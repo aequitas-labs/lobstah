@@ -22,12 +22,16 @@ import {
   worktreesDir,
   readKeptWorktrees,
   reviewSettings,
+  mirrorFreshness,
+  readMirrorStatus,
+  wharfCredential,
 } from '@lobstah/core';
 import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from '@lobstah/pick';
 import { codexTrapHooksRow } from './codex-startup.js';
 import { pickRunning } from './reviews-setup.js';
 import { planPressureCull } from './cull.js';
+import { mirrorScope } from './wharf-mirror.js';
 import { parkedSummary } from './parked-view.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
@@ -228,6 +232,26 @@ export function diskRow(cfg: Config, freeBytes: FreeBytesReader = statfsFreeByte
   return { check: 'disk', status: free === undefined || short || hold || kept.length > 0 ? 'warn' : 'ok', detail: parts.join('; ') };
 }
 
+/**
+ * The wharf mirror, when `[glass] mirror` names a wharf: whether this boat
+ * has its credential, and how recently the daemon put its snapshot.
+ */
+export function mirrorRow(cfg: Config, now = Date.now()): DoctorRow | undefined {
+  const wharf = cfg.glass.mirror;
+  if (!wharf) return undefined;
+  const check = 'wharf mirror';
+  let token = '';
+  try { token = wharfCredential(mirrorScope(cfg, wharf)); }
+  catch (err) { return { check, status: 'warn', detail: err instanceof Error ? err.message : String(err) }; }
+  if (!token) return { check, status: 'warn', detail: `no boat credential for ${wharf} — run lobstah wharf login --wharf ${wharf} --mirror` };
+  const status = readMirrorStatus();
+  const mine = status?.wharf === wharf ? status : undefined;
+  const fresh = mirrorFreshness(mine, now);
+  if (fresh === 'fresh') return { check, status: 'ok', detail: `${wharf}: snapshot put ${mine!.lastPutAt}${mine!.calls ? `; ${mine!.calls} calls carried out` : ''}` };
+  const why = mine?.error ? `; last error: ${mine.error}` : '';
+  return { check, status: 'warn', detail: fresh === 'never' ? `${wharf}: no snapshot put yet — is the daemon running? (lobstah daemon restart)${why}` : `${wharf}: last snapshot put ${mine!.lastPutAt}, longer ago than the daemon puts${why}` };
+}
+
 export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   const rows: DoctorRow[] = [];
   const push = (check: string, status: DoctorRow['status'], detail: string) => rows.push({ check, status, detail });
@@ -281,6 +305,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   }
 
   const cfg = loadConfig();
+  const mirror = mirrorRow(cfg, now);
+  if (mirror) push(mirror.check, mirror.status, mirror.detail);
   const repoKeys = Object.keys(cfg.repos);
   if (repoKeys.length === 0) push('repos', 'warn', 'none configured — add one with `lobstah repos add <path>`');
   for (const [key, repo] of Object.entries(cfg.repos)) {

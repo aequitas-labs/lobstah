@@ -504,6 +504,13 @@ export interface GlassSnapshot {
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
   /** Per-server secret for the same-origin actions, sent only to this machine's own glass address. */
   focusToken?: string;
+  /**
+   * In a mirrored snapshot only: the loopback port this machine's glass
+   * listens on, and the id its focus probe answers with. The hosted glass
+   * probes it to learn whether it runs on this boat, where ↗ Open can raise
+   * a window.
+   */
+  mirror?: { port: number; id: string };
   /** What the server can tell about who asked for this page. */
   viewer?: GlassViewer;
   /** The passkeys registered to confirm run cards' Run (count only; never a key). */

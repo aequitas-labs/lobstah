@@ -1,4 +1,4 @@
-import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput, WharfAck, WharfDocumentSummary } from './backend-model.js';
+import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput, WharfAck, WharfDocumentSummary, WharfMirrorCall } from './backend-model.js';
 
 export class BackendError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -202,6 +202,46 @@ export class WharfBackend implements CoordinationBackend {
   }
   async uploadDocument(id: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
     return this.uploadPath(`documents/${encodeURIComponent(id)}/files`, name, bytes, key);
+  }
+  /** A mirror boat's put: its glass snapshot, gzipped. The wharf keeps only the latest. */
+  async putMirrorSnapshot(gzip: Uint8Array): Promise<{ etag: string; bytes: number; at: string }> {
+    const value = record(await responseValue(await this.raw('mirror/snapshot', 'PUT', gzip, { 'Content-Type': 'application/gzip' })));
+    return { etag: string(value.etag), bytes: Number(value.bytes), at: string(value.at) };
+  }
+  /** The calls waiting for this boat, and until when a hosted glass is open. */
+  async mirrorCalls(): Promise<{ calls: WharfMirrorCall[]; watchedUntil?: string }> {
+    const value = record(await this.request('mirror/calls'));
+    if (!Array.isArray(value.calls) || value.calls.length > 32) throw new BackendError(502, 'invalid mirror calls');
+    const calls = value.calls.map((v) => {
+      const c = record(v);
+      if (typeof c.id !== 'string' || typeof c.boat !== 'string' || (c.read === undefined) === (c.write === undefined)) throw new BackendError(502, 'invalid mirror call');
+      return c as unknown as WharfMirrorCall;
+    });
+    return { calls, ...(typeof value.watchedUntil === 'string' ? { watchedUntil: value.watchedUntil } : {}) };
+  }
+  /** Take a call before running it, so it runs once. */
+  async takeMirrorCall(id: string): Promise<void> {
+    await this.request(`mirror/calls/${encodeURIComponent(id)}/take`, {}, undefined, 'POST');
+  }
+  /** Answer a taken call with the local glass's own status, type and body. */
+  async answerMirrorCall(id: string, status: number, contentType: string, body: Uint8Array): Promise<void> {
+    await responseValue(await this.raw(`mirror/calls/${encodeURIComponent(id)}/answer`, 'POST', body, { 'Content-Type': contentType, 'X-Mirror-Status': String(status) }));
+  }
+  /** A file the person attached on the hosted glass, for one of this boat's calls. */
+  async mirrorFile(id: string): Promise<{ name: string; bytes: Uint8Array }> {
+    const response = await this.raw(`mirror/files/${encodeURIComponent(id)}`, 'GET');
+    if (!response.ok) await responseValue(response);
+    const name = decodeURIComponent(response.headers.get('X-File-Name') ?? 'attachment');
+    return { name, bytes: new Uint8Array(await response.arrayBuffer()) };
+  }
+  /** One request whose body or answer is bytes, not JSON. */
+  private async raw(path: string, method: string, body?: Uint8Array, headers: Record<string, string> = {}): Promise<Response> {
+    try {
+      return await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`, {
+        method, headers: { Authorization: `Bearer ${this.token}`, ...headers },
+        ...(body ? { body: new Uint8Array(body).buffer } : {}), signal: AbortSignal.timeout(30000), redirect: 'manual',
+      });
+    } catch { throw new BackendError(503, 'backend unavailable; state unknown (no local fallback)'); }
   }
   private async uploadPath(path: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
     const response = await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`, {

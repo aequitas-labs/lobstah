@@ -1,14 +1,18 @@
 import WebSocket from 'ws';
 import type { BackendLocation } from '@lobstah/core';
 
-/** Optional hint only. No cursor advancement, worker use, or server heartbeat. */
+/**
+ * Optional hint only. No cursor advancement, worker use, or server heartbeat.
+ * Which hints wake it is the caller's: the helm's wait hears `wake`; a
+ * mirror boat hears `mirror-call` and `mirror-watch`.
+ */
 export class WharfWake {
   private socket?: WebSocket;
   private stopped = false;
   private pending = false;
   private nextAttempt = 0;
   private finish?: () => void;
-  constructor(private location: BackendLocation, private credential: string) {}
+  constructor(private location: BackendLocation, private credential: string, private kinds: readonly string[] = ['wake']) {}
   private connect() {
     if (this.stopped || this.socket || Date.now() < this.nextAttempt) return;
     this.nextAttempt = Date.now() + 5000;
@@ -18,7 +22,11 @@ export class WharfWake {
     this.socket = socket;
     const wake = () => { this.pending = true; this.finish?.(); };
     socket.on('open', wake); // Catch up even if an event preceded connection.
-    socket.on('message', (value) => { if (value.toString() === '{"type":"wake"}') wake(); });
+    socket.on('message', (value) => {
+      let kind: unknown;
+      try { kind = (JSON.parse(value.toString()) as { type?: unknown }).type; } catch { return; }
+      if (typeof kind === 'string' && this.kinds.includes(kind)) wake();
+    });
     socket.on('error', () => { /* Polling remains the guarantee; no credential logs. */ });
     socket.on('close', () => { if (this.socket === socket) this.socket = undefined; wake(); });
   }
