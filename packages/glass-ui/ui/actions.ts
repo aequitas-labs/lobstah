@@ -735,6 +735,8 @@ export async function registerRunPasskey(): Promise<void> {
     setState({
       runPasskey: done.ok ? { done: 'Passkey registered for run cards.' } : { error: done.reason ?? 'The passkey was not registered.' },
     });
+    // The count in Settings and the cards' Run follow at once, not at the next poll.
+    if (done.ok) receive(await backend().snapshot());
   } catch (err) {
     setState({ runPasskey: { error: err instanceof Error ? err.message : 'The passkey was not registered.' } });
   }
