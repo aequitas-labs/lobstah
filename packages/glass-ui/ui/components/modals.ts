@@ -33,7 +33,7 @@ import {
   stackNumbers,
   trapRow,
   viewerHasTerminal,
-  windowAction,
+  trapOpenRoutes,
 } from './common.js';
 import { can, capabilities, fileUrl } from '../backend.js';
 
@@ -281,20 +281,19 @@ function trapModal(t: GlassTrap) {
     html`<${WorkerDetails} worker=${t} />`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,
     html`<div class="sub">${sub}</div>`,
-    html`<div class="sec">window</div>`,
-    windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`,
-    liveLinkNote(t),
-    readOnlyNotice(),
-    startCommands(t),
+    html`<div class="sec">open</div>`,
+    trapOpenRoutes(t),
     !t.requested &&
       !t.starting &&
       sessionRow && [
-        html`<div class="sec">open this session</div>`,
-        sessionRow,
+        html`<div class="route">${sessionRow}</div>`,
         !t.live &&
           t.sessionId &&
           html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
       ],
+    liveLinkNote(t),
+    readOnlyNotice(),
+    startCommands(t),
     html`<div class="sec">lifecycle (${t.notices.length})</div>`,
     lifecycle,
     html`<div class="sec">messages (${t.messages.length})</div>`,

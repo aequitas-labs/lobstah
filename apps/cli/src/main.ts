@@ -262,7 +262,7 @@ import {
   startDetachedGlass,
   stopGlass,
 } from './glass-lifecycle.js';
-import { installPet, uninstallPet } from './pet.js';
+import { installPet, refreshStalePet, uninstallPet } from './pet.js';
 import { installService, restartService, serviceInstalled, uninstallService } from './service.js';
 import { clearParkRenewal, parkRenewal } from './park-renewal.js';
 import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
@@ -1669,7 +1669,8 @@ async function mainCli(): Promise<void> {
       }
       const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
-      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
+      const asksPermission = permCommand !== undefined || permPath !== undefined;
+      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true, asksPermission);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from
@@ -3840,6 +3841,13 @@ async function mainCli(): Promise<void> {
           (r) => r && console.log(`glass restarted on ${glassUrl(r.port)}: v${r.from} → v${r.to}`),
           (err: unknown) => console.log(`glass refresh failed: ${err instanceof Error ? err.message : String(err)}`),
         );
+        // The desktop pet, too: an installed pet keeps running the build it had.
+        try {
+          const pet = refreshStalePet();
+          if (pet) console.log(`pet rebuilding in the background: ${pet.from} → v${pet.to} (logs/pet-install.log)`);
+        } catch (err) {
+          console.log(`pet refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
         await daemon(Number(opt('--interval') ?? '5000'), console.log, {
           hostedStart: async () => {
             if (!loadConfig().wharves || !Object.keys(loadConfig().wharves!).length) return;
@@ -3865,8 +3873,8 @@ async function mainCli(): Promise<void> {
     }
     case 'pet': {
       if (pos[0] === 'install') {
-        const res = installPet(opt('--binary'));
-        console.log(toonKV({ pet: 'installed', binary: res.binary, file: res.file, loaded: res.loaded, detail: res.detail }));
+        const res = installPet({ binary: opt('--binary') });
+        console.log(toonKV({ pet: 'installed', binary: res.binary, source: res.source, version: res.version, file: res.file, loaded: res.loaded, detail: res.detail, ...(res.warning ? { warning: res.warning } : {}) }));
         break;
       }
       if (pos[0] === 'uninstall') {
