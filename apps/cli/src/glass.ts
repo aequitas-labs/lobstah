@@ -1214,7 +1214,8 @@ export function serveGlass(
         return reply(405, { delivered: false, reason: 'POST required.' });
       }
       if (
-        !isOwnHost(req.headers.host) ||
+        // Not a page's route: the pet and the CLI call 127.0.0.1, so localhost is refused here.
+        req.headers.host !== ownHost() ||
         req.headers.origin !== undefined ||
         !showSecretMatches(req.headers['x-lobstah-show-secret']) ||
         !/^application\/json\b/.test(req.headers['content-type'] ?? '')
