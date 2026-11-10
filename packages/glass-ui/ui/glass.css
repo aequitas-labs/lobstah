@@ -2235,15 +2235,30 @@ footer .glass-brand {
   overflow-wrap: anywhere;
 }
 
-/* A run card: the script in full, what runs it, its inputs and Run. */
+/*
+ * A run card: the script in full, what runs it, its inputs and Run. A long
+ * path, hash, URL or name breaks anywhere, so nothing in it pushes the modal
+ * past a phone's width.
+ */
 .runcard {
   margin: var(--space-3) 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  overflow-wrap: anywhere;
 }
-.runcard > * {
+.runcard > *,
+.runhead > *,
+.runmeta > *,
+.runinput > *,
+.runfoot > *,
+.runout > * {
   min-width: 0;
+}
+.runcard .btn,
+.runcard .badge {
+  white-space: normal;
+  max-width: 100%;
 }
 .runscript {
   margin: 0;
@@ -2279,9 +2294,6 @@ footer .glass-brand {
   gap: 4px var(--space-3);
   font-size: 12px;
 }
-.runsha {
-  overflow-wrap: anywhere;
-}
 .runinputs {
   display: flex;
   flex-direction: column;
@@ -2299,7 +2311,9 @@ footer .glass-brand {
   color: var(--fg);
   font: inherit;
   padding: 6px 8px;
+  width: 100%;
   max-width: 420px;
+  box-sizing: border-box;
 }
 .runfoot {
   display: flex;
