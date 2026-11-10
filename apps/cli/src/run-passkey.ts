@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, createPublicKey, randomBytes, verify as verifySignature } from 'node:crypto';
@@ -74,8 +75,12 @@ function writeRunPasskeys(list: RunPasskey[], file = runPasskeysFile()): void {
   atomicRenameSync(tmp, file);
 }
 
-/** What a challenge was issued for: a registration, or one card's Run over the script hash the page showed. */
-export type ChallengeScope = { kind: 'register' } | { kind: 'run'; key: string; sha256: string };
+/**
+ * What a challenge was issued for: a registration, the current passkey's
+ * consent to another one (`existing`), or one card's Run over the script hash
+ * the page showed.
+ */
+export type ChallengeScope = { kind: 'register' } | { kind: 'existing' } | { kind: 'run'; key: string; sha256: string };
 
 interface IssuedChallenge {
   scope: ChallengeScope;
@@ -212,20 +217,22 @@ export interface AssertionResponse {
 
 /**
  * Check an assertion: a registered passkey signed a challenge this server
- * issued for a Run, not yet spent and under two minutes old, with the user
+ * issued for `kind`, not yet spent and under two minutes old, with the user
  * verified. The challenge is spent whether or not the rest verifies. Returns
- * what the challenge was issued for (the card and the hash the page showed).
+ * what the challenge was issued for, and the passkey that signed.
  */
-export function verifyRunAssertion(
+function verifyAssertion<K extends 'run' | 'existing'>(
   res: AssertionResponse,
   challenges: RunChallenges,
   origin: string,
-  file = runPasskeysFile(),
-): { key: string; sha256: string; credentialId: string } {
+  kind: K,
+  file: string,
+): { scope: Extract<ChallengeScope, { kind: K }>; credentialId: string } {
+  if (!res || typeof res !== 'object') throw new PasskeyError('a passkey assertion is required', 400);
   const clientRaw = b64u(res.clientDataJSON, 'clientDataJSON');
   const clientData = readClientData(clientRaw, 'webauthn.get', origin);
   const scope = challenges.spend(clientData.challenge);
-  if (scope?.kind !== 'run') throw new PasskeyError('the run challenge is unknown, spent or older than two minutes');
+  if (scope?.kind !== kind) throw new PasskeyError(`the ${kind === 'run' ? 'run' : 'passkey'} challenge is unknown, spent or older than two minutes`);
   const passkeys = readRunPasskeys(file);
   const passkey = passkeys.find((k) => k.credentialId === res.credentialId);
   if (!passkey) throw new PasskeyError('that passkey is not registered for runs');
@@ -239,5 +246,40 @@ export function verifyRunAssertion(
     if (auth.signCount <= passkey.signCount) throw new PasskeyError('the passkey counter went backwards');
     writeRunPasskeys(passkeys.map((k) => (k.credentialId === passkey.credentialId ? { ...k, signCount: auth.signCount } : k)), file);
   }
-  return { key: scope.key, sha256: scope.sha256, credentialId: passkey.credentialId };
+  return { scope: scope as Extract<ChallengeScope, { kind: K }>, credentialId: passkey.credentialId };
+}
+
+/** A Run's assertion: returns the card and the script hash the passkey signed for. */
+export function verifyRunAssertion(res: AssertionResponse, challenges: RunChallenges, origin: string, file = runPasskeysFile()): { key: string; sha256: string; credentialId: string } {
+  const { scope, credentialId } = verifyAssertion(res, challenges, origin, 'run', file);
+  return { key: scope.key, sha256: scope.sha256, credentialId };
+}
+
+/** A current passkey's consent to registering another: an assertion over an `existing` challenge. */
+export function verifyExistingPasskey(res: AssertionResponse, challenges: RunChallenges, origin: string, file = runPasskeysFile()): string {
+  return verifyAssertion(res, challenges, origin, 'existing', file).credentialId;
+}
+
+/** What the macOS dialog says. It names the action, so a prompt nobody asked for stands out. */
+export const PASSKEY_DIALOG_PROMPT = 'lobstah glass wants to register a passkey that confirms run cards. Allow it only if you just pressed Register in the glass.';
+
+/** Runs a command and resolves to its exit code (0 for success). */
+export type ExitOf = (command: string, args: string[]) => Promise<number>;
+
+const exitOf: ExitOf = (command, args) =>
+  new Promise((resolve) => {
+    execFile(command, args, { timeout: 120_000 }, (err) => resolve(err ? (typeof (err as { code?: unknown }).code === 'number' ? ((err as { code: number }).code) : 1) : 0));
+  });
+
+/**
+ * Chris's go-ahead to store a passkey (ume f81321ac-e3d): macOS's own
+ * administrator dialog, which a process holding the page token can't
+ * answer. Resolves to why it was refused, or undefined when allowed.
+ */
+export function macPasswordGate(run: ExitOf = exitOf, platform: NodeJS.Platform = process.platform): () => Promise<string | undefined> {
+  return async () => {
+    if (platform !== 'darwin') return 'Run passkeys are registered on macOS, with its password dialog.';
+    const script = `do shell script "/usr/bin/true" with prompt ${JSON.stringify(PASSKEY_DIALOG_PROMPT)} with administrator privileges`;
+    return (await run('/usr/bin/osascript', ['-e', script])) === 0 ? undefined : "The macOS password wasn't given, so the passkey was not stored.";
+  };
 }

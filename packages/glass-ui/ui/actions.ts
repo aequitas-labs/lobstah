@@ -671,9 +671,37 @@ export async function registerRunPasskey(): Promise<void> {
   setState({ runPasskey: { busy: true } });
   try {
     const start = (
-      await backend().request<{ ok: boolean; reason?: string; challenge?: string; rpId?: string }>('run-passkey-challenge', {}, token)
+      await backend().request<{
+        ok: boolean;
+        reason?: string;
+        challenge?: string;
+        rpId?: string;
+        existingChallenge?: string;
+        credentialIds?: string[];
+      }>('run-passkey-challenge', {}, token)
     ).body;
     if (!start.ok || !start.challenge) return setState({ runPasskey: { error: start.reason ?? 'The glass refused to start.' } });
+    // A passkey already registered confirms the new one first.
+    let existing: Record<string, string> | undefined;
+    if (start.existingChallenge) {
+      const got = (await navigator.credentials.get({
+        publicKey: {
+          challenge: fromB64url(start.existingChallenge),
+          rpId: start.rpId ?? 'localhost',
+          allowCredentials: (start.credentialIds ?? []).map((id) => ({ type: 'public-key' as const, id: fromB64url(id) })),
+          userVerification: 'required',
+          timeout: 120_000,
+        },
+      })) as PublicKeyCredential | null;
+      if (!got) return setState({ runPasskey: { error: 'Your current passkey did not confirm.' } });
+      const r = got.response as AuthenticatorAssertionResponse;
+      existing = {
+        credentialId: b64url(got.rawId),
+        clientDataJSON: b64url(r.clientDataJSON),
+        authenticatorData: b64url(r.authenticatorData),
+        signature: b64url(r.signature),
+      };
+    }
     const created = (await navigator.credentials.create({
       publicKey: {
         challenge: fromB64url(start.challenge),
@@ -698,6 +726,7 @@ export async function registerRunPasskey(): Promise<void> {
           authenticatorData: b64url(response.getAuthenticatorData()),
           publicKey: b64url(publicKey),
           alg: response.getPublicKeyAlgorithm(),
+          ...(existing ? { existing } : {}),
         },
         token,
       )

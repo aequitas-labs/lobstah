@@ -30,7 +30,7 @@ export function RunPasskeySettings({
   if (!can('run')) return null;
   const count = passkeys?.count ?? 0;
   return html`<section class="runpasskeys"><h2>Run cards</h2>
-    <div class=${count ? 'ok' : 'dim'}>${count ? `${count} passkey${count === 1 ? '' : 's'} registered${passkeys?.newestAt ? `, newest ${new Date(passkeys.newestAt).toLocaleString()}` : ''}. Run asks for one each time.` : 'No passkey yet: register one to run cards. Run asks for it (Touch ID) each time.'}</div>
+    <div class=${count ? 'ok' : 'dim'}>${count ? `${count} passkey${count === 1 ? '' : 's'} registered${passkeys?.newestAt ? `, newest ${new Date(passkeys.newestAt).toLocaleString()}` : ''}. Run asks for one each time; another needs one of these and the macOS password.` : 'No passkey yet: register one to run cards. Registering asks for the macOS password; Run asks for the passkey (Touch ID) each time.'}</div>
     ${
       passkeysWorkHere()
         ? html`<div class="runfoot"><button type="button" class="btn runregister" disabled=${!!passkey?.busy} onClick=${() => void registerRunPasskey()}>${passkey?.busy ? 'Registering…' : count ? 'Register another passkey' : 'Register a passkey'}</button></div>`

@@ -118,7 +118,7 @@ import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
 import { handleRunRequest, isRunRequestKind } from './run-routes.js';
-import { RunChallenges, runPasskeyStatus } from './run-passkey.js';
+import { RunChallenges, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
 import { RunRegistry } from './run-exec.js';
 
 /**
@@ -902,6 +902,7 @@ export function serveGlass(
 ): http.Server {
   const runChallenges = options.runChallenges ?? new RunChallenges();
   const runs = options.runs ?? new RunRegistry();
+  const confirmWithMacPassword = macPasswordGate();
   const presence = options.presence ?? new GlassPresence();
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   // A caller's own snapshot function runs here; the default builds on the snapshot thread.
@@ -1149,7 +1150,7 @@ export function serveGlass(
             void handleRunRequest(body.kind, body.payload, {
               origin: `http://${req.headers.host}`,
               challenges: runChallenges,
-              confirmRegistration: options.confirmPasskeyRegistration ?? (async () => 'Registering a run passkey is not available yet.'),
+              confirmRegistration: options.confirmPasskeyRegistration ?? confirmWithMacPassword,
               ...(options.passkeysFile ? { passkeysFile: options.passkeysFile } : {}),
               runs,
               maxBytes: attachmentLimit(),
