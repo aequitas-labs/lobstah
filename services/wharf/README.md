@@ -186,7 +186,7 @@ credential with an enrolment instruction. GitHub-backed browser sessions replace
 the temporary operator-provisioned PATs without expanding their work authority.
 
 Boat credentials carry a steering layer (`read < helm < admin`) and independent
-`work` permission, chosen on issue or rotation:
+`work` and `mirror` permissions, chosen on issue or rotation:
 
 | Permission | Allows |
 | --- | --- |
@@ -194,6 +194,7 @@ Boat credentials carry a steering layer (`read < helm < admin`) and independent
 | work | This boat's worker sign-on, claims and renewals |
 | helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
 | admin | Helm plus approved boat enrollment, revoke boats, delete account |
+| mirror | Put this boat's glass snapshot, and take and answer the calls the hosted glass relays to it (see Mirror boats). Never work, steering or another boat's calls |
 
 Omission defaults to `work` plus `read`. The public operator `POST boats` route
 is removed; only the approved device grant drives the private issuer.
@@ -257,6 +258,10 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Addressed work boat | GET requests/starts; POST requests/:id/start | Read only its helm-authorized trap starts; consume once or record repo refusal before expiry |
 | Signed-in person | POST requests (kind `review-dismiss`) | Ask the boat that published a review to dismiss it (deleting the pending draft); authorized at once and addressed to that boat, no helm and no event. Sending a review happens in the review tool |
 | Addressed work boat | GET requests/reviews; POST requests/:id/start | Read the review requests addressed to it; mark each done or refused before expiry. The boat acts on GitHub with its own token |
+| Mirror boat | PUT mirror/snapshot | Replace this boat's latest glass snapshot: gzip, at most 2 MB, never carrying the page token |
+| Mirror boat | GET mirror/calls; POST mirror/calls/:id/take, answer | The calls addressed to it (and `watchedUntil` while a hosted glass is open); take one, then answer it with the local glass's status, type and body |
+| Mirror boat | GET mirror/files/:file | A file the person attached to a relayed answer for this boat |
+| Signed-in person | GET mirror; POST mirror/calls; GET mirror/calls/:id; POST mirror/files | The hosted glass's side: see Mirror boats |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; approve another login to receive a new
@@ -335,6 +340,42 @@ after an R2 error. Only a minimal hashed deletion-key receipt/tombstone remains
 for the same retry; the person's sessions, GitHub identity and pending device
 codes are removed too. Old boat and dispatch credentials cannot recreate that
 account. There is no cross-account cleanup or automatic timer.
+
+## Mirror boats
+
+A mirror boat keeps its fleet on its own local grounds and shows it on the
+hosted glass. It enrols with `mirror` and `read` only (the device request's
+`mirror: true`; approval keeps it as asked or refuses it), so it takes no work
+and holds no helm. The boat stays the authority: the wharf keeps a copy of
+each boat's latest snapshot and calls in transit, never a second record.
+
+- **Snapshots.** `PUT mirror/snapshot` replaces the boat's one R2 object. The
+  wharf unpacks it once (at most 16 MB), refuses one that carries the page
+  token, and keeps its digest as the ETag. The glass's `GET /api/glass/mirror`
+  lists every unrevoked mirror boat's latest snapshot with its boat, name, put
+  time and ETag. `?known=<boat>:<etag>,…` answers the boats the page already
+  holds as `unchanged`. Revoking a boat drops its snapshot and calls.
+- **Calls.** `POST /api/glass/mirror/calls` relays one read (`read: "<path>"`)
+  or one write (`write: { kind, payload }`) to one boat. Reads are the local
+  glass's own reads and writes are its `POST /requests` kinds, from
+  `MIRROR_READ_PATHS` and `MIRROR_WRITE_KINDS` in
+  `packages/core/src/backend-model.ts`. Focus is never relayed. The boat checks
+  the same lists again before it runs a call. A new call sends that boat's
+  sockets `{ "type": "mirror-call" }`; the boat takes it, runs it against its
+  local glass over loopback, and answers. `GET /api/glass/mirror/calls/:id` is
+  202 while it waits, the boat's own status, type and body once answered
+  (sandboxed), and 410 once ten minutes pass unanswered. An expired call is
+  never delivered again.
+- **Files.** A file attached to a relayed answer goes to
+  `POST /api/glass/mirror/files` (`X-File-Name`, `X-Mirror-Boat`) and waits ten
+  minutes for its boat's `GET mirror/files/:file`.
+- **Watching.** Reading the mirror list marks a hosted glass as open for 30
+  seconds. The boats hear `{ "type": "mirror-watch", "until": … }` when that
+  begins, and `GET mirror/calls` carries `watchedUntil`, so a boat puts often
+  only while someone is looking.
+- **Limits.** Mirror routes keep no idempotency records (a put replaces, a take
+  or an answer succeeds once) and have their own per-minute budget, four times
+  the account's, so a polling glass never starves coordination.
 
 ## Opt-in CLI routing
 

@@ -15,12 +15,16 @@ function readRequest(code: { requestData?: unknown }): BoatRequest {
   if (typeof code.requestData !== 'string') refuse('not a boat enrolment code');
   return JSON.parse(code.requestData) as BoatRequest;
 }
-const permissionList = z.array(z.enum(['work', 'read', 'helm'])).max(3);
+const permissionList = z.array(z.enum(['work', 'read', 'helm', 'mirror'])).max(4);
+/** A mirror boat's access: its glass on the hosted glass, and nothing to work or steer. */
+const MIRROR_PERMISSIONS: Permission[] = ['mirror', 'read'];
 export function boatDevice(env: Env, glass: string) {
   const requestSchemaFields = {
         account: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
         name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/),
         steering: z.enum(['read', 'helm', 'none']).default('read'),
+        // A mirror boat asks for mirror and read only: it shows its fleet, and takes no work and no helm.
+        mirror: z.boolean().default(false),
         boatToken: z.string().max(1024).optional(),
   };
   const grant = {
@@ -29,7 +33,9 @@ export function boatDevice(env: Env, glass: string) {
       authorizeRequest: async ({ request }: Parameters<DeviceAuthorizationGrant['authorizeRequest']>[0]) => {
         if (request.client_id !== 'lobstah-cli' || request.user_id || request.scope) refuse('invalid boat enrolment request');
         const input = z.object(requestSchemaFields).parse(request);
-        const data: BoatRequest = { account: input.account, name: boatName(input.name), permissions: input.steering === 'none' ? ['work'] : ['work', input.steering] };
+        if (input.mirror && input.steering !== 'read') refuse('a mirror boat asks for read access only');
+        const permissions: Permission[] = input.mirror ? MIRROR_PERMISSIONS : input.steering === 'none' ? ['work'] : ['work', input.steering];
+        const data: BoatRequest = { account: input.account, name: boatName(input.name), permissions };
         if (input.boatToken) {
           if (!input.boatToken.startsWith(`b.${data.account}.`)) refuse('current boat credential does not belong to these grounds');
           const own = object(JSON.parse(await env.ACCOUNTS.getByName(data.account).handle(JSON.stringify({ account: data.account, helm: false, token: input.boatToken, method: 'GET', path: '_boat', body: {} }))));
@@ -43,7 +49,8 @@ export function boatDevice(env: Env, glass: string) {
       getVerificationContext: (code) => {
         const requested = readRequest(code);
         return { boatName: requested.name, previousBoatName: requested.previousName, requestedPermissions: requested.permissions,
-          description: requested.permissions.includes('helm') ? 'Work, see the grounds state, and steer dispatches and the helm seat.' : requested.permissions.includes('read') ? 'Work and see the grounds state.' : 'Work only; cannot see the grounds state or steer.' };
+          description: requested.permissions.includes('mirror') ? "Show this boat's own fleet on this glass, and carry out what you do there. No work, no helm."
+            : requested.permissions.includes('helm') ? 'Work, see the grounds state, and steer dispatches and the helm seat.' : requested.permissions.includes('read') ? 'Work and see the grounds state.' : 'Work only; cannot see the grounds state or steer.' };
       },
   } satisfies DeviceAuthorizationGrant;
   const plugin = deviceAuthorization<typeof grant>({ validateClient: (id) => id === 'lobstah-cli', verificationUri: `${glass}/device`, grant });
