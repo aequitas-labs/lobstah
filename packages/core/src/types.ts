@@ -100,6 +100,11 @@ export interface StatusEntry {
   until?: string;
   /** Written by `lobstah report`: the worker's own note, not one lobstah wrote. */
   reported?: true;
+  /**
+   * Written by `report needs-decision --ask` or `--ask-path`: a permission
+   * request. It has its own card and is never the dispatch's question.
+   */
+  permissionRequest?: true;
 }
 
 export interface Evidence {
