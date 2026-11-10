@@ -196,7 +196,8 @@ export function windowAction(t: GlassTrap): Children {
   }
   const state = getState();
   const viewer = state.snapshot?.viewer;
-  if (!viewer?.onMachine) return offMachineAction(t, t.boat ?? viewer?.machine);
+  // A trap on another boat runs elsewhere even when this page runs on a machine of the fleet.
+  if (!viewer?.onMachine || t.boat) return offMachineAction(t, t.boat ?? viewer?.machine);
   // Where it runs is always said; raising its window needs a source that can.
   if (!can('focus')) return null;
   if (!viewer.windowFocus && !t.link) return html`<span class="dim">Window focus is not supported here</span>`;

@@ -2,6 +2,9 @@ import { render } from 'preact';
 import { setDecisionBadge } from '../../../../packages/glass-ui/ui/app-badge.js';
 import { createWharfBackend } from '../../../../packages/glass-ui/ui/backends/wharf.js';
 import type { WharfBackend } from '../../../../packages/glass-ui/ui/backends/wharf.js';
+import { createMirrorBackend } from '../../../../packages/glass-ui/ui/backends/mirror.js';
+import type { MirrorBackend } from '../../../../packages/glass-ui/ui/backends/mirror.js';
+import { Age } from '../../../../packages/glass-ui/ui/components/common.js';
 import { LinkedText } from '../../../../packages/glass-ui/ui/components/links.js';
 import { startGlassPage } from '../../../../packages/glass-ui/ui/start.js';
 import type { GlassPage } from '../../../../packages/glass-ui/ui/start.js';
@@ -20,13 +23,18 @@ import { glassWake } from './wake.js';
  * what is the host's: the sign-in screen, sign-out, the wake hint, the boats
  * page, the human requests waiting for the helm, boat approval on /device,
  * and the links boats hand out (`#job/<id>`, `#trap/<id>`) mapped onto the
- * shared glass's routes.
+ * shared glass's routes. An account with mirror boats runs on the mirror
+ * backend: each boat's own glass, merged, with the wharf's own grounds beside
+ * them.
  */
+
+/** The backend a session runs on: the wharf's, or its mirror boats' with the wharf's beside them. */
+type HostedBackend = WharfBackend | MirrorBackend;
 
 /** A live session's parts, all stopped together on sign-out or expiry. */
 interface Session {
   page: GlassPage;
-  backend: WharfBackend;
+  backend: HostedBackend;
   stop(): void;
 }
 
@@ -119,7 +127,7 @@ async function deleteAccount(): Promise<void> {
 }
 
 /** The human requests waiting for the helm: what the person queued from this glass. */
-function HumanRequests({ backend }: { backend: WharfBackend }) {
+function HumanRequests({ backend }: { backend: HostedBackend }) {
   const requests = backend.account()?.requests ?? [];
   if (!requests.length) return null;
   return html`<div class="sec">Human requests</div>${requests.map(
@@ -128,8 +136,17 @@ function HumanRequests({ backend }: { backend: WharfBackend }) {
   )}`;
 }
 
-function start(): void {
-  const backend = createWharfBackend({ onSignedOut: (status) => end(status === 403 ? 'denied' : hadSession ? 'expired' : 'signin') });
+/** Each mirror boat in the header, with how old its snapshot is: an asleep boat's rows are read-only. */
+function MirrorChips({ backend }: { backend: MirrorBackend }) {
+  return backend.boats().map(
+    (b) => html`<span key=${b.boat} class=${b.stale ? 'chip warn' : 'chip dim'} title=${b.stale ? 'asleep: its rows are read-only' : 'mirrored from this boat'}>${b.name} · mirrored ${Age(b.at)} ago${b.stale ? ' · asleep' : ''}</span>`,
+  );
+}
+
+function start(mirror = false): void {
+  const signedOut = (status: 401 | 403) => end(status === 403 ? 'denied' : hadSession ? 'expired' : 'signin');
+  const wharf = createWharfBackend({ onSignedOut: signedOut });
+  const backend: HostedBackend = mirror ? createMirrorBackend({ wharf, onSignedOut: signedOut }) : wharf;
   const pending = translateLink();
   // Registered before the glass's own route listener, so the glass reads the translated hash.
   let page: GlassPage | undefined;
@@ -140,7 +157,7 @@ function start(): void {
   window.addEventListener('hashchange', follow);
   page = startGlassPage(backend, {
     chips: () => [
-      html`<span class="chip">helm ${backend.account()?.helmLive ? 'live' : 'unknown / no live lease'}</span>`,
+      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">helm ${backend.account()?.helmLive ? 'live' : 'unknown / no live lease'}</span>`,
       html`<button class="btn" onClick=${() => void signOut()}>Sign out</button>`,
     ],
     banner: () => [
@@ -178,7 +195,10 @@ async function boot(): Promise<void> {
   showAuth('checking');
   try {
     await json('/api/glass');
-    start();
+    // Mirror boats show their own glass here; without any, the wharf's grounds show as they always have.
+    // A wharf without mirror routes, or any odd answer, means no mirror boats.
+    const mirrored = await json<{ boats?: unknown }>('/api/glass/mirror').catch(() => undefined);
+    start(Array.isArray(mirrored?.boats) && mirrored.boats.length > 0);
   } catch (e) {
     showAuth(e instanceof HttpError ? (e.status === 403 ? 'denied' : e.status === 401 ? 'signin' : 'error') : 'error');
   }

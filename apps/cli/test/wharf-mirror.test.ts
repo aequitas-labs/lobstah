@@ -266,3 +266,68 @@ describe('the doctor’s wharf mirror row', () => {
     expect(mirrorRow(loadConfig(), now)).toBeUndefined();
   });
 });
+
+describe('the local glass’s focus probe for the hosted glass', () => {
+  const HOSTED = 'https://glass.lobstah.test';
+  let focused: string[];
+  let probeServer: Server | undefined;
+  let probeBase: string;
+  beforeEach(async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[wharves.lobstah]\nurl = "https://api.lobstah.test"\naccount = "acct"\ntokenEnv = "LOBSTAH_TEST_WHARF"\n\n[glass]\nmirror = "lobstah"\n');
+    const { writeMirrorStatus } = await import('@lobstah/core');
+    writeMirrorStatus({ wharf: 'lobstah', id: 'mirror-1', glass: HOSTED, calls: 0, at: new Date(now).toISOString() });
+    focused = [];
+    probeServer = serveGlass(0, { focus: async (reg) => { focused.push(reg.trapId); return { focused: true } as never; } });
+    await new Promise<void>((resolve) => probeServer!.once('listening', resolve));
+    probeBase = `http://127.0.0.1:${(probeServer.address() as AddressInfo).port}`;
+  });
+  afterEach(async () => {
+    if (probeServer) await new Promise<void>((resolve) => probeServer!.close(() => resolve()));
+  });
+
+  it('answers the hosted glass’s origin with this mirror’s id and a focus token, across the private network', async () => {
+    const preflight = await fetch(`${probeBase}/api/mirror/probe`, { method: 'OPTIONS', headers: { Origin: HOSTED, 'Access-Control-Request-Private-Network': 'true' } });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe(HOSTED);
+    expect(preflight.headers.get('access-control-allow-private-network')).toBe('true');
+    const probe = await fetch(`${probeBase}/api/mirror/probe`, { headers: { Origin: HOSTED } });
+    expect(probe.status).toBe(200);
+    const answer = (await probe.json()) as { mirror: string; token: string };
+    expect(answer.mirror).toBe('mirror-1');
+    expect(answer.token).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('refuses any other origin', async () => {
+    for (const origin of ['https://elsewhere.test', probeBase]) {
+      expect((await fetch(`${probeBase}/api/mirror/probe`, { headers: { Origin: origin } })).status, origin).toBe(403);
+    }
+    expect((await fetch(`${probeBase}/api/mirror/probe`)).status).toBe(403);
+  });
+
+  it('raises a window with its token and opens nothing else with it', async () => {
+    const { token } = (await (await fetch(`${probeBase}/api/mirror/probe`, { headers: { Origin: HOSTED } })).json()) as { token: string };
+    // Past the token: the trap is not live here, so focus says so.
+    const focus = await fetch(`${probeBase}/api/mirror/focus/no-such-trap`, { method: 'POST', headers: { Origin: HOSTED, 'x-lobstah-focus-token': token } });
+    expect(focus.status).toBe(409);
+    expect((await fetch(`${probeBase}/api/mirror/focus/no-such-trap`, { method: 'POST', headers: { Origin: HOSTED, 'x-lobstah-focus-token': 'f'.repeat(64) } })).status).toBe(403);
+    // The token is not this page's write token, and the hosted origin is not this page's origin.
+    const write = await fetch(`${probeBase}/requests`, { method: 'POST', headers: { Origin: HOSTED, 'content-type': 'application/json', 'x-lobstah-token': token }, body: JSON.stringify({ kind: 'grant-revoke', payload: { id: 'g-1' } }) });
+    expect(write.status).toBe(403);
+    expect((await fetch(`${probeBase}/api/focus/no-such-trap`, { method: 'POST', headers: { Origin: HOSTED, 'x-lobstah-focus-token': token } })).status).toBe(403);
+    expect(focused).toEqual([]);
+  });
+
+  it('answers nothing without [glass] mirror', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '');
+    expect((await fetch(`${probeBase}/api/mirror/probe`, { headers: { Origin: HOSTED } })).status).toBe(403);
+  });
+});
+
+describe('the put snapshot', () => {
+  it('names where this glass listens and this mirror’s id, for the probe', async () => {
+    const wharf = new FakeWharf();
+    const m = new WharfMirror({ wharf: 'lobstah', backend: wharf, glass: loopbackGlass(port), glassPort: port, now: () => now, writeStatus: () => {} });
+    await m.pass();
+    expect(wharf.puts[0]!.mirror).toMatchObject({ port, id: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  });
+});
