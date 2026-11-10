@@ -35,11 +35,16 @@ export function decisionAttention(now: number, decisions: DecisionMeta[] = stand
  * withdrawn. An answered one keeps hiding it until the worker reports
  * again or the helm sends the answer on.
  */
-export function hideFramedQuestions(attention: TendAttention[], decisions: Array<Pick<DecisionMeta, 'dispatch' | 'lane' | 'askedAt'>> = listDecisions()): TendAttention[] {
+export function hideFramedQuestions(
+  attention: TendAttention[],
+  decisions: Array<Pick<DecisionMeta, 'dispatch' | 'lane' | 'askedAt' | 'permission' | 'permissionsProposal'>> = listDecisions(),
+): TendAttention[] {
+  // A permission card frames nothing: it stands beside the trap's question, never in place of it.
+  const frames = decisions.filter((d) => !d.permission && !d.permissionsProposal);
   return attention.filter(
     (a) =>
       a.kind !== 'question' ||
-      !decisions.some((d) => d.dispatch === a.id && (d.lane ?? 'work') === a.lane && d.askedAt >= (a.at ?? '')),
+      !frames.some((d) => d.dispatch === a.id && (d.lane ?? 'work') === a.lane && d.askedAt >= (a.at ?? '')),
   );
 }
 

@@ -1669,7 +1669,8 @@ async function mainCli(): Promise<void> {
       }
       const titleClaim = verb === 'done' || verb === 'failed' ? readSessionClaim(id, lane) : undefined;
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
-      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true);
+      const asksPermission = permCommand !== undefined || permPath !== undefined;
+      const entry = appendStatus(id, lane, verb, note, undefined, saysWaiting ? waiting : undefined, true, asksPermission);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from
