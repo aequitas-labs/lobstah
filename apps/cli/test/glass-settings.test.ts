@@ -338,7 +338,8 @@ describe('the Settings tab', () => {
       expect(rows).toContainEqual(['product', 'web, api', '']);
       expect(rows).toContainEqual(['Daemon', '1.2.2', 'not running']);
       const headings = g.$$('#settings h2').map((h) => h.textContent);
-      expect(headings).toEqual(['Versions', 'Grounds', 'Repos', 'Helm']);
+      // The local glass leads with its run passkeys; then the configuration.
+      expect(headings).toEqual(['Run cards', 'Versions', 'Grounds', 'Repos', 'Helm']);
       expect(g.$('#settings')?.textContent).toContain('Daemon differs from the CLI');
     } finally {
       await g.close();

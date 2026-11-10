@@ -1,5 +1,8 @@
 import type { GlassSettings, SettingRow } from '@lobstah/core';
 import { html } from '../html.js';
+import { can } from '../backend.js';
+import { passkeysWorkHere, registerRunPasskey, runPasskeyUrl } from '../actions.js';
+import type { GlassState } from '../store.js';
 
 /** A repo's trap count beside its cap, `3 of 5 traps`; a count past its cap says so. */
 export function trapCountText(traps: { used: number; limit?: number }): string {
@@ -13,10 +16,46 @@ const rowsOf = (rows: SettingRow[]) =>
       html`<div key=${row.key} class="cfgrow"><span class="cfgkey">${row.key}</span><span class="cfgvalue">${row.value}</span><span class=${'cfgsource' + (row.source === 'config' ? ' set' : '')}>${row.source === 'config' ? 'Set' : 'Default'}</span></div>`,
   )}</div>`;
 
-/** The Settings tab: the effective configuration, read-only and already masked by the server. */
-export function Settings({ page, error }: { page: GlassSettings | null; error: string | null }) {
-  if (!page) return html`<div class=${error ? 'bad' : 'dim'}>${error ?? 'Loading settings'}</div>`;
-  return html`<div class="cfg">
+/**
+ * Run cards' passkey: how many are registered, and Register. A passkey is
+ * made for `localhost`, so the 127.0.0.1 page links there instead.
+ */
+export function RunPasskeySettings({
+  passkeys,
+  passkey,
+}: {
+  passkeys?: { count: number; newestAt?: string };
+  passkey?: GlassState['runPasskey'];
+}) {
+  if (!can('run')) return null;
+  const count = passkeys?.count ?? 0;
+  return html`<section class="runpasskeys"><h2>Run cards</h2>
+    <div class=${count ? 'ok' : 'dim'}>${count ? `${count} passkey${count === 1 ? '' : 's'} registered${passkeys?.newestAt ? `, newest ${new Date(passkeys.newestAt).toLocaleString()}` : ''}. Run asks for one each time; another needs one of these and the macOS password.` : 'No passkey yet: register one to run cards. Registering asks for the macOS password; Run asks for the passkey (Touch ID) each time.'}</div>
+    ${
+      passkeysWorkHere()
+        ? html`<div class="runfoot"><button type="button" class="btn runregister" disabled=${!!passkey?.busy} onClick=${() => void registerRunPasskey()}>${passkey?.busy ? 'Registering…' : count ? 'Register another passkey' : 'Register a passkey'}</button></div>`
+        : html`<div class="dim">Passkeys work from <a href=${runPasskeyUrl('#settings')}>${runPasskeyUrl().replace(/\/$/, '')}</a>: register one there.</div>`
+    }
+    ${passkey?.done && html`<div class="ok">${passkey.done}</div>`}
+    ${passkey?.error && html`<div class="bad">${passkey.error}</div>`}
+  </section>`;
+}
+
+/** The Settings tab: the run passkeys, then the effective configuration, read-only and already masked by the server. */
+export function Settings({
+  page,
+  error,
+  passkeys,
+  passkey,
+}: {
+  page: GlassSettings | null;
+  error: string | null;
+  passkeys?: { count: number; newestAt?: string };
+  passkey?: GlassState['runPasskey'];
+}) {
+  const runs = html`<${RunPasskeySettings} passkeys=${passkeys} passkey=${passkey} />`;
+  if (!page) return [runs, html`<div class=${error ? 'bad' : 'dim'}>${error ?? 'Loading settings'}</div>`];
+  return html`${runs}<div class="cfg">
     <p class="dim">Read-only. Values marked Set come from <code>${page.file}</code>. Secrets are masked.</p>
     ${error && html`<div class="bad">${error}</div>`}
     ${page.error && html`<div class="bad">${page.error}</div>`}

@@ -1,6 +1,7 @@
 import type { GlassRunCard, ScriptWarning } from '@lobstah/core';
 import { can } from '../backend.js';
 import { html } from '../html.js';
+import { getState } from '../store.js';
 
 /**
  * A run card's body in the decision modal: the script in full, with every
@@ -55,9 +56,10 @@ function Warnings({ warnings }: { warnings: ScriptWarning[] }) {
 }
 
 /** Why Run can't be pressed yet, or undefined when it can. */
-export function runBlocked(run: GlassRunCard): string | undefined {
+export function runBlocked(run: GlassRunCard, passkeys = getState().snapshot?.runPasskeys?.count ?? 0): string | undefined {
   if (run.altered) return "The stored script no longer matches the card's hash, so it won't run.";
-  return 'Set up a passkey in Settings to run cards.';
+  if (!passkeys) return 'Set up a passkey in Settings to run cards.';
+  return 'Passkey ready.';
 }
 
 export function RunCardBody({ cardKey, run }: { cardKey: string; run: GlassRunCard }) {
