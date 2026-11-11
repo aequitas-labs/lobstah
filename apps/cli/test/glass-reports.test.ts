@@ -324,7 +324,8 @@ describe('glass: cards keep their text inside', () => {
     expect(style(badge).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
     expect(style(badge).getPropertyValue('flex')).toMatch(/^0 1 auto$/);
     // happy-dom does not compute line clamping: read the rule itself.
-    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
+    // A Windows checkout may end lines with CRLF.
+    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
     // The shared card's title and text lines wrap to two lines, then clamp (components/card.ts).
     const rule = css.slice(css.indexOf('.gtitle,\n.gtext {'), css.indexOf('}', css.indexOf('.gtitle,\n.gtext {')));
     expect(rule).toMatch(/-webkit-line-clamp: 2;/);
