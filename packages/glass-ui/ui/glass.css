@@ -1487,16 +1487,11 @@ a.lob {
   flex-direction: column;
   gap: 6px;
 }
-/* A decision on the deck: the question across, then its repo and age with Answer, then a run card's boat. */
+/* A decision on the deck: one row, the whole of it the button that opens the decision. */
 .drow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px var(--space-2);
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--card-radius);
-  padding: 8px 12px;
 }
 .drow.unread {
   background: var(--unread-bg);
@@ -1509,15 +1504,18 @@ a.lob {
 .drow.focus {
   animation: dflash 1.6s ease-out 1;
 }
+/* The question, then its repo and age, boat and status on the same line; they wrap under it when it is narrow. */
 .drow .dopen {
-  grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: 2px var(--space-2);
+  width: 100%;
   min-width: 0;
   background: none;
   border: none;
-  padding: 0;
+  border-radius: inherit;
+  padding: 8px 12px;
   color: var(--fg);
   font: inherit;
   text-align: left;
@@ -1527,25 +1525,20 @@ a.lob {
   text-decoration: underline;
 }
 .drow .dtitle {
+  flex: 1 1 200px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .drow .dmeta,
-.drow .dage,
 .drow .dboat {
   font-size: 11px;
 }
-.drow .dmeta {
-  grid-column: 1;
-  min-width: 0;
-}
-.drow .dgo,
+.drow .dmeta,
+.drow .dboat,
 .drow .dsent {
-  grid-column: 2;
-}
-.drow .dboat {
-  grid-column: 1 / -1;
+  flex: 0 0 auto;
 }
 /* A dispatch on the deck's list view: two lines, the same parts as its card. */
 .deckrow {
