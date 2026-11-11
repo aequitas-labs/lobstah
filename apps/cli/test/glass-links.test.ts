@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
-import { linkParts, safeUrl, urlAt } from '../../../packages/glass-ui/src/glass-links.js';
+import { isExternalHref, linkParts, safeUrl, urlAt } from '../../../packages/glass-ui/src/glass-links.js';
 import { parseInline, parseMarkdown } from '../../../packages/glass-ui/src/glass-markdown.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
-import { NOW, acceptanceFleet, ago, everyAttentionFleet } from './fixtures/glass-snapshots.js';
+import { NOW, acceptanceFleet, ago, everyAttentionFleet, repoFilterFleet } from './fixtures/glass-snapshots.js';
 
 /**
  * Bare URLs in the glass's free text become links: one helper
@@ -132,18 +132,16 @@ function linkFleet(): GlassSnapshot {
 }
 
 describe('glass links: the local glass', () => {
-  it('a dispatch note links its URL as text, never markup, and the click stays off the card', async () => {
-    for (const view of ['table', 'cards'] as const) {
-      const g = await page(linkFleet(), { prefs: { view }, hash: '#dispatches' });
-      const host = view === 'cards' ? g.$$('#dispatches .card').find((c) => c.textContent?.includes('cccccccc'))! : g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc'))!;
-      expect(links(host)).toEqual([ext(PR)]);
-      expect(host.querySelector('script')).toBeNull();
-      expect(host.textContent).toContain('<script>alert(1)</script> review ');
-      if (view === 'cards') expect(host.textContent).toContain('`http://127.0.0.1:5173/x`');
-      (host.querySelector('a.autolink') as HTMLElement).click();
-      await g.settle();
-      expect(g.$('#overlay')!.className).not.toBe('open');
-    }
+  it('a dispatch note links its URL as text, never markup, and the click stays off the row', async () => {
+    // The note is in the Dispatches table and the dispatch's modal; a dispatch card leaves it out.
+    const g = await page(linkFleet(), { prefs: { view: 'table' }, hash: '#dispatches' });
+    const host = g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc'))!;
+    expect(links(host)).toEqual([ext(PR)]);
+    expect(host.querySelector('script')).toBeNull();
+    expect(host.textContent).toContain('<script>alert(1)</script> review ');
+    (host.querySelector('a.autolink') as HTMLElement).click();
+    await g.settle();
+    expect(g.$('#overlay')!.className).not.toBe('open');
   });
 
   it('the dispatch modal links its last note, log, and evidence', async () => {
@@ -167,13 +165,13 @@ describe('glass links: the local glass', () => {
     expect(links(todos)).toEqual([ext('https://docs.example/a'), ext('https://docs.example/b')]);
   });
 
-  it('a cut deck note still links the whole URL', async () => {
+  it('a cut dispatch note still links the whole URL', async () => {
     const d = linkFleet();
     const c = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
     c.note = 'x'.repeat(70) + ' https://github.com/acme/web/pull/43/files';
-    const g = await page(d);
-    const flight = g.$$('#deck .deckgrid > section').find((s) => s.textContent?.startsWith('in flight'))!;
-    const [link] = links(flight);
+    const g = await page(d, { prefs: { view: 'table' }, hash: '#dispatches' });
+    const row = g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc'))!;
+    const [link] = links(row);
     expect(link![0]).toBe('https://github.com/acme/web/pull/43/files');
     expect(link![1]).toBe('https://github.com');
   });
@@ -210,5 +208,39 @@ describe('glass links: the local glass', () => {
     (option.querySelector('a') as HTMLElement).click();
     await g.settle();
     expect(g.$('.dmodal .dopt')!.getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+describe('glass links: leaving the glass', () => {
+  const GLASS = 'http://127.0.0.1:4949';
+
+  it('counts an http(s) URL on another origin as external, and nothing else', () => {
+    for (const href of [PR, 'http://127.0.0.1:8787/plan/x', 'http://localhost:4949/', 'https://glass.lobstah.dev/report/r', '//docs.example/a'])
+      expect(isExternalHref(href, GLASS), href).toBe(true);
+    for (const href of ['#decision/abc', '#traps', '', '/report/report%3Ax', 'report/x', '?q=1', `${GLASS}/report/x`, 'claude://open', 'vscode://anthropic.claude-code/open', 'mailto:a@b.c', 'javascript:alert(1)'])
+      expect(isExternalHref(href, GLASS), href).toBe(false);
+  });
+
+  it("opens an external link in a new tab with the ↗ mark, and leaves the glass's own links as written", async () => {
+    const g = await page(linkFleet(), { hash: '#dispatches' });
+    (g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc')) as HTMLElement).click();
+    await g.settle();
+    const pr = g.$(`#modalbox a[href="${PR}"]`)!;
+    expect([pr.getAttribute('target'), pr.getAttribute('rel')]).toEqual(['_blank', 'noopener noreferrer']);
+    expect(pr.classList.contains('extlink')).toBe(true);
+    const tabs = g.$$('a[href^="#"]');
+    expect(tabs.length).toBeGreaterThan(0);
+    for (const tab of tabs) {
+      expect(tab.classList.contains('extlink'), tab.getAttribute('href')!).toBe(false);
+      expect(tab.getAttribute('target'), tab.getAttribute('href')!).toBeNull();
+    }
+  });
+
+  it('marks no link whose label already shows ↗, though it still opens in a new tab', async () => {
+    const g = await page(repoFilterFleet(), { hash: '#prs', prefs: { view: 'cards' } });
+    const open = g.$$('#prs a').find((a) => a.textContent === '↗ Open');
+    expect(open, 'a PR card has ↗ Open').toBeTruthy();
+    expect(open!.getAttribute('target')).toBe('_blank');
+    expect(open!.classList.contains('extlink')).toBe(false);
   });
 });

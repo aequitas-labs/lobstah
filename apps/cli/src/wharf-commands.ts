@@ -12,6 +12,7 @@ import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-
 import { readHookStdin } from './soak-site.js';
 import { WharfWake } from './wharf-wake.js';
 import { mirrorScope } from './wharf-mirror.js';
+import { markOtherBoatAcked, otherBoatsAttention, parseBoatItemKey } from './wharf-attention.js';
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -47,6 +48,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   if (cmd === 'attention') {
     // An item of a grounds on a wharf is acknowledged on that wharf, so every boat and the hosted glass agree.
     if ((pos[0] === 'ack' || pos[0] === 'unack') && pos[1] && isHostedKey(pos[1])) { await hostedAck(config, pos[0], pos[1], opts.opt('--request-key')); return true; }
+    // Another mirror boat's item is acknowledged on that boat, through the wharf, so every pet and glass agree.
+    if ((pos[0] === 'ack' || pos[0] === 'unack') && pos[1] && parseBoatItemKey(pos[1])) { await otherBoatAck(config, pos[0], pos[1], opts.opt('--by') ?? 'terminal'); return true; }
     // Every other ack is this boat's own display file, whatever grounds the boat has.
     return false;
   }
@@ -306,19 +309,47 @@ async function mirrorWharfCommand(pos: string[], opts: Options, config: Config):
 async function hostedAck(config: Config, action: string, key: string, requestKey: string = randomUUID()): Promise<void> {
   if (action === 'unack') throw new Error(`an acknowledgement on a wharf stands, so ${key} cannot be unacknowledged; nothing was changed`);
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestKey)) throw new Error('request key must use 1–128 identifier characters');
+  const ack = await ackHostedItem(config, key, requestKey);
+  console.log(toonKV({ key, kind: ack.kind, acked: true, by: ack.by, at: ack.at, stateHash: ack.stateHash }));
+}
+/**
+ * Acknowledge an item of a grounds on a wharf on that wharf, and record the
+ * ack in this boat's cache so it stops walking at once. The CLI's ack and
+ * the glass's lob click both come here.
+ */
+export async function ackHostedItem(config: Config, key: string, requestKey: string = randomUUID()): Promise<{ kind: string; stateHash: string; by: string; at: string }> {
   const item = hostedItem(config, key);
   if (!item) throw new Error(`no wharf item ${key} in this boat's view; lobstah attention lists the keys`);
   const backend = wharfFor(backendScope(config, item.view.grounds));
   if ('document' in item) {
     const ack = await backend.ackDocument(item.document, requestKey);
     recordHostedAck(item.view, { document: item.document, ack });
-    console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, at: ack.at, stateHash: item.stateHash }));
-    return;
+    return { kind: item.kind, stateHash: item.stateHash, by: ack.by, at: ack.at };
   }
   if (!item.statusAt) throw new Error(`${key} has reported nothing to acknowledge`);
   const ack = await backend.ackDispatch(item.dispatch, item.statusAt, requestKey);
   recordHostedAck(item.view, { dispatch: item.dispatch, ack });
-  console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, at: ack.at, stateHash: item.stateHash }));
+  return { kind: item.kind, stateHash: item.stateHash, by: ack.by, at: ack.at };
+}
+/**
+ * `lobstah attention ack @<boat>/<key>`: ask the boat that owns the item to
+ * acknowledge the state this Mac shows, through the mirror's wharf, and mark
+ * it acked in this Mac's cache so it stops walking here at once. The owning
+ * boat writes the ack; its next list carries it to every other pet.
+ */
+async function otherBoatAck(config: Config, action: string, key: string, by: string): Promise<void> {
+  if (action === 'unack') throw new Error(`${key} is acknowledged on its own boat; unack it there`);
+  const ref = parseBoatItemKey(key)!;
+  const item = otherBoatsAttention(config, []).find((a) => a.key === key);
+  if (!item) throw new Error(`no item ${key} from another boat on this Mac; lobstah attention --json lists the keys`);
+  const wharf = config.glass.mirror!;
+  const scope = mirrorScope(config, wharf);
+  const token = wharfCredential(scope);
+  if (!token) throw new Error(`no boat credential for ${wharf}; run lobstah wharf login --wharf ${wharf} --mirror --attention`);
+  await new WharfBackend(scope.location, token).ackMirrorAttention(ref.boat, ref.key, item.stateHash);
+  const at = new Date().toISOString();
+  markOtherBoatAcked(key, { at, by });
+  console.log(toonKV({ key, kind: item.kind, acked: true, by, at, stateHash: item.stateHash, boat: item.boat?.name ?? ref.boat }));
 }
 /** Remote agents must never sign on, beat or claim in this boat's local fleet. */
 export async function wharfHook(cmd: string | undefined, args: string[]): Promise<boolean> {

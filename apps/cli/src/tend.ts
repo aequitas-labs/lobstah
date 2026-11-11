@@ -1,4 +1,4 @@
-import { configuredTrapViews, orderedDispatchPrUrls } from '@lobstah/core';
+import { configuredTrapViews, orderedDispatchPrUrls, reviewAttention } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
@@ -101,6 +101,7 @@ import { reportAttention } from './report-file.js';
 import { decisionAttention, hideFramedQuestions } from './decisions.js';
 import { worktreeView } from './worktree-view.js';
 import { backendViews, hostedAttention, hostedDecisionFrames } from './hosted-view.js';
+import { otherBoatsAttention } from './wharf-attention.js';
 import { livenessView } from './liveness-view.js';
 import { deriveGlassPrs } from './glass-prs.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
@@ -773,6 +774,25 @@ function bucketOf(uuid: string): TendDispatch['bucket'] | undefined {
   if (fs.existsSync(path.join(d.done, uuid))) return 'done';
   if (fs.existsSync(path.join(d.queue, `${uuid}.json`))) return 'queued';
   return undefined;
+}
+
+/**
+ * What the person's lobsters walk: the macOS pet (`lobstah attention --json`)
+ * and the glass's lobs (`/data`) both read this one list, so they show the
+ * same items. It is tend's attention without the questions held on the helm's
+ * turn, plus the completed-review notifications when [reviews] is on (those
+ * never stand in tend: the helm has nothing to do for them).
+ *
+ * `boats` adds the other mirror boats' items read from the wharf
+ * (wharf-attention.ts), as the hosted glass shows them: the pet asks for
+ * them. This glass's `/data` does not, since its snapshot is what this boat
+ * mirrors, and the hosted glass already shows every boat.
+ */
+export function walkingAttention(report: TendReport, now: number = Date.now(), opts: { boats?: boolean } = {}): TendAttention[] {
+  const cfg = loadConfig();
+  const reviews = cfg.reviews.enabled ? reviewAttention(now) : [];
+  const own = [...report.attention, ...reviews].filter((a) => !a.held);
+  return opts.boats ? [...own, ...otherBoatsAttention(cfg, own, now)] : own;
 }
 
 /** Fleet state with a one-time refresh for unrecorded multi-PR observations. */

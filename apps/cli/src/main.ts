@@ -243,7 +243,7 @@ import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThr
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
-import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
+import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS, walkingAttention } from './tend.js';
 import { runCull } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
@@ -1130,6 +1130,22 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'run': {
+      if (pos[0] !== 'passkey' || pos[1] !== 'add' || !has('--hosted')) throw new UsageError(usageFor('run')!);
+      const { readMirrorStatus } = await import('@lobstah/core');
+      const status = readMirrorStatus();
+      if (!status?.glass || !status.boat) throw new Error("This Mac doesn't mirror to a hosted glass yet. Run lobstah wharf login --mirror, then try again.");
+      const { HOSTED_PASSKEY_DIALOG_PROMPT, macPasswordGate } = await import('./run-passkey.js');
+      const refused = await macPasswordGate(undefined, undefined, HOSTED_PASSKEY_DIALOG_PROMPT)();
+      if (refused) throw new Error(refused);
+      const { issuePairing } = await import('./run-pairing.js');
+      const code = issuePairing(status.glass);
+      const link = `${status.glass}/passkey?boat=${encodeURIComponent(status.boat)}&pair=${code}`;
+      const { canOpenBrowser, openBrowser } = await import('./wharf-login.js');
+      console.log(`Open this on your phone to pair its passkey with ${status.boat}. It works once, for 5 minutes:\n${link}`);
+      if (canOpenBrowser()) openBrowser(link);
+      return;
+    }
     case 'goals': {
       const cfg = loadConfig(), caller = callerSession(opt('--session'));
       const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));
@@ -2279,6 +2295,8 @@ async function mainCli(): Promise<void> {
     case 'attention': {
       const sub = pos[0];
       const report = buildTendReport();
+      // The pet's lobsters: the same list the glass's lobs walk, and every other mirror boat's.
+      const walking = walkingAttention(report, Date.now(), { boats: true });
       if (loadConfig().reviews.enabled) report.attention.push(...reviewAttention(Date.now()));
       pruneStaleAcks(report.attention);
       if (sub === 'ack' || sub === 'unack') {
@@ -2303,9 +2321,7 @@ async function mainCli(): Promise<void> {
         break;
       }
       if (has('--json')) {
-        // The pet also receives completed-review notifications, which stay
-        // out of the helm's tend report. Held questions remain hidden.
-        console.log(JSON.stringify({ attention: report.attention.filter((a) => !a.held) }));
+        console.log(JSON.stringify({ attention: walking }));
         break;
       }
       console.log(

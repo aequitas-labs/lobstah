@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { askDecision, ensureLayout, listGrants, loadConfig, readDecisionAnswer } from '@lobstah/core';
+import { askDecision, claimBait, enqueue, ensureLayout, listGrants, loadConfig, readDecisionAnswer, settlePermissionCards, signOnTrap } from '@lobstah/core';
 import type { MirrorStatus, WharfMirrorCall } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { askPermission } from '../src/grants-cli.js';
@@ -50,6 +50,8 @@ class FakeWharf implements MirrorWharf {
     this.answers.set(id, { status, contentType, body: Buffer.from(body).toString('utf8') });
   }
   async mirrorFile(id: string) { return this.files.get(id)!; }
+  async putMirrorAttention() { return { etag: 'a'.repeat(64), at: new Date(now).toISOString(), changed: true }; }
+  async mirrorAttention() { return []; }
 }
 
 /** The loopback glass, with every path and request kind the mirror sent it written down. */
@@ -132,6 +134,40 @@ describe('the snapshot', () => {
 });
 
 describe('relayed calls', () => {
+  it('removes a finished tool permission from both glasses and refuses an already queued late answer', async () => {
+    const worktree = path.join(home, 'worktree');
+    fs.mkdirSync(worktree);
+    const session = 'mirror-waiting-trap';
+    const signed = signOnTrap({ sessionId: session, harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000 });
+    if (!('ok' in signed)) throw new Error('could not sign on');
+    enqueue({ id: 'mirror-work', repo: 'web', brief: 'Check the release' });
+    claimBait(signed.ok);
+    const card = askPermission({ dispatch: 'mirror-work', lane: 'work', ask: {
+      session, tool: 'Bash', call: { id: 'mirror-call' }, command: 'pnpm exec check-release', harness: 'claude',
+    } });
+    const wharf = new FakeWharf();
+    wharf.watchedUntil = new Date(now + 30_000).toISOString();
+    const m = mirror(wharf);
+    await m.pass();
+    expect((wharf.puts.at(-1)!.decisions as Array<{ key: string }>).map(item => item.key)).toContain(card.key);
+    // The person's click is queued before the boat learns the call ended.
+    wharf.queued = [call('late-allow', { write: { kind: 'decision-answer', payload: { key: card.key, option: 'Allow once' } } })];
+    settlePermissionCards({ session_id: session, hook_event_name: 'PostToolBatch', tool_calls: [{ tool_use_id: 'mirror-call' }] });
+    now += MIRROR_WATCHED_PASS_MS;
+    await m.pass();
+    expect(wharf.puts.at(-1)!.decisions).toEqual([]);
+    expect(wharf.answers.get('late-allow')?.status).toBe(404);
+    const snapshot = await (await fetch(`http://127.0.0.1:${port}/data`)).json() as { focusToken: string; decisions: unknown[] };
+    expect(snapshot.decisions).toEqual([]);
+    const localAnswer = await fetch(`http://127.0.0.1:${port}/requests`, {
+      method: 'POST', headers: { Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-Lobstah-Token': snapshot.focusToken },
+      body: JSON.stringify({ kind: 'decision-answer', payload: { key: card.key, option: 'Allow once' } }),
+    });
+    expect(localAnswer.status).toBe(404);
+    expect(readDecisionAnswer(card.key)).toBeUndefined();
+    expect(listGrants().grants).toEqual([]);
+  });
+
   it('carries out an allowed read and answers with the local glass’s own status and body', async () => {
     const wharf = new FakeWharf();
     wharf.queued = [call('stats', { read: '/data/stats' })];
@@ -147,12 +183,14 @@ describe('relayed calls', () => {
     const wharf = new FakeWharf();
     const glass = recordingGlass();
     wharf.queued = [
+      call('review-settings', { write: { kind: 'review-mode', payload: { mode: 'auto-review', publish: true } } }),
+      call('helm-chat', { write: { kind: 'helm-chat', payload: { grounds: 'fleet', chat: 'brief' } } }),
       call('focus', { write: { kind: 'focus', payload: { trapId: 'x' } } }),
       call('raw', { read: '/api/focus/x' }),
       call('climb', { read: '/data/dispatch/%2e%2e' }),
     ];
     await mirror(wharf, glass).pass();
-    for (const id of ['focus', 'raw', 'climb']) {
+    for (const id of ['review-settings', 'helm-chat', 'focus', 'raw', 'climb']) {
       expect(wharf.answers.get(id)?.status, id).toBe(403);
     }
     expect(glass.requests).toEqual([]);
@@ -238,6 +276,24 @@ describe('enrolling this machine as a mirror boat', () => {
     expect(lines.join('\n')).toMatch(/boat: studio/);
     expect(lines.join('\n')).toMatch(/permissions: mirror \+ read/);
     expect(lines.join('\n')).toMatch(/mirror: never/);
+  });
+
+  it("asks for attention beside mirror, so this Mac's pet walks every boat, and refuses it alone", async () => {
+    const asked: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      asked.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith('/v1/auth/device/code')) return Response.json({ device_code: 'device', user_code: 'ABCD-EFGH', verification_uri: 'https://glass.lobstah.test/device', expires_in: 600, interval: 1 });
+      if (url.endsWith('/v1/auth/device/token')) return Response.json({ token: BOAT_TOKEN, id: 'boat-1', name: 'studio', permissions: ['mirror', 'attention', 'read'] });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: unknown) => { lines.push(String(line)); });
+    const { wharfCommand } = await import('../src/wharf-commands.js');
+    expect(await wharfCommand('wharf', ['login'], options({ '--wharf': 'lobstah', '--mirror': true, '--attention': true, '--name': 'studio' }), loadConfig())).toBe(true);
+    expect(asked[0]!.body).toMatchObject({ steering: 'read', mirror: true, attention: true });
+    expect(lines.join('\n')).toContain('Approve boat studio (mirror + attention + read)');
+    await expect(wharfCommand('wharf', ['login'], options({ '--wharf': 'lobstah', '--attention': true }), loadConfig())).rejects.toThrow(/--mirror/);
   });
 
   it('refuses --wharf login without --mirror, since it has no grounds to work in', async () => {

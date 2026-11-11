@@ -15,9 +15,11 @@ function readRequest(code: { requestData?: unknown }): BoatRequest {
   if (typeof code.requestData !== 'string') refuse('not a boat enrolment code');
   return JSON.parse(code.requestData) as BoatRequest;
 }
-const permissionList = z.array(z.enum(['work', 'read', 'helm', 'mirror'])).max(4);
+const permissionList = z.array(z.enum(['work', 'read', 'helm', 'mirror', 'attention'])).max(5);
 /** A mirror boat's access: its glass on the hosted glass, and nothing to work or steer. */
 const MIRROR_PERMISSIONS: Permission[] = ['mirror', 'read'];
+/** A mirror boat that also walks every other boat's items on its pet. */
+const MIRROR_ATTENTION_PERMISSIONS: Permission[] = ['mirror', 'attention', 'read'];
 export function boatDevice(env: Env, glass: string) {
   const requestSchemaFields = {
         account: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
@@ -25,6 +27,8 @@ export function boatDevice(env: Env, glass: string) {
         steering: z.enum(['read', 'helm', 'none']).default('read'),
         // A mirror boat asks for mirror and read only: it shows its fleet, and takes no work and no helm.
         mirror: z.boolean().default(false),
+        // A mirror boat may also ask to read every other mirror boat's walking list, for its pet.
+        attention: z.boolean().default(false),
         boatToken: z.string().max(1024).optional(),
   };
   const grant = {
@@ -34,7 +38,8 @@ export function boatDevice(env: Env, glass: string) {
         if (request.client_id !== 'lobstah-cli' || request.user_id || request.scope) refuse('invalid boat enrolment request');
         const input = z.object(requestSchemaFields).parse(request);
         if (input.mirror && input.steering !== 'read') refuse('a mirror boat asks for read access only');
-        const permissions: Permission[] = input.mirror ? MIRROR_PERMISSIONS : input.steering === 'none' ? ['work'] : ['work', input.steering];
+        if (input.attention && !input.mirror) refuse('only a mirror boat asks for attention');
+        const permissions: Permission[] = input.mirror ? (input.attention ? MIRROR_ATTENTION_PERMISSIONS : MIRROR_PERMISSIONS) : input.steering === 'none' ? ['work'] : ['work', input.steering];
         const data: BoatRequest = { account: input.account, name: boatName(input.name), permissions };
         if (input.boatToken) {
           if (!input.boatToken.startsWith(`b.${data.account}.`)) refuse('current boat credential does not belong to these grounds');
@@ -49,7 +54,8 @@ export function boatDevice(env: Env, glass: string) {
       getVerificationContext: (code) => {
         const requested = readRequest(code);
         return { boatName: requested.name, previousBoatName: requested.previousName, requestedPermissions: requested.permissions,
-          description: requested.permissions.includes('mirror') ? "Show this boat's own fleet on this glass, and carry out what you do there. No work, no helm."
+          description: requested.permissions.includes('attention') ? "Show this boat's own fleet on this glass, carry out what you do there, and walk every boat's items on its pet. No work, no helm."
+            : requested.permissions.includes('mirror') ? "Show this boat's own fleet on this glass, and carry out what you do there. No work, no helm."
             : requested.permissions.includes('helm') ? 'Work, see the grounds state, and steer dispatches and the helm seat.' : requested.permissions.includes('read') ? 'Work and see the grounds state.' : 'Work only; cannot see the grounds state or steer.' };
       },
   } satisfies DeviceAuthorizationGrant;
@@ -99,7 +105,7 @@ export function boatDevice(env: Env, glass: string) {
           account: requested.account, helm: true, personId: result.user.id, token: `device-${result.claimedDeviceCode.id}`,
           method: 'POST', path: 'boats', key: `device-${result.claimedDeviceCode.id}`, body: { name: requested.name, permissions: JSON.parse(result.claimedDeviceCode.approvedGrants), enrol: true, expectedBoat: requested.id, proof: requested.proof },
         }))));
-        if (issued.status !== 201) throw new APIError('CONFLICT', { error: 'enrolment_failed', error_description: 'Boat enrolment failed; choose a new name or approve again with the current credential.' });
+        if (issued.status !== 201) throw new APIError('CONFLICT', { error: 'enrolment_failed', error_description: "This boat couldn't be added. Choose another name in your terminal, or approve again." });
         return ctx.json({ ...object(issued.value), account: requested.account });
       }),
     },

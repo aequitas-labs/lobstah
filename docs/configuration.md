@@ -323,7 +323,7 @@ harness's blocking Stop-hook timeout too.
 | Key | Default | Meaning |
 |---|---|---|
 | `port` | `4949` | Localhost port for the glass. `LOBSTAH_GLASS_PORT` takes precedence. |
-| `mirror` | unset | A wharf in `[wharves]` that shows this machine's glass on its hosted glass. The fleet stays on its local grounds. The daemon puts the glass snapshot there (never the page token): within seconds of a change while a hosted glass is open, and every five minutes otherwise. It carries out on this glass, over loopback, the reads and writes a person makes there, except ↗ Open. Enroll with `lobstah wharf login --wharf <name> --mirror` (mirror and read access only), then `lobstah daemon restart`; `lobstah wharf whoami --wharf <name>` and `lobstah doctor` show how fresh the mirror is. Unset, nothing is sent. |
+| `mirror` | unset | A wharf in `[wharves]` that shows this machine's glass on its hosted glass. The fleet stays on its local grounds. The daemon puts the glass snapshot there (never the page token): within seconds of a change while a hosted glass is open, and every five minutes otherwise. It carries out on this glass, over loopback, the reads and writes a person makes there, except ↗ Open. Enroll with `lobstah wharf login --wharf <name> --mirror` (mirror and read access only), or add `--attention` so this Mac's pet also walks every other mirror boat's items, then `lobstah daemon restart`; `lobstah wharf whoami --wharf <name>` and `lobstah doctor` show how fresh the mirror is. Unset, nothing is sent. |
 
 ## `[pet]` — report and decision clicks
 
@@ -481,7 +481,7 @@ key reused as the routing key. Opt-in is per repo, never implied. With no repo o
 
 | Key | Default | Meaning |
 |---|---|---|
-| `publish` | `false` (`true` for auto-review) | The glass draft/publish toggle, including on-demand jobs. Switching it changes auto-draft ↔ auto-review. Each job remembers whether publishing was enabled when it started. |
+| `publish` | `false` (`true` for auto-review) | The glass draft/publish toggle, including on-demand jobs. Switching it changes auto-draft ↔ auto-review. Posting requires both the current mode and the job’s original publishing permission; lowering the mode applies to jobs already running. |
 | `identity` | required | The bot login work is assigned to / authored by. |
 | `repo` | single-repo mode | `owner/name`. Omit for multi-repo mode. |
 | `key` | single-repo mode | Lobstah repo key for dispatches and rebase chores. |
@@ -528,7 +528,10 @@ as that identity, with its token source, independently of `[pickup.github]`. Ide
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
 | `maxPerDay` | `20` | Review jobs started per day. Past it, items file with no job. |
+| `requestedAfter` | `"enabled"` | Requests before reviews were enabled or the repo switched to automatic mode stay in Reviews without a job. Set a quoted ISO timestamp to choose a different cutoff; repo overrides are supported. |
 | `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
+
+Setup records the activation time when settings change. For hand-edited settings, the next poll records the transition. Older requests remain available for an explicit Review action. Cancelling a review dispatch fails its round and stops the trap at its next tool hook; cancelled rounds cannot publish.
 
 Requests land silently in the Reviews inbox with a tab count, never on deck or tend. Draft-ready and automatic-published notifications use `[hooks.notify]` and the pet, with a `#review-<encoded key>` link to the row. The hook gets `LOBSTAH_NOTE`, `LOBSTAH_VERB` (`draft-ready`, `needs-you`, `published`) and `LOBSTAH_URL` / `LOBSTAH_GLASS_URL`. Opening marks seen; a row action clears the notification and needs-you marker. Wharf notification delivery is deferred.
 

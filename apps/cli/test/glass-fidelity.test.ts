@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import type { GlassSnapshot, GlassTrap } from '@lobstah/core';
 import { trapView } from '../../../packages/glass-ui/src/glass-diff.js';
+import { isExternalHref } from '../../../packages/glass-ui/src/glass-links.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
@@ -12,13 +13,13 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (fixtures/glass-legacy.html, the exact bytes the old template string
  * served) and the built page render the same DOM for the same snapshot.
  * Both pages are driven the way a reader drives them — hash links, clicks
- * on rows and chips, the ⚙ settings buttons, the filter controls, Escape —
+ * on rows and chips, the settings menu, the filter controls, Escape —
  * through every tab in both views, the filters, every modal, the lobs, and
  * the preview lob; every visible section is compared after each step.
  *
- * Runtime helm chat controls and their mode text are removed before comparing;
- * helm-chat.test.ts covers their actual HTTP round-trip. Browser preference
- * hint text and the settings title are normalized to their pre-toggle form.
+ * Settings are now read-only, so their contents are excluded from the legacy
+ * comparison. glass-page.test.ts and helm-chat.test.ts cover those values and
+ * the refused writes. Each view is loaded from stored browser preferences.
  *
  * The comparison is canonical, and each normalization is a documented
  * difference of the Preact page, not a visible one:
@@ -80,7 +81,10 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
+  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar')) el.remove();
+  // The phone's header parts are new (glass-phone-nav.test.ts tests them); the filter row now names its tab for them.
+  const controls = g.$('.controls');
+  if (controls) controls.className = 'controls';
   const bar = g.$('.navbar');
   if (bar) bar.replaceWith(...Array.from(bar.childNodes));
 }
@@ -125,9 +129,12 @@ function canon(node: Node, skeletonOnly = false): string {
     const el = c as Element;
     if (el.tagName === 'SCRIPT') continue;
     if (el.tagName === 'BUTTON' && el.classList.contains('thumb')) continue;
+    // Where a link out of the glass opens, and its ↗ mark, are html.ts's rule now; glass-links tests them.
+    const external = el.tagName === 'A' && isExternalHref(el.getAttribute('href') ?? '', el.ownerDocument.location.origin);
     const attrs = [...el.attributes]
       .filter((a) => !a.name.startsWith('on') && a.name !== 'selected' && a.name !== 'title')
-      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )long(?= |$)/, '').trim() : a.value] as const)
+      .filter((a) => !(external && (a.name === 'target' || a.name === 'rel')))
+      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )(long|extlink)(?= |$)/g, '').trim() : a.value] as const)
       .filter(([n, v]) => !((n === 'class' || n === 'style') && v === ''))
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([n, v]) => `${n}=${JSON.stringify(v)}`);
@@ -149,9 +156,7 @@ function foldPrTitles(el: Element): Node {
   if (copy.querySelector('.settings')) {
     const title = copy.querySelector('h3');
     if (title) title.textContent = '⚙ settings';
-    const hints = copy.querySelectorAll('.settings .hint');
-    if (hints[0]) hints[0].textContent = 'cards or table';
-    if (hints[1]) hints[1].textContent = 'crawling lobsters';
+    copy.querySelector('.settings')!.replaceWith(doc.createTextNode('read-only settings'));
   }
   for (const n of copy.querySelectorAll('.chip.click .dim')) n.textContent = (n.textContent ?? '').replace(/ · chat (full|brief)$/, '');
   for (const n of copy.querySelectorAll('.prack')) n.remove();
@@ -247,6 +252,10 @@ function capture(g: GlassDom): Record<string, string> {
   // Their new affordance has its own DOM tests; keep comparing all other
   // regions against the frozen pre-action page.
   out.page = tab === 'deck' || tab === 'traps' ? '(trap window action changed)' : canon(foldPrTitles(g.$('#' + tab)!));
+  // Dispatch cards were redrawn on the shared card (components/card.ts); glass-cards-deck tests them. The table is still compared.
+  if (tab === 'dispatches' && g.$('#dispatches .cards')) out.page = '(dispatch cards redrawn)';
+  // So were PR cards (glass-page tests them); the PRs table is still compared.
+  if (tab === 'prs' && g.$('#prs .cards')) out.page = '(PR cards redrawn)';
   if (text(g.$('#modalbox h3')).startsWith('🪤')) out.modalbox = '(trap window action changed)';
   for (const id of CONTROLS) {
     const el = g.$('#' + id) as HTMLElement | null;
@@ -269,12 +278,6 @@ async function escape(g: GlassDom) {
   g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
   await g.settle();
 }
-async function setting(g: GlassDom, row: string, choice: string) {
-  await click(g, g.$('#gearbtn'));
-  const r = g.$$('#modalbox .settings .row').find((x) => text(x.querySelector('.lbl')).startsWith(row));
-  await click(g, r && [...r.querySelectorAll('.seg button')].find((b) => text(b) === choice));
-  await escape(g);
-}
 async function control(g: GlassDom, id: string, value: string | boolean, type = 'change') {
   const el = g.$('#' + id) as HTMLInputElement;
   if (typeof value === 'boolean') el.checked = value;
@@ -286,20 +289,16 @@ async function openRow(g: GlassDom, tab: string, label: string) {
   await g.go('#' + tab);
   await click(
     g,
-    g.$$(`#${tab} tr.rowhead`).find((tr) => text(tr.querySelector('td')).includes(label)),
+    g.$$(`#${tab} tr.rowhead`).find((tr) => text(tr.querySelector('td')).includes(label)) ?? g.$$(`#${tab} .card`).find((card) => text(card).includes(label)),
   );
 }
 
 type Step = { name: string; run: (g: GlassDom) => Promise<void> };
 
 /** Every view the page shows for a snapshot: tabs × views, filters, every modal — as a reader reaches them. */
-function steps(d: GlassSnapshot): Step[] {
+function steps(d: GlassSnapshot, view: 'table' | 'cards'): Step[] {
   const out: Step[] = [];
-  for (const view of ['table', 'cards']) {
-    out.push({ name: `view ${view}`, run: (g) => setting(g, 'view', view) });
-    for (const tab of TABS) out.push({ name: `${view} #${tab}`, run: (g) => g.go('#' + tab) });
-  }
-  out.push({ name: 'view table again', run: (g) => setting(g, 'view', 'table') });
+  for (const tab of TABS) out.push({ name: `${view} #${tab}`, run: (g) => g.go('#' + tab) });
   out.push({
     name: 'chain',
     run: async (g) => {
@@ -344,16 +343,14 @@ function steps(d: GlassSnapshot): Step[] {
     });
   out.push({ name: 'modal closed', run: (g) => escape(g) });
   out.push({ name: 'poll', run: (g) => g.poll() });
-  out.push({ name: 'lobs off', run: (g) => setting(g, 'lobs', 'off') });
-  out.push({ name: 'lobs on', run: (g) => setting(g, 'lobs', 'on') });
   return out;
 }
 
-async function trace(page: string, d: GlassSnapshot, search = '') {
-  const g = await loadGlass(page, d, { now: NOW, search, whole: page === LEGACY });
+async function trace(page: string, d: GlassSnapshot, search = '', view: 'table' | 'cards' = 'table') {
+  const g = await loadGlass(page, d, { now: NOW, search, whole: page === LEGACY, prefs: { view } });
   try {
     const views: Array<[string, Record<string, string>]> = [['load', capture(g)]];
-    for (const s of steps(d)) {
+    for (const s of steps(d, view)) {
       await s.run(g);
       views.push([s.name, capture(g)]);
     }
@@ -365,8 +362,8 @@ async function trace(page: string, d: GlassSnapshot, search = '') {
 
 describe('glass fidelity: the built page renders the legacy page’s DOM', () => {
   for (const [name, make] of Object.entries(FIXTURES)) {
-    it(`${name} fleet: every tab, view, filter, and modal`, async () => {
-      const [legacy, built] = [await trace(LEGACY, legacyWire(make())), await trace(GLASS_PAGE, legacyShape(make()))];
+    it.each(['table', 'cards'] as const)(`${name} fleet: every tab, filter, and modal in %s`, async (view) => {
+      const [legacy, built] = [await trace(LEGACY, legacyWire(make()), '', view), await trace(GLASS_PAGE, legacyShape(make()), '', view)];
       expect(built.skeleton).toBe(legacy.skeleton);
       expect(built.views.map(([n]) => n)).toEqual(legacy.views.map(([n]) => n));
       for (let i = 0; i < legacy.views.length; i++) {
@@ -396,22 +393,18 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
             const props = Array.from({ length: cs.length }, (_, k) => cs.item(k)).filter((p) => p !== 'color-scheme').sort();
-            out.push(`${label} ${i} ${el.tagName}.${el.className} ` + props.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'));
+            // extlink only draws the ↗ after a link out of the glass (see canon); the link's own style is compared.
+            const cls = el.className.replace(/(^| )extlink(?= |$)/, '').trim();
+            out.push(`${label} ${i} ${el.tagName}.${cls} ` + props.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'));
           });
       };
       try {
-        for (const view of ['table', 'cards']) {
-          await setting(g, 'view', view);
-          for (const tab of TABS) {
-            await g.go('#' + tab);
-            snap(`${view}#${tab}`);
-          }
+        for (const tab of TABS) {
+          await g.go('#' + tab);
+          snap(`table#${tab}`);
         }
-        await setting(g, 'view', 'table');
         await openRow(g, 'traps', 'wt:t1');
         snap('modal');
-        await click(g, g.$('#gearbtn'));
-        snap('settings');
       } finally {
         await g.close();
       }

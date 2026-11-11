@@ -91,7 +91,9 @@ it('a card answer emits a decision-answer event and does not touch the live helm
   expect((await call('documents/card/answer', { option: 'Missing' })).status).toBe(400);
   expect((await call('documents/card/answer', { option: 'One', text: 'Do this' }, person, 'helm', 'answer')).status).toBe(200);
   expect((await call('documents/card/answer', { option: 'One', text: 'Do this' }, person, 'helm', 'answer')).status).toBe(200);
-  expect((await call('documents/card/answer', { option: 'Two' })).status).toBe(409);
+  const closed = await call('documents/card/answer', { option: 'Two' });
+  expect(closed.status).toBe(409);
+  expect(await closed.json()).toMatchObject({ error: "This decision is already closed. Reload to see what's open." });
   expect(await sql("SELECT value FROM meta WHERE key='helm'")).toEqual(before);
   const events = await (await call(`events?after=${cursor}`, undefined, boat.token)).json<{ events: { kind: string; note?: string }[] }>();
   expect(events.events).toContainEqual(expect.objectContaining({ kind: 'decision-answer', note: 'card' }));
@@ -287,7 +289,9 @@ it('a job ack is keyed on the status it saw: a new report stands unacknowledged,
   // A job's own dispatch token is in scope for the job and still may not ack it.
   expect((await call('dispatches/job/ack', { at: asked }, agent)).status).toBe(403);
   expect((await call('dispatches/job/ack', {}, reader)).status).toBe(409);
-  expect((await call('dispatches/job/ack', { at: '2020-01-01T00:00:00.000Z' }, reader)).status).toBe(409);
+  const stale = await call('dispatches/job/ack', { at: '2020-01-01T00:00:00.000Z' }, reader);
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ error: 'This dispatch changed. Reload and try again.' });
   expect((await call('dispatches/missing/ack', { at: asked }, reader)).status).toBe(404);
   expect((await job()).ack).toBeUndefined();
   const first = await call('dispatches/job/ack', { at: asked }, reader); expect(first.status).toBe(200);
