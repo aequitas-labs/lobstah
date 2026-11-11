@@ -9,6 +9,8 @@ import { startTelemetrySchedule } from './telemetry-schedule.js';
 import {
   uniqueTempPath,
   appendStatus,
+  codexThreadHolders,
+  endHarnessProcess,
   bounceExpiredSignOffs,
   cancelRequested,
   claimNext,
@@ -444,6 +446,8 @@ export interface DaemonHooks {
   codexServerWatch?: (now: number, log: (message: string) => void) => void;
   /** Wakes a Codex trap that claimed work and never read it, then releases the claim (see codex-claim-watch). */
   codexClaimWatch?: (now: number, log: (message: string) => void) => void;
+  /** Refreshes Codex hook trust when lobstah's Codex plugin changes (see codex-hook-watch). */
+  codexHookWatch?: (now: number, log: (message: string) => void) => void;
   /** CLI-owned asynchronous trap startup; never waits for sign-on in the tick. */
   trapStarts?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
@@ -603,6 +607,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   } catch (err) {
     log(`codex claim watch: ${err instanceof Error ? err.message : String(err)}`);
   }
+  try {
+    hooks.codexHookWatch?.(hooks.now?.() ?? Date.now(), log);
+  } catch (err) {
+    log(`codex hook watch: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {
     const label = trapLabel({ trapId: action.trapId, name: trapNameForId(action.trapId) });
@@ -615,6 +624,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
             (action.finalized ? ` — work ${action.finalized} finalized` : '') +
             (action.worktree ? ` — worktree ${action.worktree}` : ''),
     );
+    const proc = action.codexProcess;
+    // Only the process still holding the ghost's own thread: verified, not guessed from a pid alone.
+    if (proc && codexThreadHolders(proc.threadId).includes(proc.pid)) {
+      void endHarnessProcess(proc).then((ending) => log(`ghost trap ${label}: its Codex process ${proc.pid} ${ending}`));
+    }
   }
   // A reserved trap whose session never signed on by its deadline fails
   // with a notice; its addressed work stays queued.

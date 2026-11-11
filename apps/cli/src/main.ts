@@ -241,6 +241,7 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
+import { createCodexHookWatch } from './codex-hook-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
@@ -2471,6 +2472,7 @@ async function mainCli(): Promise<void> {
           result = await throwTrap({
             ...base,
             address: pos[0]!,
+            stopStale: has('--stop-stale'),
             onLaunch: (launched) => {
               if (!json) console.log(launchedText(launched, timeoutSecs));
             },
@@ -2726,6 +2728,20 @@ async function mainCli(): Promise<void> {
         }),
       );
       console.log(toonHelp([`lobstah man relieve --session ${sessionId}   (step down)`]));
+      break;
+    }
+    case 'man:tidy-panes': {
+      const apply = has('--apply');
+      if (apply) gateHelm(callerSession(opt('--session')));
+      const { tidyPanes } = await import('./tidy-panes.js');
+      const { plan, done } = await tidyPanes(apply);
+      if (plan.length === 0) {
+        console.log(toonKV({ panes: 'nothing to tidy on lobstah\'s tmux server' }));
+        break;
+      }
+      console.log(toonTable('tidy', plan.map((p) => ({ pane: p.pane, title: p.title, action: p.action === 'stop' ? `stop Codex ${p.codexPid}, close` : p.action, why: p.why })), ['pane', 'title', 'action', 'why']));
+      if (apply) for (const line of done) console.log(line);
+      else console.log(toonHelp(['lobstah man tidy-panes --apply   (stop those Codex processes and close the panes)']));
       break;
     }
     case 'man:relieve': {
@@ -3943,6 +3959,7 @@ async function mainCli(): Promise<void> {
           todoFiring: createTodoFiring(),
           codexServerWatch: createCodexServerWatch(),
           codexClaimWatch: createCodexClaimWatch(),
+          codexHookWatch: createCodexHookWatch(),
         });
       } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;

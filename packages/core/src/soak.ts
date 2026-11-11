@@ -806,6 +806,12 @@ export interface GhostSweepAction {
   defective?: boolean;
   /** True when the catch was paused and the pause expired. */
   pauseExpired?: boolean;
+  /**
+   * A ghosted Codex trap's own process and thread: left running, it keeps
+   * the thread's writer lock, and a re-throw shows "open in another app".
+   * The daemon stops it once it confirms the process still holds the thread.
+   */
+  codexProcess?: HarnessProcess & { threadId: string };
 }
 
 /** A queue failure must not stop a trap signing off. */
@@ -886,7 +892,8 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     const worktreeNote = removal
       ? `; worktree ${removal.removed ? 'removed' : 'kept'}: ${reg.worktree}; branch ${removal.branch}; modified files ${removal.modifiedFiles ?? 'unknown'}; unpushed commits ${removal.unpushedCommits ?? 'unknown'}${removal.reason ? ` (${removal.reason})` : ''}`
       : reg.configured ? '; working folder kept; re-soaking its configured profile restores the same address' : '; worktree kept; re-soaking restores the same address';
-    actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}) });
+    const codexProcess = reg.harness === 'codex' && !reg.codexServer && reg.harnessProcess ? { ...reg.harnessProcess, threadId: reg.sessionId } : undefined;
+    actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}), ...(codexProcess ? { codexProcess } : {}) });
     fs.rmSync(regPath(reg.trapId), { force: true });
     fs.rmSync(beatPath(reg.trapId), { force: true });
     fs.rmSync(prProbePath(reg.trapId), { force: true });

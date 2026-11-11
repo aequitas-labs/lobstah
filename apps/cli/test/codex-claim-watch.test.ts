@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { claimBait, enqueue, ensureLayout, readStatusLog, readTrap, signOnTrap, type TrapRegistration } from '@lobstah/core';
-import { codexClaimWakeMessage, codexWakeRoute, createCodexClaimWatch } from '../src/codex-claim-watch.js';
+import { codexClaimWakeMessage, codexPaneReady, codexWakeRoute, createCodexClaimWatch } from '../src/codex-claim-watch.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const ID = '44444444-4444-4444-8444-444444444444';
@@ -30,11 +30,13 @@ function claimedCodexTrap(over: Partial<TrapRegistration> = {}): { trap: TrapReg
 }
 const WAKE_MS = 120_000;
 const LOBSTAH_PANE = { tmuxPane: '%7', tmuxSocket: '/private/tmp/tmux-501/lobstah' };
+/** The bottom of an idle Codex TUI, as tmux captures it. */
+const IDLE = '  Worked for 2h 31m 55s • 2:54 PM\n› Ask Codex to do anything\n  GPT-6-Luna high · ~/wt · Soak a…\n  ? for shortcuts    ⚠ 6 warnings · f2 to view\n';
 
 describe('the Codex claim watch', () => {
   it("types the wake into a silent trap's pane once, as one prompt", async () => {
     const { at } = claimedCodexTrap({ window: LOBSTAH_PANE });
-    const tmux = vi.fn(async (args: string[]) => (args[0] === 'capture-pane' ? '› \n' : ''));
+    const tmux = vi.fn(async (args: string[]) => (args[0] === 'capture-pane' ? IDLE : ''));
     const watch = createCodexClaimWatch({ tmux });
     const logs: string[] = [];
     await watch(at + WAKE_MS, (m) => logs.push(m));
@@ -48,6 +50,26 @@ describe('the Codex claim watch', () => {
     tmux.mockClear();
     await watch(at + WAKE_MS + 1000, () => {});
     expect(tmux).not.toHaveBeenCalled();
+  });
+
+  it('never types into a pane at a dialog, where Enter would choose an option', () => {
+    expect(codexPaneReady(IDLE.replace(/\n/g, ' ⏎ '))).toBe(true);
+    const review = '  Hooks need review ⏎  7 hooks are new or changed ⏎ › 1. Review ⏎   2. Trust all ⏎   3. Continue without trusting';
+    expect(codexPaneReady(review)).toBe(false);
+    expect(codexPaneReady('  This conversation is open in another app ⏎  Press enter to continue')).toBe(false);
+    expect(codexPaneReady('• Working (12s • esc to interrupt) ⏎ › ⏎ ? for shortcuts')).toBe(false);
+  });
+
+  it('counts a pane at a dialog as its one wake, so the claim is released on schedule', async () => {
+    const { at } = claimedCodexTrap({ window: LOBSTAH_PANE });
+    const tmux = vi.fn(async (args: string[]) => (args[0] === 'capture-pane' ? '  Hooks need review\n› 1. Review\n  2. Trust all\n' : ''));
+    const logs: string[] = [];
+    await createCodexClaimWatch({ tmux })(at + WAKE_MS, (m) => logs.push(m));
+    expect(tmux.mock.calls.map((c) => c[0][0])).toEqual(['capture-pane']);
+    expect(logs.join('\n')).toContain('Hooks need review');
+    const released: string[] = [];
+    await createCodexClaimWatch({ tmux })(at + WAKE_MS + 600_000, (m) => released.push(m));
+    expect(released.join('\n')).toContain('back in the queue');
   });
 
   it('waits while the pane shows a running turn', async () => {

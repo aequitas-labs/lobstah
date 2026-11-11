@@ -32,13 +32,14 @@ import {
   type TrapRegistration,
 } from '@lobstah/core';
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
-import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
+import { codexThreadHolders, modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
 import { listCodexHooks } from './codex-hook-list.js';
 import { prepareCodexServer } from './codex-server.js';
 import { codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
 import { trapTabTitle } from './terminal-title.js';
 import { openTmuxPane, tmuxPaneTail, type TmuxPaneRef, type TmuxRunner } from './tmux-terminal.js';
+import { stopStaleCodexWriters } from './codex-stale.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
 export interface TerminalLaunch {
@@ -277,6 +278,10 @@ export interface ThrowOptions {
   listHooks?: typeof listCodexHooks;
   /** Test seam: readies Codex's shared server for a trap about to attach; production uses prepareCodexServer. */
   prepareCodexServer?: (cwd: string, trapId: string) => Promise<void>;
+  /** `man throw --stop-stale`: stop a leftover Codex process holding the trap's thread before resuming it. */
+  stopStale?: boolean;
+  /** Test seam: stops those processes; production uses stopStaleCodexWriters. */
+  stopStaleWriters?: typeof stopStaleCodexWriters;
 }
 
 /** Explicit CLI timeout wins; Codex gets time for plugin and model startup. */
@@ -327,10 +332,28 @@ export function codexStallReason(cwd: string, opts: { env?: NodeJS.ProcessEnv; h
   return `Codex is likely waiting at "Hooks need review" for ${named} — trust them in that session's /hooks`;
 }
 
+/**
+ * What a Codex pane's screen means, in lobstah's terms. Codex says "This
+ * conversation is open in another app" when another Codex process still
+ * holds the thread's writer lock: it can't take a turn there, and nothing
+ * else on screen says which process or what to do.
+ */
+export function codexScreenNote(screen: string, threadId: string | undefined, holders: (thread: string) => number[] = codexThreadHolders): string | undefined {
+  if (/open in another app/i.test(screen)) {
+    const pids = threadId ? holders(threadId) : [];
+    const who = pids.length ? `Codex process ${pids.join(', ')}` : 'another Codex process';
+    return `${who} still holds this trap's thread (Codex shows that as "open in another app"), so this one can't take a turn: re-throw with --stop-stale to stop it first`;
+  }
+  if (/hooks need review|hook approval required/i.test(screen)) {
+    return "Codex doesn't trust lobstah's hooks for this session (they changed since it was trusted); in that pane choose Review in /hooks, or stow and re-throw it so lobstah supplies trust for the current plugin";
+  }
+  return undefined;
+}
+
 /** Open the command, then wait until the trap signed on after `started` and parked. */
 async function launchAndWait(
   opts: ThrowOptions,
-  w: { trapId: string; name?: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
+  w: { trapId: string; name?: string; label: string; repo?: string; sessionId?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
 ): Promise<ThrowResult> {
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
   let opened: TmuxPaneRef | undefined;
@@ -373,7 +396,8 @@ async function launchAndWait(
     if (Date.now() >= deadline) {
       // A tmux pane can be read: say what its screen shows.
       const screen = opened ? await tmuxPaneTail(opened.tmuxPane) : undefined;
-      const shows = screen ? `; its tmux pane ${opened!.tmuxPane} shows: ${screen}` : '';
+      const note = screen && w.launched.harness === 'codex' ? codexScreenNote(screen, readTrap(w.trapId)?.sessionId ?? w.sessionId) : undefined;
+      const shows = screen ? `; its tmux pane ${opened!.tmuxPane} shows: ${screen}${note ? ` — ${note}` : ''}` : '';
       if (fresh) throw new (w.launched.harness === 'codex' ? ThrowPendingError : ThrowTimeoutError)(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session${shows}`);
       if (w.launched.harness === 'codex') {
         // Keep both the ticket and the fence: an already-open slow session
@@ -397,10 +421,18 @@ async function launchAndWait(
  */
 export async function throwTrap(opts: ThrowOptions & { address: string }): Promise<ThrowResult> {
   const started = Date.now();
-  const [row] = planThrow(opts.cfg, { names: [opts.address] });
+  let [row] = planThrow(opts.cfg, { names: [opts.address] });
   const entry = rosterByAddress(opts.address);
   if (!row || !entry) throw new Error(`no roster record for ${opts.address} — \`lobstah man roster\` lists the traps a throw can bring back`);
   const label = trapLabel(entry);
+  if (row.sessionHeld && opts.stopStale && entry.harness === 'codex' && entry.sessionId) {
+    // Leftover Codex processes on the thread: each would leave the new one at "open in another app".
+    const stopped = await (opts.stopStaleWriters ?? stopStaleCodexWriters)(entry.sessionId);
+    const survived = stopped.filter((s) => s.ending === 'survived').map((s) => s.pid);
+    if (survived.length) throw new Error(`not throwing ${label}: Codex process ${survived.join(', ')} still holds its thread after SIGKILL`);
+    [row] = planThrow(opts.cfg, { names: [opts.address] });
+    if (!row) throw new Error(`no roster record for ${opts.address}`);
+  }
   if (row.sessionHeld) throw new Error(`not throwing ${label}: ${row.why}`);
   if (row.action === 'skip') throw new TrapStartingError(`not throwing ${label}: ${row.why}`);
   if (row.action === 'unresolved') throw new Error(`cannot throw ${label}: ${row.why}`);
@@ -452,6 +484,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   return launchAndWait(opts, {
     trapId: entry.trapId,
     name: entry.name,
+    ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
     label,
     repo: entry.repo,
     retry,

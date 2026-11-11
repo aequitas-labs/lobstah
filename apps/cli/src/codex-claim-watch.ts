@@ -23,8 +23,17 @@ export function codexClaimWakeMessage(dispatchId: string): string {
   );
 }
 
-/** Codex's TUI shows this while a turn runs; a prompt typed then would interrupt nothing, but wait in line. */
+/** Codex's TUI shows this while a turn runs: a prompt typed then would wait in line. */
 const CODEX_BUSY = /esc to interrupt/i;
+/**
+ * Codex's idle composer: its `›` prompt line and the footer under it. Only
+ * then does typed text land in the composer. A dialog (hook review, a
+ * permission prompt, "open in another app") hides both, and Enter there
+ * would choose one of its options.
+ */
+export function codexPaneReady(screen: string): boolean {
+  return /(^|⏎)\s*›/.test(screen) && /\? for shortcuts/.test(screen) && !CODEX_BUSY.test(screen);
+}
 
 /** How the daemon reaches one trap's Codex session, or why it can't. */
 export type CodexWakeRoute = { kind: 'server'; threadId: string } | { kind: 'pane'; pane: string } | { kind: 'none'; why: string };
@@ -39,9 +48,12 @@ export function codexWakeRoute(trap: TrapRegistration): CodexWakeRoute {
 }
 
 /** Type `text` into a pane as one prompt and submit it. */
-async function typeIntoPane(pane: string, text: string, run: TmuxRunner): Promise<'started' | 'busy'> {
+async function typeIntoPane(pane: string, text: string, run: TmuxRunner): Promise<'started' | 'busy' | { blocked: string }> {
   const screen = await tmuxPaneTail(pane, 4, run);
+  // A running turn: the next tick looks again.
   if (screen && CODEX_BUSY.test(screen)) return 'busy';
+  // A dialog or an unreadable pane: lobstah won't type into it.
+  if (!screen || !codexPaneReady(screen)) return { blocked: screen ? `its pane shows ${screen}` : 'its pane cannot be read' };
   await run(['send-keys', '-t', pane, '-l', text]);
   await run(['send-keys', '-t', pane, 'Enter']);
   return 'started';
@@ -90,9 +102,10 @@ export function createCodexClaimWatch(deps: CodexClaimWatchDeps = {}): (now: num
                 ? await typeIntoPane(route.pane, text, deps.tmux ?? tmuxRunner())
                 : undefined;
           if (result === 'busy') continue;
-          // No route still counts as the one wake: the release follows on schedule.
+          // A wake that can't be delivered still counts as the one wake: the release follows on schedule.
           recordClaimWake(step.trap, step.dispatchId, claimAt, now);
-          log(result ? `woke Codex trap ${name} for its unread ${step.dispatchId}` : `cannot wake Codex trap ${name} for ${step.dispatchId}: ${route.kind === 'none' ? route.why : ''}`);
+          const why = route.kind === 'none' ? route.why : typeof result === 'object' ? result.blocked : undefined;
+          log(why ? `cannot wake Codex trap ${name} for ${step.dispatchId}: ${why}` : `woke Codex trap ${name} for its unread ${step.dispatchId}`);
         } catch (error) {
           log(`could not wake Codex trap ${name} for ${step.dispatchId}, will retry: ${error instanceof Error ? error.message : String(error)}`);
         }
