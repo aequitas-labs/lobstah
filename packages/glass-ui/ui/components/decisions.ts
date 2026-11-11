@@ -157,7 +157,6 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   const meta = [c.repo, [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
     <button type="button" class="dopen" onClick=${open} aria-label=${`${state}: ${c.kind === 'decision' ? c.title : c.note}`}>
-      ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
       <b class="dtitle">${titleOf(c)}</b>
     </button>
     <span class="dmeta dim">${meta}</span>

@@ -123,7 +123,8 @@ describe('glass: the decisions list', () => {
     expect(text(r.querySelector('.dgo'))).toBe('Answer');
     expect(r.querySelector('.dstate')).toBeNull();
     expect(r.className).toContain('unread');
-    expect(text(row(g, Q)!.querySelector('.badge'))).toBe('needs-decision');
+    // A raw question's verb is in its modal, not on its row.
+    expect(row(g, Q)!.querySelector('.badge')).toBeNull();
     expect(g.$('#deck textarea')).toBeNull();
     expect(g.$('#deck .dsend')).toBeNull();
   });
