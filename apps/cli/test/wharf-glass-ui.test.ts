@@ -87,7 +87,7 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     if (path.endsWith('/image') || path.endsWith('/worker-image')) return new Response(new Uint8Array([137, 80, 78, 71]));
     if (path.includes('/files/')) return new Response(markdown);
     if (path.startsWith('/api/auth/device?'))
-      return Response.json({ boatName: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], description: 'Work and steer the helm.' });
+      return Response.json({ boatName: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], description: 'Work and steer the helm.', status: 'pending' });
     throw new Error('unexpected path ' + path);
   };
   w.TextDecoder = TextDecoder;
@@ -300,10 +300,15 @@ it('boats show repos and check-in, no edit/grant controls; revoke and delete eac
   expect(g.text('#boats')).toContain('last check-in');
   expect(g.text('#boats')).toContain('github.com/aequitas-labs/lobstah');
   expect(Array.from(g.doc.querySelectorAll('#boats button')).some((b) => /edit|grant|rename/i.test(b.textContent ?? ''))).toBe(false);
+  // Access in the approval page's words.
+  expect(g.text('#boats')).toContain('Work, see and steer');
+  expect(g.text('#boats')).not.toContain('work + helm');
   await g.click('#boats button', 'revoke…');
   expect(g.writes).toHaveLength(0);
-  await g.click('#boats button', 'confirm revoke');
+  expect(g.text('#boats')).toContain('keep chris-macbook');
+  await g.click('#boats button', 'revoke chris-macbook');
   expect(g.writes[0]!.path).toBe('/api/glass/boats/boat/revoke');
+  expect(g.text()).toContain('Boat revoked.');
   await g.click('#boats button', 'request trap…');
   await g.click('#boats button', 'queue trap request');
   expect(g.writes[1]).toMatchObject({ body: { kind: 'trap-request', boat: 'boat', repo: 'github.com/aequitas-labs/lobstah' } });
@@ -342,14 +347,13 @@ it('a boat card shows its name and state chip, then its access and age; a revoke
 
 it('boat approval shows the resolved name and allows only requested or lower access, never admin', async () => {
   const g = await page('/device?user_code=test-code');
-  await g.click('button', 'inspect request');
-  expect(g.text()).toContain('chris-macbook-2');
-  const select = g.doc.querySelector('[aria-label="approved boat access"]')! as unknown as HTMLSelectElement;
-  expect(Array.from(select.options).map((o) => o.value)).toEqual(['none', 'read', 'helm']);
+  expect(g.text()).toContain('Approve chris-macbook-2?');
+  const select = g.doc.querySelector('[aria-label="Access"]')! as unknown as HTMLSelectElement;
+  expect(Array.from(select.options).map((o) => o.value)).toEqual(['helm', 'read', 'none']);
   select.value = 'read';
   select.dispatchEvent(new g.window.Event('change', { bubbles: true }) as unknown as Event);
   await g.settle();
-  await g.click('button', 'approve chris');
+  await g.click('button', 'Approve');
   expect(g.writes[0]).toMatchObject({
     path: '/api/auth/wharf/approve',
     body: { userCode: 'test-code', name: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], permissions: ['work', 'read'] },

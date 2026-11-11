@@ -3,6 +3,7 @@ import { accountResponse } from './account-response.js';
 import { ApiError, boundedBody, object, requireThat } from './protocol.js';
 import type { Command } from './account.js';
 import { glassPage } from './glass-page.js';
+import type { SessionHint } from './glass-page.js';
 import { glassInstall } from './glass-install.js';
 
 /**
@@ -22,7 +23,7 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   if (install) return install;
   // The glass, boat approval, and a report's own page (the shared glass opens reports there).
   if (request.method === 'GET' && (['/', '/device'].includes(url.pathname) || reportPage(url.pathname))) {
-    return glassPage();
+    return glassPage(await sessionHint(env, request));
   }
   requireThat(url.pathname.startsWith('/api/glass'), 404, 'route not found');
   requireThat(!request.headers.has('Authorization'), 401, 'browser routes accept the glass cookie only');
@@ -55,4 +56,16 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
     path: deleting ? '' : route, method: request.method, body, key: request.headers.get('Idempotency-Key') ?? undefined,
     after: url.searchParams.get('after') ?? undefined };
   return accountResponse(request, env, c);
+}
+
+/** The visitor's session from its cookie, before the page renders; undefined when the check fails. */
+async function sessionHint(env: Env, request: Request): Promise<SessionHint | undefined> {
+  if (!request.headers.get('Cookie')) return 'out';
+  try {
+    await personSession(env, new Headers({ Cookie: request.headers.get('Cookie') ?? '' }));
+    return 'in';
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 401 || e.status === 403)) return e.status === 403 ? 'denied' : 'out';
+    return undefined;
+  }
 }

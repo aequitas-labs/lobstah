@@ -9,7 +9,7 @@ const icon = (file: string, size: number, purpose: 'any' | 'maskable') =>
   ({ src: `/icons/${file}`, sizes: `${size}x${size}`, type: 'image/png', purpose });
 export const GLASS_MANIFEST = {
   id: '/', name: 'lobstah spyglass', short_name: 'spyglass',
-  description: 'Jobs, decisions and reports of the grounds on this wharf.',
+  description: 'Dispatches, decisions and reports of the grounds on this wharf.',
   start_url: '/', scope: '/', display: 'standalone',
   // The page's own background (--bg in glass.css), so an app window opens without a flash.
   background_color: '#0e1116', theme_color: '#0e1116',
