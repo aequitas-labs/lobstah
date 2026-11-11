@@ -64,20 +64,13 @@ export function idleSinceAfterHeavy(dispatchId: string, trapId: string, idleSinc
 }
 
 /**
- * The progress states only the helm acts on. A dispatch queued too long waits
- * for its addressed trap: the helm re-addresses it or waits, and nobody else
- * has anything to do. It reaches the helm (`man wait`, `man tend`, the Stop
- * hook) and stays off the person's pet and glass: tend marks its item quiet,
- * which nothing walks, and the glass leaves its notice out (helmOnlyNotice).
+ * A dispatch-progress notice: a dispatch queued too long or stalled, or a
+ * trap idle while reporting working. Like their attention items, the glass
+ * lists them only when attentionKinds names `dispatch-progress`; the helm
+ * always gets them (`man wait`, `man tend`, the Stop hook).
  */
-export const HELM_ONLY_PROGRESS: readonly DispatchProgress['state'][] = ['queued-too-long'];
-
-/** A queued-too-long condition's stateHash, and so its notice's: `queued:<queued at>`. */
-const QUEUED_STATE = 'queued:';
-
-/** Whether a notice is a helm-only progress notice, which the glass does not list. */
-export function helmOnlyNotice(n: { kind: string; stateHash?: string }): boolean {
-  return n.kind === 'dispatch-progress' && (n.stateHash?.startsWith(QUEUED_STATE) ?? false);
+export function progressNotice(n: { kind: string }): boolean {
+  return n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working';
 }
 
 /** Current conditions, independent of notice consumption or daemon restarts. */
@@ -91,7 +84,7 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): 
       const ageSecs = (now - Date.parse(since)) / 1000;
       if (cfg.helm.queuedNoticeSecs <= 0 || ageSecs < cfg.helm.queuedNoticeSecs) continue;
       out.push({ id, lane, repo: d.repo, state: 'queued-too-long', since, ageSecs,
-        thresholdSecs: cfg.helm.queuedNoticeSecs, stateHash: `${QUEUED_STATE}${since}`,
+        thresholdSecs: cfg.helm.queuedNoticeSecs, stateHash: `queued:${since}`,
         text: `queued-too-long ${id} (${ageLabel(ageSecs * 1000)}): ${dispatchQueueReason(d, lane, cfg, now)}. Cancel and re-dispatch unaddressed, or cancel and re-address to another trap.` });
     }
     for (const id of activeIds(lane)) {
