@@ -54,7 +54,11 @@ it('shows session cards with only duration buttons, and active scopes/audit with
   expect(dom.$('.session-grants')).toBeNull();
   await dom.go('#grants');
   expect(dom.$('.session-grants')?.textContent).toContain('mcp__browser__*');
-  expect(dom.$('.session-grants')?.textContent).toContain('example.com');
+  // The card shows its tools, session and time left; a tap shows its uses, hosts and id.
+  expect(dom.$('.session-grants .card')?.textContent).not.toContain('example.com');
+  (dom.$('.session-grants .card') as unknown as HTMLElement).click();
+  await dom.settle();
+  expect(dom.$('.session-grants .card')?.textContent).toContain('example.com');
   expect(dom.$('.session-grants')?.textContent).toContain('1 use');
   expect(dom.$('.session-grants')?.textContent).not.toContain('HIDDEN');
   (dom.$('.session-grants button') as unknown as HTMLElement).click();

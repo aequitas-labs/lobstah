@@ -165,7 +165,7 @@ function start(mirror = false): void {
       location.pathname === '/device' && html`<${DeviceApproval} notify=${notify} />`,
     ],
     deck: () => html`<${HumanRequests} backend=${backend} />`,
-    boats: () => html`<${Boats} boats=${backend.account()?.boats ?? []} action=${action} deleteAccount=${deleteAccount} />`,
+    boats: () => html`<${Boats} boats=${backend.account()?.boats ?? []} mirrors=${mirror ? (backend as MirrorBackend).boats() : []} action=${action} deleteAccount=${deleteAccount} />`,
     footer: 'wharf · PR watches and repair run on your boats',
   });
   if (pending) page.open(pending);

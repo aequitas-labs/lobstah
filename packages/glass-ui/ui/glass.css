@@ -603,6 +603,15 @@ tr.rowhead:hover {
 .gfill {
   flex: 1 1 auto;
 }
+/* What a grant or boat card shows once tapped open. */
+.gmore {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  cursor: default;
+}
 .gicon {
   display: inline-flex;
   color: var(--dim);

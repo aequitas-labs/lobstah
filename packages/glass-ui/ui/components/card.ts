@@ -1,3 +1,4 @@
+import { useState } from 'preact/hooks';
 import type { Children } from '../html.js';
 import { html } from '../html.js';
 
@@ -77,4 +78,33 @@ export function Card(p: CardProps) {
     ${p.foot && html`<div class="gline gfoot dim"><span class="gtext">${p.foot.left}</span>${p.foot.right && html`<span class="gright">${p.foot.right}</span>`}</div>`}
     ${p.extra}
   </div>`;
+}
+
+/**
+ * A card with no details page of its own (a grant, a boat): a tap expands it
+ * in place to show what left its two lines. Clicks inside what it shows
+ * (buttons, a form) leave it open.
+ */
+export function ExpandingCard(p: CardProps & { more: Children }) {
+  const [open, setOpen] = useState(false);
+  const toggle = () => setOpen(!open);
+  const { more, ...card } = p;
+  return Card({
+    ...card,
+    cls: [p.cls, 'gexpand', open && 'open'].filter(Boolean).join(' '),
+    attrs: {
+      ...p.attrs,
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': String(open),
+      onKeyDown: (e: KeyboardEvent) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+          e.preventDefault();
+          toggle();
+        }
+      },
+    },
+    onClick: toggle,
+    extra: open && html`<div class="gmore" onClick=${(e: Event) => e.stopPropagation()}>${more}</div>`,
+  });
 }
