@@ -1677,8 +1677,10 @@ a.lob {
     min-height: 44px;
     align-items: center;
   }
-  .ddock .dsend {
-    min-height: 44px;
+  /* A finger's target in the composer's toolbar. */
+  .ddock .btn.dicon {
+    width: 40px;
+    height: 40px;
   }
 }
 .dnav {
@@ -1931,26 +1933,41 @@ a.lob {
 .danswer-wrap {
   position: relative;
 }
-/* The dock's compose row: attach, the text box, Send. The buttons sit at the box's foot as it grows. */
+/* The dock's composer: one bordered box, the text box across its full width, a slim toolbar under it. */
 .dcompose {
+  margin: 6px 0;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.dcompose:focus-within {
+  border-color: var(--line-hover);
+}
+.dcompose .danswer {
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.dtools {
   display: flex;
-  align-items: flex-end;
-  gap: 6px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 4px;
 }
-.dcompose .danswer-wrap {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-/* Attach and Send: the same 44px square, an icon each; the label is the button's aria-label and title. */
+/* Attach and Send: quiet icon buttons, the same square; each named by its aria-label and title. */
 .btn.dicon {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  margin: 6px 0;
+  width: 32px;
+  height: 32px;
   padding: 0;
+  border: 0;
+  background: none;
+}
+.btn.dicon:hover {
+  background: var(--card);
 }
 .dattach {
   position: relative;
@@ -1965,7 +1982,7 @@ a.lob {
   cursor: pointer;
 }
 .dattach:focus-within {
-  border-color: var(--line-hover);
+  background: var(--card);
   color: var(--fg);
 }
 .danswer-wrap .dkey-text {
@@ -2008,8 +2025,13 @@ a.lob {
 .dfoot .derr {
   font-size: 11px;
 }
+/* Send: the primary color while it can send, muted while it sends. */
 .btn.dsend {
-  color: var(--fg);
+  margin-left: auto;
+  color: var(--link);
+}
+.btn.dsend:disabled {
+  color: var(--dim);
 }
 .btn:disabled {
   cursor: default;

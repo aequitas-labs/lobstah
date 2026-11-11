@@ -87,24 +87,10 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</span></button>`;
       })}</div>`,
     instant && options.length > 0 && draft?.option && draft?.error && html`<div class="bad derr">${draft.error}</div>`,
-    // The dock's compose row: attach, the text box, and Send, as matching icon buttons beside it.
+    // The dock's composer, one box as in a chat app: the text box across the full width, then a slim
+    // toolbar inside the same box, attach at its left and Send at its right.
     !permission &&
-      html`<div class="dcompose">${
-        can('answer-files') &&
-        html`<label class="btn dattach dicon" title="Attach images or files">${AttachIcon}<input
-          type="file"
-          multiple
-          aria-label="Attach"
-          accept=${accept}
-          disabled=${sending}
-          onChange=${(e: Event) => {
-            const input = e.currentTarget as HTMLInputElement;
-            void addFiles(key, input.files).then(() => {
-              input.value = '';
-            });
-          }}
-        /></label>`
-      }<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
+      html`<div class="dcompose"><div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
       class="danswer"
       rows="2"
       aria-keyshortcuts=${textKey}
@@ -118,7 +104,22 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         setDraft(key, { text: el.value, error: undefined });
       }}
       onPaste=${can('answer-files') ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
-    ></textarea></div><button type="button" class="btn dsend dicon" aria-label="Send" title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div>`,
+    ></textarea></div><div class="dtools">${
+      can('answer-files') &&
+      html`<label class="btn dattach dicon" title="Attach images or files">${AttachIcon}<input
+          type="file"
+          multiple
+          aria-label="Attach"
+          accept=${accept}
+          disabled=${sending}
+          onChange=${(e: Event) => {
+            const input = e.currentTarget as HTMLInputElement;
+            void addFiles(key, input.files).then(() => {
+              input.value = '';
+            });
+          }}
+        /></label>`
+    }<button type="button" class="btn dsend dicon" aria-label="Send" title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div></div>`,
     !permission &&
       (files.length > 0 || (draft?.error && !(instant && draft.option))) &&
       html`<div class="dfoot">
