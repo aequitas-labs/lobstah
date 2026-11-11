@@ -8,6 +8,7 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
 import { RUN_KEY, runCardFleet } from './fixtures/run-card.js';
 import { WHARF_CAPABILITIES } from '../../../packages/glass-ui/ui/backends/wharf.js';
 import { MIRROR_CAPABILITIES } from '../../../packages/glass-ui/ui/backends/mirror.js';
+import { GLASS_ACTIONS } from '../../../packages/glass-ui/ui/backend.js';
 import { mirrorWriteAllowed } from '@lobstah/core';
 
 /**
@@ -82,7 +83,7 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(narrow.$('#traps .newtrap')).toBeNull();
   });
 
-  it('leaves helm chat out of settings without that action', async () => {
+  it('shows helm chat as a value without controls when the source cannot change it', async () => {
     const { local, narrow } = await both('#deck');
     for (const g of [local, narrow]) {
       (g.$('#gearbtn') as HTMLElement).click();
@@ -90,7 +91,13 @@ describe('a glass shows only what its source can fill and do', () => {
     }
     expect(local.$('[data-helm-chat]')).not.toBeNull();
     expect(narrow.$('.settings')).not.toBeNull();
-    expect(narrow.$('[data-helm-chat]')).toBeNull();
+    expect(narrow.$('[data-helm-chat]')?.textContent).toContain('full');
+    expect(narrow.$('[data-helm-chat] button')).toBeNull();
+    expect(narrow.$('[data-helm-chat] input')).toBeNull();
+    for (const g of [local, narrow]) {
+      expect(g.$$('.settings .seg button')).toHaveLength(4);
+      expect(g.$$('[data-helm-chat] input, [data-helm-chat] button, [data-helm-chat] select')).toEqual([]);
+    }
   });
   it('shows a run card with no Run button where its source runs nothing, as the wharf does', async () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
@@ -101,6 +108,12 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(local.$('#doverlay .runbtn')).not.toBeNull();
     expect(narrow.$('#doverlay .runscript')).not.toBeNull();
     expect(narrow.$('#doverlay .runbtn')).toBeNull();
+  });
+  it('offers review actions but no settings actions on any glass', () => {
+    expect([...GLASS_ACTIONS]).not.toContain('review-settings');
+    expect([...GLASS_ACTIONS]).not.toContain('helm-chat');
+    expect(MIRROR_CAPABILITIES.actions.has('review-request')).toBe(true);
+    for (const kind of ['review-mode', 'helm-chat']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
   });
   it("runs a card from the local glass or a mirror boat's hosted glass, where the boat checks a phone's passkey", () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
