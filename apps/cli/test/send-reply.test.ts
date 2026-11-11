@@ -62,6 +62,7 @@ function report(id: string, verb: string, note: string) {
 const count = (s: string, needle: string) => s.split(needle).length - 1;
 
 describe('a send expects a reply', () => {
+  // Six CLI runs and two one-second waits: more than vitest's default 5s on a slow CI runner.
   it('delivers the next working note once as a reply event', () => {
     live(A);
     send(A, 'start the dev server\nand report the URL');
@@ -83,7 +84,7 @@ describe('a send expects a reply', () => {
     const second = lobstah(['man', 'wait', '--timeout', '1']);
     expect(second.status).toBe(3);
     expect(second.stdout).not.toContain('event: reply');
-  });
+  }, 30_000);
 
   it('does not count a status entry lobstah writes itself as the reply', () => {
     live(A);
