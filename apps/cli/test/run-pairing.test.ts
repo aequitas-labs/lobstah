@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { ensureLayout } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges, readRunPasskeys } from '../src/run-passkey.js';
-import { PAIRING_MS, endPairing, issuePairing, pairingOrigin, pendingPairing } from '../src/run-pairing.js';
+import { PAIRING_MS, endPairing, issuePairing, pairingBoatName, pairingOrigin, pendingPairing } from '../src/run-pairing.js';
 import { RunRegistry } from '../src/run-exec.js';
 import { SoftPasskey } from './fixtures/soft-passkey.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -97,6 +97,28 @@ describe('a pairing code', () => {
     expect(pendingPairing(newer, t, pairFile)).toBeTruthy();
     endPairing(pairFile);
     expect(pendingPairing(newer, t, pairFile)).toBeUndefined();
+  });
+});
+
+describe("the pairing link's boat", () => {
+  const status = { wharf: 'lobstah', glass: 'https://glass.lobstah.dev', calls: 0, at: '2026-11-11T00:00:00.000Z' };
+
+  it("asks the wharf for this boat's name when the mirror hasn't recorded it", async () => {
+    const asked: string[] = [];
+    const name = await pairingBoatName(status, async (wharf) => {
+      asked.push(wharf);
+      return { id: 'b-1', name: 'studio', permissions: ['mirror'] };
+    });
+    expect(name).toBe('studio');
+    expect(asked).toEqual(['lobstah']);
+  });
+
+  it("uses a recorded name, and has none when there's no hosted glass or the wharf names none", async () => {
+    const never = async () => { throw new Error('not asked'); };
+    expect(await pairingBoatName({ ...status, boat: 'mini' }, never)).toBe('mini');
+    expect(await pairingBoatName({ ...status, glass: undefined }, never)).toBeUndefined();
+    expect(await pairingBoatName(undefined, never)).toBeUndefined();
+    expect(await pairingBoatName(status, async () => ({ id: 'b-1' }))).toBeUndefined();
   });
 });
 
