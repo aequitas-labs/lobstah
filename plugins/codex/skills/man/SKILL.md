@@ -67,6 +67,7 @@ lobstah man tend                                  # whole fleet: verdict, questi
                                                   # chains, PRs, live traps
 lobstah man report                                # the delta since your last report
 lobstah man wait --peek                           # standing events, not consumed
+lobstah man ask --title "<action>" --run <script>  # offer a human-run command on this machine
 lobstah man file <file.md> [--attach <img>] [--title <t>]
                                                   # publish your own report, plan or step list to the glass deck
 ```

@@ -15,6 +15,8 @@ import {
   FILE_REPORT_RULE,
   CARD_RULE,
   HELM_REMINDER,
+  HELM_STOP_REMINDER,
+  RUN_CARD_RULE,
   PARKED_TODO_RULE,
   TODO_COMMITMENT_RULE,
   WITHDRAW_CARD_RULE,
@@ -211,6 +213,8 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(charter({ name: 'fleet', repos: ['web'] }).split('Role:')[1]?.split('Fences:')[0]).toContain(HELM_REMINDER);
     expect(CARD_RULE).toBe('Every question, choice or action for the human (answer, approve, review, run a command, click, sign in, test) goes on a card, with exact steps and any command in the card. Saying it in chat too is fine; chat alone is not. When a card is answered, act on it in the same turn or put the follow-up on a todo.');
     expect(HELM_REMINDER).toContain(CARD_RULE);
+    expect(HELM_REMINDER).toContain(RUN_CARD_RULE);
+    expect(HELM_STOP_REMINDER).toContain(RUN_CARD_RULE);
     expect(charter({ name: 'fleet', repos: ['web'] }).split(CARD_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] })).not.toContain('any question or choice for the human');
   });

@@ -1,3 +1,5 @@
+import { RUN_CARD_RULE } from './charter.js';
+
 export const MANUAL = `the lobstah man's manual
 
 You are the lobstah man: one interactive session that sets traps (dispatches),
@@ -108,6 +110,17 @@ getting woken instead of asking:
                             your grounds. The charter prints (and re-injects
                             at every session start) and the Stop hook applies.
                             \`man relieve\` steps down
+
+Run cards
+  ${RUN_CARD_RULE}
+  Offer the script after saving the commands in /tmp/publish.sh.
+
+  lobstah man ask --title "Publish the package" --run /tmp/publish.sh \\
+    --interactive --cwd /path/to/package --timeout 10m --output exit
+
+  The person reviews and runs it from the glass. Declared inputs are read
+  from stdin, one line each in --input order. Scrubbed output returns to the
+  helm with --output scrubbed. Use --output exit for the exit code only.
 
 paste into your liaison instructions:
   For any task that should run in the background, dispatch it with the lobstah
