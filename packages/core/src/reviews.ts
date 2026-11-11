@@ -25,6 +25,8 @@ export type ReviewMode = (typeof REVIEW_MODES)[number];
 /** The settings a repo can override under `[repos.<key>.reviews]`. */
 export interface ReviewSettings {
   mode: ReviewMode;
+  /** Old requests stay in the inbox: enabled uses the enable/automatic-mode activation time, or set an ISO timestamp. */
+  requestedAfter: string;
   publish: boolean;
   /** Who drafts: no one, a free trap of the repo (then headless after trapWaitSecs), or headless. */
   work: ReviewWork;
@@ -59,6 +61,7 @@ export interface ReviewsConfig extends ReviewSettings {
 export const DEFAULT_REVIEWS: ReviewsConfig = {
   enabled: false,
   mode: 'notify',
+  requestedAfter: 'enabled',
   publish: false,
   repos: 'configured',
   work: 'off',
@@ -97,6 +100,11 @@ function parseSettings(raw: Record<string, unknown>, where: string): Partial<Rev
     out.publish = raw.publish;
   }
   if (raw.work !== undefined) out.work = oneOf(raw.work, REVIEW_WORK, `${where}.work`);
+  if (raw.requestedAfter !== undefined) {
+    if (raw.requestedAfter !== 'enabled' && (typeof raw.requestedAfter !== 'string' || !Number.isFinite(Date.parse(raw.requestedAfter))))
+      throw new Error(`${where}.requestedAfter must be "enabled" or an ISO timestamp`);
+    out.requestedAfter = raw.requestedAfter === 'enabled' ? 'enabled' : new Date(raw.requestedAfter as string).toISOString();
+  }
   if (raw.post !== undefined) out.post = oneOf(raw.post, REVIEW_POST, `${where}.post`);
   for (const k of ['harness', 'model', 'effort'] as const) if (raw[k] !== undefined) out[k] = String(raw[k]);
   const limits: DispatchLimits = {};
@@ -180,6 +188,8 @@ export interface ReviewRound {
   draftOnly?: boolean;
   /** Whether this job was explicitly started with publishing enabled. */
   publish?: boolean;
+  /** An explicit Draft action started this job; automatic work cannot publish in on-demand mode. */
+  onDemand?: boolean;
   verdict?: ReviewVerdict;
   blocking?: BlockingFinding[];
   needsYou?: boolean;
@@ -611,4 +621,10 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
     events.push({ key: item.key, notification: r.notification, hash: reviewHash(item.key) });
   }
   return events;
+}
+
+/** Current repo policy can lower a round's publishing permission; it cannot upgrade a draft-only receipt. */
+export function reviewCanPublish(config: ReviewsConfig, repoKey: string | undefined, round: ReviewRound): boolean {
+  const settings = reviewSettings(config, repoKey);
+  return config.enabled && (settings.mode === 'auto-review' || (settings.mode === 'on-demand' && round.onDemand === true)) && settings.publish && (round.publish ?? !round.draftOnly);
 }
