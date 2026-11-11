@@ -176,6 +176,10 @@ export interface GlassPr {
   watch?: GlassPrWatch;
   /** A PR repair that is due but waits: who holds it and why. */
   repairWait?: { heldBy: string; reason: string; until?: string };
+  /** The author's GitHub login as last observed, when known. */
+  author?: string;
+  /** The person's own PR: authored by the login gh signs in as, or opened by a dispatch and not known to be another author's. The PRs tab's Yours. */
+  mine?: boolean;
 }
 
 export interface GlassStack {

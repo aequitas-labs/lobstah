@@ -107,6 +107,7 @@ import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrHead, dispatchPrList } from './glass-prs.js';
+import { githubViewer } from './pr-ownership.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -648,6 +649,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     watches,
     prRecords,
     { readySettleSecs: cfg.readySettleSecs, now: Date.now() },
+    () => githubViewer(),
   );
   // A dispatch with several PRs lists each, in stack order, with its state.
   for (const d of dispatches as GlassDispatch[]) {
