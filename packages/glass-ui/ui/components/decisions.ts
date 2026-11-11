@@ -129,6 +129,9 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
 /** A decision's title: the helm's, or the worker's note for a raw question. */
 const titleOf = (c: DecisionCard) => (c.kind === 'decision' ? LinkedText(c.title) : NamedText(c.note));
 
+/** A decision's state in plain words. */
+const STATE_WORD = { unread: 'new', read: 'seen', answered: 'sent' } as const;
+
 /** Unread, read, or answered (from this page, until the snapshot drops it). */
 function stateOf(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean): 'unread' | 'read' | 'answered' {
   if (draft?.sent) return 'answered';
@@ -178,7 +181,7 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   const runTone = runState === 'failed' ? 'bad' : runState === 'succeeded' ? 'ok' : 'dim';
   const meta = [c.repo, [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
-    <button type="button" class="dopen" onClick=${open} aria-label=${`${state}: ${c.kind === 'decision' ? c.title : c.note}`}>
+    <button type="button" class="dopen" onClick=${open} aria-label=${`${STATE_WORD[state]}: ${c.kind === 'decision' ? c.title : c.note}`}>
       ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
       <b class="dtitle">${titleOf(c)}</b>
     </button>
@@ -324,7 +327,7 @@ export function DecisionModal({
   if (!c) {
     return shell(
       'All decisions answered',
-      html`<div class="ddone" onClick=${closeDecision}><div class="ok">✓ All decisions answered.</div><div class="dim">Click anywhere or press Escape to close.</div></div>`,
+      html`<div class="ddone" onClick=${closeDecision}><div class="ok">✓ All decisions answered.</div><div class="dim">Tap or click anywhere to close</div></div>`,
     );
   }
   const draft = drafts[c.key];

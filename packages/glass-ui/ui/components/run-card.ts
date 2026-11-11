@@ -60,7 +60,7 @@ function Warnings({ warnings }: { warnings: ScriptWarning[] }) {
 
 /** Why Run can't be pressed yet, or undefined when it can. */
 export function runBlocked(run: GlassRunCard, passkeys = getState().snapshot?.runPasskeys?.count ?? 0): string | undefined {
-  if (run.altered) return "The stored script no longer matches the card's hash, so it won't run.";
+  if (run.altered) return "This script changed after it was proposed, so it can't run.";
   if (!passkeys) return 'Set up a passkey in Settings to run cards.';
   return undefined;
 }
@@ -198,14 +198,14 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
     void runRunCard(cardKey, run.scriptSha256, inputs);
   };
   return html`<div class="runcard" data-run=${cardKey}>
-    <div class="runhead"><span class="badge warn">${run.boat ? `Runs on ${run.boat}` : 'run on this Mac'}</span>${run.proposedBy && html`<span class="dim"> proposed by ${run.proposedBy}</span>`}</div>
+    <div class="runhead"><span class="badge warn">runs on ${run.boat ?? (getState().snapshot?.viewer?.machine || 'this machine')}</span>${run.proposedBy && html`<span class="dim"> proposed by ${run.proposedBy}</span>`}</div>
     <${Script} run=${run} />
     <${Warnings} warnings=${run.warnings} />
     <div class="runmeta dim">
       <span>sha256 <code class="runsha">${run.scriptSha256}</code></span>
       <span>runs <code>${run.interpreter}</code> in <code>${run.cwd}</code></span>
       <span>time limit ${limit(run.timeoutSecs)}</span>
-      <span>the agent gets ${run.output === 'exit' ? 'the exit code only' : 'the exit code and scrubbed output'}</span>
+      <span>the agent sees ${run.output === 'exit' ? 'the exit code only' : 'the exit code and output, with secrets removed'}</span>
       ${run.interactive && html`<span>interactive: answer its prompts here</span>`}
     </div>
     ${run.altered && html`<div class="bad">${blocked}</div>`}

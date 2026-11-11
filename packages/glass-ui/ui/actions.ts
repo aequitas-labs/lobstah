@@ -372,7 +372,7 @@ export async function sendAnswer(key: string): Promise<void> {
     return;
   }
   if (!token) {
-    setDraft(key, { error: 'This page has no answer token; reload it.' });
+    setDraft(key, { error: 'Reload the page to answer.' });
     return;
   }
   setDraft(key, { sending: true, error: undefined });
@@ -389,7 +389,7 @@ export async function sendAnswer(key: string): Promise<void> {
     );
     const result = response.body;
     if (!response.ok || !result.ok) {
-      setDraft(key, { sending: false, error: result.reason ?? `The answer was refused (${response.status}).` });
+      setDraft(key, { sending: false, error: result.reason ?? "Your answer didn't go through. Reload and try again." });
       return;
     }
     const previous = modalOrder();

@@ -93,9 +93,9 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
   // These tabs have nothing to filter.
   return html`<div class=${'controls tab-' + tab} style=${tab === 'stats' || tab === 'grants' || tab === 'settings' ? 'display:none' : undefined}>
     <select id="f-lane" style=${d && only('dispatches')} value=${st.lane} onChange=${(e: Event) => setPrefs({ lane: value(e) })}>
-      <option value="">all lanes</option>
+      <option value="">all dispatches</option>
       <option value="work">work</option>
-      <option value="chore">chore</option>
+      <option value="chore">chores</option>
     </select>
     <select id="f-repo" value=${st.repo} onChange=${(e: Event) => setPrefs({ repo: value(e) })}>
       <option value="">all repos</option>

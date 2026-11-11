@@ -111,9 +111,9 @@ describe('glass: the deck reports block', () => {
     expect(more.getAttribute('href')).toBe('#reports');
   });
 
-  it('an empty fleet says none', async () => {
+  it('an empty fleet says there are no reports yet', async () => {
     const g = await page(emptyFleet());
-    expect(text(reportsSection(g).querySelector('.empty'))).toBe('none');
+    expect(text(reportsSection(g).querySelector('.empty'))).toBe('no reports yet');
   });
 });
 

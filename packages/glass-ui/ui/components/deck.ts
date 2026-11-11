@@ -133,12 +133,19 @@ function deckItem(it: DeckItem, view: View) {
 
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
 
+/** What an empty deck section says, where "none" doesn't say what is missing. */
+const EMPTY: Record<string, string> = { 'in flight': 'nothing in flight', reports: 'no reports yet' };
+
 function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number, view: View, headAction?: Children) {
   // A section for a tab this page's source does not fill is not shown, empty or otherwise.
   if (!visibleTabs().includes(tab)) return null;
   const shown = items.slice(0, max);
   const lines = shown.map((i) => deckItem(i, view));
-  const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
+  const body = shown.length
+    ? view === 'cards'
+      ? html`<div class="cards">${lines}</div>`
+      : lines
+    : html`<div class="empty">${EMPTY[title] ?? 'none'}</div>`;
   return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
 }
 

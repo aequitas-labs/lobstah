@@ -131,9 +131,11 @@ describe('a run card', () => {
     const run = merged.snapshot.decisions!.find((x) => x.key === 'decision:aaaa0003')!.run!;
     expect(run.boat).toBe('studio');
     const g = await page(merged.snapshot as GlassFullSnapshot, 'decision:aaaa0003');
-    expect(text(g.$('.dmodal .runhead .badge'))).toBe('Runs on studio');
+    expect(text(g.$('.dmodal .runhead .badge'))).toBe('runs on studio');
     // The local glass is on its boat.
-    const local = await page(fleet(true), 'decision:aaaa0003');
-    expect(text(local.$('.dmodal .runhead .badge'))).toBe('run on this Mac');
+    const own = fleet(true);
+    own.viewer = { onMachine: true, windowFocus: true, machine: 'mini', device: 'desktop' };
+    const local = await page(own, 'decision:aaaa0003');
+    expect(text(local.$('.dmodal .runhead .badge'))).toBe('runs on mini');
   });
 });

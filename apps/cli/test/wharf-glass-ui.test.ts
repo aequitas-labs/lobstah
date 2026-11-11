@@ -287,9 +287,10 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
   await g.settle();
   await g.click('#modalbox button', 'Queue message for helm');
   expect(g.writes[0]).toMatchObject({ path: '/api/glass/requests', body: { kind: 'message', dispatch: 'job', text: 'Please retry' }, credentials: 'same-origin' });
-  await g.click('#modalbox button', 'Cancel job…');
+  await g.click('#modalbox button', 'Cancel dispatch…');
   expect(g.writes).toHaveLength(1);
-  await g.click('#modalbox button', 'Confirm cancel');
+  expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its agent stops.');
+  await g.click('#modalbox button', 'Cancel dispatch');
   expect(g.writes[1]).toMatchObject({ path: '/api/glass/dispatches/job/cancel', body: {} });
   for (const write of g.writes) {
     expect(write.headers['Idempotency-Key']).toBeTruthy();

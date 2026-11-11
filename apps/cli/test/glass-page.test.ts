@@ -1079,9 +1079,9 @@ describe('glass page: On deck', () => {
     expect(cards.map((c) => text(c.querySelector('.gword')))).toContain('conflicts');
   });
 
-  it('an empty fleet: every section says none, the daemon is down', async () => {
+  it('an empty fleet: every section says it is empty, the daemon is down', async () => {
     const g = await page(emptyFleet());
-    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'none', 'none', 'none', 'none', 'none']);
+    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'none', 'none']);
     expect(text(g.$('#chips'))).toBe('daemon down');
   });
 });

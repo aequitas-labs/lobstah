@@ -130,7 +130,7 @@ describe('a run card in the glass', () => {
     expect(card.textContent).toContain('/bin/bash');
     expect(card.textContent).toContain('/Users/me/base/homebase');
     expect(card.textContent).toContain('time limit 5m');
-    expect(card.textContent).toContain('the exit code and scrubbed output');
+    expect(card.textContent).toContain('the agent sees the exit code and output, with secrets removed');
     const input = card.querySelector('.runinput input') as HTMLInputElement;
     expect(input.getAttribute('type')).toBe('password');
     const run = card.querySelector('.runbtn') as HTMLButtonElement;
@@ -231,7 +231,7 @@ describe('a run card in the glass', () => {
 
   it("says a card whose stored copy changed won't run", async () => {
     const g = await modal(glassRun(undefined, { altered: true }));
-    expect(g.$('#doverlay .runcard')!.textContent).toContain("no longer matches the card's hash");
+    expect(g.$('#doverlay .runcard')!.textContent).toContain("This script changed after it was proposed, so it can't run.");
   });
 
   it('wraps a long path, hash or name at phone width, and lets each row of the card shrink', () => {
