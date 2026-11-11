@@ -189,9 +189,13 @@ worker's verb and note stay the primary line. `lobstah status <id>` prints
 the same line as `activity:`, and `lobstah ls` has an `activity` column. See
 [Activity](vocabulary.md#activity).
 
-A worker that waits on something outside lobstah (a ume review, a PR
-review, a deploy) reports `paused "<note>" --waiting-on review --link <url>`
-before it waits. Tend, `status`, `ls`, and the glass then show
+A worker that waits on something outside lobstah (a ume review, a
+deploy) reports `paused "<note>" --waiting-on review --link <url>`
+before it waits. A trap never parks on its own PR's CI or review: once the
+PR is up it reports `done --pr <url>`, which frees it, and the PR's watch
+starts the next round on review feedback, a failing check or a merge. A
+trap's `paused --waiting-on pr|review` about its own PR is recorded as
+`done --pr`. Tend, `status`, `ls`, and the glass then show
 `paused: waiting on review` with the link and the time waited. It is a
 state, not a question: nothing to answer, no attention, no pet. A paused
 headless worker is never counted as wedged and its wall clock stops.

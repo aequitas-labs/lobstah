@@ -292,6 +292,7 @@ import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
 import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, onCodexServer, startMode, throwBatch, throwTrap } from './throw.js';
 import { repoTrapRows, trapSummary } from './trap-list.js';
+import { trapPrWaitAsDone } from './trap-pr-wait.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle, trapTabTitle } from './terminal-title.js';
@@ -1621,15 +1622,19 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'report': {
-      const [id, verb, ...rest] = pos;
-      if (!id || !verb) throw new Error(`report requires an id and a verb (${VERBS.join('|')})`);
+      const [id, asked, ...rest] = pos;
+      if (!id || !asked) throw new Error(`report requires an id and a verb (${VERBS.join('|')})`);
       const lane = findLane(id);
       const note = rest.join(' ') || undefined;
-      const reportedPrs = values('--pr');
+      const askedWaiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
+      // A trap doesn't park on its own PR's CI or review: that pause is recorded as done --pr, which frees the trap.
+      const prDone = trapPrWaitAsDone(id, lane, asked, askedWaiting, values('--pr'));
+      const verb = prDone ? 'done' : asked;
+      const reportedPrs = prDone ? prDone.prs : values('--pr');
       const prUrl = reportedPrs[0];
       const noWatch = has('--no-watch');
-      const waiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
-      const saysWaiting = waiting.waitingOn !== undefined || waiting.link !== undefined || waiting.until !== undefined;
+      const waiting = prDone ? {} : askedWaiting;
+      const saysWaiting = !prDone && (askedWaiting.waitingOn !== undefined || askedWaiting.link !== undefined || askedWaiting.until !== undefined);
       if (saysWaiting && isVerb(verb)) {
         try {
           waitingFields(verb, waiting);
@@ -1710,6 +1715,7 @@ async function mainCli(): Promise<void> {
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
       const asksPermission = permCommand !== undefined || permPath !== undefined;
       const entry = appendStatus(id, lane, verb, runNote ? `${note ?? ''}${runNote}`.trim() : note, undefined, saysWaiting ? waiting : undefined, true, asksPermission);
+      if (prDone) console.log(`note: a trap doesn't park on its own PR; recorded done --pr ${prDone.prs.join(' --pr ')}. The PR's watch starts the next round on review feedback, a failing check or a merge.`);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from

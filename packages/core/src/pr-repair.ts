@@ -182,7 +182,7 @@ export function prReviewed(pr: Pick<PrRecord, 'reviewDecision' | 'review'>): boo
 /**
  * How a worker finishes after it changed the head of a reviewed PR: it
  * re-requests review from the PR's current reviewers (named, or listed with
- * gh), then parks on the review instead of reporting done.
+ * gh), then reports done with the PR; its watch starts the next round on the review.
  */
 export function rerequestReview(pr: { url: string; number?: number; repo?: string }, id = '<dispatch id>', reviewers: readonly string[] = []): string {
   const n = pr.number !== undefined ? String(pr.number) : pr.url;
@@ -192,7 +192,7 @@ export function rerequestReview(pr: { url: string; number?: number; repo?: strin
     : `its current reviewers: list them with \`gh pr view ${n}${repo} --json reviews,reviewRequests\`, then \`gh pr edit ${n}${repo} --add-reviewer <login>,<login>\``;
   return (
     `This PR had a review, and your push changes its head, which invalidates that review. After you push, re-request review from ${who}. ` +
-    `Then report \`lobstah report ${id} paused "<note>" --waiting-on review --link ${pr.url}\` instead of done.`
+    `Then report \`lobstah report ${id} done "<note>" --pr ${pr.url}\`: the PR's watch starts the next round when the review comes back.`
   );
 }
 
