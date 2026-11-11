@@ -1154,6 +1154,15 @@ a {
   color: var(--link);
   text-decoration: none;
 }
+/* A link that leaves the glass (html.ts adds the class): a new tab, marked ↗. */
+a.extlink::after {
+  content: '\2197';
+  margin-left: 0.2em;
+}
+/* A lobster is a picture, not a label: it carries no mark. */
+a.lob.extlink::after {
+  content: none;
+}
 .dot {
   display: inline-block;
   width: 8px;
