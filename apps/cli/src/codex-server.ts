@@ -215,6 +215,22 @@ export function codexRestartMessage(dispatchId?: string): string {
   return `lobstah: Codex's server restarted and interrupted your last turn. Any command that was running and your soak --wait listener were stopped. Carry on with ${work} from where it stopped, then listen again as usual.`;
 }
 
+/**
+ * Start a turn on a trap's thread with `text`, unless a turn is already
+ * running there (it would read the same thing soon anyway). 'started' or
+ * 'busy'; throws when the server can't be reached.
+ */
+export async function startCodexTurn(threadId: string, text: string): Promise<'started' | 'busy'> {
+  return withCodexServer(async (call) => {
+    await call('thread/resume', { threadId });
+    const { thread } = (await call('thread/read', { threadId, includeTurns: true })) as { thread?: { turns?: Array<{ status: string }> } };
+    const busy = (thread?.turns ?? []).some((turn) => turn.status === 'inProgress');
+    if (!busy) await call('turn/start', { threadId, input: [{ type: 'text', text }] });
+    await call('thread/unsubscribe', { threadId }).catch(() => undefined);
+    return busy ? 'busy' : 'started';
+  });
+}
+
 /** Tell one trap its server restarted, by a turn on its own thread. */
 async function wakeCodexTrap(trap: TrapRegistration): Promise<void> {
   await withCodexServer(async (call) => {

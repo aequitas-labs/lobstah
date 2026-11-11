@@ -240,6 +240,7 @@ import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
+import { createCodexClaimWatch } from './codex-claim-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
@@ -3657,8 +3658,11 @@ async function mainCli(): Promise<void> {
               }
             : {}),
           note:
-            'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
-            'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ' +
+            (reg.harness === 'codex'
+              ? 'this session now takes assigned work: run `lobstah soak --wait --timeout 600` in the foreground, ' +
+                'and keep the turn open until it returns. On Codex, a background listener that finishes after your turn ends starts no new turn, so its brief is lost. '
+              : 'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
+                'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ') +
             "Never `man wait` (that is the orchestrator's command, not yours).",
         }),
       );
@@ -3938,6 +3942,7 @@ async function mainCli(): Promise<void> {
           },
           todoFiring: createTodoFiring(),
           codexServerWatch: createCodexServerWatch(),
+          codexClaimWatch: createCodexClaimWatch(),
         });
       } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;

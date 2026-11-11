@@ -113,12 +113,16 @@ naming a dispatch id. Then:
 - For ume: use the ume skill's non-blocking push; Codex cannot run the await
   as a tracked background task. End the turn while it runs.
 - Don't block on long-running processes: run servers and watchers in the
-  background with a timeout.
+  background with a timeout. `lobstah soak --wait` is the exception.
 - After sign-on and after every completion or report, run one foreground
   `lobstah soak --wait --timeout 600` if no waiter is already active, never
-  with a shell `&`. The Stop hook blocks in park mode with standing work;
-  there is no watcher to arm. A quiet exit 3 means re-run the wait, never
-  stow.
+  with a shell `&`. Give the command a yield time longer than its timeout
+  (`yield_time_ms` of at least 610000), and don't end the turn while it runs.
+  Codex moves a command that outlasts its yield time to the background, and
+  a background command that finishes after your turn ends starts no new
+  turn: the brief it prints is lost and the work sits claimed. The Stop hook
+  blocks in park mode with standing work; there is no watcher to arm. A
+  quiet exit 3 means re-run the wait, never stow.
 
 ## Heavy commands
 

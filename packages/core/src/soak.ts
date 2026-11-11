@@ -669,7 +669,11 @@ export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.cl
       kind: 'trap-claim-idle',
       refId: bait.id,
       repo: bait.descriptor.repo,
-      text: `${trapRepoLabel(reg)} claimed ${bait.id} ${Math.floor(age / 1000)}s ago but has not reported. The brief will be re-delivered at its next park; check that the session is awake.`,
+      text:
+        `${trapRepoLabel(reg)} claimed ${bait.id} ${Math.floor(age / 1000)}s ago but has not reported. ` +
+        (reg.harness === 'codex'
+          ? 'An idle Codex session never parks, so lobstah wakes it with the brief, then puts the dispatch back in the queue if it still does not report.'
+          : 'The brief will be re-delivered at its next park; check that the session is awake.'),
       dedupeKey: `trap-claim-idle-${bait.id}-${bait.claim.at}`,
     });
   }

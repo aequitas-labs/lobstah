@@ -30,6 +30,7 @@ export type NoticeKind =
   | 'trap-available'
   | 'trap-batch'
   | 'trap-claim-idle'
+  | 'trap-claim-released'
   | 'dispatch-progress'
   | 'trap-idle-working'
   | 'trap-stowed'
