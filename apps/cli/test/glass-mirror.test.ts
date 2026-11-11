@@ -339,6 +339,14 @@ describe('mergeMirror', () => {
     expect(router.resolve({ nothing: 'here' }).boat).toBeUndefined();
   });
 
+  it("keeps each boat's done-today todos marked done, so the hosted glass counts open ones only", () => {
+    const todo = (id: number, done: boolean) => ({ grounds: 'home', groundsKey: 'fleet', id, text: `Task ${id}`, createdAt: new Date(NOW).toISOString(), done, stale: false, overdue: false });
+    const withTodos = sources().map((s, i) => ({ ...s, snapshot: { ...s.snapshot, todos: [todo(1 + i * 10, false), todo(2 + i * 10, false), todo(3 + i * 10, true), todo(4 + i * 10, true), todo(5 + i * 10, true)] } }));
+    const { snapshot } = mergeMirror(withTodos, NOW, viewer);
+    expect(snapshot.todos!.filter((t) => !t.done)).toHaveLength(4);
+    expect(snapshot.todos!.filter((t) => t.done)).toHaveLength(6);
+  });
+
   it('adds up counts and keeps a PR both boats watch once', () => {
     const { snapshot } = mergeMirror(sources(), NOW, viewer);
     const one = put('n', NORTH);

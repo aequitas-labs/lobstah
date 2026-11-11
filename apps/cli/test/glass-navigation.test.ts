@@ -51,11 +51,15 @@ describe('TODO preview and page', () => {
     d.todos![0]!.done = true;
     g.serve(d);
     await g.poll();
-    expect(g.$$('#todos .todo-check')).toHaveLength(7);
-    expect(g.$('#todos')?.textContent).not.toContain('Task 1');
+    const open = (tab: string) => g.$$(`#${tab} .todos > .todo-checklist > .todo-check`);
+    expect(open('todos')).toHaveLength(7);
+    expect(open('todos').map((el) => el.textContent).join(' ')).not.toContain('Task 1');
+    expect(g.$('#todos .todo-done-today summary')?.textContent).toBe('Done today (1)');
     await g.go('#deck');
-    expect(g.$('#deck .todo-check')?.classList.contains('done')).toBe(true);
-    expect(g.$$('#deck .todo-check')).toHaveLength(5);
+    expect(open('deck').some((el) => el.classList.contains('done'))).toBe(false);
+    expect(open('deck')).toHaveLength(5);
+    expect(g.$('#deck .todos .deckmore')?.textContent).toBe('More (2)');
+    expect(g.$('#deck .todo-done-today')?.textContent).toBe('1 done today');
   });
 });
 

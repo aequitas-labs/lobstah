@@ -556,6 +556,14 @@ h2 {
   padding: 0;
   margin: 0;
 }
+/* Todos done today sit apart from the open ones, and no count includes them. */
+.todo-done-today {
+  display: block;
+  margin-top: var(--space-2);
+}
+.todo-done-today summary {
+  cursor: pointer;
+}
 .todo-content {
   min-width: 0;
   flex: 1;

@@ -172,16 +172,21 @@ it.each(['table', 'cards'])('renders Todos as one compact read-only checklist wi
     expect(page.$$('.todos ul.todo-checklist')).toHaveLength(1);
     expect(page.$$('.todos .card, .todos .cards')).toHaveLength(0);
     const rows = page.$$('.todo-checklist > li.todo-check');
-    expect(rows.map((r) => r.querySelector('.todo-text')?.textContent)).toEqual([long, 'Second', 'Done today']);
+    // The Deck lists the open ones; the one done today is a quiet line, outside the count.
+    expect(rows.map((r) => r.querySelector('.todo-text')?.textContent)).toEqual([long, 'Second']);
     for (const row of rows) expect(row.textContent).toMatch(/added .+ ago/);
     const boxes = page.$$('.todo-checklist input[type="checkbox"]') as HTMLInputElement[];
-    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[false, true], [false, true], [true, true]]);
-    // Done today: checked (green, by CSS) and struck through; the open ones are not struck.
-    expect(rows[2]?.classList.contains('done')).toBe(true);
-    expect(page.$$('.todo-checklist s').map((s) => s.textContent)).toEqual(['Done today']);
+    expect(boxes.map((b) => [b.checked, b.disabled])).toEqual([[false, true], [false, true]]);
+    expect(page.$('.todos .todo-done-today')?.textContent).toBe('1 done today');
     expect(page.$('.todo-checklist safe')).toBeNull();
-    expect(page.$('.todo-checklist')?.textContent).not.toContain('Done yesterday');
-    expect(page.$('.todo-checklist')?.textContent).not.toContain('Dropped today');
+    expect(page.$('.todos')?.textContent).not.toContain('Done yesterday');
+    expect(page.$('.todos')?.textContent).not.toContain('Dropped today');
+    // On the page, Done today lists it: checked (green, by CSS) and struck through; the open ones are not struck.
+    await page.go('#todos');
+    const done = page.$$('#todos .todo-done-today li.todo-check');
+    expect(done.map((r) => r.querySelector('.todo-text')?.textContent)).toEqual(['Done today']);
+    expect((done[0]!.querySelector('input') as HTMLInputElement).checked).toBe(true);
+    expect(page.$$('#todos .todo-checklist s').map((s) => s.textContent)).toEqual(['Done today']);
   } finally { await page.close(); }
 });
 
