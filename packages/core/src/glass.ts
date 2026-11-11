@@ -67,6 +67,11 @@ export interface TendAttention {
    * grounds (the local glass), and until the wharf has named its glass.
    */
   glass?: string;
+  /**
+   * Another mirror boat's item, read from the wharf (apps/cli/src/wharf-attention.ts):
+   * that boat's id and name. Its key is `@<boat id>/<the boat's own key>`. Absent for this boat's own items.
+   */
+  boat?: { id: string; name: string };
   /** pr:* kinds: the evidence fields the kind derives from. */
   prUrl?: string;
   /** Click destination only: prUrl remains the canonical watch/ack identity. */
