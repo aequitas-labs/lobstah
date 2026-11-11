@@ -216,7 +216,7 @@ describe('the Grants tab', () => {
       await g.settle();
       const card = g.$('.standing-grant')!;
       expect(card.textContent).toContain(INTENT.text);
-      expect(card.textContent).toContain('Trap pearl-gull');
+      expect(card.textContent).toContain('🪤 pearl-gull');
       expect(card.textContent).toContain('Claude Code');
       expect(card.textContent).toContain('scripts/with-timeout * npx wrangler tail');
       expect(card.textContent).toContain('3 uses');
@@ -238,7 +238,7 @@ describe('the Grants tab', () => {
       expect(text[0]).toContain('npx wrangler tail …');
       expect(text[0]).toContain('Every trap');
       expect(text[1]).toContain('Write /w/reports/');
-      expect(text[2]).toContain('Every trap in web');
+      expect(text[2]).toContain('Every trap in 📁 web');
     } finally {
       await g.close();
     }
