@@ -10,6 +10,7 @@ import { newRequestId, readRequest, requestFilesDir, requestsDir, writeRequest }
 import type { DecisionAnswerPayload } from './requests.js';
 import type { Attachment, Lane } from './types.js';
 import { runScriptFile, type RunCard } from './run-cards.js';
+import { withDirLock } from './dir-lock.js';
 
 /**
  * Decisions: a question the helm puts to the human (`man ask`), answered in
@@ -39,6 +40,10 @@ import { runScriptFile, type RunCard } from './run-cards.js';
  * to the grants ledger.
  */
 export interface PermissionAsk {
+  /** Distinguish a pending harness call from an explicit proposal that can outlive a turn. */
+  source?: 'hook' | 'proposal';
+  /** The harness call this automatic card waits for; absent on an explicit permission proposal. */
+  call?: { id?: string; turn?: string };
   session?: string;
   tool?: string;
   sessionGrant?: { session: string; tools: string; hosts?: string[]; durationMs: number; reason: string; command?: string };
@@ -511,6 +516,24 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
 
 /** Withdraw a standing decision into a read-only archive, retaining its task progress. */
 export function withdrawDecision(key: string): DecisionMeta {
+  return withDecisionLock(key, () => withdrawStandingDecision(key));
+}
+
+/** Serialize withdrawal with a permission answer and its grant application. */
+export function withDecisionLock<T>(key: string, action: () => T): T {
+  const dir = decisionDir(key);
+  if (!dir) throw new DecisionError(`no decision ${key}`, 404);
+  const locks = path.join(decisionsRoot(), '.locks');
+  fs.mkdirSync(locks, { recursive: true });
+  return withDirLock(path.join(locks, path.basename(dir)), action, {
+    staleMs: 60_000,
+    waitMs: 2_000,
+    busy: () => new DecisionError('This card is being updated. Try again.', 409),
+  });
+}
+
+/** Move the standing card while its lifecycle lock is held. */
+function withdrawStandingDecision(key: string): DecisionMeta {
   const meta = readDecision(key);
   if (!meta) throw new DecisionError(`no decision ${key}`, 404);
   const answer = readDecisionAnswer(key);

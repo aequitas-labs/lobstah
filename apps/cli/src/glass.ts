@@ -1,5 +1,5 @@
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
-import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus } from '@lobstah/core';
+import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
 import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
@@ -603,6 +603,7 @@ function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
  * request), so starting cards may carry their start command and ticket.
  */
 export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
+  reconcilePermissionCards();
   const cfg = loadConfig();
   refreshMissingDispatchPrs();
   const prRecords = readPrs();
