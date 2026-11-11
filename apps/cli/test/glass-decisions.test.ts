@@ -119,7 +119,7 @@ describe('glass: the decisions list', () => {
     const r = row(g, KEY)!;
     expect(text(r.querySelector('.dtitle'))).toBe('Which schema should the tray use?');
     // The row is the question, then its repo and age, all one button that opens it; the highlight says unread, no word does.
-    expect(text(r.querySelector('.dopen .dmeta'))).toBe('📁 web · 2m ago');
+    expect(text(r.querySelector('.dopen .dmeta'))).toBe('web · 2m ago');
     expect(r.querySelectorAll('button')).toHaveLength(1);
     expect(r.querySelector('.dstate')).toBeNull();
     expect(r.className).toContain('unread');
@@ -206,7 +206,7 @@ describe('glass: the decision modal', () => {
     expect(c.getAttribute('aria-modal')).toBe('true');
     expect(text(g.$('#' + c.getAttribute('aria-labelledby')!))).toBe('Which schema should the tray use?');
     expect(text(c.querySelector('.dtitle'))).toBe('Which schema should the tray use?');
-    expect(text(c.querySelector('.dmeta'))).toBe('aaaaaaaa · 📁 web · 2m ago');
+    expect(text(c.querySelector('.dmeta'))).toBe('aaaaaaaa · web · 2m ago');
     const md = c.querySelector('.mdpage')!;
     expect(text(md.querySelector('h1'))).toBe('Context');
     expect(md.querySelector('img')!.getAttribute('src')).toBe(`/decision/${encodeURIComponent(KEY)}/files/tray.png`);

@@ -238,7 +238,7 @@ describe('the Grants tab', () => {
       expect(text[0]).toContain('npx wrangler tail …');
       expect(text[0]).toContain('Every trap');
       expect(text[1]).toContain('Write /w/reports/');
-      expect(text[2]).toContain('Every trap in 📁 web');
+      expect(text[2]).toContain('Every trap in web');
     } finally {
       await g.close();
     }

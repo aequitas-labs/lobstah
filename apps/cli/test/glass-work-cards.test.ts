@@ -61,7 +61,8 @@ describe('a PR card', () => {
     expect(card.querySelector('.gtop .pricon')).toBeTruthy();
     expect(card.querySelector('.gtop .gword')).toBeNull();
     expect(text(card.querySelector('.gtop + .gstate .gword'))).toBe(p.badge.text.toLowerCase());
-    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^📁 web #41 · 4\/4 passed · \d+\w ago$/);
+    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^web #41 · 4\/4 passed · \d+\w ago$/);
+    expect(card.querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card.querySelectorAll(':scope > .gline')).toHaveLength(3);
     // The gate moved to the modal.
     expect(text(card)).not.toContain('gate');
@@ -102,7 +103,7 @@ describe('a review card', () => {
     const card = (n: number) => g.$(`#reviews [data-review="review:acme/web#${n}"]`)!;
     expect(card(7).className).toContain('gcard-edge gedge-bad');
     expect(text(card(7).querySelector('.gword'))).toBe('drafted');
-    expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('📁 acme/web#7 · approval drafted · 60m ago');
+    expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web#7 · approval drafted · 60m ago');
     const draft = card(7).querySelector('.gaction a')!;
     expect([text(draft), draft.getAttribute('href')]).toEqual(['Open draft', 'https://github.com/acme/web/pull/7#pullrequestreview-1']);
     expect(card(8).className).toContain('gcard-edge gedge-warn');

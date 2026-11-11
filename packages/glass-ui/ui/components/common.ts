@@ -1,4 +1,5 @@
 import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
+import { RepoIcon } from './card.js';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
 import { desktopSession, isImageName, prBadgeClass, resumeCommand, watchState } from '../../src/glass-diff.js';
@@ -414,11 +415,8 @@ export function trapScope(trap: Pick<GlassTrap, 'repo' | 'configured'>): string 
 
 /** The mark before a trap's name everywhere but the trap's own card, as the trap modal and deck show it. */
 export const TRAP_MARK = '🪤';
-/** The mark before a repo's name in every card. */
-export const REPO_MARK = '📁';
-
-/** A repo, as every card names it: 📁 and its name. */
-export const RepoName = (repo: string): Children => html`<span class="reponame">${REPO_MARK} ${repo}</span>`;
+/** A repo, as every card names it: the Octicon repo icon (RepoIcon), then its name as the text. */
+export const RepoName = (repo: string): Children => html`<span class="reponame">${RepoIcon}${repo}</span>`;
 
 /** A trap shown by name, its full `wt:<id>` in the title. A click opens the trap's modal. A card puts TRAP_MARK before it. */
 export function TrapName(trapId: string): Children {

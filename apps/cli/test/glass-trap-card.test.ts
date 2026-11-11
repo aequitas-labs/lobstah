@@ -40,7 +40,7 @@ describe('the trap card', () => {
     const word = text(c.querySelector('.gchip'));
     expect(word).toBe('working');
     expect(word).toBe(word.toLowerCase());
-    expect(text(c.querySelector('.gcontext .gtext'))).toBe('📁 aequitas-labs/lobstah');
+    expect(text(c.querySelector('.gcontext .gtext'))).toBe('aequitas-labs/lobstah');
     expect(text(c.querySelector('.gnow'))).not.toBe('');
     expect(text(c.querySelector('.gfoot'))).toContain('⛵ studio');
     expect(text(c.querySelector('.gfoot'))).toContain('🦞 36');

@@ -3,7 +3,8 @@ import type { Grant } from '@lobstah/core';
 import { html } from '../html.js';
 import { closeModal, reviewRequest } from '../actions.js';
 import { ExpandingCard } from './card.js';
-import { REPO_MARK, TRAP_MARK } from './common.js';
+import { RepoName, TRAP_MARK } from './common.js';
+import type { Children } from '../html.js';
 
 export function activeSessionGrants(grants: Grant[], now = Date.now()): Grant[] {
   return grants.filter((g) => g.mode === 'session' && !g.revokedAt && !!g.expiresAt && Date.parse(g.expiresAt) > now);
@@ -33,8 +34,13 @@ export function grantExpiryText(expiresAt: string | undefined, now = Date.now())
 /** Who a grant covers, in words. */
 function grantScopeText(grant: Grant): string {
   if (grant.trap) return `${TRAP_MARK} ${grant.trap}`;
-  if (grant.mode === 'intent') return `Every trap in ${REPO_MARK} ${grant.repo}`;
+  if (grant.mode === 'intent') return `Every trap in ${grant.repo}`;
   return 'Every trap';
+}
+
+/** Who a grant covers, as its card shows it: the repo with its icon. */
+function grantScope(grant: Grant): Children {
+  return grant.mode === 'intent' && !grant.trap ? ['Every trap in ', RepoName(grant.repo ?? '')] : grantScopeText(grant);
 }
 
 /** What a grant covers, as its card leads with it. */
@@ -71,7 +77,7 @@ function StandingGrant({ grant, busy, revoke }: { grant: Grant; busy: boolean; r
     title=${grantLead(grant)}
     titleAttr=${grantLead(grant)}
     state=${{ word: 'active', tone: 'ok', mark: 'edge' }}
-    context=${context}
+    context=${[grantScope(grant), ` · ${midLine(grantExpiryText(grant.expiresAt))}`]}
     contextTitle=${context}
     action=${revokeButton(busy, revoke)}
     more=${[

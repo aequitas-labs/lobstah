@@ -1000,7 +1000,7 @@ describe('glass page: On deck', () => {
     // Two lines: the instruction and its status chip; the repo and trap, with the queue time at the right.
     const line = [...flight.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
     expect(text(line.querySelector('.gchip'))).toBe('queued');
-    expect(text(line.querySelector('.gtext'))).toBe('📁 api · 🪤 wt:t2');
+    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
     expect(text(line.querySelector('.gright'))).toBe('60s ago');
   });
 
@@ -1009,7 +1009,7 @@ describe('glass page: On deck', () => {
     d.dispatches = d.dispatches.map((x) => (x.id.startsWith('dddddddd') ? { ...x, verbAt: undefined } : x));
     const g = await page(d);
     const line = [...g.$$('#deck section')[1]!.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line.querySelector('.gtext'))).toBe('📁 api · 🪤 wt:t2');
+    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
     expect(line.querySelector('.gright')).toBeNull();
     expect(text(line)).not.toContain('ago');
   });

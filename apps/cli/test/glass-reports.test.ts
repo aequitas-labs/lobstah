@@ -88,7 +88,7 @@ describe('glass: the deck reports block', () => {
       // A card says no "acked": it is greyed instead.
       expect(metas).toEqual(
         view === 'cards'
-          ? ['60s ago', '5m ago', '📁 web · 🪤 kind-crab · 20m ago', '📁 web · aaaaaaaa · 40m ago']
+          ? ['60s ago', '5m ago', 'web · 🪤 kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']
           : ['· 60s ago · acked', '· 5m ago', '· kind-crab · 20m ago', '· aaaaaaaa · 40m ago'],
       );
       expect(rows[0]!.className).toContain('acked');
@@ -276,7 +276,7 @@ describe('glass: the Reports tab', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
-    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual(['60s ago', '5m ago', '📁 web · 🪤 kind-crab · 20m ago', '📁 web · aaaaaaaa · 40m ago']);
+    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual(['60s ago', '5m ago', 'web · 🪤 kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']);
     expect(cards.$$('#reports .card').map((c) => c.className.includes('quiet'))).toEqual([true, false, false, false]);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
