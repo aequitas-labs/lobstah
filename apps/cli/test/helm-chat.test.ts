@@ -183,35 +183,27 @@ it('concurrent heartbeat and worker observations preserve the last toggle', asyn
   } finally { for (const child of children) if (child.exitCode === null) child.kill(); }
 });
 
-it('glass settings switch round-trips through the real authenticated API and refreshes the chip', async () => {
+it('glass shows helm chat as text and refuses settings writes with a valid page token', async () => {
   seat();
+  setHelmChat('fleet', 'brief');
   server = serveGlass(0);
   await new Promise<void>((resolve) => server!.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const snapshot = async () => (await (await fetch(`${base}/data`)).json());
   const initial = await snapshot();
-  page = await loadGlass(GLASS_PAGE, initial, { now: Date.now(), post: async (url, init) => {
-    const response = await fetch(base + url, { method: 'POST', headers: { ...init.headers, Origin: base }, body: init.body });
-    const body = await response.json();
-    page!.serve(await snapshot());
-    return { status: response.status, body };
-  } });
+  page = await loadGlass(GLASS_PAGE, initial, { now: Date.now() });
   (page.$('#gearbtn') as HTMLElement).click(); await page.settle();
-  for (const chat of ['brief', 'full']) {
-    const button = page.$$('[data-helm-chat="home"] button').find((b) => b.textContent === chat)!;
-    expect(button).toBeTruthy(); (button as HTMLElement).click(); await page.settle();
-    expect(readHelm('fleet')?.chat).toBe(chat);
-    expect(page.$('[data-helm-chat="home"] button.on')?.textContent).toBe(chat);
-    expect(page.$('#chips')?.textContent).toContain(`chat ${chat}`);
+  expect(page.$('[data-helm-chat="home"]')?.textContent).toContain('brief');
+  expect(page.$$('[data-helm-chat] input, [data-helm-chat] select, [data-helm-chat] button')).toEqual([]);
+  expect(page.$$('.settings .seg button')).toHaveLength(4);
+  expect(page.posts()).toEqual([]);
+  const before = readHelm('fleet');
+  for (const chat of ['full', 'brief', 'quiet']) {
+    const response = await fetch(`${base}/requests`, { method: 'POST', headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': initial.focusToken }, body: JSON.stringify({ kind: 'helm-chat', payload: { grounds: 'home', chat } }) });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ ok: false, reason: 'Settings are read-only in glass.' });
   }
-  expect(page.posts().filter((p) => p.url === '/requests').map((p) => JSON.parse(p.body))).toEqual([
-    { kind: 'helm-chat', payload: { grounds: 'home', chat: 'brief' } },
-    { kind: 'helm-chat', payload: { grounds: 'home', chat: 'full' } },
-  ]);
-  expect(page.window.localStorage.getItem('spyglass') ?? '').not.toContain('chat');
-  const bad = await fetch(`${base}/requests`, { method: 'POST', headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': initial.focusToken }, body: JSON.stringify({ kind: 'helm-chat', payload: { grounds: 'home', chat: 'quiet' } }) });
-  expect(bad.status).toBe(400);
-  const unauthorized = await fetch(`${base}/requests`, { method: 'POST', headers: { Origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'helm-chat', payload: { grounds: 'home', chat: 'brief' } }) });
+  expect(readHelm('fleet')).toEqual(before);
+  const unauthorized = await fetch(`${base}/requests`, { method: 'POST', headers: { Origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'helm-chat', payload: { grounds: 'home', chat: 'full' } }) });
   expect(unauthorized.status).toBe(403);
-  expect(readHelm('fleet')?.chat).toBe('full');
 });

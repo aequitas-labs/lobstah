@@ -2,6 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   dismissReview,
+  dispatchWasCancelled,
+  loadConfig,
+  reviewCanPublish,
   latestRound,
   markReviewPosted,
   readReview,
@@ -117,6 +120,8 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   const { r, token, f, at, base } = c;
   if (r.staged) return { staged: false, why: `${key}: this round is already staged` };
   if (r.state !== 'drafted') return { staged: false, why: `${key}: the newest round is ${r.state}; only a fresh draft is staged` };
+  const refused = postRefusal(key, r, 'cli');
+  if (refused) return { staged: false, why: refused };
   const draft = readRoundDraft(key, r.id);
   if ('error' in draft) return { staged: false, why: `${key}: ${draft.error}` };
   const lock = receipt(key, r.id, 'staged.json', 'stage', at);
@@ -128,6 +133,8 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
       markReviewPosted(key, r.id, { reviewId: String(prior.id), by: 'review tool', at });
       return { staged: false, why: `${key}: already sent (review ${prior.id})` };
     }
+    const refused = postRefusal(key, r, 'cli');
+    if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
     const id = prior
       ? prior.id
       : (
@@ -156,6 +163,17 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   }
 }
 
+/** Re-read local policy and cancellation after awaits, immediately before a GitHub write. */
+function postRefusal(key: string, round: ReviewRound, by: PostBy): string | undefined {
+  const item = readReview(key);
+  const current = item && latestRound(item);
+  if (!item || !current || current.id !== round.id || current.state !== 'drafted' || current.headSha !== item.pr.headSha)
+    return `${key}: this round is no longer ready to publish`;
+  if (current.dispatch && dispatchWasCancelled(current.dispatch, 'chore')) return `${key}: the review job was cancelled`;
+  if (by === 'auto' && !reviewCanPublish(loadConfig().reviews, item.pr.repoKey, current)) return `${key}: automatic publishing is off for this round`;
+  return undefined;
+}
+
 /**
  * Post the newest round with its selected verdict, as the configured
  * identity: submit its staged pending review, or create the review when it
@@ -171,6 +189,8 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   if (r.state === 'posted') return { posted: false, why: `${key}: this round is already posted` };
   if (r.state === 'stale' || r.headSha !== readReview(key)?.pr.headSha) return { posted: false, why: `${key}: the draft is stale; re-draft it before publishing` };
   if (r.state !== 'drafted') return { posted: false, why: `${key}: the newest round is ${r.state}; there is no draft to post` };
+  const refused = postRefusal(key, r, opts.by);
+  if (refused) return { posted: false, why: refused };
   const draft = readRoundDraft(key, r.id);
   if ('error' in draft) return { posted: false, why: `${key}: ${draft.error}` };
   const event = opts.event ?? (draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
@@ -198,6 +218,11 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
       fs.rmSync(lock, { force: true });
       saveRound(key, r.id, (x) => { x.state = 'stale'; x.reason = 'the PR head changed or closed before publishing; re-draft it'; }, at);
       return { posted: false, why: `${key}: the PR head changed or closed before publishing; re-draft it` };
+    }
+    const refused = postRefusal(key, r, opts.by);
+    if (refused) {
+      fs.rmSync(lock, { force: true });
+      return { posted: false, why: refused };
     }
     const posted = r.staged
       ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body: reviewBody(draft.body, r) })
