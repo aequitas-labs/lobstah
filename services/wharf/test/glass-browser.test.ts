@@ -90,7 +90,11 @@ it('links this person’s own Slack once per connect, shows their standing cards
     return Response.json({ ok: true, ts: '9.000001' });
   });
   try {
-    const back = await SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}&grounds=private`, { redirect: 'manual', headers: { Cookie: cookie } });
+    const callbacks = await Promise.all([0, 1].map(() => SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}&grounds=private`, { redirect: 'manual', headers: { Cookie: cookie } })));
+    const accepted = callbacks.filter((response) => response.headers.get('Location') === 'https://glass.test/#boats');
+    expect(accepted).toHaveLength(1);
+    expect(callbacks.filter((response) => response.headers.get('Location')?.includes('slack_error='))).toHaveLength(1);
+    const back = accepted[0]!;
     expect(back.status).toBe(302); expect(back.headers.get('Location')).toBe('https://glass.test/#boats');
     expect(await (await browser('slack')).json()).toMatchObject({ configured: true, link: { team: 'T9', slackUser: 'U9' } });
     expect((await env.AUTH_DB.prepare('SELECT grounds FROM slackLinkGround WHERE person=?').bind(account).all()).results).toEqual([{ grounds: 'away' }]);

@@ -81,12 +81,16 @@ type OAuthAccess = { access_token?: string; token_type?: string; scope?: string;
  */
 export async function completeConnect(env: SlackEnv, glass: string, person: string, sessionId: string, code: string, state: string): Promise<SlackLink> {
   requireThat(slackConfigured(env), 409, 'this wharf has no Slack app configured');
-  const claimed = await env.AUTH_DB.prepare('DELETE FROM slackConnect WHERE state=? RETURNING person,sessionId,expiresAt').bind(state).first<{ person: string; sessionId: string; expiresAt: number }>();
-  const selected = await env.AUTH_DB.prepare('SELECT grounds FROM slackConnectGround WHERE state=? ORDER BY grounds').bind(state).all<{ grounds: string }>();
-  await env.AUTH_DB.prepare('DELETE FROM slackConnectGround WHERE state=?').bind(state).run();
+  // A replay must not remove the grounds while the winning callback is reading them.
+  const consumed = await env.AUTH_DB.batch([
+    env.AUTH_DB.prepare('SELECT grounds FROM slackConnectGround WHERE state=? ORDER BY grounds').bind(state),
+    env.AUTH_DB.prepare('DELETE FROM slackConnect WHERE state=? RETURNING person,sessionId,expiresAt').bind(state),
+    env.AUTH_DB.prepare('DELETE FROM slackConnectGround WHERE state=?').bind(state),
+  ]);
+  const claimed = consumed[1]!.results[0] as { person: string; sessionId: string; expiresAt: number } | undefined;
   requireThat(claimed && claimed.expiresAt > Date.now(), 400, 'this Slack connection expired or was already used; connect again from the glass');
   requireThat(claimed.person === person && claimed.sessionId === sessionId, 403, 'this Slack connection was started by another session');
-  const grounds = slackGrounds(selected.results.map((row) => row.grounds));
+  const grounds = slackGrounds((consumed[0]!.results as Array<{ grounds: string }>).map((row) => row.grounds));
   const access = await slackCall<OAuthAccess>('oauth.v2.access', { client_id: env.SLACK_CLIENT_ID!, client_secret: env.SLACK_CLIENT_SECRET!, code, redirect_uri: redirectUri(glass) });
   requireThat(access.ok, 400, `Slack refused the connection: ${access.error ?? 'unknown error'}`);
   requireThat(!access.is_enterprise_install, 400, 'install the app in one workspace, not an enterprise organization');
