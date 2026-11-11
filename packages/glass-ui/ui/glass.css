@@ -2016,6 +2016,19 @@ a.lob {
   border-radius: 50%;
   flex: 0 0 24px;
 }
+.rv-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--line);
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 600;
+}
 .rv-asker {
   margin-top: 10px;
 }

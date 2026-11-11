@@ -97,6 +97,11 @@ describe('the Reviews tab', () => {
     expect(g.$('#reviews .rv-person img')?.getAttribute('src')).toContain('avatars.githubusercontent.com/u/7');
     expect(g.$('#reviews .rv-person')?.textContent).toContain('Dana Developer');
     expect(g.$('#reviews .rv-person')?.textContent).toContain('automatic');
+    // An avatar that can't load (offline, or a page that blocks it) shows the asker's initials.
+    g.$('#reviews .rv-person img')!.dispatchEvent(new g.window.Event('error'));
+    await g.settle();
+    expect(g.$('#reviews .rv-person .rv-initials')?.textContent).toBe('DD');
+    expect(g.$$('#reviews .rv-person img')).toHaveLength(REVIEW_ROUND_STATES.length - 1);
     expect(g.$('#reviews .rv-staged')?.getAttribute('href')).toContain('#pullrequestreview-99');
     const first = g.$('#reviews .card') as unknown as HTMLElement;
     first.click();

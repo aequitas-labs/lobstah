@@ -4,6 +4,7 @@ import type { GlassFullSnapshot, GlassSnapshot } from '@lobstah/core';
 import { GLASS_CSS, GLASS_SCRIPT } from '../../../services/wharf/src/glass-page.generated.js';
 import { pollBody } from '../src/glass-poll.js';
 import { mergeMirror, MIRROR_STALE_MS } from '../../../packages/glass-ui/ui/mirror-merge.js';
+import { mirrorReadAllowed } from '../../../packages/core/src/backend-model.js';
 import { acceptanceFleet, NOW } from './fixtures/glass-snapshots.js';
 import { snapshot as wharfAccount } from './fixtures/wharf-glass.js';
 
@@ -27,9 +28,13 @@ function boatFleet(tag: 'n' | 's'): GlassFullSnapshot {
   d.decisions = [{ key: `decision:${tag}0000000`, dispatch: d.dispatches[0]!.id, lane: 'work', title: `${tag} base?`, detail: '', options: ['main', 'feature'], attachments: [], askedBy: 'helm', askedAt: new Date(NOW - 60_000).toISOString(), stateHash: tag }];
   d.attention.push({ kind: 'decision', key: `decision:${tag}0000000`, stateHash: tag, id: d.dispatches[0]!.id, lane: 'work', verb: 'decision', ageSecs: 60, at: new Date(NOW - 60_000).toISOString(), standingSince: new Date(NOW - 60_000).toISOString(), note: `${tag} base?` });
   d.reviewSetup = { enabled: true, mode: 'notify', publish: false, running: true, identity: 'reviewer', perRepo: { web: { mode: 'on-demand', publish: true, overridden: true } } };
+  d.reports = [{ key: `report:work:${d.dispatches[0]!.id}`, dispatch: d.dispatches[0]!.id, lane: 'work', title: `${tag} findings`, author: `${tag}-crab`, filedAt: new Date(NOW - 60_000).toISOString(), stateHash: tag, bytes: 40, attachments: [] }];
   d.viewer = { onMachine: false, windowFocus: false, machine: '', device: 'desktop' };
   return d;
 }
+
+/** A report's markdown, as its boat's glass serves it. */
+const reportMarkdown = (tag: 'n' | 's') => `# ${tag} findings\n\nThe ${tag} boat found the cause.\n`;
 
 /** What a boat puts: its /data body, without the page token, with where its glass listens. */
 const put = (tag: 'n' | 's', boat: typeof NORTH): GlassSnapshot => {
@@ -42,6 +47,8 @@ interface Hosted {
   settle: () => Promise<void>;
   relayed: Array<{ boat: string; read?: string; write?: { kind: string; payload: Record<string, unknown> } }>;
   focused: string[];
+  /** Every call the page made off the wharf's own origin. */
+  offOrigin: string[];
 }
 
 const windows: Window[] = [];
@@ -66,9 +73,11 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
   w.clearInterval = () => {};
   const relayed: Hosted['relayed'] = [];
   const focused: string[] = [];
+  const offOrigin: string[] = [];
   const boats = opts.boats ?? [[NORTH, 'n'], [SOUTH, 's']];
   w.fetch = async (input: string, init: RequestInit = {}) => {
     const path = String(input);
+    if (/^[a-z]+:/i.test(path)) offOrigin.push(path);
     if (path.startsWith('http://127.0.0.1:')) {
       const port = Number(new URL(path).port);
       const boat = boats.find(([b]) => b.port === port)?.[0];
@@ -91,6 +100,13 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
         const found = boatFleet(tag).dispatches.find((d) => d.id === id);
         return found ? Response.json(found) : Response.json({ error: 'not on this boat' }, { status: 404 });
       }
+      const report = call.read && /^\/report\/([^/]+)\/(meta|md)$/.exec(call.read);
+      if (report) {
+        const [, tag] = boats.find(([b]) => b.boat === call.boat)!;
+        const found = boatFleet(tag).reports.find((r) => r.key === decodeURIComponent(report[1]!));
+        if (!found) return Response.json({ error: 'not on this boat' }, { status: 404 });
+        return report[2] === 'meta' ? Response.json(found) : new Response(reportMarkdown(tag), { headers: { 'Content-Type': 'text/markdown' } });
+      }
       if (call.write) return Response.json({ ok: true, id: 'request-1' }, { status: 201 });
       return Response.json({ error: 'not found' }, { status: 404 });
     }
@@ -104,7 +120,7 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
   };
   window.document.write(`<!doctype html><html><head><style>${GLASS_CSS}</style></head><body><script>${GLASS_SCRIPT}</script></body></html>`);
   await settle();
-  return { doc: window.document as unknown as Document, settle, relayed, focused };
+  return { doc: window.document as unknown as Document, settle, relayed, focused, offOrigin };
 }
 
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -181,6 +197,32 @@ describe('two mirror boats in one fleet', () => {
   });
 });
 
+describe('a report on the hosted glass', () => {
+  it('opens a boat’s report on its own page, read from that boat through the relay', async () => {
+    const key = boatFleet('s').reports[0]!.key;
+    const h = await hosted('report/' + encodeURIComponent(key));
+    expect(text(h.doc.querySelector('main.reportview h1'))).toBe('s findings');
+    expect(text(h.doc.querySelector('main.reportview'))).toContain('The s boat found the cause.');
+    const reads = h.relayed.filter((c) => c.read).map((c) => ({ boat: c.boat, read: c.read }));
+    expect(reads).toEqual([
+      { boat: SOUTH.boat, read: `/report/${encodeURIComponent(key)}/meta` },
+      { boat: SOUTH.boat, read: `/report/${encodeURIComponent(key)}/md` },
+    ]);
+    // The boat relays only the reads it lists: these are two of them.
+    for (const { read } of reads) expect(mirrorReadAllowed(read!), read).toBe(true);
+    // Showing it acks it on its own boat, as the local glass does.
+    expect(h.relayed.filter((c) => c.write).map((c) => ({ boat: c.boat, write: c.write }))).toEqual([
+      { boat: SOUTH.boat, write: { kind: 'report-viewed', payload: { key } } },
+    ]);
+  });
+
+  it('says so when no boat lists the report', async () => {
+    const h = await hosted('report/' + encodeURIComponent('report:work:gone'));
+    expect(text(h.doc.querySelector('main.reportview'))).toContain('report not found');
+    expect(h.relayed).toEqual([]);
+  });
+});
+
 describe('↗ Open from the hosted glass', () => {
   it('shows only on the trap rows of the boat this browser runs on, and asks that boat’s glass, never the wharf', async () => {
     const h = await hosted('#traps', { onBoat: NORTH });
@@ -193,6 +235,10 @@ describe('↗ Open from the hosted glass', () => {
     await h.settle();
     expect(h.focused).toHaveLength(1);
     expect(h.focused[0]).toMatch(/^n-/);
+    // The probe and focus are the page's only calls off the wharf, each to a boat's glass port on
+    // 127.0.0.1: the one loopback source the wharf's connect-src allows (services/wharf/src/glass-page.ts).
+    expect(h.offOrigin.length).toBeGreaterThan(0);
+    for (const url of h.offOrigin) expect(url, url).toMatch(/^http:\/\/127\.0\.0\.1:(4949|4950)\/api\/mirror\/(probe|focus\/[^/]+)$/);
     expect(h.relayed.filter((c) => c.write?.kind === 'focus')).toEqual([]);
   });
 

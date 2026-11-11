@@ -782,6 +782,25 @@ the same rule.
   the retention window, with the `decision-answer` request and its files. A
   standing decision is never culled.
 
+### Run cards
+
+When the human must run a command on this machine, save it in a script and
+offer a run card. Use plain cards for steps the glass cannot run, such as
+app clicks or phone sign-ins. For a package publish, save the commands in
+`/tmp/publish.sh` and offer the script.
+
+```sh
+lobstah man ask --title "Publish the package" --run /tmp/publish.sh \
+  --interactive --cwd /path/to/package --timeout 10m --output exit
+```
+
+Use `--input NAME:secret` for secrets (values via stdin, never in the script),
+`--interactive` for logins/prompts, `--cwd` for the working folder,
+`--timeout` for the time limit, and `--output scrubbed|exit` for the result.
+The person reviews and runs the script from the glass. Scripts read declared
+inputs from stdin, one line each in `--input` order. `scrubbed` returns
+scrubbed output to the helm. `exit` returns only the exit code.
+
 ### The periodic report
 
 `lobstah man tend` is the full picture on demand; `lobstah man report` is the
