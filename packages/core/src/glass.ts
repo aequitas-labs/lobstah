@@ -251,6 +251,12 @@ export interface GlassDispatchSummary {
   prGate?: string;
   /** Every PR of a dispatch with more than one, in stack order, each with its badge once observed. */
   prList?: Array<{ url: string; number: number; title?: string; badge?: PrBadge; position?: number; size?: number }>;
+  /**
+   * The PR its card leads with: the work it is doing now (glass-prs.ts
+   * dispatchPrHead), with how many of its PRs are open. Absent while it
+   * builds a new PR after an earlier one ended.
+   */
+  prHead?: { url: string; number: number; badge?: PrBadge & { observedAt: string }; open: number; several: boolean };
 }
 
 /** A dispatch with everything: its summary plus the fields its modal shows. */

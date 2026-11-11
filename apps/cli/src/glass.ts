@@ -63,6 +63,7 @@ import {
   loadConfig,
   lobstahVersion,
   pendingIds,
+  dispatchPrUrls,
   prBadge,
   readEvidence,
   dispatchWorktree,
@@ -105,7 +106,7 @@ import { buildTendReport, landedCatches } from './tend.js';
 import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
-import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
+import { deriveGlassPrs, dispatchPrHead, dispatchPrList } from './glass-prs.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -651,6 +652,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   for (const d of dispatches as GlassDispatch[]) {
     const urls = d.evidence?.prUrls;
     if (urls && urls.length > 1) d.prList = dispatchPrList(urls.filter((url) => recordsByUrl.get(url)?.state !== 'CLOSED'), prs, d.evidence?.prPositions);
+    const ev = d.evidence;
+    const head = ev && dispatchPrHead(dispatchPrUrls(ev), (url) => recordsByUrl.get(url) ?? (ev.pr?.url === url ? ev.pr : undefined), prs, d, ev.prPositions);
+    if (head) d.prHead = head;
   }
   const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
