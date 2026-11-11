@@ -310,6 +310,10 @@ export interface SoakConfig {
   deferSecs: number;
   /** Grace after a claim before an absent worker report raises a helm notice. */
   claimIdleNoticeSecs: number;
+  /** After a Codex trap claims work and doesn't report, how long before lobstah wakes its session with the brief. */
+  codexClaimWakeSecs: number;
+  /** After that wake, how long a still-silent Codex trap keeps the claim before it goes back to the queue. */
+  codexClaimReleaseSecs: number;
   /** Heartbeat age past which a registration is a ghost trap and gets swept. */
   ttlSecs: number;
   /**
@@ -568,6 +572,9 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
 function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
   if (!Number.isInteger(soak.codexStartSecs) || soak.codexStartSecs < 1) throw new Error('soak.codexStartSecs must be a positive whole number');
+  for (const key of ['codexClaimWakeSecs', 'codexClaimReleaseSecs'] as const) {
+    if (!Number.isInteger(soak[key]) || soak[key] < 1) throw new Error(`soak.${key} must be a positive whole number`);
+  }
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
   if (typeof soak.codexRemoteControl !== 'boolean') throw new Error('soak.codexRemoteControl must be true or false');
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm' && soak.terminal !== 'tmux') {
@@ -609,6 +616,8 @@ export const DEFAULT_SOAK: SoakConfig = {
   acceptWharfStarts: false,
   deferSecs: 90,
   claimIdleNoticeSecs: 180,
+  codexClaimWakeSecs: 120,
+  codexClaimReleaseSecs: 600,
   ttlSecs: 1800,
   beat: true,
   pausedTtlSecs: 86400,

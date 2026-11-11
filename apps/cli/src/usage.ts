@@ -219,6 +219,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--request': { value: '<id>' },
       '--bypass': {},
       '--remote-control': {},
+      '--stop-stale': {},
       '--timeout': { value: '<secs>' },
       '--all': {},
       '--repo': { value: '<key>' },
@@ -264,6 +265,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   'man:chat': { positionals: 'brief|full', subverbs: ['brief', 'full'], maxPositionals: 1, flags: { '--session': { value: '<id>' }, '--grounds': { value: '<name>' } } },
   'man:relieve': { flags: { '--session': { value: '<id>' } } },
+  'man:tidy-panes': { flags: { '--apply': {}, '--session': { value: '<id>' } } },
   'man:init': { flags: { '--shared': {}, '--global': {}, '--marker': {} } },
   'man:haul': { flags: { '--timeout': { value: '<secs>' }, '--park': {} } },
   'man:brief': { flags: {} },
@@ -457,7 +459,7 @@ PR, and merge gate. Pure disk read.`,
   'man:throw': `Bring roster traps back, or start fresh, and wait until they listen; live/starting traps refuse.
 <trap>: one; --all: grounds; --repo: one repo; --new [--count N] [--request <id>]: fresh traps.
 --new shows reusable traps; --reason is required when any exist and never overrides the repo's traps cap.
---dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control, where Claude's own setting doesn't; this Codex trap attaches to Codex's shared server, so a paired phone can drive it ([soak].codexRemoteControl: every Codex trap).`,
+--dry-run (or --plan) launches nothing. Traps start in auto (or a roster permissionMode); --bypass: a person's. --remote-control: this Claude trap starts in Remote Control, where Claude's own setting doesn't; this Codex trap attaches to Codex's shared server, so a paired phone can drive it ([soak].codexRemoteControl: every Codex trap). --stop-stale: stop a leftover Codex process holding the trap's thread first.`,
   'man:roster': `Every trap that signed on, kept through stow, ghost sweep, and cull. set (the
 helm's) saves how a throw starts it; default or key= clears a field. forget removes a
 stowed trap's record, worktree, and protected ref (refused while it has unpushed commits).`,
@@ -475,6 +477,9 @@ $CLAUDE_CODE_SESSION_ID — so inside Claude Code no flag is needed.`,
   'man:chat': `Set this grounds' helm chat to brief or full without a config edit or restart.
 Brief points at cards instead of repeating their detail and keeps routine wakes quiet.
 The seat retains the override on re-sign and takeover. A terminal user or this grounds' helm may change it.`,
+  'man:tidy-panes': `List the panes on lobstah's tmux server to tidy: dead panes, and duplicate Codex panes whose
+thread another Codex process holds (they show "open in another app" and never take a turn).
+The pane holding a thread is never touched. --apply stops each duplicate's Codex and closes the panes.`,
   'man:relieve': `Step down from the helm; a displaced predecessor's stand-down notice is
 cleared too.`,
   'man:wait': `Block until a dispatch or watched source needs attention; exit 3 on timeout,

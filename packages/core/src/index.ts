@@ -40,6 +40,7 @@ export * from './heavy-hooks.js';
 export * from './heavy-reminder.js';
 export * from './watch.js';
 export * from './soak.js';
+export * from './codex-claim-recovery.js';
 export * from './harness-process.js';
 export * from './session-link.js';
 export * from './session-title.js';

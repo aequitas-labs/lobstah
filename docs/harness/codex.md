@@ -44,6 +44,16 @@ never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
 disabled hook, or approves repo/user/other-plugin hooks. Those still require
 their normal review. Manually launched Codex sessions still use `/hooks`.
 
+That trust covers the plugin as it was at launch. When the lobstah Codex
+plugin's contents change, a running session refuses lobstah's hooks: the
+transcript shows "Hook failed: plugin contents changed; hook approval
+required", and the trap can no longer park or report liveness. The daemon
+notices the change. For traps on Codex's shared server it refreshes the
+trust in `~/.codex/config.toml`, which the server re-reads. Other traps were
+trusted by launch flags that can't change while they run, so the helm gets
+one `codex-hooks-stale` notice naming them. `lobstah stow --wt <id>` and then
+`lobstah man throw <name>` resumes each with trust for the new plugin.
+
 ### On Codex's shared server
 
 `man throw --remote-control` starts a Codex trap with `--remote unix://`, attached
@@ -228,6 +238,16 @@ the periodic digest (`[helm].reportSecs`). There is nothing to arm.
 With no hook, run `lobstah man wait --session <task-id> --timeout 900` in
 the foreground and loop on it (exit 3 is a timeout). A trap listens with
 `lobstah soak --wait --timeout 600`.
+
+Keep that listener in the foreground, with a yield time longer than its
+timeout. Codex moves a command that outlasts its yield time to the
+background. A background command that finishes after the turn ends starts
+no new turn: when such a listener claims work, the brief it prints is lost
+and the work sits claimed. The daemon wakes a trap in that state after
+`[soak].codexClaimWakeSecs`. It takes a turn on the shared server, or types
+a prompt into the trap's tmux pane when that pane shows Codex's idle prompt.
+If the trap still doesn't report after `[soak].codexClaimReleaseSecs`, the
+dispatch goes back to the queue.
 
 ## CLI vs desktop app
 
