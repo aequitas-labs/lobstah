@@ -26,8 +26,9 @@ and no id of this deployment: its D1 `database_id` is a placeholder, and the
 GitHub client ID is a variable on the Worker. This machine's real database id
 lives in `services/wharf/wrangler.local.jsonc`, which git ignores (copy
 `wrangler.local.example.jsonc`). Run wrangler for the deployment through
-`pnpm --filter @lobstah/wharf run wrangler -- <command>`, which merges that file
-in, and deploy with `pnpm --filter @lobstah/wharf run deploy`. Both refuse to run
+`pnpm --filter @lobstah/wharf run wrangler <command>`, which merges that file
+in (with no `--`: pnpm hands it on, and wrangler reads the rest as one unknown
+command), and deploy with `pnpm --filter @lobstah/wharf run deploy`. Both refuse to run
 without the local file or with a placeholder in it, and the deploy refuses when
 the live Worker has no `GITHUB_CLIENT_ID`. Neither prints an id.
 
@@ -68,12 +69,12 @@ npx wrangler whoami
 npx wrangler r2 bucket create lobstah-wharf-files
 npx wrangler d1 create lobstah-wharf-auth          # put its id in wrangler.local.jsonc
 cp wrangler.local.example.jsonc wrangler.local.jsonc
-pnpm run wrangler -- d1 migrations apply lobstah-wharf-auth --remote
+pnpm run wrangler d1 migrations apply lobstah-wharf-auth --remote
 openssl rand -base64 48 | npx wrangler secret put AUTH_SECRET
 openssl rand -base64 48 | npx wrangler secret put TOKEN_SECRET
 npx wrangler secret put GITHUB_CLIENT_SECRET
 npx wrangler secret put GITHUB_CLIENT_ID           # or a variable in the dashboard; once
-pnpm run wrangler -- deploy --dry-run
+pnpm run wrangler deploy --dry-run
 pnpm run deploy
 ```
 
