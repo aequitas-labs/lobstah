@@ -299,12 +299,18 @@ function startedToday(items: ReviewItem[], now: number): number {
   return items.reduce((n, i) => n + i.rounds.reduce((m, r) => m + (r.draftStarts ?? (r.dispatchedAt ? [r.dispatchedAt] : [])).filter((at) => at.slice(0, 10) === day).length, 0), 0);
 }
 
-/** Why a requested round gets no job, or undefined when it gets one. */
-function noJob(item: ReviewItem, round: ReviewRound, started: number): string | undefined {
+/**
+ * Why a requested round gets no job, or undefined when it gets one. The
+ * daily cap bounds only the reviews lobstah starts on its own: one a person
+ * asks for (`byHand`: a Draft click, a redraft) always starts, and counts
+ * toward the day's total like any other.
+ */
+function noJob(item: ReviewItem, round: ReviewRound, started: number, byHand: boolean): string | undefined {
   const rc = loadConfig().reviews;
   if (round.reason?.startsWith('skipped:')) return round.reason;
   if (!item.pr.repoKey) return 'no job: not a configured repo, so there is no checkout to review in';
-  if (started >= rc.maxPerDay) return `no job: the daily cap ([reviews].maxPerDay = ${rc.maxPerDay}) is reached`;
+  if (!byHand && started >= rc.maxPerDay)
+    return `no job: the daily cap on automatic reviews ([reviews].maxPerDay = ${rc.maxPerDay}) is reached, so this one wasn't started. Start it by hand with Draft on the glass's Reviews tab.`;
   return undefined;
 }
 
@@ -323,7 +329,9 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if (manualKey && item.key !== manualKey) continue;
     const r = latestRound(item);
     if (!r) continue;
-    const settings = { ...reviewSettings(cfg.reviews, item.pr.repoKey), ...(manualKey ? { work: 'trap' as const } : {}) };
+    // A round a person asked for (this Draft click, or a redraft) starts as a Draft click does, past the daily cap and in any mode.
+    const manual = manualKey !== undefined || r.byHand === true;
+    const settings = { ...reviewSettings(cfg.reviews, item.pr.repoKey), ...(manual ? { work: 'trap' as const } : {}) };
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
     // A withdrawn or dismissed round (the request went, a re-request superseded it, or the person dropped it) has its job cancelled, then its checkout removed once the job ends.
@@ -344,8 +352,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
       if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
       const cutoff = reviewAutomationCutoff(cfg.reviews, item.pr.repoKey, now);
-      const oldRequest = !manualKey && settings.work !== 'off' && Date.parse(r.requestedAt) < Date.parse(cutoff);
-      const why = oldRequest ? `no job: requested before ${cutoff}; start a draft from Reviews` : settings.work === 'off' ? undefined : noJob(item, r, started);
+      const oldRequest = !manual && settings.work !== 'off' && Date.parse(r.requestedAt) < Date.parse(cutoff);
+      const why = oldRequest ? `no job: requested before ${cutoff}; start a draft from Reviews` : settings.work === 'off' ? undefined : noJob(item, r, started, manual);
       if (settings.work === 'off' || why) {
         if (why && r.reason !== why) {
           r.reason = why;
@@ -375,7 +383,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       const at = new Date(now).toISOString();
       r.draftStarts = [...(r.draftStarts ?? (r.dispatchedAt ? [r.dispatchedAt] : [])), at];
       Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: at });
-      r.onDemand = manualKey !== undefined;
+      r.onDemand = manual;
+      delete r.byHand;
       r.publish = settings.publish;
       r.draftOnly = !settings.publish;
       delete r.reason;
@@ -439,7 +448,7 @@ export async function draftReviewOnDemand(key: string, now = Date.now()): Promis
   if (!item || !round) return `no review item ${key}`;
   if (reviewSettings(loadConfig().reviews, item.pr.repoKey).mode === 'notify' && round.state === 'requested') return 'reviews are in notify mode; switch to on-demand or an automatic mode to review';
   if (!['requested', 'stale', 'failed'].includes(round.state) || (round.state === 'requested' && round.dispatch)) return `${key}: this round is already ${round.state}`;
-  const why = noJob(item, round, startedToday(listReviews(), now));
+  const why = noJob(item, round, startedToday(listReviews(), now), true);
   if (why) return why;
   const identity = loadPickupConfig().reviews?.identity;
   if (!identity) return 'reviews are not enabled; run lobstah setup reviews';
