@@ -978,7 +978,7 @@ describe('glass page: On deck', () => {
     // Only raw questions (and framed decisions) are rows; PR kinds stay with the PRs.
     const rows = [...sections[0]!.querySelectorAll('.drow')];
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => !r.querySelector('.badge') && r.querySelector('.dgo'))).toBe(true);
+    expect(rows.every((r) => r.querySelector('.badge'))).toBe(true);
     expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(String(rows.length));
     // PR standing rides the stack line.
     expect(text(sections[5]!)).toContain('#41 → #42 → #43 · next #41');
