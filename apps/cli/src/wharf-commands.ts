@@ -310,19 +310,27 @@ async function mirrorWharfCommand(pos: string[], opts: Options, config: Config):
 async function hostedAck(config: Config, action: string, key: string, requestKey: string = randomUUID()): Promise<void> {
   if (action === 'unack') throw new Error(`an acknowledgement on a wharf stands, so ${key} cannot be unacknowledged; nothing was changed`);
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestKey)) throw new Error('request key must use 1–128 identifier characters');
+  const ack = await ackHostedItem(config, key, requestKey);
+  console.log(toonKV({ key, kind: ack.kind, acked: true, by: ack.by, at: ack.at, stateHash: ack.stateHash }));
+}
+/**
+ * Acknowledge an item of a grounds on a wharf on that wharf, and record the
+ * ack in this boat's cache so it stops walking at once. The CLI's ack and
+ * the glass's lob click both come here.
+ */
+export async function ackHostedItem(config: Config, key: string, requestKey: string = randomUUID()): Promise<{ kind: string; stateHash: string; by: string; at: string }> {
   const item = hostedItem(config, key);
   if (!item) throw new Error(`no wharf item ${key} in this boat's view; lobstah attention lists the keys`);
   const backend = wharfFor(backendScope(config, item.view.grounds));
   if ('document' in item) {
     const ack = await backend.ackDocument(item.document, requestKey);
     recordHostedAck(item.view, { document: item.document, ack });
-    console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, at: ack.at, stateHash: item.stateHash }));
-    return;
+    return { kind: item.kind, stateHash: item.stateHash, by: ack.by, at: ack.at };
   }
   if (!item.statusAt) throw new Error(`${key} has reported nothing to acknowledge`);
   const ack = await backend.ackDispatch(item.dispatch, item.statusAt, requestKey);
   recordHostedAck(item.view, { dispatch: item.dispatch, ack });
-  console.log(toonKV({ key, kind: item.kind, acked: true, by: ack.by, at: ack.at, stateHash: item.stateHash }));
+  return { kind: item.kind, stateHash: item.stateHash, by: ack.by, at: ack.at };
 }
 /** Remote agents must never sign on, beat or claim in this boat's local fleet. */
 export async function wharfHook(cmd: string | undefined, args: string[]): Promise<boolean> {

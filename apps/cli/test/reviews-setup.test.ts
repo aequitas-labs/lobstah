@@ -112,3 +112,21 @@ it('reviews setup does not install pick while unrelated legacy pickup loops woul
   expect(install).not.toHaveBeenCalled();
   expect(loadConfig().reviews.mode).toBe('notify');
 });
+
+it('records setup enable and repo automatic-mode times, retaining an explicit cutoff', async () => {
+  const { reviewAutomationCutoff } = await import('@lobstah/core');
+  const enabled = Date.parse('2026-11-11T10:00:00Z');
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    vi.setSystemTime(enabled);
+    write(auth + '[repos.web]\npath = "/w"\n');
+    writeReviewMode('notify', 'chris');
+    vi.setSystemTime(enabled + 60000);
+    writeReviewMode('auto-draft', undefined, { repo: 'web' });
+    vi.setSystemTime(enabled + 120000);
+    expect(reviewAutomationCutoff(loadConfig().reviews, 'web')).toBe(new Date(enabled + 60000).toISOString());
+    fs.appendFileSync(path.join(home, 'config.toml'), 'requestedAfter = "2026-01-01T00:00:00Z"\n');
+    writeReviewMode('auto-review', undefined, { repo: 'web' });
+    expect(reviewAutomationCutoff(loadConfig().reviews, 'web')).toBe('2026-01-01T00:00:00.000Z');
+  } finally { vi.useRealTimers(); }
+});

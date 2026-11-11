@@ -118,9 +118,10 @@ describe('glass: the decisions list', () => {
     expect(g.$$('#deck .dlist > .drow').map((c) => c.getAttribute('data-decision'))).toEqual([KEY, Q]);
     const r = row(g, KEY)!;
     expect(text(r.querySelector('.dtitle'))).toBe('Which schema should the tray use?');
-    expect(text(r.querySelector('.dmeta'))).toBe('aaaaaaaa · web');
-    expect(text(r.querySelector('.dage'))).toBe('2m ago');
-    expect(text(r.querySelector('.dstate'))).toBe('unread');
+    // The row is the question, then its repo and age with Answer; the highlight says unread, no word does.
+    expect(text(r.querySelector('.dmeta'))).toBe('web · 2m ago');
+    expect(text(r.querySelector('.dgo'))).toBe('Answer');
+    expect(r.querySelector('.dstate')).toBeNull();
     expect(r.className).toContain('unread');
     expect(text(row(g, Q)!.querySelector('.badge'))).toBe('needs-decision');
     expect(g.$('#deck textarea')).toBeNull();
@@ -131,7 +132,7 @@ describe('glass: the decisions list', () => {
     const d = fleet();
     d.decisions[0]!.viewedAt = ago(60_000);
     const g = await page(d);
-    expect(text(row(g, KEY)!.querySelector('.dstate'))).toBe('read');
+    expect(row(g, KEY)!.className).toContain('read');
     expect(row(g, KEY)!.className).not.toContain('unread');
     expect(row(g, Q)!.className).toContain('unread');
     expect(text(g.$('#deck .decisions h2 .dbadge'))).toBe('1');
@@ -218,7 +219,7 @@ describe('glass: the decision modal', () => {
     expect(text(c.querySelector('.dpos'))).toBe('2 of 2');
     expect(views(g)).toEqual([KEY]);
     expect(answers(g)).toEqual([]);
-    expect(text(row(g, KEY)!.querySelector('.dstate'))).toBe('read');
+    expect(row(g, KEY)!.className).not.toContain('unread');
     // Closing and opening again records nothing more.
     await key(g, 'Escape');
     expect(card(g, KEY)).toBeUndefined();
@@ -262,7 +263,8 @@ describe('glass: the decision modal', () => {
     // The next open one loads; the answered one left the order.
     expect(card(g, KEY)).toBeTruthy();
     expect(text(card(g, KEY)!.querySelector('.dpos'))).toBe('1 of 1');
-    expect(text(row(g, Q)!.querySelector('.dstate'))).toBe('answered · 8080');
+    expect(row(g, Q)!.className).toContain('answered');
+    expect(text(row(g, Q)!.querySelector('.dsent'))).toBe('sent');
     await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
     await click(g, card(g, KEY)!.querySelector('.dsend'));
     expect(JSON.parse(answers(g)[1]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v2', files: [] } });
@@ -381,6 +383,15 @@ describe('glass: the decision modal', () => {
     expect(row(g, KEY)!.className).toContain('focus');
     expect(card(g, KEY)).toBeTruthy();
     expect(g.$('#overlay')!.className).not.toBe('open');
+  });
+
+  it('a lob click acknowledges the item it walked, as a pet click does', async () => {
+    const d = fleet();
+    const g = await page(d, { hash: '#prs', post: ok });
+    await click(g, g.$$('#lobs a.lob').find((l) => l.getAttribute('href') === `#decision/${encodeURIComponent(KEY)}`));
+    const acks = g.posts().map((p) => JSON.parse(p.body) as { kind: string; payload: unknown }).filter((p) => p.kind === 'attention-ack');
+    const shown = d.attention.find((a) => a.key === KEY)!;
+    expect(acks).toEqual([{ kind: 'attention-ack', payload: { items: [{ key: KEY, stateHash: shown.stateHash }] } }]);
   });
 });
 

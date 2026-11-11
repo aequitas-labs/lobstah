@@ -12,10 +12,10 @@ const LOB_TEXT_MAX = 60;
 
 /**
  * The crawling lobs: attention walking along the bottom of the page.
- * prefs.lobs gates the lobs; acked items (the pet's shared ack) and lobs
- * this browser already clicked (hidden by item key + state hash) don't
- * walk; a new state re-shows them. lobItems (glass-lobs.ts) makes that
- * decision; the glass writes nothing to lobstah — the hide is localStorage.
+ * prefs.lobs gates the lobs; acked items don't walk, and a new state
+ * re-shows them. lobItems (glass-lobs.ts) makes that decision. A click
+ * acknowledges the item, as a pet click does, so it stops walking on the
+ * pet and every glass; this browser hides it at once (hideLob).
  */
 
 function lob(it: LobItem, i: number) {

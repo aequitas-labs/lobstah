@@ -17,11 +17,12 @@ import { viewerDevice } from '../../../core/src/viewer-device.js';
 /**
  * What the wharf fills: no PRs, stacks, grants, TODOs, notices, stats or
  * settings, and none of the local-only actions. It adds the account's boats,
- * messages and cancellation from a job, and dismissing a review.
+ * messages and cancellation from a job, dismissing a review, and
+ * acknowledging a clicked lob on the wharf, where every boat reads the ack.
  */
 export const WHARF_CAPABILITIES: GlassCapabilities = {
   tabs: ['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports'],
-  actions: new Set(['message-helm', 'cancel', 'review-dismiss']),
+  actions: new Set(['message-helm', 'cancel', 'review-dismiss', 'attention-ack']),
   daemon: false,
 };
 
@@ -57,6 +58,7 @@ interface WharfAnswer<T> {
 export function createWharfBackend(options: WharfBackendOptions = {}): WharfBackend {
   const now = options.now ?? Date.now;
   let glass: WharfGlass | undefined;
+  let jobs: DispatchView[] = [];
   /** Decision Markdown read so far, by file id. Wharf files never change, so each is read once. */
   const texts = new Map<string, string>();
   /** The last detail read per job, for its files' URLs. */
@@ -115,9 +117,10 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
   }
 
   async function load(): Promise<GlassSnapshot> {
-    const [account, jobs] = await Promise.all([need<WharfGlass>('/api/glass'), need<DispatchView[]>('/api/glass/dispatches')]);
+    const [account, listed] = await Promise.all([need<WharfGlass>('/api/glass'), need<DispatchView[]>('/api/glass/dispatches')]);
     await decisionTexts(account.documents);
     glass = account;
+    jobs = listed;
     return wharfSnapshot(account, jobs, now(), texts, WRITES_BY_COOKIE, viewerDevice(globalThis.navigator?.userAgent ?? ''));
   }
 
@@ -174,6 +177,23 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
         })) as GlassWrite<T>;
       if (kind === 'cancel')
         return (await post(`/api/glass/dispatches/${encodeURIComponent(p.dispatch ?? '')}/cancel`, {})) as GlassWrite<T>;
+      // A clicked lob: a document is acked as seen; a job's question or landing on the status it showed.
+      if (kind === 'attention-ack') {
+        const item = (payload as { items?: Array<{ key?: string; stateHash?: string }> } | undefined)?.items?.[0];
+        const key = item?.key ?? '';
+        const at = new Date(now()).toISOString();
+        const acked = [{ key, stateHash: item?.stateHash ?? '', at, by: 'glass' }];
+        const found = doc(key);
+        if (found) {
+          const done = found.ack ? { ok: true } : (await post(documentPath(key, 'ack'), {})).body;
+          return { ok: !!done.ok, status: done.ok ? 200 : 409, body: (done.ok ? { ok: true, acked } : done) as T };
+        }
+        const job = key.startsWith('work:') ? jobs.find((j) => j.id === key.slice('work:'.length)) : undefined;
+        if (!job?.status || item?.stateHash !== `${job.id}:${job.status.at}`)
+          return refused<T>('This has changed since the page read it; read it again.');
+        const done = await post(`/api/glass/dispatches/${encodeURIComponent(job.id)}/ack`, { at: job.status.at });
+        return { ok: done.ok, status: done.status, body: (done.ok ? { ok: true, acked } : done.body) as T };
+      }
       // The boat that drafted the review dismisses it; the wharf never touches GitHub.
       if (kind === 'review-dismiss')
         return (await post('/api/glass/requests', { id: crypto.randomUUID(), kind: 'review-dismiss', document: p.key })) as GlassWrite<T>;
