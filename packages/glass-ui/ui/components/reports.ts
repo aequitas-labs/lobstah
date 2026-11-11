@@ -3,12 +3,14 @@ import { reportFrom, reportPageUrl } from '../../src/glass-diff.js';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
+import { Card, CardLink } from './card.js';
 
 /**
- * The Reports tab: every report, newest first regardless of acknowledgment. A card or
- * row says who filed it (a trap's name, a headless dispatch's id, nothing for
- * the helm), then its age, then `acked`. Each opens the report's own page in
- * a new tab.
+ * The Reports tab: every report, newest first regardless of acknowledgment.
+ * A card shows the title, then its repo, who filed it (a trap's name, a
+ * headless dispatch's id, nothing for the helm) and its age, with ↗ Open; it
+ * is greyed once read. A row says `acked` instead. Each opens the report's
+ * own page in a new tab.
  */
 
 /** Open a report's own page in a new tab. Its page acknowledges it once the report text loads. */
@@ -25,9 +27,20 @@ export function reportMeta(r: GlassReport): { nodes: unknown[]; text: string } {
   };
 }
 
-function card(r: GlassReport) {
-  const meta = reportMeta(r);
-  return html`<a key=${r.key} class=${'card' + (r.acked ? ' acked' : '')} href=${reportPageUrl(r.key)} target="_blank" rel="noopener"><div class="top"><b title=${r.title}>${r.title}</b></div><div class="meta" title=${meta.text}>${meta.nodes}</div></a>`;
+/** A report card: no status word; greyed once read (its page acks it). */
+export function reportCard(r: GlassReport) {
+  const lead = [r.repo, reportFrom(r)].filter(Boolean).join(' · ');
+  return html`<${Card}
+    key=${r.key}
+    title=${r.title}
+    titleAttr=${r.title}
+    context=${[lead && lead + ' · ', Age(r.filedAt), ' ago']}
+    contextTitle=${[lead, `${ageText(r.filedAt)} ago`].filter(Boolean).join(' · ')}
+    action=${html`<${CardLink} href=${reportPageUrl(r.key)} />`}
+    quiet=${!!r.acked}
+    cls=${r.acked ? 'acked' : undefined}
+    onClick=${openReport(r)}
+  />`;
 }
 
 function row(r: GlassReport) {
@@ -36,6 +49,6 @@ function row(r: GlassReport) {
 
 export function Reports({ inp }: { inp: SectionInputs['reports'] }) {
   if (inp.view === 'cards')
-    return inp.list.length ? html`<div class="cards">${inp.list.map(card)}</div>` : html`<div class="empty">no reports match</div>`;
+    return inp.list.length ? html`<div class="cards">${inp.list.map(reportCard)}</div>` : html`<div class="empty">no reports match</div>`;
   return Table(['title', 'from', 'filed', 'acked'], inp.list.map(row), 'no reports match');
 }

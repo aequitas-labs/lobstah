@@ -302,7 +302,11 @@ describe('stack watch discovery and shared presentation', () => {
         expect(deck.querySelector('.stacktitle')?.textContent).toBe('Add the heavy line');
         expect(deck.textContent).toContain('3 PRs, all green');
         expect(deck.textContent).not.toContain('stack ready to merge');
-        for (const n of [1, 2, 3]) expect([...deck.querySelectorAll('.prname')].map((e) => e.textContent)).toContain(`#${n} ${titles[n]}`);
+        // A row names each PR as "#n title"; a card puts the title on line 1 and the number on line 2.
+        const names = viewMode === 'cards'
+          ? [...deck.querySelectorAll('.card')].map((c) => `${/#\d+/.exec(c.querySelector('.gcontext')?.textContent ?? '')?.[0]} ${c.querySelector('.gtitle')?.textContent}`)
+          : [...deck.querySelectorAll('.prname')].map((e) => e.textContent);
+        for (const n of [1, 2, 3]) expect(names).toContain(`#${n} ${titles[n]}`);
         await g.go('#prs');
         expect(g.$('#prs .stacktitle')?.textContent).toBe('Add the heavy line');
       } finally { await g.close(); }

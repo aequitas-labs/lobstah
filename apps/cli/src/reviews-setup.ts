@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'smol-toml';
-import { configPath, DEFAULT_ATTENTION_KINDS, loadConfig, REVIEW_MODES, reviewSettings, uniqueTempPath, withDirLock } from '@lobstah/core';
+import { configPath, reviewAutomationCutoff, DEFAULT_ATTENTION_KINDS, loadConfig, REVIEW_MODES, reviewSettings, uniqueTempPath, withDirLock } from '@lobstah/core';
 import { loadPickupConfig, pickupPlan } from '@lobstah/pick';
 import { installService } from './service.js';
 
@@ -63,6 +63,7 @@ export function writeReviewMode(mode: string, identity?: string, opts: { repo?: 
       const temp = uniqueTempPath(file);
       fs.writeFileSync(temp, text);
       fs.renameSync(temp, file);
+      reviewAutomationCutoff(loadConfig().reviews);
     },
     { staleMs: 5000, waitMs: 1000, pauseMs: 20, busy: () => new Error('config is busy; try again') },
   );

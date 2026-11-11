@@ -134,7 +134,7 @@ export class GlassState {
       const last = this.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
       const status = last ? (JSON.parse(last.data) as { at: string }).at : undefined;
       // Keyed on the status time: an ack of what the job said before must not hide what it says now.
-      requireThat(status && b.at === status, 409, 'the job has no such current status; read it again before acknowledging');
+      requireThat(status && b.at === status, 409, 'This dispatch changed. Reload and try again.');
       const standing = this.dispatchAck(id, status);
       if (standing) return ok(standing);
       const ack = { status, at: new Date(now).toISOString(), by };
@@ -188,7 +188,7 @@ export class GlassState {
       }
       if (parts.length === 3 && parts[2] === 'answer' && c.method === 'POST') {
         // Human input, like the local glass: never takes, renews or steals a helm seat.
-        this.person(actor); requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, 'decision is not standing');
+        this.person(actor); requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, "This decision is already closed. Reload to see what's open.");
         const option = b.option === undefined ? undefined : text(b.option, 80), answer = b.text === undefined ? undefined : text(b.text, 20000).trim();
         requireThat(option === undefined || d.options?.includes(option), 400, 'not a decision option'); requireThat(option || answer, 400, 'answer needs an option or text');
         d.answer = { ...(option ? { option } : {}), ...(answer ? { text: answer } : {}), at: new Date(now).toISOString(), by: actor.id };

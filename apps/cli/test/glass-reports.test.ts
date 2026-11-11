@@ -84,14 +84,19 @@ describe('glass: the deck reports block', () => {
       const rows = [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
       expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
       expect(reportsSection(g).querySelectorAll('.badge')).toHaveLength(0);
-      const metas = rows.map((r) => text(view === 'cards' ? r.querySelector('.meta') : r.querySelector('.dim')));
-      expect(metas).toEqual([
-        (view === 'cards' ? '' : '· ') + '60s ago · acked',
-        view === 'cards' ? '5m ago' : '· 5m ago',
-        (view === 'cards' ? '' : '· ') + 'kind-crab · 20m ago',
-        (view === 'cards' ? '' : '· ') + 'aaaaaaaa · 40m ago',
-      ]);
+      const metas = rows.map((r) => text(view === 'cards' ? r.querySelector('.gcontext .gtext') : r.querySelector('.dim')));
+      // A card says no "acked": it is greyed instead.
+      expect(metas).toEqual(
+        view === 'cards'
+          ? ['60s ago', '5m ago', 'web · kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']
+          : ['· 60s ago · acked', '· 5m ago', '· kind-crab · 20m ago', '· aaaaaaaa · 40m ago'],
+      );
       expect(rows[0]!.className).toContain('acked');
+      if (view === 'cards') {
+        expect(rows[0]!.className).toContain('quiet');
+        expect(rows[1]!.className).not.toContain('quiet');
+        expect(rows.map((r) => text(r.querySelector('.gaction')))).toEqual(Array(4).fill('↗ Open'));
+      }
     }
   });
 
@@ -106,9 +111,9 @@ describe('glass: the deck reports block', () => {
     expect(more.getAttribute('href')).toBe('#reports');
   });
 
-  it('an empty fleet says none', async () => {
+  it('an empty fleet says there are no reports yet', async () => {
     const g = await page(emptyFleet());
-    expect(text(reportsSection(g).querySelector('.empty'))).toBe('none');
+    expect(text(reportsSection(g).querySelector('.empty'))).toBe('no reports yet');
   });
 });
 
@@ -252,9 +257,9 @@ describe('glass: a report page', () => {
     const tray = lines.find((l) => text(l).includes('Tray findings'))!;
     expect([tray.getAttribute('href'), tray.getAttribute('target'), tray.getAttribute('rel')]).toEqual([pagePath(TRAP_KEY), '_blank', 'noopener']);
     const cards = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
-    const card = [...reportsSection(cards).querySelectorAll('a.card')].find((c) => text(c).includes('Fleet notes'))!;
-    expect(card.getAttribute('href')).toBe(pagePath(HELM_KEY));
-    expect(card.getAttribute('target')).toBe('_blank');
+    const card = [...reportsSection(cards).querySelectorAll('.card')].find((c) => text(c).includes('Fleet notes'))!;
+    const open = card.querySelector('.gaction a')!;
+    expect([open.getAttribute('href'), open.getAttribute('target')]).toEqual([pagePath(HELM_KEY), '_blank']);
   });
 });
 
@@ -271,7 +276,8 @@ describe('glass: the Reports tab', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
-    expect(cards.$$('#reports .card .meta').map(text)).toEqual(['60s ago · acked', '5m ago', 'kind-crab · 20m ago', 'aaaaaaaa · 40m ago']);
+    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual(['60s ago', '5m ago', 'web · kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']);
+    expect(cards.$$('#reports .card').map((c) => c.className.includes('quiet'))).toEqual([true, false, false, false]);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
 
@@ -293,8 +299,11 @@ describe('glass: the Reports tab', () => {
     const title = g.$$('#reports tr.rowhead td a').find((a) => text(a) === 'Fleet notes')!;
     expect([title.getAttribute('href'), title.getAttribute('target'), title.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(HELM_KEY)}`, '_blank', 'noopener']);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
-    const card = cards.$$('#reports a.card').find((c) => text(c).includes('Tray findings'))!;
-    expect([card.getAttribute('href'), card.getAttribute('target'), card.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']);
+    const card = cards.$$('#reports .card').find((c) => text(c).includes('Tray findings'))!;
+    const open = card.querySelector('.gaction a')!;
+    expect([open.getAttribute('href'), open.getAttribute('target'), open.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']);
+    await click(cards, card);
+    expect(cards.opened()).toEqual([[`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']]);
   });
 });
 
@@ -309,12 +318,12 @@ describe('glass: cards keep their text inside', () => {
     x.verb = longBadge as never;
     x.note = longMeta;
     const g = await page(d, { prefs: { view: 'cards' } });
-    const card = g.$$('#deck .card').find((c) => text(c).includes(x.id.slice(0, 8)))!;
-    const badge = card.querySelector('.top .badge')!;
-    const meta = card.querySelector('.meta')!;
-    expect(badge.getAttribute('title')).toBe(longBadge);
-    // /data cuts a note to NOTE_MAX characters; the modal's detail has all of it.
-    expect(meta.getAttribute('title')).toContain(`${longMeta.slice(0, NOTE_MAX)}…`);
+    const card = g.$$('#deck .card').find((c) => c.querySelector('b')?.getAttribute('title')?.startsWith(x.id.slice(0, 8)))!;
+    // A long status word truncates with its text in the title; the note is in the dispatch's modal, not on its card.
+    const badge = card.querySelector('.gchip')!;
+    expect(badge.getAttribute('title')).toBe(longBadge.replace(/-/g, ' '));
+    expect(text(card)).not.toContain(longMeta.slice(0, 40));
+    expect(NOTE_MAX).toBeGreaterThan(0);
     const style = (el: Element) => g.window.getComputedStyle(el as never);
     expect(style(card)).toMatchObject({ overflow: 'hidden' });
     expect(style(card).getPropertyValue('overflow-wrap')).toBe('anywhere');
@@ -323,44 +332,36 @@ describe('glass: cards keep their text inside', () => {
     expect(style(badge).getPropertyValue('max-width').replace(/\s/g, '')).toBe('min(26ch,100%)');
     expect(style(badge).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
     expect(style(badge).getPropertyValue('flex')).toMatch(/^0 1 auto$/);
-    expect(style(meta)).toMatchObject({ overflow: 'hidden' });
     // happy-dom does not compute line clamping: read the rule itself.
-    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
-    for (const sel of ['.card .meta', '.card .note']) {
-      const rule = css.slice(css.indexOf(`${sel} {`), css.indexOf('}', css.indexOf(`${sel} {`)));
-      expect(rule, sel).toMatch(/-webkit-line-clamp: 2;/);
-      expect(rule, sel).toMatch(/overflow: hidden;/);
-    }
-    expect(style(card.querySelector('.top > b')!)).toMatchObject({ textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
-    // The title keeps room for its identity (#99999, an 8-character id); the badge gives way first.
-    expect(style(card.querySelector('.top > b')!).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(10ch,100%)');
-    // A short badge carries no title.
-    const short = g.$$('#deck .card .top .badge').find((b) => text(b) === 'working');
+    // A Windows checkout may end lines with CRLF.
+    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    // The shared card's title and text lines wrap to two lines, then clamp (components/card.ts).
+    const rule = css.slice(css.indexOf('.gtitle,\n.gtext {'), css.indexOf('}', css.indexOf('.gtitle,\n.gtext {')));
+    expect(rule).toMatch(/-webkit-line-clamp: 2;/);
+    expect(rule).toMatch(/overflow: hidden;/);
+    // A short status word carries no title.
+    const short = g.$$('#deck .card .gchip').find((b) => text(b) === 'working');
     expect(short?.getAttribute('title') ?? null).toBeNull();
   });
 });
 
 describe('glass: a PR card with a long badge', () => {
-  it('keeps the whole PR number: the title holds room for #99999, the badge truncates', async () => {
+  it('keeps the whole PR number on line 2; the title gives way first, then the status word truncates', async () => {
     const d = everyAttentionFleet();
     const p = d.prs.find((x) => x.state === 'OPEN')!;
     p.number = 1826;
     p.badge = { ...p.badge, text: 'repairing: checks (attempt 1 of 2)' };
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
-    const card = g.$$('#prs .card').find((c) => text(c.querySelector('.prname')).startsWith('#1826'))!;
-    const title = card.querySelector('.top > .prname')!;
-    expect(text(title.querySelector('b'))).toBe('#1826');
-    const badge = card.querySelector('.top .badge')!;
-    expect(badge.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
+    const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#1826'))!;
+    const title = card.querySelector('.gtop > .gtitle')!;
+    const word = card.querySelector('.gtop .gword')!;
+    expect(word.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
     const style = (el: Element) => g.window.getComputedStyle(el as never);
-    expect(style(title).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(10ch,100%)');
-    // '#99999' and an 8-character id are at most eight characters: 10ch holds either and the ellipsis after it.
-    expect('dddddddd'.length + 1).toBeLessThanOrEqual(10 - 1);
-    // The title shrinks first (1000000 to the badge's 1); the long badge then truncates, never below 12ch.
+    // The title shrinks first (1000000 to the word's 1); the long word then truncates, never below 12ch.
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
-    expect(badge.className).toContain('long');
-    expect(style(badge).getPropertyValue('flex-shrink')).toBe('1');
-    expect(style(badge).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
+    expect(word.className).toContain('long');
+    expect(style(word).getPropertyValue('flex-shrink')).toBe('1');
+    expect(style(word).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
   });
 });
 
@@ -370,25 +371,24 @@ describe('glass: short card badges stay whole', () => {
     d.landed[0] = { ...d.landed[0]!, repo: 'a-repository-name-long-enough-to-crowd-the-badge', verb: 'done', at: ago(60_000) };
     const g = await page(d, { prefs: { view: 'cards' } });
     const style = (el: Element) => g.window.getComputedStyle(el as never);
-    const landed = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('a-repository-name-long'))!;
-    const done = landed.querySelector('.top > .badge')!;
+    const landed = g.$$('#deck .card').find((c) => text(c.querySelector('.gtext')).includes('a-repository-name-long'))!;
+    const done = landed.querySelector('.gchip')!;
     expect(text(done)).toBe('done');
-    expect(done.className).not.toContain('long');
     expect(done.getAttribute('title')).toBeNull();
     expect(style(done).getPropertyValue('flex')).toBe('0 0 auto');
-    const title = landed.querySelector('.top > b')!;
+    const title = landed.querySelector('.gtitle')!;
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
     const trap = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
-    const claude = trap.querySelector('.top > .badge')!;
+    // A trap card's harness is the icon after its name (components/card.ts); it never shrinks either.
+    const claude = trap.querySelector('.gicon')!;
     expect(claude.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
-    expect(claude.className).not.toContain('long');
     expect(style(claude).getPropertyValue('flex')).toBe('0 0 auto');
     // Twelve characters is still whole; thirteen is long.
     for (const [verb, long] of [['twelve-chars', false], ['thirteen-char', true]] as const) {
       const e = everyAttentionFleet();
       e.dispatches.find((v) => v.bucket !== 'done')!.verb = verb as never;
       const p = await page(e, { hash: '#dispatches', prefs: { view: 'cards' } });
-      const badge = p.$$('#dispatches .card .top .badge').find((b) => text(b) === verb)!;
+      const badge = p.$$('#dispatches .card .gchip').find((b) => text(b) === verb.replace(/-/g, ' '))!;
       expect(badge.className.includes('long'), verb).toBe(long);
     }
   });
@@ -401,14 +401,14 @@ describe('glass: the open-window button', () => {
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });
-      const button = g.$(view === 'cards' ? '#traps .card .foot .footact button' : '#traps tr.rowhead td:last-child button')!;
+      const button = g.$(view === 'cards' ? '#traps .card .gaction button' : '#traps tr.rowhead td:last-child button')!;
       expect(text(button)).toBe('↗ Open');
       expect(button.className).toBe('btn open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
-    const button = deck.$('#deck .card .foot .footact button')!;
+    const button = deck.$('#deck .card .gaction button')!;
     expect(text(button)).toBe('↗ Open');
     await click(deck, button);
     expect(deck.$('#overlay')!.className).toBe('');

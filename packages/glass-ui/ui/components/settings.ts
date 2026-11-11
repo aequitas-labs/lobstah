@@ -1,6 +1,6 @@
 import type { GlassSettings, SettingRow } from '@lobstah/core';
 import { html } from '../html.js';
-import { can } from '../backend.js';
+import { can, capabilities } from '../backend.js';
 import { passkeysWorkHere, registerRunPasskey, runPasskeyUrl } from '../actions.js';
 import type { GlassState } from '../store.js';
 
@@ -24,10 +24,18 @@ export function RunPasskeySettings({
   passkeys,
   passkey,
 }: {
-  passkeys?: { count: number; newestAt?: string };
+  passkeys?: { count: number; newestAt?: string; hosted?: number };
   passkey?: GlassState['runPasskey'];
 }) {
   if (!can('run')) return null;
+  // The hosted glass (a mirror boat's, with no daemon of its own): a phone pairs its passkey from the Mac.
+  if (!capabilities().daemon) {
+    const phones = passkeys?.hosted ?? 0;
+    return html`<section class="runpasskeys"><h2>Run cards</h2>
+      <div class=${phones ? 'ok' : 'dim'}>${phones ? `${phones} phone passkey${phones === 1 ? '' : 's'} paired. Run asks for one, then covers 15 minutes on that page.` : 'No phone passkey yet.'}</div>
+      <div class="dim">To pair this phone, run <code>lobstah run passkey add --hosted</code> on the Mac.</div>
+    </section>`;
+  }
   const count = passkeys?.count ?? 0;
   return html`<section class="runpasskeys"><h2>Run cards</h2>
     <div class=${count ? 'ok' : 'dim'}>${count ? `${count} passkey${count === 1 ? '' : 's'} registered${passkeys?.newestAt ? `, newest ${new Date(passkeys.newestAt).toLocaleString()}` : ''}. Run asks for one each time; another needs one of these and the macOS password.` : 'No passkey yet: register one to run cards. Registering asks for the macOS password; Run asks for the passkey (Touch ID) each time.'}</div>
