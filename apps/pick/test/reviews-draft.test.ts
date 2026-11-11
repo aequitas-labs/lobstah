@@ -36,7 +36,7 @@ afterEach(() => {
 const NOW = Date.parse('2026-10-15T12:00:00Z');
 const KEY = 'review:acme/web#7';
 const config = (...lines: string[]) =>
-  fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'identity = "chris"', 'tokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"', ...(lines.some((s) => s.startsWith('work') || s.startsWith('mode')) ? [] : ['work = "trap"']), ...lines, '[repos.web]', 'path = "/w"'].join('\n'));
+  fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'requestedAfter = "1970-01-01T00:00:00Z"', 'identity = "chris"', 'tokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"', ...(lines.some((s) => s.startsWith('work') || s.startsWith('mode')) ? [] : ['work = "trap"']), ...lines, '[repos.web]', 'path = "/w"'].join('\n'));
 
 function request(over: { number?: number; repoKey?: string | null; head?: string; skip?: string } = {}): string {
   const number = over.number ?? 7;
@@ -250,7 +250,7 @@ describe('the review checkout', () => {
     fs.mkdirSync(repo);
     git('init', '-q', '-b', 'main');
     git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'one');
-    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "headless"', '[repos.web]', `path = '${repo.replaceAll('\\', '/')}'`].join('\n'));
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'requestedAfter = "1970-01-01T00:00:00Z"', 'work = "headless"', '[repos.web]', `path = '${repo.replaceAll('\\', '/')}'`].join('\n'));
   });
 
   /** A drafting round whose job made its checkout where the brief said, the way `git worktree add --detach` does. */
@@ -337,4 +337,15 @@ describe('the review checkout', () => {
     expect(logs.some((m) => m.includes('removed the review checkout'))).toBe(false);
     expect(listed()).toBe(false);
   });
+});
+
+it('an explicit Draft action can start an old request held by the default activation cutoff', async () => {
+  config('mode = "auto-review"');
+  const file = path.join(home, 'config.toml');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('requestedAfter = "1970-01-01T00:00:00Z"\n', ''));
+  request();
+  draftReviews('chris', () => {}, NOW);
+  expect(round()).toMatchObject({ state: 'requested', reason: expect.stringContaining('requested before') });
+  expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+  expect(round()).toMatchObject({ state: 'drafting', onDemand: true });
 });

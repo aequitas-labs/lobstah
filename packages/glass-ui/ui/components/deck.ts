@@ -1,4 +1,4 @@
-import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata, Grant } from '@lobstah/core';
+import type { GlassPr, GlassSnapshot, GlassStack, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
 import {
   DECK_TRAPS_MAX,
   INFLIGHT_MAX,
@@ -23,7 +23,6 @@ import {
   ageText,
   badgeLong,
   badgeTitle,
-  kindLabel,
   NewTrap,
   opener,
   prName,
@@ -35,10 +34,17 @@ import {
   trapDisplayName,
   trapScope,
   windowAction,
+  dispatchContext,
+  verbTone,
+  verbWord,
 } from './common.js';
 import { GrantChip } from './session-grants.js';
-import { reportMeta } from './reports.js';
-import { PrAck } from './prs.js';
+import { trapCard } from './traps.js';
+import { dispatchCard } from './dispatches.js';
+import { Card } from './card.js';
+import { getState } from '../store.js';
+import { reportCard, reportMeta } from './reports.js';
+import { PrAck, prCard } from './prs.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
 import { Todos } from './todos.js';
@@ -68,11 +74,39 @@ interface DeckItem {
   href?: string;
   /** A block under the card or line: a starting trap's start commands. */
   extra?: Children;
+  /** The item's own card, used as is in the cards view: a trap's, a dispatch's. */
+  card?: Children;
+  /** The item's own row, used as is in the list view: a dispatch's two-line row. */
+  row?: Children;
   open?: () => void;
   acked?: boolean;
 }
 
 type View = GlassPrefs['view'] | undefined;
+
+/**
+ * A dispatch on the deck in the list view: two lines, the same parts as its
+ * card. Line 1 is its instruction and status chip; line 2 its repo and trap,
+ * with its age at the right.
+ */
+function dispatchRow(p: {
+  key: string;
+  title: Children;
+  titleAttr: string;
+  verb: string;
+  context: Children;
+  at?: string;
+  open: () => void;
+}) {
+  return html`<div key=${p.key} class="deckrow click" onClick=${p.open}>
+    <div class="gline"><b class="gtitle" title=${p.titleAttr}>${p.title}</b><span class="gfill"></span><span class=${'gchip ' + verbTone(p.verb)}>${verbWord(p.verb)}</span></div>
+    <div class="gline dim"><span class="gtext">${p.context}</span>${p.at && html`<span class="gright">${Age(p.at)} ago</span>`}</div>
+  </div>`;
+}
+
+/** A landed catch's title: its dispatch's, while the snapshot still lists it; else its note's first line; else its id. */
+const landedTitle = (x: LandedCatch): string =>
+  getState().snapshot?.dispatches.find((d) => d.id === x.id)?.title || (x.note ?? '').split('\n')[0]!.trim() || x.id.slice(0, 8);
 
 function deckItem(it: DeckItem, view: View) {
   const badge =
@@ -81,6 +115,7 @@ function deckItem(it: DeckItem, view: View) {
       ? html`<${Harness} worker=${it.badge.worker} label=${it.badge.text} cls=${'badge ' + (it.badge.tone || 'dim')} compact />`
       : html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`);
   const worker = it.worker && html`<${Harness} worker=${it.worker} />`;
+  if (view === 'cards' && it.card) return it.card;
   if (it.href) {
     // A page of its own, in a new tab (a report).
     const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
@@ -88,6 +123,7 @@ function deckItem(it: DeckItem, view: View) {
       ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener"><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
       : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
+  if (view !== 'cards' && it.row) return it.row;
   if (view === 'cards')
     return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b title=${it.trap?.address}>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${(it.action || it.trap?.scope) && html`<div class="foot">${it.trap?.scope && html`<span class="trap-scope" title=${it.trap.scope}>${it.trap.scope}</span>`}<span class="footact">${it.action}</span></div>`}</div>`;
   if (it.trap)
@@ -97,12 +133,19 @@ function deckItem(it: DeckItem, view: View) {
 
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
 
+/** What an empty deck section says, where "none" doesn't say what is missing. */
+const EMPTY: Record<string, string> = { 'in flight': 'nothing in flight', reports: 'no reports yet' };
+
 function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number, view: View, headAction?: Children) {
   // A section for a tab this page's source does not fill is not shown, empty or otherwise.
   if (!visibleTabs().includes(tab)) return null;
   const shown = items.slice(0, max);
   const lines = shown.map((i) => deckItem(i, view));
-  const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
+  const body = shown.length
+    ? view === 'cards'
+      ? html`<div class="cards">${lines}</div>`
+      : lines
+    : html`<div class="empty">${EMPTY[title] ?? 'none'}</div>`;
   return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
 }
 
@@ -118,14 +161,10 @@ function deckStack(
   const chain = stackNumbers(s.numbers, new Map(members.map((p) => [p.number, p.title])));
   const nextText = next ? 'next #' + next.number : 'nothing mergeable';
   if (view === 'cards') {
+    // An acked PR is greyed, as an acked report is.
     const card = (p: GlassPr) => {
       const kinds = standing.get(p.key) || [];
-      const acked = kinds.length > 0 && kinds.every((a) => a.acked);
-      const badges = kinds.length
-        ? kinds.map((a) => html`<span class=${'badge ' + (KIND_TONE[a.kind] || 'dim')}>${kindLabel(a.kind)}</span>`)
-        : html`<span class=${'badge ' + prBadgeClass(p.badge) + badgeLong(p.badge.text)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span>`;
-      const meta = `${p.repo} · ${p.badge.text}${acked ? ' · acked' : ''}`;
-      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
+      return prCard(p, kinds.length > 0 && kinds.every((a) => a.acked));
     };
     return html`<div key=${s.id} class="deckstack"><div class="dim">${stackTitle(s)}${chain} · ${nextText}${ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${members.map(card)}</div></div>`;
   }
@@ -185,6 +224,16 @@ export function Deck({
   const shownGoals = goals.filter((g) => g.lines.length);
   const view = inp.view;
   const flight = inp.inflight.map((x): DeckItem => ({
+    card: dispatchCard(x),
+    row: dispatchRow({
+      key: x.lane + ':' + x.id,
+      title: x.title || x.id.slice(0, 8),
+      titleAttr: `${x.id.slice(0, 8)} · ${x.title}`,
+      verb: x.verb,
+      context: dispatchContext(x.repo, x.for || x.claimedBy),
+      at: x.verbAt,
+      open: opener('dispatch', x.lane + ':' + x.id),
+    }),
     key: x.lane + ':' + x.id,
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
     worker: x.worker,
@@ -200,17 +249,43 @@ export function Deck({
       .join(' · '),
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
-  const landed = inp.landed.map((x): DeckItem => ({
-    key: x.key,
-    title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
-    badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
-    meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
-    metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
-    open: opener('dispatch', x.lane + ':' + x.id),
-  }));
+  const landed = inp.landed.map((x): DeckItem => {
+    const title = landedTitle(x);
+    const trap = getState().snapshot?.dispatches.find((d) => d.id === x.id);
+    const context = [
+      dispatchContext(x.repo, trap?.for || trap?.claimedBy),
+      x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`],
+    ];
+    const open = opener('dispatch', x.lane + ':' + x.id);
+    return {
+      card: html`<${Card}
+      key=${x.key}
+      title=${title}
+      titleAttr=${`${x.id.slice(0, 8)} · ${title}`}
+      state=${{ word: verbWord(x.verb), tone: verbTone(x.verb), mark: 'chip' }}
+      context=${[context, ' · ', Age(x.at), ' ago']}
+      onClick=${open}
+    />`,
+      row: dispatchRow({ key: x.key, title, titleAttr: `${x.id.slice(0, 8)} · ${title}`, verb: x.verb, context, at: x.at, open }),
+      key: x.key,
+      title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
+      badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
+      meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
+      metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
+      open,
+    };
+  });
   const reports = inp.reports.map((r): DeckItem => {
     const meta = reportMeta(r);
-    return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, href: reportPageUrl(r.key), acked: !!r.acked };
+    return {
+      card: reportCard(r),
+      key: r.key,
+      title: r.title,
+      meta: meta.nodes,
+      metaText: meta.text,
+      href: reportPageUrl(r.key),
+      acked: !!r.acked,
+    };
   });
   const traps = inp.traps.map(({ x: t }): DeckItem => ({
     key: t.trapId,
@@ -230,6 +305,7 @@ export function Deck({
     metaText: `🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
     action: windowAction(t),
     extra: startCommands(t),
+    card: trapCard(t),
     open: opener('trap', t.trapId),
   }));
   return [

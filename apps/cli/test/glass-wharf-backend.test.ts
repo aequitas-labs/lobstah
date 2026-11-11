@@ -63,6 +63,17 @@ describe('the wharf account as a glass snapshot', () => {
     expect(next.landed.map((l) => l.id)).toEqual(['done-job']);
   });
 
+  it('marks acked what the wharf records as seen, so its lob stops walking: a decision, and a job on its current status', () => {
+    const at = '2026-10-10T17:04:00Z';
+    const asking = { ...jobs[0]!, status: { verb: 'needs-decision' as const, note: 'Which base?', at }, ack: { status: at, at: '2026-10-10T17:04:30Z', by: 'glass' } };
+    const older = { ...asking, id: 'older', ack: { status: '2026-10-10T16:00:00Z', at: '2026-10-10T16:00:30Z', by: 'glass' } };
+    const seen = { ...snapshot, documents: snapshot.documents.map((d) => (d.id === 'card' ? { ...d, ack: { at: '2026-10-10T16:55:00Z', by: 'glass' } } : d)) };
+    const next = wharfSnapshot(seen, [asking, older], NOW, new Map(), 'token');
+    expect(next.attention.find((a) => a.key === 'card')?.acked).toEqual({ at: '2026-10-10T16:55:00Z', by: 'glass' });
+    expect(next.attention.find((a) => a.key === 'work:job')?.acked).toEqual({ at: '2026-10-10T17:04:30Z', by: 'glass' });
+    expect(next.attention.find((a) => a.key === 'work:older')?.acked).toBeUndefined();
+  });
+
   it('keeps a job without a report as queued or unknown, never a guessed verb', () => {
     expect(dispatchSummary({ ...jobs[0]!, state: 'queued', status: undefined }).verb).toBe('queued');
     expect(dispatchSummary({ ...jobs[0]!, state: 'active', status: undefined }).verb).toBe('unknown');
@@ -104,7 +115,7 @@ describe('the wharf backend', () => {
 
   it('fills only the tabs the wharf has, takes none of the local-only actions, and runs no daemon', () => {
     expect(WHARF_CAPABILITIES.tabs).toEqual(['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
-    expect([...WHARF_CAPABILITIES.actions]).toEqual(['message-helm', 'cancel', 'review-dismiss']);
+    expect([...WHARF_CAPABILITIES.actions]).toEqual(['message-helm', 'cancel', 'review-dismiss', 'attention-ack']);
     expect(WHARF_CAPABILITIES.daemon).toBe(false);
   });
 
@@ -145,6 +156,33 @@ describe('the wharf backend', () => {
     expect(calls.filter((c) => c.init.method === 'POST').map((c) => c.path)).toEqual([
       '/api/glass/documents/report/ack',
       '/api/glass/documents/card/ack',
+    ]);
+  });
+
+  it('acks a clicked lob on the wharf: a document as seen, a job on the status the page showed', async () => {
+    const asking = { ...jobs[0]!, status: { verb: 'needs-decision' as const, note: 'Which base?', at: '2026-10-10T17:04:00Z' } };
+    const posts: Array<[string, unknown]> = [];
+    vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
+      if (init.method === 'POST') {
+        posts.push([path, JSON.parse(String(init.body))]);
+        return new Response(JSON.stringify({ ok: true }));
+      }
+      if (path === '/api/glass') return new Response(JSON.stringify(snapshot));
+      if (path === '/api/glass/dispatches') return new Response(JSON.stringify([asking]));
+      return new Response(markdown);
+    });
+    const b = createWharfBackend({ now: () => NOW });
+    const read = await b.poll(null);
+    const question = read.kind === 'snapshot' ? read.snapshot.attention.find((a) => a.kind === 'question') : undefined;
+    expect(question).toMatchObject({ key: 'work:job', stateHash: 'job:2026-10-10T17:04:00Z' });
+    const ack = (key: string, stateHash: string) => b.request('attention-ack', { items: [{ key, stateHash }] }, 'token');
+    expect((await ack('work:job', question!.stateHash)).body).toMatchObject({ ok: true, acked: [{ key: 'work:job', stateHash: question!.stateHash, by: 'glass' }] });
+    // A page that read an older status acks nothing.
+    expect((await ack('work:job', 'job:2026-10-10T17:00:00Z')).ok).toBe(false);
+    expect((await ack('card', 'any')).ok).toBe(true);
+    expect(posts).toEqual([
+      ['/api/glass/dispatches/job/ack', { at: '2026-10-10T17:04:00Z' }],
+      ['/api/glass/documents/card/ack', {}],
     ]);
   });
 

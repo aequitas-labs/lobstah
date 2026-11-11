@@ -81,12 +81,12 @@ export const GLASS_ACTIONS = [
   'focus',
   /** Ask the helm for a new trap. */
   'trap-request',
-  /** Switch the helm between brief and full chat. */
-  'helm-chat',
   /** Set or move a TODO's time. */
   'todo-schedule',
   /** Acknowledge PR and stack attention. */
   'pr-ack',
+  /** Acknowledge the item a clicked lob walked, so the pet and every glass stop walking it. */
+  'attention-ack',
   /** Ask for, see or dismiss a review round. */
   'review-request',
   /** Attach files to a decision's answer. */

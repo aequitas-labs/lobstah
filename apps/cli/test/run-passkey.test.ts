@@ -196,7 +196,7 @@ describe('confirming a Run with the passkey', () => {
     fs.writeFileSync(path.join(decisionDir(card.key)!, 'run', 'script'), 'echo changed\n');
     const res = await runChallenge(card);
     expect(res.status).toBe(409);
-    expect(res.json.reason).toContain("no longer matches the card's hash");
+    expect(res.json.reason).toContain('This script changed after it was proposed');
   });
 
   it('asks for a passkey before issuing a run challenge', async () => {

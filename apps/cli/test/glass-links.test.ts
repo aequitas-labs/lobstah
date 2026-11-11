@@ -132,18 +132,16 @@ function linkFleet(): GlassSnapshot {
 }
 
 describe('glass links: the local glass', () => {
-  it('a dispatch note links its URL as text, never markup, and the click stays off the card', async () => {
-    for (const view of ['table', 'cards'] as const) {
-      const g = await page(linkFleet(), { prefs: { view }, hash: '#dispatches' });
-      const host = view === 'cards' ? g.$$('#dispatches .card').find((c) => c.textContent?.includes('cccccccc'))! : g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc'))!;
-      expect(links(host)).toEqual([ext(PR)]);
-      expect(host.querySelector('script')).toBeNull();
-      expect(host.textContent).toContain('<script>alert(1)</script> review ');
-      if (view === 'cards') expect(host.textContent).toContain('`http://127.0.0.1:5173/x`');
-      (host.querySelector('a.autolink') as HTMLElement).click();
-      await g.settle();
-      expect(g.$('#overlay')!.className).not.toBe('open');
-    }
+  it('a dispatch note links its URL as text, never markup, and the click stays off the row', async () => {
+    // The note is in the Dispatches table and the dispatch's modal; a dispatch card leaves it out.
+    const g = await page(linkFleet(), { prefs: { view: 'table' }, hash: '#dispatches' });
+    const host = g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc'))!;
+    expect(links(host)).toEqual([ext(PR)]);
+    expect(host.querySelector('script')).toBeNull();
+    expect(host.textContent).toContain('<script>alert(1)</script> review ');
+    (host.querySelector('a.autolink') as HTMLElement).click();
+    await g.settle();
+    expect(g.$('#overlay')!.className).not.toBe('open');
   });
 
   it('the dispatch modal links its last note, log, and evidence', async () => {
@@ -167,13 +165,13 @@ describe('glass links: the local glass', () => {
     expect(links(todos)).toEqual([ext('https://docs.example/a'), ext('https://docs.example/b')]);
   });
 
-  it('a cut deck note still links the whole URL', async () => {
+  it('a cut dispatch note still links the whole URL', async () => {
     const d = linkFleet();
     const c = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
     c.note = 'x'.repeat(70) + ' https://github.com/acme/web/pull/43/files';
-    const g = await page(d);
-    const flight = g.$$('#deck .deckgrid > section').find((s) => s.textContent?.startsWith('in flight'))!;
-    const [link] = links(flight);
+    const g = await page(d, { prefs: { view: 'table' }, hash: '#dispatches' });
+    const row = g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc'))!;
+    const [link] = links(row);
     expect(link![0]).toBe('https://github.com/acme/web/pull/43/files');
     expect(link![1]).toBe('https://github.com');
   });
