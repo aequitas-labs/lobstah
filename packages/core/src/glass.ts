@@ -250,7 +250,7 @@ export interface GlassDispatchSummary {
   /** The merge view's gate verdict, where pick has one. */
   prGate?: string;
   /** Every PR of a dispatch with more than one, in stack order, each with its badge once observed. */
-  prList?: Array<{ url: string; number: number; title?: string; badge?: PrBadge }>;
+  prList?: Array<{ url: string; number: number; title?: string; badge?: PrBadge; position?: number; size?: number }>;
 }
 
 /** A dispatch with everything: its summary plus the fields its modal shows. */

@@ -262,9 +262,16 @@ of the stack are recorded too:
 
 - a gh stack: the `gh-stack` state in the dispatch's checkout (from
   `gh stack init` or `gh stack submit`) lists a stack that holds the PR;
-- a base chain: the dispatch pushed two or more branches, and
-  `gh pr view <branch>` links their PRs to the reported one by base
-  branch.
+- pushed branches: every branch recorded for the dispatch is checked for a
+  PR, including separate PRs outside the stack;
+- observed stacks: the normal PR watch discovers both directions of an
+  owned branch chain and adds each member to the dispatch's evidence and
+  watches at the same cadence, without a second polling loop.
+
+Stack positions are saved with the evidence, so retargeting after a squash
+does not erase their order. Tracker reports and live status comments list
+every PR with its position, and update when new PRs are found even if the
+dispatch's status verb has not changed.
 
 The report prints `prs` with every PR it recorded. `lobstah catch` and
 `lobstah status <id>` list each PR (`prs`), `man tend` lists each with its

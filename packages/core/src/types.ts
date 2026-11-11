@@ -107,6 +107,13 @@ export interface StatusEntry {
   permissionRequest?: true;
 }
 
+/** A pull request's one-based position in its dispatch's stack. */
+export interface DispatchPrPosition {
+  bottom: string;
+  position: number;
+  size: number;
+}
+
 export interface Evidence {
   /** Actual headless launch options, refreshed on each attempt. */
   worker?: WorkerMetadata;
@@ -123,6 +130,8 @@ export interface Evidence {
   prUrl?: string;
   /** Every PR the dispatch reported when it has more than one (`--pr` repeated, or the PRs of its stack), `prUrl` first. */
   prUrls?: string[];
+  /** Stack positions, by canonical PR URL, retained after retargeting. */
+  prPositions?: Record<string, DispatchPrPosition>;
   transcriptPath?: string;
   note?: string;
   /** Delivery receipt: the trap address that actually claimed this dispatch. */

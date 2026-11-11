@@ -285,7 +285,7 @@ import {
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
-import { stackPrUrls } from './pr-stack.js';
+import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
@@ -1716,15 +1716,17 @@ async function mainCli(): Promise<void> {
       // Each --pr, and the other PRs of a stack that holds one, belongs to
       // this dispatch. The first reported PR stays its `prUrl`.
       let reportPrs: string[] = [];
+      let discovery: ReturnType<typeof dispatchPrDiscovery> | undefined;
       if (prUrl) {
         const ev = readEvidence(id, lane);
         const worktree = readSessionClaim(id, lane)?.worktree ?? ev.worktree;
         const branches = [...new Set([ev.branch, ...(ev.pushes ?? []).map((p) => p.branch)])].filter(
           (b): b is string => !!b && b !== 'HEAD',
         );
-        reportPrs = stackPrUrls(reportedPrs, { cwd: worktree && fs.existsSync(worktree) ? worktree : process.cwd(), branches });
-        const all = dispatchPrUrls({ prUrl, prUrls: [...reportPrs, ...dispatchPrUrls(ev)] });
-        mergeEvidence(id, lane, { prUrl, ...(all.length > 1 ? { prUrls: all } : {}) });
+        discovery = dispatchPrDiscovery(reportedPrs, { cwd: worktree && fs.existsSync(worktree) ? worktree : process.cwd(), branches });
+        reportPrs = discovery.urls;
+        if (discovery.urls.length) recordDispatchPrs(id, lane, discovery, false);
+        else mergeEvidence(id, lane, { prUrl });
       }
       const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
       // A PR stays observed from the first report that names it: CI, review,

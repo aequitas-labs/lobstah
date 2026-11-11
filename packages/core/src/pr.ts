@@ -40,6 +40,29 @@ export function dispatchPrUrls(ev: { prUrl?: string; prUrls?: string[]; pr?: { u
   return [...out.values()];
 }
 
+/** Keep each recorded stack together and ordered bottom to top, even after retargeting. */
+export function orderedDispatchPrUrls(evidence: import('./types.js').Evidence): string[] {
+  const urls = dispatchPrUrls(evidence);
+  if (!urls.length && evidence.prUrl) return [evidence.prUrl];
+  const rows = urls.map((url, order) => ({ url, order, position: evidence.prPositions?.[url] }));
+  const groups = new Map<string, number>();
+  for (const row of rows) {
+    const group = row.position?.bottom ?? row.url;
+    if (!groups.has(group)) groups.set(group, row.order);
+  }
+  return rows.sort((left, right) =>
+    groups.get(left.position?.bottom ?? left.url)! - groups.get(right.position?.bottom ?? right.url)! ||
+    (left.position?.position ?? left.order) - (right.position?.position ?? right.order)).map((row) => row.url);
+}
+
+/** Every reported PR, with a one-based stack position when known. */
+export function dispatchPrLines(evidence: import('./types.js').Evidence): string[] {
+  return orderedDispatchPrUrls(evidence).map((url) => {
+    const position = evidence.prPositions?.[url];
+    return `PR${position ? ` ${position.position}/${position.size}` : ''}: ${url}`;
+  });
+}
+
 /** `pr:o/r#n`, `o/r#n`, or a github.com PR URL (any trailing path) → the ref. */
 export function parsePrRef(s: string): PrRef | undefined {
   const m =

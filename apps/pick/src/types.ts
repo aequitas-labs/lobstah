@@ -80,6 +80,11 @@ export interface PrCandidate {
   headRef: string;
   /** The branch the PR merges into. */
   baseRef?: string;
+  /** Same-repository default branch and GitHub's linked stack, when present. */
+  defaultBranch?: string;
+  linkedStack?: { number: number; position: number; size: number; base: string };
+  /** Other authors remain visible as stack boundaries but cannot be merged by pickup. */
+  eligible?: boolean;
   labels: string[];
   assignees: string[];
   /** Latest review per author. */
@@ -99,7 +104,16 @@ export interface MergeSource {
   updateBranch(number: number): Promise<void>;
   /** Ask previous approvers to review the current head again. */
   requestReview(number: number, reviewers: string[]): Promise<void>;
-  merge(number: number, method: string): Promise<void>;
+  merge(number: number, method: string, expectedHead?: string): Promise<void>;
+  /** Retarget without rewriting commits. */
+  retarget?(number: number, branch: string): Promise<void>;
+  /** Refresh the current head's checks; absent checks wait after a stack update. */
+  checks?(number: number, head: string): Promise<'green' | 'pending' | 'red'>;
+  /** Whether the default branch is already included in this head. */
+  includesBase?(number: number): Promise<boolean>;
+  linkedMembers?(stack: number): Promise<number[]>;
+  mergeLinked?(number: number, method: string, head: string): Promise<AsyncMergeResult>;
+  linkedResult?(number: number, uuid: string): Promise<AsyncMergeResult>;
   comment(number: number, text: string): Promise<void>;
   addLabel(number: number, label: string): Promise<void>;
   /** Lobstah repo key for rebase chores against this forge repo. */
@@ -137,4 +151,10 @@ export function lobstahWrote(body: string | null | undefined): boolean {
 /** A note lobstah posts, marked: led by the dispatch marker when one backs it, else ending with the hidden one. */
 export function markedNote(text: string, uuid?: string): string {
   return uuid ? `${marker(uuid)} ${text}` : `${text}\n\n${hiddenMarker()}`;
+}
+
+/** A native stack merge is accepted before GitHub has evaluated all rules. */
+export interface AsyncMergeResult {
+  status: 'pending' | 'merged' | 'enqueued' | 'failed';
+  details: { uuid?: string; message?: string; sha?: string; expected_head_sha?: string; merge_method?: string };
 }
