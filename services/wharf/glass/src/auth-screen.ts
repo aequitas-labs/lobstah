@@ -6,7 +6,7 @@ import buoyBody from '../../../../apps/site/assets/buoy-body-160.webp';
 import trap from '../../../../apps/site/assets/trap-180.webp';
 import crawl from '../../../../docs/assets/lob-crawl.svg';
 
-export type AuthState = 'signin' | 'signed-out' | 'denied' | 'error' | 'expired' | 'cancelled' | 'connecting' | 'checking';
+export type AuthState = 'signin' | 'signed-out' | 'denied' | 'error' | 'expired' | 'cancelled' | 'connecting';
 
 /** Provider messages are untrusted; display only our own, actionable copy. */
 export function authEntry(location: Pick<Location, 'pathname' | 'search'>): AuthState | null {
@@ -43,7 +43,6 @@ const COPY: Record<AuthState, { title: string; detail?: string }> = {
   expired: { title: 'Your session timed out', detail: 'Sign in again to pick up where you left off' },
   cancelled: { title: 'Sign-in cancelled', detail: "Continue with GitHub when you're ready" },
   connecting: { title: 'Opening GitHub…' },
-  checking: { title: 'Checking your session…' },
 };
 
 // Reuse the banner's original pixels and frame animation in a compact icon viewport.
@@ -89,6 +88,6 @@ export function AuthScreen({ state, authenticate }: { state: AuthState; authenti
     previous.current = state;
   }, [state]);
   const copy = COPY[state];
-  const waiting = state === 'connecting' || state === 'checking';
+  const waiting = state === 'connecting';
   return html`<div class="auth-shell"><header class="auth-brand"><img src=${logo} width="64" height="64" alt="Lobstah lobster and star" /><b>lobstah spyglass</b></header><main class="auth-main"><section class="auth-intro" aria-labelledby="auth-intro-title"><h1 id="auth-intro-title">Your fleet<br /><span>in sight</span></h1><ul class="auth-features"><li><span class="auth-buoy" aria-hidden="true"><img src=${buoy} width="64" height="64" alt="" /><img src=${buoyBody} width="64" height="64" alt="" /></span><span>Answer when a buoy flags you</span></li><li><img src=${trap} width="64" height="64" alt="" /><span>Know what's working and what's stuck</span></li><li><${CrawlingLobster} /><span>Haul up the catch: PRs, evidence and reports</span></li></ul></section><section class=${'auth-card auth-' + state} aria-labelledby="auth-title" aria-busy=${waiting}><div class="auth-card-body"><h2 id="auth-title" ref=${heading} tabindex="-1" aria-describedby=${copy.detail ? 'auth-detail' : undefined} role=${waiting ? 'status' : undefined}>${copy.title}</h2>${copy.detail && html`<p id="auth-detail" class="auth-detail">${copy.detail}</p>`}<button class="auth-github" type="button" disabled=${waiting} onClick=${authenticate}><${GitHubMark} /><span>Continue with GitHub</span></button><p class="auth-access">GitHub only confirms who you are. It grants no repository access</p></div></section></main><footer class="auth-footer">Nobody stares at the water</footer></div>`;
 }

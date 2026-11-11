@@ -56,6 +56,16 @@ it('serves the same bundled look on the glass host only, with nonce CSP and no c
   for (const path of ['/report/', '/report/a/b', '/report/..%2Fdevice', '/report/' + 'a'.repeat(129)]) expect((await SELF.fetch('https://glass.test' + path)).status, path).toBe(404);
   expect((await SELF.fetch('https://state.test/')).status).toBe(404);
 });
+it('tells the page whether the visitor is signed in before it renders', async () => {
+  const hint = async (headers: Record<string, string> = {}, path = '/') =>
+    /<meta name="lobstah-session" content="([a-z]+)">/.exec(await (await SELF.fetch('https://glass.test' + path, { headers })).text())?.[1];
+  expect(await hint()).toBe('out');
+  expect(await hint({ Cookie: 'better-auth.session_token=forged' })).toBe('out');
+  expect(await hint({ Cookie: cookie })).toBe('in');
+  expect(await hint({ Cookie: cookie }, '/device?user_code=ABCD')).toBe('in');
+  const page = await (await SELF.fetch('https://glass.test/', { headers: { Cookie: cookie } })).text();
+  expect(page).not.toContain(token);
+});
 it('requires its cookie, not an API bearer, and derives the account rather than trusting a selector', async () => {
   await job();
   expect((await SELF.fetch('https://glass.test/api/glass')).status).toBe(401);
