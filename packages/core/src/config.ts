@@ -547,7 +547,7 @@ function parsePermissions(raw: unknown): PermissionsConfig {
  * Level-triggered: each stands until its clear condition, unlike [hooks.notify].verbs,
  * which fire once per transition.
  */
-export const ATTENTION_KINDS = ['question', 'decision', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready', 'report', 'stack-ready', 'review'] as const;
+export const ATTENTION_KINDS = ['question', 'decision', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready', 'report', 'stack-ready', 'review', 'dispatch-progress'] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 /** Human-actionable conditions; drafts, landed catches and review requests are opt-in. */
 export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'decision', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks'];
