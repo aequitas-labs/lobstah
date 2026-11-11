@@ -107,7 +107,7 @@ describe('soak creates a worktree when the session has none', () => {
     expect(only().link).toBe('vscode://anthropic.claude-code/open?session=abc-123');
     const res = lobstah(primary, 'focus', 'wt:missing');
     expect(res.status).toBe(1);
-    expect(res.stdout).toContain('Trap is not live.');
+    expect(res.stdout).toContain('Trap is not live');
   });
   processTest('prints and changes a stable name, refusing malformed or taken names', () => {
     const first = soak(primary, '--name', 'amber-gull');

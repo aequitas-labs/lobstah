@@ -18,8 +18,8 @@ to the helm through the focus ladder:
 
 Every attention kind walks (`attentionKinds` in `config.toml` picks them),
 its bubble led by a short label: `draft`, `review`, `checks`, `ready`,
-`landed`, or nothing for a question or a decision (its title only). Clicking a PR pet (`pr:*`) opens the
-PR in your browser instead of the helm; right-click adds **Open PR**.
+`landed`, or nothing for a question or a decision (its title only). Clicking a PR or stack pet opens the
+PR in the repo's `reviewTool`, the same as the glass, instead of the helm; right-click adds **Open PR**.
 Clicking a decision pet opens the glass at the decision's card; the card
 stays until the decision is answered or withdrawn.
 Clicking a report pet opens the glass at the report. Opening a report in
@@ -86,11 +86,20 @@ current windows and tries again on the next poll.
 ## Install
 
 ```bash
-cd apps/pet && swift build -c release && cd ../..
-lobstah pet install        # copies the binary under ~/.lobstah/bin and writes
-                           # a login LaunchAgent (RunAtLoad; quitting sticks
-                           # until next login). `lobstah pet uninstall` removes it.
+lobstah pet install        # builds the pet from the sources this lobstah ships,
+                           # copies it under ~/.lobstah/bin and writes a login
+                           # LaunchAgent (RunAtLoad; quitting sticks until next
+                           # login). `lobstah pet uninstall` removes it.
+lobstah pet install --binary apps/pet/.build/release/LobstahPet   # a build of your own
 ```
+
+The build needs Swift (Xcode's command line tools); its scratch space is
+`~/.lobstah/pet/build`. `~/.lobstah/bin/LobstahPet.stamp.json` records the
+lobstah version the pet was built from. `lobstah doctor` warns when that is
+behind the CLI, and the daemon's next start after an upgrade rebuilds the pet
+in the background, once per version (`~/.lobstah/logs/pet-install.log`). When
+install can't build, it says so and reuses the installed binary. A pet
+installed with `--binary` has no known version and is never called stale.
 
 A locally built binary needs no signing or notarization — Gatekeeper only
 gates quarantined downloads. Distributing prebuilt pets through GitHub

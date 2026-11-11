@@ -25,7 +25,7 @@ import { readAck } from '../src/acks.js';
 import { applyCull, planCull } from '../src/cull.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // End to end against the built CLI (`pnpm build` runs before `pnpm test`).

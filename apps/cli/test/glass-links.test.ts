@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
-import { linkParts, safeUrl, urlAt } from '../src/glass-links.js';
-import { parseInline, parseMarkdown } from '../src/glass-markdown.js';
+import { linkParts, safeUrl, urlAt } from '../../../packages/glass-ui/src/glass-links.js';
+import { parseInline, parseMarkdown } from '../../../packages/glass-ui/src/glass-markdown.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
 import { NOW, acceptanceFleet, ago, everyAttentionFleet } from './fixtures/glass-snapshots.js';

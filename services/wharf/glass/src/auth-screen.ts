@@ -19,13 +19,16 @@ export function authEntry(location: Pick<Location, 'pathname' | 'search'>): Auth
   return 'error';
 }
 
+/** A report's own page on the glass host. */
+const REPORT_PAGE = /^\/report\/[A-Za-z0-9_-]{1,128}$/;
+
 /** Retry returns only to a glass page, preserving deep links and boat approval codes. */
 export function authDestination(location: Pick<Location, 'href' | 'origin' | 'pathname' | 'search'>): URL {
   if (!location.pathname.startsWith('/api/auth/')) return new URL(location.href);
   const candidate = new URLSearchParams(location.search).get('returnTo') ?? '/';
   try {
     const target = new URL(candidate, location.origin);
-    if (target.origin === location.origin && ['/', '/device'].includes(target.pathname)) return target;
+    if (target.origin === location.origin && (['/', '/device'].includes(target.pathname) || REPORT_PAGE.test(target.pathname))) return target;
   } catch {
     /* A malformed retry target returns to the glass. */
   }

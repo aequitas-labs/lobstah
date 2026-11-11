@@ -50,6 +50,16 @@ describe('notifications', () => {
     expect(attentionNow(true, 1, Date.now() + 86400_000)).toEqual([]);
   });
 
+  it('a push in the heavy line wakes nobody and notifies nobody', () => {
+    fs.mkdirSync(path.join(home, 'active', 'in-line'));
+    appendStatus('in-line', 'work', 'working');
+    const baseline = captureWaitBaseline();
+    appendStatus('in-line', 'work', 'paused', 'Push in line', undefined, { waitingOn: 'heavy' });
+    expect(freshWakeEvents(baseline)).toEqual([]);
+    expect(attentionNow(false, 1, Date.now() + 86400_000)).toEqual([]);
+    expect(pendingNotifications('in-line', 'work')).toEqual([]);
+  });
+
   it('emits only wake-worthy verbs, once each', () => {
     appendStatus('n1', 'work', 'working');
     appendStatus('n1', 'work', 'needs-decision', 'which db?');

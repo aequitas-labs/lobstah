@@ -14,9 +14,9 @@ export function readCatchContext(dir: string, id: string): CatchContext {
 export function observeLocalCatch(id: string, lane: Lane, phase: 'claim' | 'finish', now = Date.now()): void {
   const dir = laneDirs(lane).state, old = readCatchContext(dir, id), cfg = loadConfig();
   if (phase === 'finish' && Object.hasOwn(old, 'helm')) return; // A done retry cannot rewrite the first completion's observation.
-  const repo = storedDescriptor(id, lane)?.repo;
+  const descriptor = storedDescriptor(id, lane), repo = descriptor?.repo;
   const helms = liveHelms(cfg.helm.ttlSecs * 1000, now);
-  const present = repo ? helms.some((h) => h.repos.includes(repo)) : null;
+  const present = descriptor?.target ? helms.some((helm) => helm.grounds === descriptor.target!.grounds) : repo ? helms.some((h) => h.repos.includes(repo)) : null;
   const next: CatchContext = phase === 'claim' ? { claimHelm: present, location: 'local' }
     : { ...old, location: 'local', helm: old.claimHelm === true || present === true ? true : old.claimHelm === false && present === false ? false : null };
   const file = path.join(dir, `${id}.catch-context`), tmp = uniqueTempPath(file);

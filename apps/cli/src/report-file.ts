@@ -10,6 +10,7 @@ import {
   loadConfig,
   newHelmReportKey,
   readReport,
+  readDecisionDetail,
   readReportMarkdown,
   readSessionClaim,
   readEvidence,
@@ -17,7 +18,7 @@ import {
   trapNameForId,
   unattachedImages,
 } from '@lobstah/core';
-import type { Lane, ReportMeta, TendAttention } from '@lobstah/core';
+import type { DecisionMeta, Lane, ReportMeta, TendAttention } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
 
 /**
@@ -88,9 +89,26 @@ export function fileHelmReport(grounds: string, file: string, attach: string[], 
  */
 export function unattachedWarning(meta: ReportMeta): string | undefined {
   const missing = unattachedImages(readReportMarkdown(meta.key) ?? '', meta);
-  if (missing.length === 0) return undefined;
-  const shown = missing.slice(0, 5).join(', ') + (missing.length > 5 ? `, and ${missing.length - 5} more` : '');
-  return `the page links ${missing.length} image(s) the glass cannot show: ${shown}. Attach each with --attach <file>, or a folder of them with --attach-dir <dir>; a path must stay under the page's directory`;
+  return missing.length === 0
+    ? undefined
+    : `the page links ${missing.length} image(s) the glass cannot show: ${imageList(missing)}. Attach each with --attach <file>, or a folder of them with --attach-dir <dir>; a path must stay under the page's directory`;
+}
+
+/**
+ * The warning for images a decision's detail links but the glass cannot
+ * show, or undefined when every image resolves. A remote https image needs
+ * no file: the card loads it.
+ */
+export function unattachedDecisionWarning(meta: DecisionMeta): string | undefined {
+  const missing = unattachedImages(readDecisionDetail(meta.key) ?? '', meta);
+  return missing.length === 0
+    ? undefined
+    : `the detail links ${missing.length} image(s) the glass cannot show: ${imageList(missing)}. Attach each with --attach <file>; a path must stay under the detail file's directory`;
+}
+
+/** Up to five image links by name, then how many more. */
+function imageList(missing: readonly string[]): string {
+  return missing.slice(0, 5).join(', ') + (missing.length > 5 ? `, and ${missing.length - 5} more` : '');
 }
 
 /** One `report` attention item per filed report: it stands until acked. */

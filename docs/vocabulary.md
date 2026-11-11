@@ -314,10 +314,11 @@ plus Codex's `UserPromptSubmit` and `PermissionRequest` when declared, it says:
 - **trusted**: Codex runs a plugin hook only after the user trusts it in
   `/hooks`, and records trust in `config.toml` as
   `[hooks.state."lobstah@lobstah:hooks/hooks.json:<event>:<group>:<handler>"]`
-  with a `trusted_hash`, a hash of the hook's definition. The row says
-  `trusted` when that hash matches the hook as the plugin declares it now,
-  `changed since trusted` when the hook changed after it was trusted (a
-  plugin update; Codex asks again), and `untrusted` without an entry. Claude
+  with a `trusted_hash`, a hash of the hook's definition, and from Codex 0.166
+  a `trusted_content_hash` of the plugin's contents. The row reports Codex's
+  own answer when it can get one: `trusted`, `changed since trusted` when the
+  hook or plugin changed after it was trusted (a plugin update; Codex asks
+  again), or `untrusted` without an entry. Claude
   Code has no per-hook trust: `trust n/a`;
 - **last run**: when lobstah last saw the hook run (`never run` when it has
   not). Each hook run stamps `~/.lobstah/hook-runs.json` (`<harness>:<event>`
@@ -524,7 +525,7 @@ silently ignored). Read verbs (`man tend`, `man brief`, `man throw --dry-run`,
 | `relieve` | Step down. `--take` on another session's `helm` is the only force path: it displaces a live holder deliberately and leaves them a stand-down notice, delivered once at their next park. A holder whose heartbeat lapsed past `[helm].ttlSecs` is stale and claimable without `--take`. |
 | grounds | A named territory: the subset of configured repos one helm oversees, from `[grounds.*]`. A repo belongs to at most one grounds (config error otherwise). No grounds configured means one implicit `home` grounds covering every repo; explicit `home` or `fleet` names are unchanged. Internal detail: the implicit local grounds permanently uses storage ID `fleet` (files, embedded fields and report/ack keys), so old and new CLI/daemon versions share one authority without moving data. `--grounds fleet` aliases `home` with a notice; raw storage addresses remain valid and copyable. Wharf grounds have no legacy alias. |
 | charter | The helm's persona and scope fences, in Standard Technical English. Printed at sign-on and re-injected by `man brief` at every session start, so it survives restarts and compaction. |
-| todo | A reminder the helm keeps for itself (`lobstah todo add`), stored per grounds in `todos/<grounds>.json`. Shown in `man tend`, `man report`, and the glass, and re-injected beside the charter by `man brief`. Traps keep none. |
+| todo | A reminder the helm keeps for itself (`lobstah todo add`), stored per grounds in `todos/<grounds>.json`. Shown in `man tend`, `man report`, and the glass, and re-injected beside the charter by `man brief`. One with a time wakes the helm once when it comes, as a `todo-due` event. Traps keep none. |
 | digest | The delta since the reported-through cursor: catches landed, attention arisen, still-waiting, fleet verdict. Carried by `man report`, a `man wait` timeout, and — in blocking park mode, at `[helm].reportSecs` cadence — the park itself. Change-gated: an empty delta is never delivered. |
 
 ## Attention contract
@@ -599,6 +600,24 @@ registry that decides what parses).
 | `2` | Usage mistake: unknown command, flag, or subverb. The error names the offender and prints the command's usage card. Flags in a free-text tail (a `send` message, a `report` note) are never validated — prose may contain anything. |
 | `3` | `man wait --timeout` elapsed with nothing to report. Its own code so `while lobstah man wait` loops still terminate on timeout while `2` stays unambiguous. |
 
+
+### Intent grants
+
+A trap that will need more commands of one kind proposes them on its permission card, instead of raising a card per command: `lobstah report <id> needs-decision "<why>" --ask "<command>" --intent "<one sentence>" --allow <pattern> [--allow <pattern> ...]`. The card shows the patterns and the sentence before a person clicks. Only the glass can grant it: `man answer` can only say No.
+
+The patterns are the grant. lobstah's own hook matches them, the same on Claude Code and Codex, from the moment the grant is made, and each match runs without asking and is recorded against the grant's id. The sentence only labels the grant on the card and the Grants tab, and allows nothing. A command that doesn't match goes to the harness's own reviewer, unchanged and told nothing. lobstah writes no harness configuration for these grants and adds no deny or prompt rules.
+
+The card then offers three ways to allow, and No:
+
+| Button | Scope | Lasts |
+|---|---|---|
+| Allow once | This trap, this command | One use, within the hour |
+| Allow this kind for 1h | This trap only | One hour |
+| Always allow this kind | Every trap in this repo | Until revoked |
+
+A pattern is a command prefix or glob, `tool:<glob>`, or `path:<glob>` relative to the repo. Inside a command pattern, `*` matches within one word; a final `*` runs to the end, or to the closing quote when it's inside a quote. A command joined with shell syntax never matches, and neither does a protected target (grants, harness settings, `.git` at any depth and in any case). A proposal is refused if it's one word, starts with a glob, or names a command that runs anything, such as `bash`, `node` or `env`. A pattern is otherwise literal: a wrapper script that runs its arguments allows what it runs.
+
+`lobstah grant ls` lists grants in force with their scope, label, patterns, expiry, uses and last use, and the glass's Grants tab shows the same with a Revoke button. `lobstah grant revoke <id>` takes one away; anyone may, the helm included. Each match is recorded with its tool and time, never its command text.
 
 ### Session grants
 
