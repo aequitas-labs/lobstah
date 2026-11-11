@@ -12,13 +12,13 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (fixtures/glass-legacy.html, the exact bytes the old template string
  * served) and the built page render the same DOM for the same snapshot.
  * Both pages are driven the way a reader drives them — hash links, clicks
- * on rows and chips, the ⚙ settings buttons, the filter controls, Escape —
+ * on rows and chips, the settings menu, the filter controls, Escape —
  * through every tab in both views, the filters, every modal, the lobs, and
  * the preview lob; every visible section is compared after each step.
  *
- * Runtime helm chat controls and their mode text are removed before comparing;
- * helm-chat.test.ts covers their actual HTTP round-trip. Browser preference
- * hint text and the settings title are normalized to their pre-toggle form.
+ * Settings are now read-only, so their contents are excluded from the legacy
+ * comparison. glass-page.test.ts and helm-chat.test.ts cover those values and
+ * the refused writes. Each view is loaded from stored browser preferences.
  *
  * The comparison is canonical, and each normalization is a documented
  * difference of the Preact page, not a visible one:
@@ -149,9 +149,7 @@ function foldPrTitles(el: Element): Node {
   if (copy.querySelector('.settings')) {
     const title = copy.querySelector('h3');
     if (title) title.textContent = '⚙ settings';
-    const hints = copy.querySelectorAll('.settings .hint');
-    if (hints[0]) hints[0].textContent = 'cards or table';
-    if (hints[1]) hints[1].textContent = 'crawling lobsters';
+    copy.querySelector('.settings')!.replaceWith(doc.createTextNode('read-only settings'));
   }
   for (const n of copy.querySelectorAll('.chip.click .dim')) n.textContent = (n.textContent ?? '').replace(/ · chat (full|brief)$/, '');
   for (const n of copy.querySelectorAll('.prack')) n.remove();
@@ -269,12 +267,6 @@ async function escape(g: GlassDom) {
   g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
   await g.settle();
 }
-async function setting(g: GlassDom, row: string, choice: string) {
-  await click(g, g.$('#gearbtn'));
-  const r = g.$$('#modalbox .settings .row').find((x) => text(x.querySelector('.lbl')).startsWith(row));
-  await click(g, r && [...r.querySelectorAll('.seg button')].find((b) => text(b) === choice));
-  await escape(g);
-}
 async function control(g: GlassDom, id: string, value: string | boolean, type = 'change') {
   const el = g.$('#' + id) as HTMLInputElement;
   if (typeof value === 'boolean') el.checked = value;
@@ -286,20 +278,16 @@ async function openRow(g: GlassDom, tab: string, label: string) {
   await g.go('#' + tab);
   await click(
     g,
-    g.$$(`#${tab} tr.rowhead`).find((tr) => text(tr.querySelector('td')).includes(label)),
+    g.$$(`#${tab} tr.rowhead`).find((tr) => text(tr.querySelector('td')).includes(label)) ?? g.$$(`#${tab} .card`).find((card) => text(card).includes(label)),
   );
 }
 
 type Step = { name: string; run: (g: GlassDom) => Promise<void> };
 
 /** Every view the page shows for a snapshot: tabs × views, filters, every modal — as a reader reaches them. */
-function steps(d: GlassSnapshot): Step[] {
+function steps(d: GlassSnapshot, view: 'table' | 'cards'): Step[] {
   const out: Step[] = [];
-  for (const view of ['table', 'cards']) {
-    out.push({ name: `view ${view}`, run: (g) => setting(g, 'view', view) });
-    for (const tab of TABS) out.push({ name: `${view} #${tab}`, run: (g) => g.go('#' + tab) });
-  }
-  out.push({ name: 'view table again', run: (g) => setting(g, 'view', 'table') });
+  for (const tab of TABS) out.push({ name: `${view} #${tab}`, run: (g) => g.go('#' + tab) });
   out.push({
     name: 'chain',
     run: async (g) => {
@@ -344,16 +332,14 @@ function steps(d: GlassSnapshot): Step[] {
     });
   out.push({ name: 'modal closed', run: (g) => escape(g) });
   out.push({ name: 'poll', run: (g) => g.poll() });
-  out.push({ name: 'lobs off', run: (g) => setting(g, 'lobs', 'off') });
-  out.push({ name: 'lobs on', run: (g) => setting(g, 'lobs', 'on') });
   return out;
 }
 
-async function trace(page: string, d: GlassSnapshot, search = '') {
-  const g = await loadGlass(page, d, { now: NOW, search, whole: page === LEGACY });
+async function trace(page: string, d: GlassSnapshot, search = '', view: 'table' | 'cards' = 'table') {
+  const g = await loadGlass(page, d, { now: NOW, search, whole: page === LEGACY, prefs: { view } });
   try {
     const views: Array<[string, Record<string, string>]> = [['load', capture(g)]];
-    for (const s of steps(d)) {
+    for (const s of steps(d, view)) {
       await s.run(g);
       views.push([s.name, capture(g)]);
     }
@@ -365,8 +351,8 @@ async function trace(page: string, d: GlassSnapshot, search = '') {
 
 describe('glass fidelity: the built page renders the legacy page’s DOM', () => {
   for (const [name, make] of Object.entries(FIXTURES)) {
-    it(`${name} fleet: every tab, view, filter, and modal`, async () => {
-      const [legacy, built] = [await trace(LEGACY, legacyWire(make())), await trace(GLASS_PAGE, legacyShape(make()))];
+    it.each(['table', 'cards'] as const)(`${name} fleet: every tab, filter, and modal in %s`, async (view) => {
+      const [legacy, built] = [await trace(LEGACY, legacyWire(make()), '', view), await trace(GLASS_PAGE, legacyShape(make()), '', view)];
       expect(built.skeleton).toBe(legacy.skeleton);
       expect(built.views.map(([n]) => n)).toEqual(legacy.views.map(([n]) => n));
       for (let i = 0; i < legacy.views.length; i++) {
@@ -400,18 +386,12 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           });
       };
       try {
-        for (const view of ['table', 'cards']) {
-          await setting(g, 'view', view);
-          for (const tab of TABS) {
-            await g.go('#' + tab);
-            snap(`${view}#${tab}`);
-          }
+        for (const tab of TABS) {
+          await g.go('#' + tab);
+          snap(`table#${tab}`);
         }
-        await setting(g, 'view', 'table');
         await openRow(g, 'traps', 'wt:t1');
         snap('modal');
-        await click(g, g.$('#gearbtn'));
-        snap('settings');
       } finally {
         await g.close();
       }

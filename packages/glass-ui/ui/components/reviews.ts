@@ -138,30 +138,22 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
   }} onClick=${openReview(r)}><div class="top"><b title=${r.title}>${r.title}</b>${badge(r)}</div><div class="rv-asker">${asker(r)}</div><div class="meta" title=${meta.text}>${r.repo}#${r.number} · ${Age(r.requestedAt)} ago</div>${findings(r)}${r.reason && html`<div class="rv-reason">${r.reason}</div>`}<div class="foot">${staged(r)}<span class="footact"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></span></div></div>`;
 }
 
+/** The mode names shown beside read-only review settings. */
+const REVIEW_MODE_LABELS: Record<NonNullable<GlassSnapshot['reviewSetup']>['mode'], string> = {
+  notify: 'Notify',
+  'on-demand': 'On-demand',
+  'auto-draft': 'Auto draft',
+  'auto-review': 'Auto review',
+};
+
+/** Review rounds and the current repo's settings; all settings are read-only. */
 export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews']; setup?: GlassSnapshot['reviewSetup']; repo?: string }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>();
   const effective = (repo && setup?.perRepo?.[repo]) || setup;
   const canDraft = effective?.mode !== 'notify';
   const publish = effective?.publish ?? false;
-  const change = async (mode: string, publish: boolean) => {
-    setBusy(true);
-    setError(await reviewRequest('review-mode', { mode, publish, ...(repo ? { repo } : {}) }));
-    setBusy(false);
-  };
   return [
     setup?.enabled
-      ? html`<div class="rv-controls"><label>Review mode · ${repo || 'default'} <select aria-label="Review mode" value=${effective?.mode} disabled=${busy} onChange=${(
-          e: Event,
-        ) => {
-          const next = (e.currentTarget as HTMLSelectElement).value;
-          return change(next, next.startsWith('auto-') ? next === 'auto-review' : publish);
-        }}><option value="notify">Notify</option><option value="on-demand">On-demand</option><option value="auto-draft">Auto draft</option><option value="auto-review">Auto review</option></select></label><label title="Publish sends request changes for blocking findings, otherwise a comment. Approve always needs your click."><input type="checkbox" aria-label="Publish reviews" checked=${publish} disabled=${busy} onChange=${(
-          e: Event,
-        ) => {
-          const next = (e.currentTarget as HTMLInputElement).checked;
-          return change(effective?.mode.startsWith('auto-') ? (next ? 'auto-review' : 'auto-draft') : (effective?.mode ?? 'notify'), next);
-        }} />Publish</label><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'}</span>${error && html`<span class="bad" role="alert">${error}</span>`}</div>`
+      ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
     !inp.list.length
       ? html`<div class="empty">no review requests</div>`
