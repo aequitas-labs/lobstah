@@ -7,7 +7,7 @@ import type { KeyObject } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { RUN_SEAL_INFO, askDecision, ensureLayout, prepareRunCard, runInputsText, sha256Hex } from '@lobstah/core';
+import { RUN_LINE_SEAL_INFO, RUN_SEAL_INFO, askDecision, ensureLayout, prepareRunCard, runInputsText, runLineSignedText, sha256Hex } from '@lobstah/core';
 import type { RunInputValues, SealedInput } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges, addRunPasskey } from '../src/run-passkey.js';
@@ -146,12 +146,6 @@ describe('a Run from the hosted glass', () => {
     expect((await relayed('run-passkey-challenge', {})).status).toBe(403);
   });
 
-  // An interactive card needs expect(1), which macOS ships and CI's Linux runners don't.
-  it.skipIf(!fs.existsSync('/usr/bin/expect'))('keeps interactive cards on the Mac', async () => {
-    const interactive = await relayed('run-challenge', runCard({ interactive: true }));
-    expect(interactive.json.reason).toBe('Interactive cards run from the Mac.');
-  });
-
   it('says to pair first when no phone passkey is paired', async () => {
     fs.rmSync(hostedFile);
     const none = await relayed('run-challenge', runCard());
@@ -211,10 +205,10 @@ describe('the 15-minute window', () => {
 });
 
 /** Seal a secret as the page does: ECDH with a fresh P-256 key, HKDF-SHA256, AES-256-GCM. */
-function seal(value: string, boatKey: string): SealedInput {
+function seal(value: string, boatKey: string, info = RUN_SEAL_INFO): SealedInput {
   const mine = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const boat = createPublicKey({ key: Buffer.from(boatKey, 'base64url'), format: 'der', type: 'spki' });
-  const key = Buffer.from(hkdfSync('sha256', diffieHellman({ privateKey: mine.privateKey, publicKey: boat }), Buffer.alloc(0), RUN_SEAL_INFO, 32));
+  const key = Buffer.from(hkdfSync('sha256', diffieHellman({ privateKey: mine.privateKey, publicKey: boat }), Buffer.alloc(0), info, 32));
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const ct = Buffer.concat([cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]);
@@ -269,6 +263,92 @@ describe('a secret input from the hosted glass', () => {
 });
 
 // These start real runs, with /bin/bash: not on CI's Windows runner (as run-execute.test.ts).
+/** The boat's seal key, as the card in the snapshot carries it. */
+async function boatSealKey(key: string): Promise<string> {
+  const decisions = (await call(`127.0.0.1:${port}`, '/data')).json.decisions as Array<{ key: string; run?: { sealKey?: string } }>;
+  return decisions.find((d) => d.key === key)!.run!.sealKey!;
+}
+
+/** Wait until the card's live output holds `text`, and return the run's attempt id. */
+async function outputHolds(key: string, text: string): Promise<string> {
+  for (let i = 0; i < 100; i++) {
+    const out = (await relayed('run-output', { key, after: 0 })).json;
+    if ((out.text as string | undefined)?.includes(text)) return out.id as string;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`no "${text}" in the run's output`);
+}
+
+// An interactive card needs expect(1), which macOS ships and CI's Linux runners don't.
+describe.skipIf(!RUNS_HERE || !fs.existsSync('/usr/bin/expect'))('a line typed into an interactive run on the hosted glass', () => {
+  const SECRET = 'hunter2-sealed-secret';
+  const promptCard = () =>
+    runCard({ interactive: true, body: '#!/bin/bash\nread -r -p "Name: " n\necho "hello $n"\nread -r -p "Code: " c\necho "using $c"\n' });
+
+  /** A line as the hosted page sends it: sealed to the boat, signed by the page key that started the run. */
+  function signedLine(card: { key: string }, page: { privateKey: KeyObject }, attempt: string, boatKey: string, seq: number, text: string, secret = false, info = RUN_LINE_SEAL_INFO) {
+    const sealed = seal(text, boatKey, info);
+    return { key: card.key, attempt, seq, secret, sealed, signature: signWith(page.privateKey, runLineSignedText(card.key, attempt, seq, secret, sealed)) };
+  }
+
+  it('starts after the passkey, takes sealed lines signed by the page that started it, and scrubs a secret one', async () => {
+    const card = promptCard();
+    const page = windowKey();
+    expect((await passkeyRun(card, { window: page.spki })).status).toBe(202);
+    const attempt = await outputHolds(card.key, 'Name:');
+    const boatKey = await boatSealKey(card.key);
+    expect((await relayed('run-line', signedLine(card, page, attempt, boatKey, 0, 'pearl'))).status).toBe(200);
+    await outputHolds(card.key, 'hello pearl');
+    expect((await relayed('run-line', signedLine(card, page, attempt, boatKey, 1, SECRET, true))).status).toBe(200);
+    await runs.settled();
+    const out = (await relayed('run-output', { key: card.key, after: 0 })).json;
+    expect(out).toMatchObject({ state: 'succeeded' });
+    expect(out.text).not.toContain(SECRET);
+    expect(out.text).toContain('using ‹secret›');
+  }, 15_000);
+
+  it('refuses an unsealed line, another key, a replayed or skipped number, an input seal, and a line after the run ends, writing nothing', async () => {
+    const card = promptCard();
+    const page = windowKey();
+    expect((await passkeyRun(card, { window: page.spki })).status).toBe(202);
+    const attempt = await outputHolds(card.key, 'Name:');
+    const boatKey = await boatSealKey(card.key);
+    const refusals = [
+      [{ key: card.key, line: 'plain' }, 400],
+      [signedLine(card, windowKey(), attempt, boatKey, 0, 'other key'), 403],
+      [signedLine(card, page, 'another-attempt', boatKey, 0, 'other run'), 403],
+      [signedLine(card, page, attempt, boatKey, 1, 'skipped'), 409],
+      [signedLine(card, page, attempt, boatKey, 0, 'input seal', false, RUN_SEAL_INFO), 400],
+    ] as const;
+    for (const [payload, status] of refusals) expect((await relayed('run-line', payload)).status, JSON.stringify(payload).slice(0, 60)).toBe(status);
+    const first = signedLine(card, page, attempt, boatKey, 0, 'pearl');
+    expect((await relayed('run-line', first)).status).toBe(200);
+    expect((await relayed('run-line', first)).status).toBe(409);
+    expect((await relayed('run-line', signedLine(card, page, attempt, boatKey, 1, 'code'))).status).toBe(200);
+    await runs.settled();
+    const out = (await relayed('run-output', { key: card.key, after: 0 })).json.text as string;
+    for (const refused of ['plain', 'other key', 'other run', 'skipped', 'input seal']) expect(out).not.toContain(refused);
+    expect(out).toContain('hello pearl');
+    expect((await relayed('run-line', signedLine(card, page, attempt, boatKey, 2, 'late'))).status).toBe(409);
+  }, 15_000);
+
+  it('runs inside the window with no passkey, and takes lines signed by that window key', async () => {
+    const page = windowKey();
+    const first = await passkeyRun(runCard(), { window: page.spki });
+    const id = first.json.window as string;
+    const card = promptCard();
+    const asked = await relayed('run-challenge', { ...card, window: id });
+    const res = await relayed('run', { key: card.key, challenge: asked.json.challenge, window: id, windowSignature: signWith(page.privateKey, asked.json.challenge as string), inputs: {} });
+    expect(res.status).toBe(202);
+    const attempt = await outputHolds(card.key, 'Name:');
+    const boatKey = await boatSealKey(card.key);
+    expect((await relayed('run-line', signedLine(card, page, attempt, boatKey, 0, 'pearl'))).status).toBe(200);
+    expect((await relayed('run-line', signedLine(card, page, attempt, boatKey, 1, 'code'))).status).toBe(200);
+    await runs.settled();
+    expect((await relayed('run-output', { key: card.key, after: 0 })).json.text).toContain('hello pearl');
+  }, 15_000);
+});
+
 describe.skipIf(!RUNS_HERE)('Stop, Run again and Dismiss from the hosted glass', () => {
   it('stops a running card and dismisses a finished one, with no passkey', async () => {
     const card = runCard({ body: '#!/bin/bash\nsleep 20\n' });

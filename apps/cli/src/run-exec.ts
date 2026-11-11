@@ -150,6 +150,8 @@ export function runAnswerText(card: RunCard, result: RunResult, output: string):
 interface RunConsole {
   write: (line: string) => void;
   scrubbers: OutputScrubber[];
+  /** For a run started from the hosted glass: the page key that may type into it, and the next line's number. */
+  relayed?: { attempt: string; lineKey?: string; next: number };
 }
 
 /** Deliver an outcome independently of whether its card still stands. Exit-mode output stays local. */
@@ -287,13 +289,23 @@ export class RunRegistry {
    * scrubbed from everything the run prints after it, its echo included.
    * Returns why it was refused, or undefined when sent.
    */
-  sendLine(key: string, line: unknown, secret: boolean): string | undefined {
+  /** A live interactive run started from the hosted glass: its attempt, the page key that may type into it, and the number it takes next. */
+  relayedConsole(key: string): { attempt: string; lineKey?: string; next: number } | undefined {
+    const live = this.runs.get(key);
+    const console = this.consoles.get(key);
+    return live && !live.result && console?.relayed ? { ...console.relayed } : undefined;
+  }
+
+  /** Send a line to a card's live interactive run. A relayed line names its number, which must be the next one. */
+  sendLine(key: string, line: unknown, secret: boolean, seq?: number): string | undefined {
     const live = this.runs.get(key);
     const console = this.consoles.get(key);
     if (!live || live.result || !console) return 'That card has no run waiting for a line.';
     if (typeof line !== 'string' || line.length > RUN_INPUT_MAX_CHARS)
       return `A line is text of at most ${RUN_INPUT_MAX_CHARS} characters.`;
     if (/[\r\n\0]/.test(line)) return 'Send one line at a time.';
+    if (console.relayed && seq !== console.relayed.next) return 'That line was already sent, or one before it is missing.';
+    if (console.relayed) console.relayed.next += 1;
     if (secret && line) for (const s of console.scrubbers) s.add({ name: RUN_SECRET_LINE_NAME, value: line });
     console.write(line);
     return undefined;
@@ -313,7 +325,7 @@ export class RunRegistry {
     values: Array<{ name: string; value: string }>,
     stdin: string,
     credentialId: string,
-    options: { maxBytes: number; env?: NodeJS.ProcessEnv } = { maxBytes: 1 << 20 },
+    options: { maxBytes: number; env?: NodeJS.ProcessEnv; relayed?: { lineKey?: string } } = { maxBytes: 1 << 20 },
   ): Promise<RunResult> {
     const card = meta.run;
     if (this.get(meta.key)?.attempt.state === 'running') throw new Error('This card is already running.');
@@ -448,7 +460,11 @@ export class RunRegistry {
       child.stdin.on('error', () => {});
       if (card.interactive) {
         child.stdin.write(stdin);
-        this.consoles.set(meta.key, { write: (line) => child.stdin.write(`${line}\n`), scrubbers: [out, err] });
+        this.consoles.set(meta.key, {
+          write: (line) => child.stdin.write(`${line}\n`),
+          scrubbers: [out, err],
+          ...(options.relayed ? { relayed: { attempt: attempt.id, ...(options.relayed.lineKey ? { lineKey: options.relayed.lineKey } : {}), next: 0 } } : {}),
+        });
       } else child.stdin.end(stdin);
       let settled = false;
       const finish = (code: number | null) => {

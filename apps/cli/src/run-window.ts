@@ -19,6 +19,17 @@ import { PasskeyError } from './run-passkey.js';
 
 export const RUN_WINDOW_MS = 15 * 60_000;
 
+/** Whether a page key signed this text: WebCrypto's ECDSA P-256 with SHA-256, as raw r‖s. */
+export function pageKeySigned(publicKey: string, text: string, signature: unknown): boolean {
+  if (typeof signature !== 'string' || !/^[A-Za-z0-9_-]{80,200}$/.test(signature)) return false;
+  try {
+    const key = createPublicKey({ key: Buffer.from(publicKey, 'base64url'), format: 'der', type: 'spki' });
+    return verifySignature('sha256', Buffer.from(text, 'utf8'), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url'));
+  } catch {
+    return false;
+  }
+}
+
 interface OpenWindow {
   /** base64url SPKI DER of the page's P-256 public key. */
   publicKey: string;
@@ -68,9 +79,7 @@ export class RunWindows {
     const w = this.get(id, hosted);
     if (!w) throw new PasskeyError('the 15-minute window has ended: confirm with your passkey');
     if (typeof signature !== 'string' || !/^[A-Za-z0-9_-]{80,200}$/.test(signature)) throw new PasskeyError('the window signature is not base64url', 400);
-    const key = createPublicKey({ key: Buffer.from(w.publicKey, 'base64url'), format: 'der', type: 'spki' });
-    const ok = verifySignature('sha256', Buffer.from(challenge, 'utf8'), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url'));
-    if (!ok) throw new PasskeyError('the window signature does not verify');
+    if (!pageKeySigned(w.publicKey, challenge, signature)) throw new PasskeyError('the window signature does not verify');
     return w.credentialId;
   }
 

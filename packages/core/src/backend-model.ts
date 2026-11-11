@@ -269,6 +269,8 @@ export const MIRROR_WRITE_KINDS = [
   'run-pair-challenge', 'run-pair-register',
   // A Run from the hosted glass: the boat checks a phone's passkey (or that page's window key) and runs only its stored script.
   'run-challenge', 'run', 'run-output',
+  // A line for an interactive run: sealed to the boat and signed by the page key that started the run.
+  'run-line',
   // Stop and Dismiss need no passkey, as on the Mac: stopping is safe and urgent.
   'run-stop', 'run-dismiss',
 ] as const;

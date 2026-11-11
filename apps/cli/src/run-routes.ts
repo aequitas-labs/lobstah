@@ -16,9 +16,9 @@ import {
 } from './run-passkey.js';
 import { RunRegistry, runStdin } from './run-exec.js';
 import { endPairing, pendingPairing } from './run-pairing.js';
-import { RunWindows } from './run-window.js';
-import { openRunInputs } from './run-seal.js';
-import { runInputsText, sha256Hex } from '@lobstah/core';
+import { RunWindows, pageKeySigned } from './run-window.js';
+import { openRunInputs, openSealedInput, runSealKey } from './run-seal.js';
+import { RUN_LINE_SEAL_INFO, isSealedInput, runInputsText, runLineSignedText, sha256Hex } from '@lobstah/core';
 import type { RunInputValues } from '@lobstah/core';
 
 /**
@@ -142,7 +142,6 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         const card = runnableCard(p.key);
         if ('status' in card) return card;
         if (p.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The script this page shows is not the card's: reload it.");
-        if (relayed && card.meta.run.interactive) return refuse(409, 'Interactive cards run from the Mac.');
         // The challenge binds the inputs the page will send, by hash: a relayed Run must, so the wharf can't swap them.
         const inputs = typeof p.inputsSha256 === 'string' && /^[a-f0-9]{64}$/.test(p.inputsSha256) ? p.inputsSha256 : undefined;
         if (relayed && !inputs) return refuse(400, "The inputs' hash is required.");
@@ -190,7 +189,6 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         const card = runnableCard(p.key);
         if ('status' in card) return card;
         if (verified.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The passkey signed a script that is not the card's.");
-        if (relayed && card.meta.run.interactive) return refuse(409, 'Interactive cards run from the Mac.');
         // The inputs must be the ones the challenge bound: a relayed Run always binds them.
         if (relayed && !verified.inputs) return refuse(403, 'The inputs were not confirmed.');
         if (verified.inputs && (!p.inputs || typeof p.inputs !== 'object' || sha256Hex(runInputsText(p.inputs as RunInputValues)) !== verified.inputs))
@@ -202,12 +200,32 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         if ('reason' in input) return refuse(400, input.reason);
         // A passkey confirmation may open the page's 15-minute window, bound to its key.
         const opened = p.window === undefined && p.windowKey !== undefined ? ctx.windows.start(p.windowKey, verified.credentialId, relayed) : undefined;
-        void ctx.runs.start(card.meta, input.values, input.stdin, verified.credentialId, { maxBytes: ctx.maxBytes });
+        // From the hosted glass, only the page key that confirmed this Run may type into it.
+        const lineKey = opened ? (p.windowKey as string) : p.window !== undefined ? ctx.windows.get(p.window, relayed)?.publicKey : undefined;
+        void ctx.runs.start(card.meta, input.values, input.stdin, verified.credentialId, {
+          maxBytes: ctx.maxBytes,
+          ...(relayed ? { relayed: lineKey ? { lineKey } : {} } : {}),
+        });
         return { status: 202, body: { ok: true, running: true, key: card.meta.key, ...(opened ? { window: opened.id, windowUntil: opened.until } : {}) } };
       }
       case 'run-line': {
-        // A line only reaches the card's own live run, from the page that holds the token.
-        const refused = ctx.runs.sendLine(typeof p.key === 'string' ? p.key : '', p.line, p.secret === true);
+        const key = typeof p.key === 'string' ? p.key : '';
+        if (!relayed) {
+          // A line only reaches the card's own live run, from the page that holds the token.
+          const refused = ctx.runs.sendLine(key, p.line, p.secret === true);
+          return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
+        }
+        // From the hosted glass: sealed to this boat, signed by the page key that started the run, and numbered.
+        const hosted = ctx.runs.relayedConsole(key);
+        if (!hosted) return refuse(409, 'That card has no run from the hosted glass waiting for a line.');
+        if (!hosted.lineKey) return refuse(403, 'Only the page that started this run can type into it.');
+        if (!isSealedInput(p.sealed)) return refuse(400, 'A line from the hosted glass must be sealed to the boat.');
+        if (p.attempt !== hosted.attempt || typeof p.seq !== 'number' || !Number.isSafeInteger(p.seq)) return refuse(403, 'That line is for another run.');
+        if (!pageKeySigned(hosted.lineKey, runLineSignedText(key, hosted.attempt, p.seq, p.secret === true, p.sealed), p.signature))
+          return refuse(403, "The line's signature does not verify.");
+        if (p.seq !== hosted.next) return refuse(409, 'That line was already sent, or one before it is missing.');
+        const line = openSealedInput(p.sealed, runSealKey().privateKey, RUN_LINE_SEAL_INFO);
+        const refused = ctx.runs.sendLine(key, line, p.secret === true, p.seq);
         return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
       }
       case 'run-stop': {
