@@ -11,7 +11,7 @@ import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
 import { routeSlackMessage } from './slack-routing.js';
-import { MIRROR_WATCH_MS, MirrorState, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
+import { MIRROR_WATCH_MS, MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
 
@@ -681,15 +681,22 @@ export class Account extends DurableObject<Env> {
   private dropMirrorFiles(cleanup: MirrorCleanup) {
     if (cleanup.keys.length) this.ctx.waitUntil(this.serialFile(() => this.env.FILES.delete(cleanup.keys)).catch(() => {}));
   }
-  /** Tell mirror boats something through their wake sockets: a call waits, or a hosted glass is open. No content travels. */
-  private async mirrorHint(boats: ReadonlySet<string> | 'all', message: { type: 'mirror-call' } | { type: 'mirror-watch'; until: string }) {
+  /**
+   * Tell mirror boats something through their wake sockets: a call waits, a
+   * hosted glass is open, or another boat's walking list changed (only to
+   * boats granted attention, never to the boat that put it). No content travels.
+   */
+  private async mirrorHint(boats: ReadonlySet<string> | 'all' | { except: string },
+    message: { type: 'mirror-call' } | { type: 'mirror-watch'; until: string } | { type: 'attention' }) {
+    const needs: Permission = message.type === 'attention' ? 'attention' : 'mirror';
     for (const socket of this.ctx.getWebSockets()) {
       try {
         const a = socket.deserializeAttachment() as { actor: Actor; hash: string };
-        if (a.actor.kind !== 'boat' || (boats !== 'all' && !boats.has(a.actor.id))) continue;
+        if (a.actor.kind !== 'boat') continue;
+        if (boats instanceof Set ? !boats.has(a.actor.id) : boats !== 'all' && a.actor.id === (boats as { except: string }).except) continue;
         const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
         const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
-        if (!this.get('deleted') && row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], 'mirror')) socket.send(JSON.stringify(message));
+        if (!this.get('deleted') && row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], needs)) socket.send(JSON.stringify(message));
       } catch { /* disconnected */ }
     }
   }
@@ -741,6 +748,17 @@ export class Account extends DurableObject<Env> {
           const actor = run((a) => a);
           await this.env.FILES.put(mirrorSnapshotKey(c.account, actor.id), bytes!, { customMetadata: { etag } });
           return JSON.stringify(run((a, now) => this.mirrorState.recordSnapshot(a, etag, bytes!.byteLength, now)));
+        }
+        // A boat's walking list: kept when it changed, and the boats granted attention are told.
+        if (c.path === 'mirror/attention' && c.method === 'PUT') {
+          const json = attentionJson(c.body);
+          const etag = await digest(json);
+          const put = run((actor, now) => {
+            const r = this.mirrorState.putAttention(actor, json, etag, now);
+            return { ...r, boat: actor.id };
+          });
+          if (put.changed) this.ctx.waitUntil(this.mirrorHint({ except: put.boat }, { type: 'attention' }));
+          return JSON.stringify({ status: put.status, value: put.value });
         }
         const answer = /^mirror\/calls\/([A-Za-z0-9_-]+)\/answer$/.exec(c.path);
         if (answer && c.method === 'POST') {
