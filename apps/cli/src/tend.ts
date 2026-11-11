@@ -13,6 +13,7 @@ import {
   waitingView,
   activityLine,
   dispatchProgress,
+  HELM_ONLY_PROGRESS,
   dispatchQueueReason,
   activityView,
   readActivity,
@@ -1013,6 +1014,8 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
     id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,
     note: p.text, repo: p.repo,
+    // The helm's alone (queued too long): man tend lists it; the pet and the glass, which skip quiet items, do not.
+    ...(HELM_ONLY_PROGRESS.includes(p.state) ? { quiet: true } : {}),
   })));
   // Man-owned member events are represented by the same current stack item,
   // not an independent watch lobster (including obsolete Approval Gate events).

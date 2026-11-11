@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, askDecision, claimNext, enqueue, ensureLayout, executorPath, holdWatch, laneDirs } from '@lobstah/core';
-import { buildTendReport, renderTend } from '../src/tend.js';
+import { addWatch, appendStatus, askDecision, claimNext, enqueue, ensureLayout, executorPath, holdWatch, laneDirs, listNotices, noticeDispatchProgress, statusPath } from '@lobstah/core';
+import { lobItems } from '@lobstah/glass-ui';
+import { buildGlassSnapshot } from '../src/glass.js';
+import { buildTendReport, renderTend, walkingAttention } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { observeSessionWorker, signOnTrap, takeHelm } from '@lobstah/core';
 
@@ -32,6 +34,25 @@ describe('man tend — the fleet verdict', () => {
     expect(r.attention.filter((a) => a.kind === 'dispatch-progress')).toHaveLength(1);
     expect(renderTend(r)).toContain('queued-too-long');
     expect(renderTend(r)).toContain('not signed on');
+  });
+  it('a dispatch queued too long reaches the helm, but not the pet or the glass; a stalled one stays everywhere', () => {
+    heartbeat();
+    enqueue({ id: 'waiting', repo: 'r', brief: 'work', for: 'wt:missing', queuedAt: new Date(Date.now() - 200_000).toISOString() });
+    enqueue({ id: 'silent', repo: 'r', brief: 'work' });
+    expect(claimNext('work', (d) => d.id !== 'silent')).toBe('silent');
+    fs.writeFileSync(statusPath('silent', 'work'), JSON.stringify({ at: new Date(Date.now() - 1300_000).toISOString(), verb: 'working', note: 'old note' }) + '\n');
+    noticeDispatchProgress();
+    // The helm: man tend lists both, and both notices wake man wait and the Stop hook.
+    const r = buildTendReport();
+    expect(renderTend(r)).toContain('queued-too-long');
+    expect(renderTend(r)).toContain('stalled');
+    expect(listNotices().filter((n) => n.kind === 'dispatch-progress').map((n) => n.refId).sort()).toEqual(['silent', 'waiting']);
+    // The pet and the glass's lobs walk what is neither quiet nor acked: the queue is quiet, the stall is not.
+    const progress = Object.fromEntries(walkingAttention(r).filter((a) => a.kind === 'dispatch-progress').map((a) => [a.verb, !!a.quiet]));
+    expect(progress).toEqual({ 'queued-too-long': true, stalled: false });
+    expect(lobItems(walkingAttention(r), { lobs: true, preview: false }).map((i) => i.text)).toEqual([expect.stringContaining('stalled silent')]);
+    // The glass's notices leave the queue out and keep the stall.
+    expect(buildGlassSnapshot().notices.filter((n) => n.kind === 'dispatch-progress').map((n) => n.refId)).toEqual(['silent']);
   });
   it('passes the configured report/decision click route through the pet feed', () => {
     askDecision({ title: 'Choose a route', options: ['A', 'B'], by: 'helm' });

@@ -12,6 +12,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   awaitingReply,
+  helmOnlyNotice,
   listGrants,
   revokeGrant,
   latestRound,
@@ -775,7 +776,8 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     configuredTraps: configuredTrapViews(loadConfig()),
     stats: { catchesToday: stats.catchesToday, totalCatches: stats.totalCatches },
     trapNames: trapNamesShown(traps, dispatches, attention, names),
-    notices: allNotices.slice().reverse(),
+    // A helm-only notice (a dispatch queued too long) is the helm's to act on, not the person's.
+    notices: allNotices.filter((n) => !helmOnlyNotice(n)).reverse(),
     repoKeys: Object.keys(cfg.repos),
     helmOn: liveHelms(cfg.helm.ttlSecs * 1000).length > 0,
     watches,
