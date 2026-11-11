@@ -164,6 +164,10 @@ describe('two mirror boats in one fleet', () => {
     expect(south).toMatch(/south · mirrored 3m ago · asleep/);
     const rows = Array.from(h.doc.querySelectorAll('#dispatches tr.rowhead')).map(text);
     expect(rows.some((r) => r.includes('south (asleep) ·'))).toBe(true);
+    // On a phone, the helm pill's dot turns amber while a boat is asleep.
+    expect(Array.from(h.doc.querySelectorAll('.helmpill .hdot')).map((dot) => dot.className)).toEqual(['hdot warn', 'hdot warn']);
+    const awake = await hosted('#dispatches');
+    expect(Array.from(awake.doc.querySelectorAll('.helmpill .hdot')).map((dot) => dot.className)).toEqual(['hdot ok', 'hdot ok']);
     // Its card refuses an answer before anything is sent.
     const d = await hosted('#decision/' + encodeURIComponent('decision:s0000000'), { southAt: NOW - MIRROR_STALE_MS - 60_000 });
     (Array.from(d.doc.querySelectorAll('.dmodal .dopt'))[0] as unknown as HTMLElement).click();

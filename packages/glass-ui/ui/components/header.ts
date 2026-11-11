@@ -8,6 +8,8 @@ import { GrantChip } from './session-grants.js';
 import { Age, Harness, opener } from './common.js';
 import { capabilities, visibleTabs } from '../backend.js';
 import { host } from '../host.js';
+import { getState } from '../store.js';
+import { PrIcon } from './card.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -89,7 +91,7 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
   const repos = d ? repoList(d) : [];
   const kinds = d ? kindList(d) : [];
   // These tabs have nothing to filter.
-  return html`<div class="controls" style=${tab === 'stats' || tab === 'grants' || tab === 'settings' ? 'display:none' : undefined}>
+  return html`<div class=${'controls tab-' + tab} style=${tab === 'stats' || tab === 'grants' || tab === 'settings' ? 'display:none' : undefined}>
     <select id="f-lane" style=${d && only('dispatches')} value=${st.lane} onChange=${(e: Event) => setPrefs({ lane: value(e) })}>
       <option value="">all lanes</option>
       <option value="work">work</option>
@@ -179,6 +181,112 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
   </div>`;
 }
 
+/**
+ * On a phone (glass.css, under 700px) the header is the name and the helm
+ * pill, then one strip of the fleet's numbers; the tabs, chips and filters
+ * give way to a bar at the bottom: On deck, Reviews, Search and Menu. Wider
+ * screens never show these parts.
+ */
+
+/** The helm as a pill: a dot (amber when its heartbeat is stale or a mirror boat is asleep), its name and its age. */
+function HelmPill({ inp }: { inp: SectionInputs['chips'] }) {
+  const asleep = host().asleep?.() ?? false;
+  return inp.helms.map(
+    ({ x: h, stale }) =>
+      html`<button key=${h.grounds} type="button" class="helmpill" onClick=${opener('helm', h.grounds)} title=${asleep ? 'a boat is asleep: its rows are read-only' : `helm ${h.grounds}`}><span class=${'hdot ' + (stale || asleep ? 'warn' : 'ok')} aria-hidden="true"></span><b>${h.man}</b> <span class="dim">${Age(h.heartbeatAt)}</span></button>`,
+  );
+}
+
+/** One line of the fleet's numbers: catches today, traps, slots in use, the heavy line. */
+function Strip({ d, inp }: { d: GlassSnapshot; inp: SectionInputs['chips'] }) {
+  const parts = [
+    inp.stats && html`<span title="catches today">🦞 ${inp.stats.catchesToday} today</span>`,
+    d.slots && html`<span title="traps">🪤 ${d.slots.traps} ${d.slots.traps === 1 ? 'trap' : 'traps'}</span>`,
+    d.slots && html`<span title="headless slots in use">🎣 ${d.slots.headless} of ${d.slots.limit}</span>`,
+    d.heavy &&
+      d.heavy.tickets.length > 0 &&
+      html`<span title="The machine's line for heavy commands">heavy ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` +${d.heavy.waiting}` : ''}</span>`,
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  return html`<div class="phone-strip">${parts.flatMap((p, i) => (i ? [html`<span class="dim" aria-hidden="true"> · </span>`, p] : [p]))}</div>`;
+}
+
+const svg = (body: string) =>
+  html`<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: body }}></svg>`;
+const DECK_ICON = svg(
+  '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+);
+const SEARCH_ICON = svg('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
+const MENU_ICON = svg('<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>');
+
+/** The bar at the bottom of a phone: On deck and Reviews, then Search and Menu. */
+function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: SectionInputs; tab: GlassTab; st: GlassPrefs; unread: number }) {
+  const [mode, setMode] = useState<'bar' | 'search' | 'menu'>('bar');
+  const root = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    if (mode === 'search') search.current?.focus();
+    if (mode !== 'menu') return;
+    const outside = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setMode('bar');
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setMode('bar');
+    };
+    const away = () => setMode('bar');
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', key, true);
+    window.addEventListener('hashchange', away);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', key, true);
+      window.removeEventListener('hashchange', away);
+    };
+  }, [mode]);
+  // A decision or run card takes the bottom edge with its own dock.
+  if (getState().decisionModal) return null;
+  const reviews = (d?.reviews ?? []).filter((r) => r.stands || r.notification).length;
+  const count = (n: number, label: string) => n > 0 && html`<span class="dbadge" aria-label=${label}>${n}</span>`;
+  if (mode === 'search') {
+    const repos = d ? repoList(d) : [];
+    const chip = (repo: string, label: string) =>
+      html`<button key=${repo || '*'} type="button" class=${'repochip' + (st.repo === repo ? ' on' : '')} aria-pressed=${st.repo === repo} onClick=${() => setPrefs({ repo })}>${label}</button>`;
+    return html`<div class="bottombar searching" ref=${root}>
+      <div class="repochips" aria-label="repos">${chip('', 'all repos')}${repos.map((r) => chip(r, r))}</div>
+      <div class="bbrow"><input ref=${search} type="search" aria-label="search" placeholder="search id · note · brief" value=${st.q} onInput=${(e: Event) => setPrefs({ q: value(e) })} /><button type="button" class="bbclose" aria-label="close search" onClick=${() => setMode('bar')}>✕</button></div>
+    </div>`;
+  }
+  const tabs = visibleTabs();
+  const link = (t: GlassTab, icon: unknown, badge: unknown) =>
+    tabs.includes(t) &&
+    html`<a href=${'#' + t} class=${'bbitem' + (t === tab ? ' on' : '')} aria-current=${t === tab ? 'page' : undefined}><span class="bbicon">${icon}${badge}</span><span class="bblabel">${TAB_LABEL[t]}</span></a>`;
+  const fleet = d && inp && [capabilities().daemon && chips(d, inp.chips)[0], host().fleet?.()];
+  return html`<div class="bottombar" ref=${root}>
+    ${
+      mode === 'menu' &&
+      html`<div class="phonemenu" id="phone-menu" role="menu" aria-label="Spyglass menu">
+        <div class="pmsec">views</div>
+        <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${() => setMode('bar')}>${TAB_LABEL[t]}</a>`)}</nav>
+        ${fleet && html`<div class="pmsec">fleet</div><div class="pmchips">${fleet}</div>`}
+        <div class="pmsec">you</div>
+        <div class="pmyou"><button type="button" class="btn" role="menuitem" onClick=${() => {
+          setMode('bar');
+          showModal('settings', 'browser');
+        }}>⚙ settings</button>${host().signOut && html`<button type="button" class="btn" role="menuitem" onClick=${() => host().signOut!()}>Sign out</button>`}</div>
+      </div>`
+    }
+    <nav class="bbrow" aria-label="Spyglass">
+      ${link('deck', DECK_ICON, count(unread, `${unread} new decision${unread === 1 ? '' : 's'}`))}
+      ${link('reviews', PrIcon, count(reviews, 'reviews in inbox'))}
+      <button type="button" class=${'bbitem' + (st.q || st.repo ? ' on' : '')} onClick=${() => setMode('search')}><span class="bbicon">${SEARCH_ICON}</span><span class="bblabel">Search</span></button>
+      <button type="button" class=${'bbitem' + (mode === 'menu' ? ' on' : '')} aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${MENU_ICON}</span><span class="bblabel">Menu</span></button>
+    </nav>
+  </div>`;
+}
+
 export function Header({
   d,
   inp,
@@ -196,10 +304,12 @@ export function Header({
   unread?: number;
 }) {
   return [
-    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1><span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
+    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1>${d && inp && html`<span class="phone-helm"><${HelmPill} inp=${inp.chips} /></span>`}<span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
+    d && inp && html`<${Strip} d=${d} inp=${inp.chips} />`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<${Navigation} d=${d} tab=${tab} unread=${unread} />`,
     controls(d, tab, st),
+    html`<${BottomBar} d=${d} inp=${inp} tab=${tab} st=${st} unread=${unread} />`,
   ];
 }
 

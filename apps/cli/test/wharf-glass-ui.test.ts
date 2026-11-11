@@ -171,6 +171,15 @@ it('badges only open account decisions, updates on existing polls, and clears on
   expect(badges.at(-1)).toBe(0);
 });
 
+it("the phone menu lists the boats' fleet chips and signs out", async () => {
+  const g = await page('/');
+  await g.click('.bottombar button', 'Menu');
+  expect(g.text('#phone-menu')).toContain('Boats');
+  expect(g.text('#phone-menu')).toContain('helm');
+  await g.click('#phone-menu button', 'Sign out');
+  expect(g.text()).toContain('Continue with GitHub');
+});
+
 it('keeps the hosted glass usable when the OS denies app badges', async () => {
   const g = await page('/', false, {
     badge: async () => {

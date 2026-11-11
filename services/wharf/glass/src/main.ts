@@ -167,6 +167,10 @@ function start(mirror = false): void {
     deck: () => html`<${HumanRequests} backend=${backend} />`,
     boats: () => html`<${Boats} boats=${backend.account()?.boats ?? []} mirrors=${mirror ? (backend as MirrorBackend).boats() : []} action=${action} deleteAccount=${deleteAccount} />`,
     footer: 'wharf · PR watches and repair run on your boats',
+    fleet: () =>
+      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">helm ${backend.account()?.helmLive ? 'live' : 'unknown / no live lease'}</span>`,
+    signOut: () => void signOut(),
+    asleep: () => mirror && (backend as MirrorBackend).boats().some((b) => b.stale),
   });
   if (pending) page.open(pending);
   const live = page;
