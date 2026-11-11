@@ -1,4 +1,4 @@
-import { MIRROR_CALL_MS, mirrorReadAllowed, mirrorWriteAllowed } from '../../../packages/core/src/backend-model.js';
+import { MIRROR_ATTENTION_MAX_BYTES, MIRROR_ATTENTION_MAX_ITEMS, MIRROR_CALL_MS, mirrorReadAllowed, mirrorWriteAllowed } from '../../../packages/core/src/backend-model.js';
 import type { WharfMirrorCall, WharfMirrorCallInput, WharfMirrorSnapshot } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
@@ -14,8 +14,25 @@ export const mirrorSchema = `
   CREATE TABLE IF NOT EXISTS mirror_calls (id TEXT PRIMARY KEY, boat TEXT NOT NULL, data TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS mirror_call_boat ON mirror_calls(boat);
   CREATE TABLE IF NOT EXISTS mirror_files (id TEXT PRIMARY KEY, boat TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, expires INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS mirror_attention (boat TEXT PRIMARY KEY, etag TEXT NOT NULL, at TEXT NOT NULL, data TEXT NOT NULL);
 `;
-export const mirrorTables = ['mirror_snapshots', 'mirror_calls', 'mirror_files'];
+export const mirrorTables = ['mirror_snapshots', 'mirror_calls', 'mirror_files', 'mirror_attention'];
+
+/**
+ * A boat's walking list as it puts it, checked and serialized once: a JSON
+ * array of items, at most MIRROR_ATTENTION_MAX_ITEMS of them and
+ * MIRROR_ATTENTION_MAX_BYTES in all. The wharf never reads inside an item.
+ */
+export function attentionJson(body: unknown): string {
+  const b = object(body);
+  requireThat(Object.keys(b).every((k) => k === 'attention'), 400, 'unexpected field');
+  const list = b.attention;
+  requireThat(Array.isArray(list) && list.length <= MIRROR_ATTENTION_MAX_ITEMS && list.every((i) => i !== null && typeof i === 'object' && !Array.isArray(i)),
+    400, `attention must be a list of at most ${MIRROR_ATTENTION_MAX_ITEMS} items`);
+  const json = JSON.stringify(list);
+  requireThat(json.length <= MIRROR_ATTENTION_MAX_BYTES, 413, 'attention list too large');
+  return json;
+}
 /** How long a browser's read of the mirror list counts as a hosted glass being open. */
 export const MIRROR_WATCH_MS = 30_000;
 /** The most calls a boat may have waiting, and the most a list returns. */
@@ -92,6 +109,7 @@ export class MirrorState {
     this.sql.exec('DELETE FROM mirror_snapshots WHERE boat=?', boat);
     this.sql.exec('DELETE FROM mirror_calls WHERE boat=?', boat);
     this.sql.exec('DELETE FROM mirror_files WHERE boat=?', boat);
+    this.sql.exec('DELETE FROM mirror_attention WHERE boat=?', boat);
     return { keys };
   }
   /** The boat's put, after its bytes are in R2: the new ETag and size, and when. */
@@ -101,6 +119,19 @@ export class MirrorState {
     const at = new Date(now).toISOString();
     this.sql.exec('INSERT OR REPLACE INTO mirror_snapshots VALUES (?,?,?,?)', boat, etag, bytes, at);
     return { status: 200, value: { etag, bytes, at } };
+  }
+  /**
+   * A boat's put of its walking list (`json` from attentionJson, `etag` its
+   * digest). An unchanged list keeps its time and says so: the wharf hints
+   * the other boats only when `changed`.
+   */
+  putAttention(actor: Actor, json: string, etag: string, now: number): Result & { changed: boolean } {
+    const boat = this.boat(actor);
+    const prior = this.sql.exec<{ etag: string; at: string }>('SELECT etag,at FROM mirror_attention WHERE boat=?', boat).toArray()[0];
+    if (prior?.etag === etag) return { status: 200, value: { etag, at: prior.at, changed: false }, changed: false };
+    const at = new Date(now).toISOString();
+    this.sql.exec('INSERT OR REPLACE INTO mirror_attention VALUES (?,?,?,?)', boat, etag, at, json);
+    return { status: 200, value: { etag, at, changed: true }, changed: true };
   }
   /** Before a put: the boat may mirror. */
   authorizeSnapshot(actor: Actor): void { this.boat(actor); }
@@ -143,6 +174,29 @@ export class MirrorState {
         JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY b.name LIMIT 100`).toArray()
         .map((s): MirrorListing => ({ boat: s.boat, name: s.name, at: s.at, etag: s.etag, bytes: s.bytes, key: mirrorSnapshotKey(account, s.boat) }));
       return { ...ok({ boats }), watch: true };
+    }
+    // Every other mirror boat's walking list, for a boat granted attention (permissions.ts checks the grant).
+    if (c.path === 'mirror/attention' && c.method === 'GET') {
+      const boat = this.boat(actor);
+      const boats = this.sql.exec<{ boat: string; name: string; at: string; etag: string; data: string }>(`SELECT a.boat,b.name,a.at,a.etag,a.data FROM mirror_attention a JOIN boats b ON b.id=a.boat
+        JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND a.boat<>? AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY b.name LIMIT 100`, boat).toArray()
+        .map((r) => ({ boat: r.boat, name: r.name, at: r.at, etag: r.etag, attention: JSON.parse(r.data) as unknown[] }));
+      return ok({ boats });
+    }
+    // Ask the boat that owns an item to acknowledge it: one relayed attention-ack call, as a hosted glass click makes.
+    if (c.path === 'mirror/attention/acks' && c.method === 'POST') {
+      const from = this.boat(actor);
+      const b = object(c.body);
+      requireThat(Object.keys(b).every((k) => ['boat', 'key', 'stateHash'].includes(k)), 400, 'unexpected field');
+      const boat = identifier(b.boat), key = text(b.key, 300), stateHash = text(b.stateHash, 200);
+      requireThat(boat !== from, 400, "acknowledge this boat's own items on this boat");
+      requireThat(this.mirrorBoat(boat), 404, 'mirror boat not found');
+      const waiting = this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM mirror_calls WHERE boat=? AND json_extract(data,'$.state') IN ('queued','taken')", boat).one().n;
+      requireThat(waiting < MIRROR_CALL_LIMIT, 429, 'too many calls waiting for this boat');
+      const stored: WharfMirrorCall = { id: crypto.randomUUID(), boat, write: { kind: 'attention-ack', payload: { items: [{ key, stateHash }] } },
+        at: new Date(now).toISOString(), expiresAt: new Date(now + MIRROR_CALL_MS).toISOString(), state: 'queued', by: from };
+      this.save(stored);
+      return { ...ok({ id: stored.id, boat }), hint: boat };
     }
     if (parts[0] === 'mirror' && parts[1] === 'calls') {
       if (parts.length === 2 && c.method === 'POST') {
