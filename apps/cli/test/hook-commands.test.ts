@@ -216,8 +216,12 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(CARD_RULE).toBe('Every question, choice or action for the human (answer, approve, review, run a command, click, sign in, test) goes on a card, with exact steps and any command in the card. Saying it in chat too is fine; chat alone is not. When a card is answered, act on it in the same turn or put the follow-up on a todo.');
     expect(HELM_REMINDER).toContain(CARD_RULE);
     expect(HELM_REMINDER).toContain(RUN_CARD_RULE);
-    expect(HELM_REMINDER).toContain(REVIEW_DRAFT_RULE);
-    expect(HELM_STOP_REMINDER).toBe(`If this reply requires human action, put it on a card. ${REVIEW_DRAFT_RULE}`);
+    // A run card is a kind of card: the Stop reminder stays the plain card rule.
+    expect(HELM_STOP_REMINDER).toBe('If this reply requires human action, put it on a card.');
+    // The review-draft rule is said once, at sign-on: no per-turn reminder carries it.
+    expect(HELM_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
+    expect(HELM_STOP_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
+    expect(charter({ name: 'fleet', repos: ['web'] }).split(REVIEW_DRAFT_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] }).split(CARD_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] })).not.toContain('any question or choice for the human');
   });
