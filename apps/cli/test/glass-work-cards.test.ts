@@ -52,7 +52,7 @@ function review(n: number, over: Partial<GlassReview> = {}): GlassReview {
 }
 
 describe('a PR card', () => {
-  it('shows its title on line 1, then its status, repo, number, checks and age on line 2 with ↗ Open, and no third line', async () => {
+  it('shows its title, then its status on a line of its own, then its repo, number, checks and age with ↗ Open, and nothing more', async () => {
     const d = acceptanceFleet();
     const p = d.prs.find((x) => x.number === 41)!;
     const g = await page(d, '#prs');
@@ -60,9 +60,9 @@ describe('a PR card', () => {
     expect(card.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
     expect(card.querySelector('.gtop .pricon')).toBeTruthy();
     expect(card.querySelector('.gtop .gword')).toBeNull();
-    expect(text(card.querySelector('.gcontext .gword'))).toBe(p.badge.text.toLowerCase());
+    expect(text(card.querySelector('.gtop + .gstate .gword'))).toBe(p.badge.text.toLowerCase());
     expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^📁 web #41 · 4\/4 passed · \d+\w ago$/);
-    expect(card.querySelectorAll(':scope > .gline')).toHaveLength(2);
+    expect(card.querySelectorAll(':scope > .gline')).toHaveLength(3);
     // The gate moved to the modal.
     expect(text(card)).not.toContain('gate');
     // ↗ Open leaves the card alone; the card opens the PR's modal, gate and all.

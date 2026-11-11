@@ -859,10 +859,10 @@ describe('glass page: PRs', () => {
     for (const c of cards) {
       const p = d.prs.find((x) => '#' + x.number === cardNumber(c))!;
       expect(c.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
-      expect(text(c.querySelector('.gcontext .gword'))).toBe(p.badge.text.toLowerCase());
+      expect(text(c.querySelector('.gstate .gword'))).toBe(p.badge.text.toLowerCase());
       expect(text(c.querySelector('.gaction'))).toBe('↗ Open');
-      // Two lines, nothing more: merge readiness, the watch and the gate are in the modal.
-      expect(c.querySelectorAll(':scope > .gline')).toHaveLength(2);
+      // Title, status, context, nothing more: merge readiness, the watch and the gate are in the modal.
+      expect(c.querySelectorAll(':scope > .gline')).toHaveLength(3);
     }
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#41 → #42 → #43 · floor main');
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#30 · floor main · history');

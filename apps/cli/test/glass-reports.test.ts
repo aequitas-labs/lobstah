@@ -346,7 +346,7 @@ describe('glass: cards keep their text inside', () => {
 });
 
 describe('glass: a PR card with a long badge', () => {
-  it('keeps the title alone on line 1, and truncates a long status word on line 2, never below 12ch', async () => {
+  it('keeps the title alone on line 1, and truncates a long status word on its own line, never below 12ch', async () => {
     const d = everyAttentionFleet();
     const p = d.prs.find((x) => x.state === 'OPEN')!;
     p.number = 1826;
@@ -354,7 +354,7 @@ describe('glass: a PR card with a long badge', () => {
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
     const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#1826'))!;
     expect(card.querySelector('.gtop .gword')).toBeNull();
-    const word = card.querySelector('.gcontext .gword')!;
+    const word = card.querySelector('.gstate .gword')!;
     expect(word.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
     const style = (el: Element) => g.window.getComputedStyle(el as never);
     expect(word.className).toContain('long');

@@ -44,7 +44,7 @@ export interface CardProps {
   extra?: Children;
   /** Greyed: signed off, read, done. */
   quiet?: boolean;
-  /** The state word starts line 2 instead of ending line 1, leaving the title the whole first line. */
+  /** The state word gets its own line under the title instead of ending line 1, leaving the title the whole first line. */
   stateBelow?: boolean;
   onClick?: () => void;
   /** More classes for the card itself. */
@@ -75,7 +75,8 @@ export function Card(p: CardProps) {
     html`<span class=${(mark === 'chip' ? 'gchip ' : 'gword ') + p.state.tone + (long ? ' long' : '')} title=${long ? p.state.word : undefined}>${p.state.word}</span>`;
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
     <div class="gline gtop"><b class="gtitle" title=${p.titleAttr}>${p.title}</b>${p.icon && html`<span class="gicon">${p.icon}</span>`}<span class="gfill"></span>${!p.stateBelow && state}</div>
-    ${(p.context || p.action || (p.stateBelow && state)) && html`<div class="gline gcontext">${p.stateBelow && state}<span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
+    ${p.stateBelow && state && html`<div class="gline gstate">${state}</div>`}
+    ${(p.context || p.action) && html`<div class="gline gcontext"><span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
     ${p.now && html`<div class="gline gnow dim"><span class="gtext" title=${p.nowTitle}>${p.now}</span></div>`}
     ${p.foot && html`<div class="gline gfoot dim"><span class="gtext">${p.foot.left}</span>${p.foot.right && html`<span class="gright">${p.foot.right}</span>`}</div>`}
     ${p.extra}
