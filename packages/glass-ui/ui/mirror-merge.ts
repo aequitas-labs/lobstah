@@ -194,6 +194,8 @@ export function mergeMirror(sources: readonly MirrorBoatSnapshot[], now: number,
       }
       if (copy.repoKeys) copy.repoKeys = copy.repoKeys.map((k) => router.label(s.boat, name, k));
     }
+    // A run card runs on its own boat: the card names it.
+    for (const d of copy.decisions ?? []) if (d.run) d.run.boat = s.name;
     // Only the boat this browser runs on raises its traps' windows; every other trap runs elsewhere.
     for (const trap of copy.traps) if (s.boat !== probed && (several || probed !== undefined)) trap.boat ??= s.name;
     return copy;

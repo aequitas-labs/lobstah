@@ -137,7 +137,9 @@ describe('a run card in the glass', () => {
     expect(run.disabled).toBe(true);
     expect(card.textContent).toContain('Set up a passkey in Settings');
     expect(g.$$('#doverlay .dopt').map((b) => b.textContent?.trim())).toEqual(['1Decline']);
-    expect(g.$('#doverlay textarea')).toBeNull();
+    // A run card also takes a reply, sent with Send; Decline sends at once.
+    expect(g.$('#doverlay .ddock textarea')).toBeTruthy();
+    expect(g.$('#doverlay .ddock .dsend')).toBeTruthy();
   });
 
   it('marks and names a zero-width or bidi character by its code point', async () => {

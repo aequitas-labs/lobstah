@@ -1609,6 +1609,78 @@ a.lob {
   font-size: 18px;
   color: var(--dim);
 }
+/* The card's head, body and dock: one box from 700px up (the wrappers add nothing), a page of its own on a phone. */
+.dhead,
+.dbody,
+.ddock {
+  display: contents;
+}
+@media (max-width: 699px) {
+  #doverlay {
+    padding: 0;
+    overflow: hidden;
+  }
+  /* The whole viewport; --dvh follows the visual viewport, so an open keyboard never covers the dock. */
+  .dmodal {
+    display: flex;
+    flex-direction: column;
+    max-width: none;
+    height: var(--dvh, 100dvh);
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+  }
+  .dhead {
+    display: block;
+    flex: 0 0 auto;
+    padding: var(--space-2) 48px var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--line);
+  }
+  .dmodal .x {
+    top: var(--space-2);
+    right: var(--space-2);
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .dhead .dnav {
+    margin: 0;
+    justify-content: space-between;
+  }
+  .dhead .dnav .btn {
+    min-height: 44px;
+  }
+  .dbody {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-3) var(--space-4);
+  }
+  .ddock {
+    display: block;
+    flex: 0 0 auto;
+    max-height: 60%;
+    overflow-y: auto;
+    padding: var(--space-2) var(--space-4) calc(var(--space-2) + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: var(--card);
+  }
+  /* Each option a full-width button: long options read whole, and every one is a big target. */
+  .ddock .doptions {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    margin-top: 0;
+  }
+  .ddock .btn.dopt {
+    width: 100%;
+    min-height: 44px;
+    align-items: center;
+  }
+  .ddock .dsend {
+    min-height: 44px;
+  }
+}
 .dnav {
   display: flex;
   align-items: center;

@@ -198,7 +198,7 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
     void runRunCard(cardKey, run.scriptSha256, inputs);
   };
   return html`<div class="runcard" data-run=${cardKey}>
-    <div class="runhead"><span class="badge warn">run on this Mac</span>${run.proposedBy && html`<span class="dim"> proposed by ${run.proposedBy}</span>`}</div>
+    <div class="runhead"><span class="badge warn">${run.boat ? `Runs on ${run.boat}` : 'run on this Mac'}</span>${run.proposedBy && html`<span class="dim"> proposed by ${run.proposedBy}</span>`}</div>
     <${Script} run=${run} />
     <${Warnings} warnings=${run.warnings} />
     <div class="runmeta dim">
