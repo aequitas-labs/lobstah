@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { dismissReview, reviewRequest } from '../actions.js';
@@ -89,12 +89,16 @@ export const initials = (name: string): string =>
     .map((part) => part[0]!.toUpperCase())
     .join('');
 
-/** The asker's avatar; one that can't load (offline, or blocked) shows their initials instead. */
+/**
+ * The asker's avatar; one that can't load (offline, or blocked) shows their
+ * initials instead. It remembers which url failed rather than resetting in
+ * an effect: a page's Content-Security-Policy refuses an image before the
+ * first effect runs, and a reset there would bring the broken image back.
+ */
 function Avatar({ url, name }: { url: string; name: string }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [url]);
-  if (failed) return html`<span class="rv-initials" aria-hidden="true">${initials(name)}</span>`;
-  return html`<img src=${url} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailed(true)} />`;
+  const [failedUrl, setFailedUrl] = useState<string>();
+  if (failedUrl === url) return html`<span class="rv-initials" aria-hidden="true">${initials(name)}</span>`;
+  return html`<img src=${url} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailedUrl(url)} />`;
 }
 
 const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?? r.requestedBy ?? r.author}>
