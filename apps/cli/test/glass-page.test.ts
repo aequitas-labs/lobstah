@@ -156,12 +156,40 @@ describe('glass page: tabs and hash routing', () => {
         expect(got[label]![1], label).toContain(line);
       }
     };
-    for (const view of ['cards', 'table'] as const) {
-      const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view } });
-      check(dots([...g.$$('#deck section')[4]!.querySelectorAll(view === 'cards' ? '.card' : '.deckline')]));
-      await g.go('#traps');
-      check(dots(view === 'cards' ? g.$$('#traps .card') : g.$$('#traps tr.rowhead')));
-    }
+    const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view: 'table' } });
+    check(dots([...g.$$('#deck section')[4]!.querySelectorAll('.deckline')]));
+    await g.go('#traps');
+    check(dots(g.$$('#traps tr.rowhead')));
+  });
+
+  it("shows each trap card's state as a lowercase chip in the dot's tone, and its work on the third line", async () => {
+    const want: Record<string, [string, string, string]> = {
+      'working trap': ['ok', 'working', ''],
+      'listening trap': ['ok', 'idle', 'listening for work'],
+      'parked trap': ['warn', 'waiting', 'waiting on review'],
+      'stale trap': ['dim', 'idle', 'not listening'],
+    };
+    const chips = (cards: Element[]) =>
+      Object.fromEntries(
+        cards.map((el) => {
+          const chip = el.querySelector('.gchip')!;
+          const tone = [...chip.classList].filter((c) => c !== 'gchip').join(' ');
+          const label = Object.keys(want).find((l) => text(el).includes(l))!;
+          return [label, [tone, text(chip), text(el.querySelector('.gnow'))]];
+        }),
+      );
+    const check = (got: Record<string, [string, string, string]>) => {
+      expect(Object.keys(got).sort()).toEqual(Object.keys(want).sort());
+      for (const [label, [tone, word, now]] of Object.entries(want)) {
+        expect(got[label]![0], label).toBe(tone);
+        expect(got[label]![1], label).toBe(word);
+        expect(got[label]![2], label).toContain(now);
+      }
+    };
+    const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view: 'cards' } });
+    check(chips([...g.$$('#deck section')[4]!.querySelectorAll('.card')]));
+    await g.go('#traps');
+    check(chips(g.$$('#traps .card')));
   });
 
   it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('copies a signed-off $harness resume command in the modal only, not on $view or deck', async ({ harness, view }) => {
@@ -250,7 +278,7 @@ describe('glass page: tabs and hash routing', () => {
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((el) => text(el).includes('wt:t1'))!;
-    expect(text(card.querySelector('.footact'))).toBe('↗ Open');
+    expect(text(card.querySelector('.gaction'))).toBe('↗ Open');
     expect(text(card)).not.toContain('codex://threads/live-session');
     expect(card.querySelectorAll('.cmd')).toHaveLength(0);
     await click(g, card);
@@ -298,9 +326,11 @@ describe('glass page: tabs and hash routing', () => {
       expect(g.$$('#traps button.open')).toHaveLength(0);
       return g.$$('#traps .card').find((c) => text(c).includes('wt:t1'))!;
     };
-    expect(text(await foot())).toContain('Running on studio, only reachable from there');
+    // The card names the boat; it never says where the trap is only reachable from (the modal does).
+    expect(text((await foot()).querySelector('.gfoot'))).toContain('⛵ studio');
+    expect(text(await foot())).not.toContain('only reachable');
     trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
-    expect(text(await foot())).toContain('Running on studio');
+    expect(text((await foot()).querySelector('.gfoot'))).toContain('⛵ studio');
     expect(text(await foot())).not.toContain('only reachable');
     const attach = await page(d, { hash: '#traps' });
     await openRow(attach, '#traps', 'wt:t1');
@@ -309,7 +339,8 @@ describe('glass page: tabs and hash routing', () => {
     trap.attachCommand = undefined;
     Object.assign(trap, { harness: 'codex', link: 'codex://threads/live-session' });
     const card = await foot();
-    expect(text(card)).toContain('Running on studio, only reachable from there');
+    expect(text(card.querySelector('.gfoot'))).toContain('⛵ studio');
+    expect(text(card)).not.toContain('only reachable');
     expect(card.querySelector('a[href^="codex:"]')).toBeNull();
     const desktopTrap = await page(d, { hash: '#traps' });
     await openRow(desktopTrap, '#traps', 'wt:t1');
@@ -516,7 +547,7 @@ describe('glass page: tabs and hash routing', () => {
       const card = trapRow(g, '#traps .card');
       expect(opens(card).map(text)).toEqual(['↗ Open']);
       expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
-      expect(text(card)).toContain('Running on studio');
+      expect(text(card.querySelector('.gfoot'))).toContain('⛵ studio');
       const modal = await page(d, { hash: '#traps' });
       await openRow(modal, '#traps', 'wt:t1');
       expect(modal.$$('#modalbox .route').map(text)).toEqual(['Open live in Claude any device']);
@@ -990,17 +1021,24 @@ describe('glass page: On deck', () => {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const traps = g.$$('#deck section')[4]!;
       const items = [...traps.querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
-      expect(items.map((l) => text(l.querySelector('b')))).toEqual([
-        '🪤 wt:t1',
-        '🪤 wt:t10',
-        '🪤 wt:t3',
-        '🪤 wt:t4',
-        '🪤 wt:t5',
-        '🪤 wt:t6',
-        '🪤 wt:t7',
-        '🪤 wt:t2',
+      // A card leads with the name alone (components/card.ts); a deck line keeps the 🪤.
+      expect(items.map((l) => text(l.querySelector('b')).replace(/^🪤 /, ''))).toEqual([
+        'wt:t1',
+        'wt:t10',
+        'wt:t3',
+        'wt:t4',
+        'wt:t5',
+        'wt:t6',
+        'wt:t7',
+        'wt:t2',
       ]);
-      expect(items.map((l) => l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')))).toEqual([
+      const harnessOrState = (l: Element) =>
+        view === 'cards'
+          ? text(l.querySelector('.gchip')) === 'signed off'
+            ? 'signed off'
+            : l.querySelector('.gicon .harness-icon')?.getAttribute('aria-label')?.toLowerCase()
+          : (l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')));
+      expect(items.map(harnessOrState)).toEqual([
         'claude',
         'claude',
         'codex',

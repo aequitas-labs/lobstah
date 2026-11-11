@@ -715,6 +715,67 @@ export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   return s.kind === 'parked' || s.kind === 'starting' ? 'warn' : 'dim';
 }
 
+/** A trap's state for its card's chip: one lowercase word, in the state dot's tone. */
+export function trapStatus(t: GlassTrap): { word: string; tone: 'ok' | 'warn' | 'bad' | 'dim' } {
+  const s = trapState(t);
+  return { word: s.kind === 'parked' ? 'waiting' : s.kind, tone: trapDotTone(t) };
+}
+
+/** What a trap is doing now, without its state word: its card's third line. */
+export function trapWork(t: GlassTrap): Children {
+  const s = trapState(t);
+  if (s.kind === 'requested') return s.helmOn ? 'waiting for the helm' : 'waiting for a helm';
+  if (s.kind === 'starting') return 'waiting for its session to sign on';
+  if (s.kind === 'start failed') return html`<span class="bad">${LinkedText(s.reason)}</span>`;
+  if (s.kind === 'signed off') return t.heartbeatAt ? ['last seen ', Age(t.heartbeatAt), ' ago'] : null;
+  if (s.kind === 'idle') return s.listening ? 'listening for work' : 'not listening';
+  const place = heavyPlace({ trap: t.trapId, dispatch: s.current.id });
+  if (place) return place;
+  if (s.kind === 'parked') return NamedText(parkedText(s.current));
+  const current = s.current;
+  return [
+    current.title ? LinkedText(current.title, 40) : workTitle(current),
+    current.activity && [' · ', LinkedText(current.activity.summary), ' ', Age(current.activity.at), ' ago'],
+  ];
+}
+
+/** trapWork as plain text: the hover title of its line. */
+export function trapWorkText(t: GlassTrap): string {
+  const s = trapState(t);
+  if (s.kind === 'requested') return s.helmOn ? 'waiting for the helm' : 'waiting for a helm';
+  if (s.kind === 'starting') return `waiting for its session to sign on by ${s.deadline}`;
+  if (s.kind === 'start failed') return s.reason;
+  if (s.kind === 'signed off') return t.heartbeatAt ? `last seen ${ageText(t.heartbeatAt)} ago` : '';
+  if (s.kind === 'idle') return s.listening ? 'listening for work' : 'not listening';
+  const place = heavyPlace({ trap: t.trapId, dispatch: s.current.id });
+  if (place) return place;
+  if (s.kind === 'parked') return parkedText(s.current);
+  return [workTitle(s.current), s.current.activity && `${s.current.activity.summary} ${ageText(s.current.activity.at)} ago`]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** The boat a trap runs on: its own, or this page's machine. */
+export function trapBoat(t: GlassTrap): string | undefined {
+  return t.boat ?? getState().snapshot?.viewer?.machine;
+}
+
+/**
+ * A trap card's ↗ Open: the trap's best route, or nothing. Unlike
+ * windowAction it never shows a note in place of the button; the card's
+ * boat line already says where the trap runs, and the modal has every route.
+ */
+export function trapOpen(t: GlassTrap): Children {
+  if (t.requested || t.starting) return null;
+  if (!t.live) {
+    if (!(desktopSession(t) && t.link) || !sessionLinkOpens()) return null;
+    return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
+  }
+  const [best] = trapRoutes(t);
+  if (!best) return null;
+  return html`<span class="winaction">${best.control('↗ Open')}${focusResult(t)}</span>`;
+}
+
 /** A trap's or worker's place in the heavy line: `in line, 1st`, `running, 6m`, `over limit`. */
 export function heavyPlace(match: { trap?: string; dispatch?: string }): string | undefined {
   const tickets = getState().snapshot?.heavy?.tickets ?? [];

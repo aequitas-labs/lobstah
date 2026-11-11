@@ -78,9 +78,15 @@ it.each(['table', 'cards'])(
     dom = await loadGlass(GLASS_PAGE, d, { now: NOW, prefs: { view } });
     expect(dom.$('.session-grants')).toBeNull();
     expect(dom.$$('.chips .grant-chip').map((x) => x.textContent)).toEqual(['grant · 12m left']);
-    expect(dom.$$('main .grant-chip').map((x) => x.textContent)).toEqual(['grant · 12m left']);
+    // A trap card leaves its grant to the trap's modal; a table row keeps it.
+    expect(dom.$$('main .grant-chip').map((x) => x.textContent)).toEqual(view === 'cards' ? [] : ['grant · 12m left']);
     await dom.go('#traps');
-    const chip = dom.$('main .grant-chip')!;
+    if (view === 'cards') {
+      (dom.$('main .card') as unknown as HTMLElement).click();
+      await dom.settle();
+    }
+    const chip = dom.$(view === 'cards' ? '#modalbox .grant-chip' : 'main .grant-chip')!;
+    expect(chip.textContent).toBe('grant · 12m left');
     expect(chip.getAttribute('href')).toBe('#grants');
     (chip as unknown as HTMLElement).click();
     await dom.settle();
@@ -110,10 +116,10 @@ it("shows the trap name first, keeps repo context secondary, and retains the tab
   if (!('ok' in signed)) throw new Error('unexpected hold');
   const address = `wt:${signed.ok.trapId}`;
   dom = await loadGlass(GLASS_PAGE, { ...emptyFleet(), traps: buildGlassSnapshot().traps }, { now: NOW, hash: '#traps', prefs: { view: 'cards' } });
-  expect(dom.$('main .card .top b')?.textContent).toBe('🪤 amber-gull');
-  expect(dom.$('main .card .top b')?.getAttribute('title')).toBe(address);
-  expect(dom.$('main .card .foot .trap-scope')?.textContent).toBe('web');
-  expect(dom.$('main .card .meta')?.textContent).not.toContain('web');
+  expect(dom.$('main .card .gtitle')?.textContent).toBe('amber-gull');
+  expect(dom.$('main .card .gtitle')?.getAttribute('title')).toBe(address);
+  expect(dom.$('main .card .gcontext .gtext')?.textContent).toBe('web');
+  expect(dom.$('main .card .gtop')?.textContent).not.toContain('web');
   (dom.$('main .card') as unknown as HTMLElement).click();
   await dom.settle();
   expect(dom.$('#overlay h3')?.textContent).toContain('amber-gull');

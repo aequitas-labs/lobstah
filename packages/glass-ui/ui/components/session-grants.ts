@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { Grant } from '@lobstah/core';
 import { html } from '../html.js';
-import { reviewRequest } from '../actions.js';
+import { closeModal, reviewRequest } from '../actions.js';
 
 export function activeSessionGrants(grants: Grant[], now = Date.now()): Grant[] {
   return grants.filter((g) => g.mode === 'session' && !g.revokedAt && !!g.expiresAt && Date.parse(g.expiresAt) > now);
@@ -12,7 +12,12 @@ export function GrantChip({ session, grants = [] }: { session?: string; grants?:
   const covered = activeSessionGrants(grants, now).filter((g) => g.session === session);
   if (!session || !covered.length) return null;
   const remaining = Math.ceil((Math.max(...covered.map((g) => Date.parse(g.expiresAt!))) - now) / 60_000);
-  return html`<a class="badge grant-chip" href="#grants" onClick=${(e: Event) => e.stopPropagation()}>grant · ${remaining}m left</a>`;
+  // From a trap's modal, the chip leads to Grants and closes the modal on its way.
+  const follow = (e: Event) => {
+    e.stopPropagation();
+    closeModal();
+  };
+  return html`<a class="badge grant-chip" href="#grants" onClick=${follow}>grant · ${remaining}m left</a>`;
 }
 
 /** How long a grant has left, in words. */

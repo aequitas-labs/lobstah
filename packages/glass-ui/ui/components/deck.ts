@@ -37,6 +37,7 @@ import {
   windowAction,
 } from './common.js';
 import { GrantChip } from './session-grants.js';
+import { trapCard } from './traps.js';
 import { reportMeta } from './reports.js';
 import { PrAck } from './prs.js';
 import { DeckDecisions } from './decisions.js';
@@ -68,6 +69,8 @@ interface DeckItem {
   href?: string;
   /** A block under the card or line: a starting trap's start commands. */
   extra?: Children;
+  /** The item's own card, used as is in the cards view: a trap's. */
+  card?: Children;
   open?: () => void;
   acked?: boolean;
 }
@@ -88,6 +91,7 @@ function deckItem(it: DeckItem, view: View) {
       ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener"><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
       : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
+  if (view === 'cards' && it.card) return it.card;
   if (view === 'cards')
     return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b title=${it.trap?.address}>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${(it.action || it.trap?.scope) && html`<div class="foot">${it.trap?.scope && html`<span class="trap-scope" title=${it.trap.scope}>${it.trap.scope}</span>`}<span class="footact">${it.action}</span></div>`}</div>`;
   if (it.trap)
@@ -230,6 +234,7 @@ export function Deck({
     metaText: `🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
     action: windowAction(t),
     extra: startCommands(t),
+    card: trapCard(t),
     open: opener('trap', t.trapId),
   }));
   return [

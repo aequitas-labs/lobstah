@@ -36,6 +36,8 @@ import {
   trapOpenRoutes,
 } from './common.js';
 import { can, capabilities, fileUrl } from '../backend.js';
+import { getState } from '../store.js';
+import { GrantChip } from './session-grants.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
@@ -247,6 +249,7 @@ function trapModal(t: GlassTrap) {
             t.repo ?? 'addressed bait only',
             ' · session ',
             t.sessionId ?? '',
+            html`<${GrantChip} session=${t.sessionId} grants=${getState().snapshot?.sessionGrants ?? []} />`,
             ' · signed on ',
             Age(t.signedOnAt),
             ' ago · ',

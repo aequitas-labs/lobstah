@@ -379,9 +379,9 @@ describe('glass: short card badges stay whole', () => {
     const title = landed.querySelector('.top > b')!;
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
     const trap = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
-    const claude = trap.querySelector('.top > .badge')!;
+    // A trap card's harness is the icon after its name (components/card.ts); it never shrinks either.
+    const claude = trap.querySelector('.gicon')!;
     expect(claude.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
-    expect(claude.className).not.toContain('long');
     expect(style(claude).getPropertyValue('flex')).toBe('0 0 auto');
     // Twelve characters is still whole; thirteen is long.
     for (const [verb, long] of [['twelve-chars', false], ['thirteen-char', true]] as const) {
@@ -401,14 +401,14 @@ describe('glass: the open-window button', () => {
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });
-      const button = g.$(view === 'cards' ? '#traps .card .foot .footact button' : '#traps tr.rowhead td:last-child button')!;
+      const button = g.$(view === 'cards' ? '#traps .card .gaction button' : '#traps tr.rowhead td:last-child button')!;
       expect(text(button)).toBe('↗ Open');
       expect(button.className).toBe('btn open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
-    const button = deck.$('#deck .card .foot .footact button')!;
+    const button = deck.$('#deck .card .gaction button')!;
     expect(text(button)).toBe('↗ Open');
     await click(deck, button);
     expect(deck.$('#overlay')!.className).toBe('');

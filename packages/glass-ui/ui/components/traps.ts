@@ -6,35 +6,29 @@ import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { catchCount } from '../../src/glass-diff.js';
 import { html } from '../html.js';
+import { Card } from './card.js';
 import {
-  badgeLong,
-  badgeTitle,
   Harness,
   mailCell,
   NewTrap,
   opener,
   startCommands,
   Table,
+  trapBoat,
   trapNow,
-  trapNowText,
   trapDisplayName,
+  trapOpen,
   trapScope,
   trapRow,
+  trapStatus,
+  trapWork,
+  trapWorkText,
   windowAction,
   DesktopStartAction,
 } from './common.js';
 
 /** The Traps tab: live seats, reserved (starting) ones, and the history of signed-off ones. */
 
-/** A starting trap shows its state; a live one its harness. */
-const badgeText = (t: GlassTrap): string =>
-  t.requested
-    ? 'requested'
-    : t.starting
-      ? t.starting.failedAt
-        ? 'start failed'
-        : 'starting'
-      : (t.harness ?? (t.live ? '' : 'signed off'));
 const dim = (t: GlassTrap): string => (t.live || t.starting ? '' : ' dim');
 
 function row(t: GlassTrap, grants: Grant[]) {
@@ -42,22 +36,32 @@ function row(t: GlassTrap, grants: Grant[]) {
   return html`<tr key=${t.trapId} class=${'rowhead' + dim(t)} onClick=${opener('trap', t.trapId)}><td><b title=${`wt:${t.trapId}`}>${trapDisplayName(t)}</b><div class="trap-address dim">wt:${t.trapId}</div></td><td>${t.configured ? `trap:${t.configured.profile} · ${t.configured.grounds}` : (t.repo ?? '—')}</td><td class="grow">${t.worktree ?? ''}</td><td>${t.harness && html`<${Harness} worker=${t} cls="" compact />`}</td><td>${(t.sessionId ?? '').slice(0, 8)}<${GrantChip} session=${t.sessionId} grants=${grants} /></td><td>${trapNow(t)}${startCommands(t)}</td><td>${r.listen}</td><td>${r.hb}</td><td>${mailCell(t)}</td><td class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</td><td>${windowAction(t)}</td></tr>`;
 }
 
-function card(t: GlassTrap, grants: Grant[]) {
-  const r = trapRow(t);
-  const mail = mailCell(t);
-  const meta = [
-    t.configured
-      ? `${t.configured.profile} · ${t.configured.grounds} · ${t.configured.surface}`
-      : t.repo
-        ? ''
-        : t.live
-          ? 'addressed bait only'
-          : 'history',
-    t.sessionId ? 'session ' + t.sessionId.slice(0, 8) : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  return html`<div key=${t.trapId} class=${'card' + dim(t)} onClick=${opener('trap', t.trapId)}><div class="top"><b title=${`wt:${t.trapId}`}>🪤 ${trapDisplayName(t)}</b>${!t.requested && !t.starting && t.harness ? html`<${Harness} worker=${t} compact />` : html`<span class=${'badge' + badgeLong(badgeText(t))} title=${badgeTitle(badgeText(t))}>${badgeText(t)}</span>`}</div><div class="meta" title=${meta}>${meta}<${GrantChip} session=${t.sessionId} grants=${grants} /></div>${t.worktree && html`<div class="note" title=${t.worktree}>${t.worktree}</div>`}<div class="note" title=${trapNowText(t)}>${trapNow(t)}</div>${startCommands(t)}<div class="foot"><span>${r.listen}${t.live && [' · heartbeat ', r.hb]} · <span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>${mail && [' · ', mail]}</span></div><div class="foot"><span class="trap-scope" title=${trapScope(t)}>${trapScope(t)}</span><span class="footact">${windowAction(t)}</span></div></div>`;
+/**
+ * A trap as a card, the same on every glass and at every width: its name,
+ * harness and state chip; its repo and ↗ Open; what it is doing now; and the
+ * boat it runs on with its catches. The session, worktree, heartbeat, mail
+ * and grants are in the trap's modal.
+ */
+export function trapCard(t: GlassTrap) {
+  const status = trapStatus(t);
+  const boat = trapBoat(t);
+  const scope = trapScope(t) || (t.live ? 'addressed bait only' : '');
+  return html`<${Card}
+    key=${t.trapId}
+    title=${trapDisplayName(t)}
+    titleAttr=${`wt:${t.trapId}`}
+    icon=${t.harness && html`<${Harness} worker=${t} cls="" compact />`}
+    state=${{ word: status.word, tone: status.tone, mark: 'chip' }}
+    context=${scope}
+    contextTitle=${scope}
+    action=${trapOpen(t)}
+    now=${trapWork(t)}
+    nowTitle=${trapWorkText(t)}
+    foot=${{ left: boat && ['⛵ ', boat], right: html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>` }}
+    extra=${startCommands(t)}
+    quiet=${!t.live && !t.starting}
+    onClick=${opener('trap', t.trapId)}
+  />`;
 }
 
 export function Traps({ inp, grants = [] }: { inp: SectionInputs['traps']; grants?: Grant[] }) {
@@ -70,7 +74,7 @@ export function Traps({ inp, grants = [] }: { inp: SectionInputs['traps']; grant
     return [
       head,
       configured,
-      list.length ? html`<div class="cards">${list.map((t) => card(t, grants))}</div>` : html`<div class="empty">no traps soaking</div>`,
+      list.length ? html`<div class="cards">${list.map((t) => trapCard(t))}</div>` : html`<div class="empty">no traps soaking</div>`,
     ];
   return [
     head,
