@@ -5,13 +5,23 @@ import type { Command } from './account.js';
 import { glassPage } from './glass-page.js';
 import { glassInstall } from './glass-install.js';
 
+/**
+ * A report's own page, `/report/<key>`, with the key percent-encoded as the
+ * glass links it (`report:work:<id>` arrives as `report%3Awork%3A<id>`): the
+ * key characters the mirror relays a report's reads for, and no way out of
+ * the one segment.
+ */
+function reportPage(pathname: string): boolean {
+  return /^\/report\/[A-Za-z0-9%._-]{1,300}$/.test(pathname) && !pathname.includes('..') && !/%2e%2e|%2f|%5c/i.test(pathname);
+}
+
 /** Browser-only routes. No account selector, credential issuance or helm seat. */
 export async function glassBrowser(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const install = request.method === 'GET' ? glassInstall(url.pathname) : undefined;
   if (install) return install;
   // The glass, boat approval, and a report's own page (the shared glass opens reports there).
-  if (request.method === 'GET' && (['/', '/device'].includes(url.pathname) || /^\/report\/[A-Za-z0-9_-]{1,128}$/.test(url.pathname))) {
+  if (request.method === 'GET' && (['/', '/device'].includes(url.pathname) || reportPage(url.pathname))) {
     return glassPage();
   }
   requireThat(url.pathname.startsWith('/api/glass'), 404, 'route not found');
