@@ -1,3 +1,4 @@
+import type { AnswerSource } from './decisions.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -17,8 +18,7 @@ export interface LobstahRequest {
   id: string;
   kind: RequestKind;
   at: string;
-  /** `wharf`: a person's verified answer relayed by the wharf, applied by this boat. */
-  from: 'glass' | 'cli' | 'wharf';
+  from: AnswerSource;
   payload: Record<string, unknown>;
   closedAt?: string;
   outcome?: string;
@@ -107,7 +107,7 @@ export const newRequestId = (): string => randomUUID();
 export function writeRequest(
   kind: RequestKind,
   payload: Record<string, unknown>,
-  from: 'glass' | 'cli' | 'wharf' = 'glass',
+  from: AnswerSource = 'glass',
   opts: { id?: string } = {},
 ): LobstahRequest {
   const r: LobstahRequest = { id: opts.id ?? randomUUID(), kind, at: new Date().toISOString(), from, payload };

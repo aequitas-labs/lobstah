@@ -155,5 +155,15 @@ describe('catch, tend, and the glass resolve a reused follow-up', () => {
     appendStatus('fu', 'work', 'done', 'finished');
     const attach = lobstah('attach', 'fu', '--print');
     expect(attach.stdout).toContain(`cwd: ${wtOf('origin')}`);
+
+    // But not beside a process still on that session. PATH holds no harness, so a regression can't start one.
+    fs.mkdirSync(path.join(home, 'watchers'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'watchers', `${encodeURIComponent('19a4f6e4-1341-4c3a-9f2e-0123456789ab')}.json`), JSON.stringify({ sessionId: '19a4f6e4-1341-4c3a-9f2e-0123456789ab', kind: 'trap', pid: process.pid, heartbeatAt: new Date().toISOString() }));
+    const env: NodeJS.ProcessEnv = { ...process.env, LOBSTAH_HOME: home, PATH: path.dirname(process.execPath) };
+    delete env.CLAUDE_CODE_SESSION_ID;
+    const refused = spawnSync(process.execPath, [cli, 'attach', 'fu'], { encoding: 'utf8', env, timeout: 10_000 });
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr + refused.stdout).toContain('not attaching fu');
+    expect(refused.stderr + refused.stdout).toContain(`listener pid ${process.pid}`);
   });
 });

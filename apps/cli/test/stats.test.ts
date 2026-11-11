@@ -9,7 +9,7 @@ import { readStats, statsOutput } from '../src/stats.js';
 import { applyCull, planCull } from '../src/cull.js';
 import type { AddressInfo } from 'node:net';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
-import { catchCount } from '../src/glass-diff.js';
+import { catchCount } from '../../../packages/glass-ui/src/glass-diff.js';
 import { pollBody } from '../src/glass-poll.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 

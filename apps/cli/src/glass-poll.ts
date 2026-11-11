@@ -10,7 +10,7 @@ import type {
   GlassSnapshot,
   Notice,
 } from '@lobstah/core';
-import { LANDED_WINDOW_MS } from './glass-diff.js';
+import { LANDED_WINDOW_MS } from '@lobstah/glass-ui';
 
 /**
  * What /data sends on each 2s poll, from a full snapshot: dispatch
@@ -48,6 +48,7 @@ export function dispatchSummary(x: GlassDispatch | GlassDispatchSummary): GlassD
     ...(evidence.deliveredTo !== undefined ? { deliveredTo: evidence.deliveredTo } : {}),
     ...(evidence.prUrl !== undefined ? { prUrl: evidence.prUrl } : {}),
     ...(evidence.prUrls !== undefined ? { prUrls: evidence.prUrls } : {}),
+    ...(evidence.prPositions !== undefined ? { prPositions: evidence.prPositions } : {}),
     ...(evidence.pr?.url !== undefined ? { pr: { url: evidence.pr.url } } : {}),
   };
   return {

@@ -262,9 +262,16 @@ of the stack are recorded too:
 
 - a gh stack: the `gh-stack` state in the dispatch's checkout (from
   `gh stack init` or `gh stack submit`) lists a stack that holds the PR;
-- a base chain: the dispatch pushed two or more branches, and
-  `gh pr view <branch>` links their PRs to the reported one by base
-  branch.
+- pushed branches: every branch recorded for the dispatch is checked for a
+  PR, including separate PRs outside the stack;
+- observed stacks: the normal PR watch discovers both directions of an
+  owned branch chain and adds each member to the dispatch's evidence and
+  watches at the same cadence, without a second polling loop.
+
+Stack positions are saved with the evidence, so retargeting after a squash
+does not erase their order. Tracker reports and live status comments list
+every PR with its position, and update when new PRs are found even if the
+dispatch's status verb has not changed.
 
 The report prints `prs` with every PR it recorded. `lobstah catch` and
 `lobstah status <id>` list each PR (`prs`), `man tend` lists each with its
@@ -512,7 +519,8 @@ dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
 and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
-PRs, Reviews, Reports, Notices, and Stats. The Stats tab shows catches per day as a
+PRs, Reviews, Reports, Grants, Notices, Stats, and Settings, a read-only view of the
+effective config with its secrets masked. The Stats tab shows catches per day as a
 53-week heatmap, with today, this week, the total, and the top traps; it
 reads `stats.json` from `GET /data/stats` and sends nothing. The Reports tab lists every report, unacked first,
 then newest first, and the repo filter and the search box (title, author,
@@ -606,7 +614,32 @@ the helm files to keep.
   in it.
   `lobstah todo done <id>` and `lobstah todo drop <id>` close one;
   `lobstah todo ls` (or bare `todo`) lists the open ones, and `--all` adds
-  closed ones. They are stored per grounds in `todos/<grounds>.json` with
+  closed ones. `todo add "<text>" --at <time>` or `--in <duration>` gives one
+  a time, and `todo snooze <id> --until <time|duration>` sets or moves it. A
+  todo with a time is quiet and never stale until then. At its time, `man wait`
+  and the Stop hook wake the helm once with a `todo-due` event, and it stays
+  overdue until `done`, `snooze` or `drop`. Times read in `[helm].timezone`, in
+  24-hour form: `fri 09:00`, `tomorrow 09:00`, `09:00`, `thu` (09:00 that day),
+  `2026-11-06 09:00`, `2026-11-06T14:00Z`. A day name means a goal day, which
+  runs from 04:00 to 04:00. So `fri 01:00` is the late end of Friday.
+  `todo add "<text>" --every "daily 09:00"`, `"weekdays 09:00"` or
+  `"weekly fri 09:00"` repeats one, and `--every` stands alone. `todo done`
+  moves it to the next occurrence, `todo skip <id>` passes one without counting
+  it as done, and `todo drop` ends it. Missed occurrences fire once when lobstah
+  next checks, with no backfill. A done on a series counts in `goals recap-data`.
+  `todo add "<text>" --when <trigger>` wakes on any of its triggers, and
+  `--when-all` on all of them; mixing the two is refused. `--at` or `--in` beside
+  either is a deadline backstop. The triggers are `card:<key>` (answered or
+  withdrawn), `dispatch:<id> done|blocked|needs-decision|failed`,
+  `pr:<owner>/<repo>#<n> merged|closed|green` and `trap:<name> free`. A `merged`
+  wait also fires if the PR closes without merging, and the event names that
+  outcome. A trigger
+  lobstah can't observe is refused and not stored. A PR trigger with no watch
+  registers one owned by the helm and says so; that watch also wakes the helm on
+  failing checks and requested changes. Each daemon tick reads only the local
+  record a trigger names, so it fires at most one interval late. A trigger whose
+  record is gone fires with what was lost. A todo waiting only on a trigger keeps
+  the age rule; a snooze quiets it and its unmet triggers keep listening. They are stored per grounds in `todos/<grounds>.json` with
   created and updated times. `man tend`, `man report`, and the glass deck
   show the open ones, and `man brief` re-injects them beside the charter at
   every session start and after compaction. A todo marked done stays in
@@ -679,8 +712,14 @@ the same rule.
   for a question such as "cut 0.6.0?"), who asked (`helm`), and when. It is
   stored in `~/.lobstah/decisions/<rid>/`: `decision.json`, `detail.md`, and
   `attachments/`. The claimed helm alone may ask.
+- **Checklists.** Task items (`- [ ] step` or `- [x] step`), including nested
+  items, are tickable in decision details and filed reports. Ticks are saved
+  with the document and shared between desktop and phone; ticking never
+  answers a card. `lobstah man ask --show <card-or-report-key>` prints the
+  checked count and every item's state. Answered and withdrawn cards retain
+  read-only checklists at their existing glass links.
 - **Standing.** A decision stands until it is answered or the helm withdraws
-  it with `lobstah man ask --withdraw <key>`, which removes its directory. A
+  it with `lobstah man ask --withdraw <key>`, which retains a read-only archive. A
   newer `man ask` on the same dispatch keeps the older decisions: each shows
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
   standing decision; a key that is not standing is refused.
@@ -742,6 +781,25 @@ the same rule.
 - **Cull.** `lobstah cull` removes a decision once its answer is older than
   the retention window, with the `decision-answer` request and its files. A
   standing decision is never culled.
+
+### Run cards
+
+When the human must run a command on this machine, save it in a script and
+offer a run card. Use plain cards for steps the glass cannot run, such as
+app clicks or phone sign-ins. For a package publish, save the commands in
+`/tmp/publish.sh` and offer the script.
+
+```sh
+lobstah man ask --title "Publish the package" --run /tmp/publish.sh \
+  --interactive --cwd /path/to/package --timeout 10m --output exit
+```
+
+Use `--input NAME:secret` for secrets (values via stdin, never in the script),
+`--interactive` for logins/prompts, `--cwd` for the working folder,
+`--timeout` for the time limit, and `--output scrubbed|exit` for the result.
+The person reviews and runs the script from the glass. Scripts read declared
+inputs from stdin, one line each in `--input` order. `scrubbed` returns
+scrubbed output to the helm. `exit` returns only the exit code.
 
 ### The periodic report
 
@@ -1287,6 +1345,7 @@ lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --con
                                                     # save how a throw starts it; `default` or `key=` clears
 lobstah man throw <trap> [--timeout <secs>]         # bring one trap back; wait until it listens
 lobstah man throw <trap> --bypass                   # a person, at a terminal: this start skips permission checks
+lobstah man throw <trap> --remote-control           # this start can be driven from a phone: Claude's Remote Control, or Codex's shared server
 lobstah man throw --all                             # every eligible trap in your grounds, at once
 lobstah man throw --repo <key>                      # every eligible trap of one repo
 lobstah man throw --new --repo <key> --count N      # N fresh traps (see "Starting a new trap")
@@ -1294,6 +1353,15 @@ lobstah man throw --dry-run <trap>... | --all | --repo <key> | --new ...
                                                     # what a throw would do; launches nothing (--plan too)
 lobstah man roster forget <trap> [--force]          # remove a stowed trap's record, worktree, and ref
 ```
+
+`man throw --remote-control` makes one start reachable from a phone, new
+(`--new`) or returning. A Codex trap attaches to Codex's shared app-server, so its
+pane and a paired phone drive one thread. Other traps are unchanged unless
+`[soak].codexRemoteControl = true`, which covers every Codex start, including
+scheduled and batch throws. It saves hook and folder trust in
+`~/.codex/config.toml`. Pair the phone once with `codex remote-control pair` at your
+own terminal, which grants the whole host. See
+[Codex's shared server](harness/codex.md#on-codexs-shared-server) for what changes.
 
 `man throw --dry-run` (or `--plan`) launches nothing and writes nothing. Each
 row says what a throw would do and why:
@@ -1349,12 +1417,16 @@ launched twice. Otherwise:
 fresh or rostered:
 
 - Claude Code: `--permission-mode auto`.
-- Codex: `--approve-for-me`, which asks for approval on request and routes
-  each request to Codex's automatic reviewer, inside the workspace-write
-  sandbox. This is the nearest Codex has to Claude Code's auto mode. The
-  sandbox also gets the network (`-c sandbox_workspace_write.network_access=true`)
-  and, with `--add-dir`, lobstah's home and the repo's git directory: a trap
-  pushes, opens PRs, commits from a linked worktree, and reports.
+- Codex:
+  `--sandbox danger-full-access --ask-for-approval on-request -c approvals_reviewer="auto_review"`.
+  There is no OS sandbox. Codex asks for approval on request and routes each
+  request to its automatic reviewer. This is the nearest Codex has to Claude
+  Code's auto mode. The execpolicy rules in `$CODEX_HOME/rules` still apply:
+  `prompt` goes to the reviewer and `forbidden` is refused.
+
+A headless Codex dispatch is not a thrown trap and keeps the workspace-write
+sandbox. `heavy/` under lobstah's home is added as a writable directory, so its
+heavy commands can join the line.
 
 The mode is set, first match wins, by:
 
@@ -1568,3 +1640,34 @@ disk  warn  412.3 GB free on ~/.lobstah/worktrees; minFreeGB 10; retentionDays 1
   after a reboot.
 - An honest six-verb status contract, validated at the write path, so the
   liaison never has to parse prose to know where things stand.
+
+## Configured repo-less traps
+
+Declare one `[traps.<name>]` profile per grounds with `harness`, `surface`
+(`claude-desktop` or `terminal`), and `grounds`. `cwd` is an optional existing
+plain folder; `maxInstances` defaults to 1. See the configuration reference.
+A configured session joins with `lobstah soak --trap <name> --session <own-id>
+--wait`. Its identity, inbox, park, stow and ghost history survive without a
+git worktree. Forget frees an idle instance and keeps its folder and history.
+
+Route a bounded app or browser step with:
+
+```sh
+lobstah dispatch --for trap:desk --grounds fleet --assist <original-id> --brief /tmp/inspection.md
+```
+
+The catch stays queued for that profile. The original worker keeps repo and
+PR ownership; a terminal child report returns its findings and attachments
+to the original dispatch once. Results arriving after the parent ends stay
+filed and notify the helm. Configured catches accept `--report` and
+`--attach`, rather than PR evidence. Tool approval remains with the harness
+Auto reviewer.
+
+`lobstah man throw trap:desk` files one app-start card for an absent Claude
+Desktop profile. Open its prefilled Code link on the Mac, confirm the folder
+if Claude asks, and send the sign-on instruction. The catch stays queued
+until that session signs on and parks. Returning sessions use their saved
+app link when available; they are never cold-started in a terminal. Opening
+a card is not sign-on. Roster, status, tend and glass show the profile,
+grounds, surface, capacity, queued catches and current state. Desk catches
+share one host UI lease across grounds; the person's keyboard remains free.

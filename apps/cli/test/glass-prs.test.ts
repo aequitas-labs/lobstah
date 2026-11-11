@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PrEvidence, PrRecord } from '@lobstah/core';
 import { deriveGlassPrs } from '../src/glass-prs.js';
-import { prBadgeClass } from '../src/glass-diff.js';
+import { prBadgeClass } from '../../../packages/glass-ui/src/glass-diff.js';
 
 // The page's badge class: the same function the glass bundle imports.
 

@@ -15,3 +15,6 @@ build/
 .dev.vars.*
 apps/cli/src/glass-page.generated.ts
 services/wharf/src/glass-page.generated.ts
+# This deployment's own wharf ids (copy wrangler.local.example.jsonc), and the merged config the deploy writes from them.
+services/wharf/wrangler.local.jsonc
+services/wharf/wrangler.deploy.jsonc

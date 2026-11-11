@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import { hasOpenCatch, helmLabel, listHelms, listTraps, trapLabel } from '@lobstah/core';
 import type { HelmRegistration, TrapRegistration } from '@lobstah/core';
+import type { CodexHookList } from './codex-hook-list.js';
 import { LOBSTAH_HOOKS, readHookRuns } from './hook-runs.js';
 import type { LobstahHook } from './hook-runs.js';
 import { installedClaudePlugin, installedCodexPlugin, UPDATE_COMMAND } from './plugin-version.js';
@@ -40,6 +41,8 @@ interface Opts {
   env?: NodeJS.ProcessEnv;
   home?: string;
   now?: number;
+  /** Codex's own view of its hooks (see listCodexHooks); without it, this reads Codex's config only. */
+  listed?: CodexHookList;
 }
 
 const readJson = (file: string): unknown => {
@@ -112,13 +115,22 @@ export function codexHookHash(hook: CodexHook, matcher: string | undefined, h: H
   return `sha256:${createHash('sha256').update(JSON.stringify(sortKeys(identity))).digest('hex')}`;
 }
 
+/** Codex's `trustStatus` in lobstah's terms, or undefined when Codex gave none lobstah knows. */
+function reportedTrust(status: string | undefined): HookReadiness['trusted'] | undefined {
+  if (status === 'trusted') return 'trusted';
+  if (status === 'modified') return 'changed';
+  if (status === 'untrusted') return 'untrusted';
+  return undefined;
+}
+
 /**
  * Codex: the plugin's hooks and Codex's own record of them. Codex runs a
  * plugin hook only after the user trusts it in `/hooks`; it records trust
  * under `[hooks.state."<plugin>:hooks/hooks.json:<event>:<group>:<handler>"]`
  * with a `trusted_hash`, and asks again when the hook's hash changes (a
- * plugin update that changes a hook). Read-only: nothing here writes
- * Codex's config.
+ * plugin update that changes a hook). From Codex 0.166 it also asks again when
+ * the plugin's contents change, so with `listed` Codex's own answer wins.
+ * Read-only: nothing here writes Codex's config.
  */
 export function codexHooks(opts: Opts = {}): HarnessHooks {
   const env = opts.env ?? process.env;
@@ -138,14 +150,16 @@ export function codexHooks(opts: Opts = {}): HarnessHooks {
   const events: CodexHook[] = [...LOBSTAH_HOOKS, ...CODEX_EXTRA_HOOKS.filter((h) => declared?.[h]?.length)];
   const hooks = events.map((hook): HookReadiness => {
     const at = lobstahHandler(declared?.[hook]);
-    const entry = at ? state[`lobstah@lobstah:hooks/hooks.json:${snake(hook)}:${at[0]}:${at[1]}`] : undefined;
+    const key = at ? `lobstah@lobstah:hooks/hooks.json:${snake(hook)}:${at[0]}:${at[1]}` : undefined;
+    const entry = key ? state[key] : undefined;
+    const reported = key ? opts.listed?.get(key) : undefined;
     const group = at ? declared![hook]![at[0]]! : undefined;
     const current = at ? codexHookHash(hook, group!.matcher, group!.hooks![at[1]]!) : undefined;
     const trustedHash = typeof entry?.trusted_hash === 'string' && entry.trusted_hash.length > 0 ? entry.trusted_hash : undefined;
     return {
       hook,
       installed: at !== undefined,
-      trusted: !trustedHash ? 'untrusted' : trustedHash === current ? 'trusted' : 'changed',
+      trusted: reportedTrust(reported?.trustStatus) ?? (!trustedHash ? 'untrusted' : trustedHash === current ? 'trusted' : 'changed'),
       enabled: entry?.enabled !== false,
       ...(runs[`codex:${hook}`] ? { lastRun: runs[`codex:${hook}`] } : {}),
     };

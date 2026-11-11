@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as detector from '../src/glass-diff.js';
+import * as detector from '../../../packages/glass-ui/src/glass-diff.js';
 
 // The PR modal's pure data selection, imported exactly as the page's bundle imports it.
 type View = {

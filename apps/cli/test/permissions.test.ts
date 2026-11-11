@@ -51,7 +51,12 @@ describe('the profile', () => {
     expect(p.environment.join('\n')).toMatch(/glass \(127\.0\.0\.1:4949\) is the user's own UI on this machine\. A `decision-answer` event with `from: glass`/);
     expect(p.environment).toHaveLength(3);
     expect(p.deny).toEqual([]);
-    expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)']);
+    expect(p.allow).toEqual(['Read(//h/.lobstah/worktrees/**)', 'Edit(//h/.lobstah/worktrees/**)', 'Bash(lobstah permissions propose *)', 'Bash(lobstah dispatch:*)', 'Bash(lobstah send:*)',
+      'Bash(lobstah report:*)', 'Bash(lobstah todo:*)', 'Bash(lobstah status:*)', 'Bash(lobstah inbox:*)',
+      'Bash(lobstah soak:*)', 'Bash(lobstah stow:*)', 'Bash(lobstah catch:*)', 'Bash(lobstah ls:*)',
+      'Bash(lobstah logs:*)', 'Bash(lobstah reports:*)', 'Bash(lobstah goals:*)', 'Bash(lobstah attention:*)',
+      'Bash(lobstah prs:*)', 'Bash(lobstah reviews:*)',
+    ]);
   });
 
   it('writes absolute rule paths the way Claude Code matches them, Windows drives included', () => {
@@ -145,11 +150,53 @@ describe('lobstah permissions', () => {
     const applied = JSON.parse(fs.readFileSync(file, 'utf8'));
     expect(applied.model).toBe('opus');
     expect(applied.permissions.allow[0]).toBe('Bash(npm run test *)');
-    expect(readOwned(file).allow).toHaveLength(3);
+    expect(readOwned(file).allow).toHaveLength(19);
     expect(await run(undefined)).toContain("lobstah's profile is applied and current");
     await run('remove', { yes: true });
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(USER);
     expect(readOwned(file)).toEqual(EMPTY_PROFILE);
+  });
+
+  it('adds only missing relay rules, backs up the file, and preserves unrelated keys and rule order', async () => {
+    const base = baseProfile();
+    const relayRules = ['Bash(lobstah dispatch:*)', 'Bash(lobstah send:*)'];
+    const settings = {
+      ...USER,
+      autoMode: { environment: ['$defaults', ...base.environment], enabled: true },
+      permissions: {
+        ...USER.permissions,
+        allow: [...USER.permissions.allow, ...base.allow.filter((rule) => !relayRules.includes(rule))],
+        deny: ['Bash(user-denied:*)'],
+        ask: ['Bash(user-confirmed:*)'],
+      },
+    };
+    const original = JSON.stringify(settings);
+    fs.writeFileSync(file, original);
+    const out = await run('apply', { yes: true });
+    const backup = /backup: (.*)/.exec(out)![1]!;
+    expect(fs.readFileSync(backup, 'utf8')).toBe(original);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
+      ...settings,
+      permissions: { ...settings.permissions, allow: [...settings.permissions.allow, ...relayRules] },
+    });
+    expect(out).toContain('added: 2');
+    expect(out).toContain('removed: 0');
+  });
+
+  it('leaves current settings byte-for-byte unchanged when both relay rules are already present', async () => {
+    const base = baseProfile();
+    const settings = {
+      ...USER,
+      autoMode: { environment: ['$defaults', ...base.environment] },
+      permissions: { ...USER.permissions, allow: [...base.allow].reverse() },
+    };
+    const original = JSON.stringify(settings, null, 4);
+    fs.writeFileSync(file, original);
+    const before = fs.statSync(file);
+    expect(await run('apply', { yes: true })).toContain("lobstah's profile is applied and current");
+    expect(fs.readFileSync(file, 'utf8')).toBe(original);
+    expect(fs.statSync(file).mtimeMs).toBe(before.mtimeMs);
+    expect(fs.existsSync(path.join(process.env.LOBSTAH_HOME!, 'backups'))).toBe(false);
   });
 
   it('refuses a settings file that is not valid JSON, leaving it as it was', async () => {
@@ -167,6 +214,21 @@ describe('doctor', () => {
     expect(permissionsRow(NO_EXT, env)).toMatchObject({ status: 'ok' });
     expect(permissionsRow({ ...NO_EXT, deny: ['Bash(env pull *)'] }, env)).toMatchObject({ status: 'warn', detail: expect.stringMatching(/out of date \(1 to add, 0 to remove\)/) });
     expect(permissionsRow(NO_EXT, { CLAUDE_CONFIG_DIR: path.join(home, 'nowhere') })).toMatchObject({ status: 'skip' });
+  });
+
+  it.each(['Bash(lobstah dispatch:*)', 'Bash(lobstah send:*)'])('doctor warns when %s is missing and names the repair', (missingRule) => {
+    const base = baseProfile();
+    fs.writeFileSync(file, JSON.stringify({
+      autoMode: { environment: ['$defaults', ...base.environment] },
+      permissions: { allow: base.allow.filter((rule) => rule !== missingRule) },
+    }));
+    expect(permissionsRow(NO_EXT, person())).toMatchObject({
+      status: 'warn',
+      detail: expect.stringContaining('`lobstah permissions apply`'),
+    });
+    expect(planProfile(JSON.parse(fs.readFileSync(file, 'utf8')), base).changes).toEqual([
+      { op: '+', at: 'permissions.allow', entry: missingRule },
+    ]);
   });
 
   it('desired is the base profile plus config, each entry once', () => {

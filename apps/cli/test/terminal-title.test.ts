@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ITERM_TITLE_SCRIPT, TERMINAL_TITLE_SCRIPT, setTerminalTitle, titleCommand } from '../src/terminal-title.js';
+import { ITERM_TITLE_SCRIPT, TERMINAL_TITLE_SCRIPT, setTerminalTitle, titleCommand, trapTabTitle } from '../src/terminal-title.js';
 
 const env = {}; // the suite sets LOBSTAH_TERMINAL_TITLE=0; these calls use a fake runner
 const terminal = { termProgram: 'Apple_Terminal', tty: 'ttys007' };
@@ -25,6 +25,30 @@ describe('terminal tab titles', () => {
     });
     expect(ITERM_TITLE_SCRIPT).toContain('set name of s to newTitle');
     expect(ITERM_TITLE_SCRIPT).toContain('if (tty of s as string) is targetTty then');
+  });
+
+  it("names a trap's tab after its repo, and keeps a repo key that won't fit a title out of it", () => {
+    expect(trapTabTitle('amber-gull', 'homebase')).toBe('homebase · amber-gull');
+    expect(titleCommand(terminal, trapTabTitle('amber-gull', 'lavish-axi'), 'darwin')?.args.at(-1)).toBe('lavish-axi · amber-gull');
+    expect(trapTabTitle('amber-gull', undefined)).toBe('amber-gull');
+    expect(trapTabTitle('amber-gull', 'x" & do shell script "id')).toBe('amber-gull');
+    expect(titleCommand(terminal, 'x" · amber-gull', 'darwin')).toBeUndefined();
+  });
+
+  it("titles a pane on lobstah's tmux server, and leaves any other tmux alone", () => {
+    const pane = { termProgram: 'tmux', tmuxPane: '%7', tmuxSocket: '/private/tmp/tmux-501/lobstah' };
+    expect(titleCommand(pane, 'homebase · amber-gull', 'linux')).toEqual({
+      target: 'tmux',
+      file: 'tmux',
+      args: ['-S', '/private/tmp/tmux-501/lobstah', 'select-pane', '-t', '%7', '-T', 'homebase · amber-gull'],
+    });
+    expect(titleCommand({ ...pane, tmuxSocket: '/private/tmp/tmux-501/default' }, 'amber-gull', 'darwin')).toBeUndefined();
+    expect(titleCommand({ termProgram: 'tmux', tmuxPane: '%7' }, 'amber-gull', 'darwin')).toBeUndefined();
+    expect(titleCommand({ ...pane, tmuxPane: '%7;kill-server' }, 'amber-gull', 'darwin')).toBeUndefined();
+    // tmux runs a #(...) in a title, so nothing but a trap's title reaches it.
+    expect(titleCommand(pane, '#(id) · amber-gull', 'darwin')).toBeUndefined();
+    // A stowed trap's pane still shows its session, so it keeps the title.
+    expect(titleCommand(pane, '', 'darwin')).toBeUndefined();
   });
 
   it('clears with an empty title', () => {

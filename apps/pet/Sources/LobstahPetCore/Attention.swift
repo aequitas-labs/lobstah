@@ -21,6 +21,8 @@ public struct AttentionItem: Decodable, Equatable {
   /** pr:* kinds: the PR this pet walks for. */
   public var prUrl: String? = nil
   public var reviewUrl: String? = nil
+  /** A stack's short line: its title, count and state. Absent otherwise, and from an older lobstah. */
+  public var headline: String? = nil
   public var petOpen: String? = nil
   /** The hash of the state the item stands on; a new one re-stands an acked item. */
   public var stateHash: String? = nil
@@ -121,10 +123,24 @@ public struct AttentionItem: Decodable, Equatable {
     }
   }
 
-  /** Bubble text: the label, then the note. */
+  /** Bubble text: the label, then the headline or the note. */
   public var bubbleText: String {
-    let body = note ?? verb
+    let body = headline ?? note ?? verb
     return kindLabel.map { "\($0) · \(body)" } ?? body
+  }
+
+  /** Bubble text as it fits three lines of the bubble. */
+  public var bubbleLine: String {
+    let text = bubbleText
+    return text.count > 80 ? String(text.prefix(79)) + "…" : text
+  }
+
+  /** The item standing for this one and `extra` more when too many walk: same target, shorter text. */
+  public func standingFor(extra: Int) -> AttentionItem {
+    var item = AttentionItem(id: id, verb: verb, note: (headline ?? note ?? verb) + " (+\(extra) more)", key: key, kind: kind, prUrl: prUrl, stateHash: stateHash)
+    item.petOpen = petOpen
+    item.reviewUrl = reviewUrl
+    return item
   }
 }
 

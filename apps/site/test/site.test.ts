@@ -43,7 +43,7 @@ describe('the site build helpers', () => {
   });
 
   it('finds every glass rule the page reuses', () => {
-    const glass = fs.readFileSync(path.join(here, '..', '..', 'cli', 'glass', 'glass.css'), 'utf8');
+    const glass = fs.readFileSync(path.join(here, '..', '..', '..', 'packages', 'glass-ui', 'ui', 'glass.css'), 'utf8');
     expect(() => pickRules(glass, GLASS_RULES)).not.toThrow();
   });
 
