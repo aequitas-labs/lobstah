@@ -382,6 +382,15 @@ describe('glass: the decision modal', () => {
     expect(card(g, KEY)).toBeTruthy();
     expect(g.$('#overlay')!.className).not.toBe('open');
   });
+
+  it('a lob click acknowledges the item it walked, as a pet click does', async () => {
+    const d = fleet();
+    const g = await page(d, { hash: '#prs', post: ok });
+    await click(g, g.$$('#lobs a.lob').find((l) => l.getAttribute('href') === `#decision/${encodeURIComponent(KEY)}`));
+    const acks = g.posts().map((p) => JSON.parse(p.body) as { kind: string; payload: unknown }).filter((p) => p.kind === 'attention-ack');
+    const shown = d.attention.find((a) => a.key === KEY)!;
+    expect(acks).toEqual([{ kind: 'attention-ack', payload: { items: [{ key: KEY, stateHash: shown.stateHash }] } }]);
+  });
 });
 
 describe('glass: decision hotkeys', () => {

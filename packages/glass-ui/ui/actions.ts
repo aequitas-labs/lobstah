@@ -542,11 +542,17 @@ export function setView(v: string): void {
 
 export const setLobs = (v: string): void => setPrefs({ lobs: v === 'on' });
 
-/** Hide a clicked lob in this browser until its state hash changes. Deferred, so a PR lob's link still follows. */
+/**
+ * A clicked lob: hidden in this browser at once (deferred, so a PR lob's link
+ * still follows), and acknowledged where its ack lives, so the pet and every
+ * other glass stop walking it too. A new state re-shows it everywhere. A
+ * source that cannot acknowledge, or an ack that fails, leaves the local hide.
+ */
 export function hideLob(key: string, hash: string): void {
   const lobHidden = { ...getState().lobHidden, [key]: hash };
   saveLobHidden(lobHidden);
   setTimeout(() => setState({ lobHidden }), 0);
+  if (can('attention-ack')) void ackAttention('attention-ack', [{ key, stateHash: hash }]).catch(() => {});
 }
 
 export async function copyText(text: string): Promise<boolean> {
@@ -559,16 +565,20 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /** Acknowledge the PR/stack states one stack group showed, using the guarded request path. */
-export async function ackPrAttention(items: Array<{ key: string; stateHash: string }>): Promise<void> {
+export const ackPrAttention = (items: Array<{ key: string; stateHash: string }>): Promise<void> => ackAttention('pr-ack', items);
+
+/** Acknowledge the attention states this page showed, and mark them acked in the snapshot it holds. */
+async function ackAttention(kind: 'pr-ack' | 'attention-ack', items: Array<{ key: string; stateHash: string }>): Promise<void> {
   const token = getState().snapshot?.focusToken;
   if (!token) throw new Error('Reload the glass before acknowledging.');
   const response = await backend().request<{
     ok: boolean;
     reason?: string;
     acked?: Array<{ key: string; stateHash: string; at: string; by: string }>;
-  }>('pr-ack', { items: items.map(({ key, stateHash }) => ({ key, stateHash })) }, token);
+  }>(kind, { items: items.map(({ key, stateHash }) => ({ key, stateHash })) }, token);
   const result = response.body;
-  if (!response.ok || !result.ok) throw new Error(result.reason ?? 'Could not acknowledge PRs.');
+  if (!response.ok || !result.ok)
+    throw new Error(result.reason ?? (kind === 'pr-ack' ? 'Could not acknowledge PRs.' : 'Could not acknowledge this.'));
   const snapshot = getState().snapshot;
   if (snapshot)
     setState({

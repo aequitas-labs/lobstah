@@ -207,6 +207,8 @@ function attentionOf(glass: WharfGlass, jobs: readonly DispatchView[], now: numb
       ageSecs: age(d.at),
       at: d.at,
       note: d.title,
+      // Seen on the wharf (opened, or its lob clicked): it stops walking, as on every boat.
+      ...(d.ack ? { acked: d.ack } : {}),
     }));
   const questions = jobs
     .filter((j) => j.state === 'active' && (j.status?.verb === 'needs-decision' || j.status?.verb === 'blocked'))
@@ -221,6 +223,7 @@ function attentionOf(glass: WharfGlass, jobs: readonly DispatchView[], now: numb
       at: j.status!.at,
       ...(j.status!.note ? { note: j.status!.note } : {}),
       ...(j.repo ? { repo: j.repo } : {}),
+      ...(j.ack?.status === j.status!.at ? { acked: { at: j.ack.at, by: j.ack.by } } : {}),
     }));
   return [...decisions, ...questions];
 }
