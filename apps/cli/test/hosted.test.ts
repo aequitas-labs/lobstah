@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, loadConfig, refreshHostedViews, readHostedViews, readStatsStore, WharfBackend } from '@lobstah/core';
+import { agentEnvironment, appendStatus, backendScope, claimNext, enqueue, ensureLayout, glassOrigin, groundsErrors, listWatches, loadConfig, refreshHostedViews, readHostedViews, readStatsStore, WharfBackend } from '@lobstah/core';
 import { hostedGlassLink } from '../src/hosted-view.js';
 import { ackItemExists } from '../src/acks.js';
 import { commandScope, wharfCommand } from '../src/wharf-commands.js';
@@ -283,6 +283,19 @@ it('refuses hosted soak without a daemon, and dispatch without a usable remote, 
   await expect(wharfCommand('dispatch', [], opts, loadConfig())).rejects.toThrow('no usable origin remote');
   expect(fetcher).not.toHaveBeenCalled();
 });
+it('the helm answers a person’s work request: dispatch --request fulfills it, request-respond asks back', async () => {
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => Response.json(JSON.parse(String(init.body)))); vi.stubGlobal('fetch', fetcher);
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--repo': 'remote', '--brief-text': 'Fix the flaky checkout', '--session': 'helm', '--request': 'slack-D1-1700000000-000100' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  expect(await wharfCommand('dispatch', [], opts, loadConfig())).toBe(true);
+  expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toMatchObject({ repo: 'remote', request: 'slack-D1-1700000000-000100' });
+  expect(await wharfCommand('wharf', ['request-respond', 'slack-D1-1700000000-000100', 'Which', 'repo?'], opts, loadConfig())).toBe(true);
+  expect(fetcher.mock.calls[1][0]).toContain('/requests/slack-D1-1700000000-000100/respond');
+  expect(JSON.parse(String(fetcher.mock.calls[1][1].body))).toEqual({ text: 'Which repo?' });
+  expect(parseArgs('wharf', ['request-respond', 'r', 'text', '--grounds', 'away'])?.error).toBeUndefined();
+  expect(parseArgs('dispatch', ['--request', 'r', '--repo', 'remote'])?.error).toBeUndefined();
+});
 it('wharf recover prints only its submitted recovery, without listing recoveries or falling through the outer switch', async () => {
   const recovery = { verb: 'done', note: 'preserved result' };
   const file = path.join(home, 'recovery.json'); fs.writeFileSync(file, JSON.stringify(recovery));
@@ -366,6 +379,20 @@ it('accepted wharf completion retries update only local catch counters, never te
   expect(readStatsStore()).toMatchObject({ totalCatches: 1, utc: { catches: 1, usage: { withHelm: 1, onWharf: 1 } } });
   expect(fs.existsSync(path.join(home, 'telemetry.json'))).toBe(false);
   expect(fetcher.mock.calls).toHaveLength(2);
+});
+it('a wharf report with --pr watches that PR on this boat, owned by the helm, once; a refused report watches nothing', async () => {
+  let refuse = false;
+  vi.stubGlobal('fetch', vi.fn(async () => (refuse ? Response.json({ error: 'dispatch no longer active' }, { status: 409 }) : Response.json({}))));
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  const report = (prs: string[], key: string) => wharfCommand('report', ['job', 'done', 'Finished'],
+    { opt: (f: string) => ({ '--grounds': 'away', '--request-key': key } as Record<string, string>)[f], has: (f: string) => ['--grounds', '--request-key'].includes(f), values: (f: string) => (f === '--pr' ? prs : []) }, loadConfig());
+  expect(await report(['https://github.com/test/repo/pull/7', 'https://example.test/not-a-pr'], 'first')).toBe(true);
+  expect(listWatches().map((w) => ({ key: w.key, owner: w.owner, brief: w.brief }))).toEqual([{ key: 'pr:test/repo#7', owner: 'man', brief: undefined }]);
+  await report(['https://github.com/test/repo/pull/7'], 'again');
+  expect(listWatches()).toHaveLength(1);
+  refuse = true;
+  await expect(report(['https://github.com/test/repo/pull/8'], 'refused')).rejects.toThrow();
+  expect(listWatches().map((w) => w.key)).toEqual(['pr:test/repo#7']);
 });
 it('worker reports upload only their dispatch files and human-request CLI verbs carry the helm lease', async () => {
   const markdown = path.join(home, 'report.md'); fs.writeFileSync(markdown, '# Evidence');

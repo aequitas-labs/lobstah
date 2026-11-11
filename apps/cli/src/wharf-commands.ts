@@ -7,6 +7,7 @@ import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 import { hostedItem, isHostedKey } from './hosted-view.js';
 import { wharfRepoIdentity } from './wharf-repo.js';
+import { registerWharfPrWatch } from './pr-watch.js';
 import { wharfLogin } from './wharf-login.js';
 import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
 import { readHookStdin } from './soak-site.js';
@@ -145,7 +146,9 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       const targetBoat = opts.opt('--boat') ? await boatId(opts.opt('--boat')) : undefined;
       print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, repoRemote: wharfRepoIdentity(config, repo), grounds: scope.grounds, brief, lane: opts.has('--chore') ? 'chore' : 'work',
         ...(targetBoat ? { boat: targetBoat } : {}),
-        for: opts.opt('--for')?.replace(/^wt:/, ''), followUp: opts.opt('--follow-up'), harness: opts.opt('--harness'), model: opts.opt('--model'), effort: opts.opt('--effort') }, key()));
+        for: opts.opt('--for')?.replace(/^wt:/, ''), followUp: opts.opt('--follow-up'), harness: opts.opt('--harness'), model: opts.opt('--model'), effort: opts.opt('--effort'),
+        // A person's work request this dispatch answers: the wharf fulfills it with this dispatch, once.
+        request: opts.opt('--request') }, key()));
       break;
     }
     case 'ls': print(await backend.list()); break;
@@ -178,6 +181,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       const r: ReportInput = { verb, ...(pos.length > 2 ? { note: pos.slice(2).join(' ') } : {}), ...waiting,
         evidence: { prUrls: opts.values('--pr'), files } };
       await backend.report(pos[0] ?? '', r, base);
+      // Once the wharf has the report, this boat watches its PRs.
+      for (const url of r.evidence?.prUrls ?? []) registerWharfPrWatch(url);
       if (verb === 'done') {
         // Only this boat's accepted report counts. Never send telemetry or create its ID here.
         try {
@@ -252,6 +257,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
         case 'requests': print(await backend.request('requests')); break;
         case 'request-receipt': print(await backend.request(`requests/${encodeURIComponent(pos[1] ?? '')}/receipt`, {}, key())); break;
         case 'request-execute': print(await backend.request(`requests/${encodeURIComponent(pos[1] ?? '')}/execute`, {}, key())); break;
+        // Answer a work request without dispatching it: a question back, or why not. The person sees it in their Slack thread.
+        case 'request-respond': print(await backend.request(`requests/${encodeURIComponent(pos[1] ?? '')}/respond`, { text: pos.slice(2).join(' ') }, key())); break;
         case 'renew': print(await backend.request('workers/renew', { worker }, key())); break;
         case 'heartbeat': await backend.heartbeat(pos[1] ?? '', key()); print({ renewed: true }); break;
         case 'receipt': await backend.receipt(pos[1] ?? '', pos[2] ?? '', key()); print({ received: true }); break;

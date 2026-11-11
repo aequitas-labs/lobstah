@@ -135,7 +135,7 @@ function HumanRequests({ backend }: { backend: HostedBackend }) {
   if (!requests.length) return null;
   return html`<div class="sec">Your requests</div>${requests.map(
     (r) =>
-      html`<div class="msg" key=${r.id}><b>${r.kind}</b> · ${r.dispatch ?? r.boat ?? r.document} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`,
+      html`<div class="msg" key=${r.id}><b>${r.kind}</b> · ${r.dispatch ?? r.boat ?? r.document ?? 'new work'} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`,
   )}`;
 }
 

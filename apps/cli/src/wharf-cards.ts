@@ -3,6 +3,7 @@ import { backendScopes, listNotices, loadConfig, repoKey, standingDecisions, wha
 import type { BackendScope, Config, DecisionMeta, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardLink, Notice, TendAttention } from '@lobstah/core';
 import { buildTendReport } from './tend.js';
 import { isHostedKey } from './hosted-view.js';
+import { applyWharfAnswers } from './wharf-answers.js';
 
 /** The wharf takes at most this many cards from one boat. */
 export const BOAT_CARDS_MAX = 100;
@@ -40,6 +41,10 @@ function permissionSummary(d: DecisionMeta): string {
   return [asked, who, always && `Allow always: ${always}`].filter(Boolean).join('\n');
 }
 
+/** A permission card's option as the card action it is. Any other option (a session's "Allow for 1h") keeps its exact words. */
+export function permissionAction(option: string): GlassCardAction {
+  return option === 'Allow once' ? { kind: 'allow-once' } : option === 'Allow always' ? { kind: 'allow-always' } : option === 'No' ? { kind: 'deny' } : { kind: 'answer', option };
+}
 /** One local attention item as a card, or nothing when it is the wharf's own. */
 export function attentionCard(a: TendAttention, decision: DecisionMeta | undefined, grounds: string, now: number): GlassCardInput | undefined {
   // A wharf item is already the wharf's card; a boat never restates it.
@@ -47,7 +52,7 @@ export function attentionCard(a: TendAttention, decision: DecisionMeta | undefin
   const permission = !!decision?.permission;
   const family: GlassCardFamily | undefined = a.kind.startsWith('pr:') ? 'pr' : permission ? 'permission' : FAMILY[a.kind];
   if (!family) return undefined;
-  const actions: GlassCardAction[] = permission ? [{ kind: 'allow-once' }, { kind: 'allow-always' }, { kind: 'deny' }]
+  const actions: GlassCardAction[] = permission ? (decision!.options ?? []).map(permissionAction)
     : family === 'decision' ? [...(decision?.options ?? []).map((option): GlassCardAction => ({ kind: 'answer', option })), { kind: 'answer-text' }]
     : family === 'question' ? [{ kind: 'answer-text' }]
     : a.acked || family === 'dispatch' ? [] : [{ kind: 'seen' }];
@@ -115,7 +120,9 @@ let checkedAt = 0;
  * grounds it holds stated as empty still hears it, so its cards end.
  */
 export async function publishBoatCards(now = Date.now(), log: (m: string) => void = () => {}): Promise<void> {
-  if (now - checkedAt < CARDS_CHECK_MS) return;
+  // Answers people gave this boat's cards come first: what one changes is restated at once.
+  const applied = await applyWharfAnswers(now, log);
+  if (!applied && now - checkedAt < CARDS_CHECK_MS) return;
   checkedAt = now;
   const cfg = loadConfig();
   const scopes = backendScopes(cfg).filter((s) => s.kind === 'wharf');

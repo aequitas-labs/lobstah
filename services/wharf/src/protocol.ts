@@ -45,13 +45,13 @@ export function configuredTarget(value: unknown): ConfiguredTrapTarget {
 
 export function dispatchInput(value: unknown): DispatchInput {
   const b = object(value);
-  keys(b, ['id', 'repo', 'repoRemote', 'target', 'grounds', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort']);
+  keys(b, ['id', 'repo', 'repoRemote', 'target', 'grounds', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort', 'request']);
   const target = b.target === undefined ? undefined : configuredTarget(b.target);
   if (target) requireThat(['repo', 'repoRemote', 'followUp', 'harness', 'model', 'effort'].every((key) => b[key] === undefined), 400, 'configured target cannot carry repository or launch metadata');
   const d: DispatchInput = { id: identifier(b.id), brief: text(b.brief, 48000), ...(target ? { target, for: `trap:${target.profile}`, grounds: target.grounds } : { repo: identifier(b.repo), repoRemote: repoIdentity(b.repoRemote), ...(b.grounds ? { grounds: identifier(b.grounds) } : {}) }) };
   if (target && b.for !== undefined) requireThat(b.for === d.for, 400, 'configured address must match its profile');
   if (b.lane !== undefined) { requireThat(b.lane === 'work' || b.lane === 'chore', 400, 'invalid lane'); d.lane = b.lane; }
-  for (const k of ['for', 'boat', 'followUp', 'harness', 'effort'] as const) {
+  for (const k of ['for', 'boat', 'followUp', 'harness', 'effort', 'request'] as const) {
     if (b[k] !== undefined && !(target && k === 'for')) d[k] = identifier(b[k]);
   }
   if (b.model !== undefined) { const model = text(b.model, 128); requireThat(/^[A-Za-z0-9._-]+$/.test(model), 400, 'invalid model identifier'); d.model = model; }

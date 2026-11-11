@@ -1013,13 +1013,16 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
     id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,
     note: p.text, repo: p.repo,
+    // The helm always gets it (man tend, its verdict); it walks on the pet and the glass only when attentionKinds names it.
+    ...(cfg.attentionKinds.includes('dispatch-progress') ? {} : { quiet: true }),
   })));
   // Man-owned member events are represented by the same current stack item,
   // not an independent watch lobster (including obsolete Approval Gate events).
   const stackKeys = new Set(attention.flatMap((a) => a.stack?.members.map((m) => `watch:${m.key}`) ?? []));
   for (let i = attention.length - 1; i >= 0; i--) if (attention[i]!.kind === 'watch' && stackKeys.has(attention[i]!.key)) attention.splice(i, 1);
   // attentionKinds (config.toml) picks what walks; watch events are
-  // machinery wakes and always stand.
+  // machinery wakes and always stand. Dispatch progress stands for the helm
+  // too, and is quiet (never walks) unless attentionKinds names it.
   const enabled = new Set<string>(cfg.attentionKinds);
   const walking = attention.filter((a) => a.kind === 'watch' || a.kind === 'dispatch-progress' ||
     (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) : enabled.has(a.kind)));

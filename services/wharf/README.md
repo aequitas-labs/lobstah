@@ -42,6 +42,9 @@ the live Worker has no `GITHUB_CLIENT_ID`. Neither prints an id.
 | `AUTH_SECRET` | secret | random, at least 32 characters: Better Auth signing and the encryption of stored GitHub tokens |
 | `TOKEN_SECRET` | secret | random, separate: signs retryable dispatch capabilities. Rotating it stops old claim responses from being rebuilt; issued token hashes stay valid until their leases end |
 | `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app's client secret |
+| `SLACK_CLIENT_ID` | var | the private Slack app's public client ID. Empty, the glass offers no Slack link |
+| `SLACK_CLIENT_SECRET` | secret, optional | the Slack app's client secret. With the client ID, a person can link their own Slack from the boat list |
+| `SLACK_SIGNING_SECRET` | secret, optional | the Slack app's signing secret. Unset, the API host answers no Slack call |
 | `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
 | `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/`; its id is in the git-ignored `wrangler.local.jsonc` |
 | `FILES` | R2 | `lobstah-wharf-files`, evidence files |
@@ -61,6 +64,23 @@ wharf runs its own. Sign-in asks GitHub for `read:user` and `user:email`.
 Local development needs a second OAuth app whose callback is
 `http://localhost:8787/api/auth/callback/github`.
 
+The Slack app is optional and private to one workspace: at api.slack.com,
+create an app, keep distribution off, and under OAuth & Permissions add the
+redirect URL `https://glass.lobstah.dev/api/slack/oauth` and the bot scopes
+`chat:write`, `im:write` and `im:history`. Turn on App Home's Messages tab. Put
+its client ID in `SLACK_CLIENT_ID` and its client secret in
+`SLACK_CLIENT_SECRET`. Each person then links their own Slack from the boat
+list; the install stores the workspace's bot token sealed under `AUTH_SECRET`,
+and links no one but the person who connected.
+
+For asking for work from Slack, also set Event Subscriptions' Request URL to
+`https://api.lobstah.dev/slack/events` with the bot event `message.im`, set
+Interactivity's Request URL to `https://api.lobstah.dev/slack/interactions`,
+and put the app's signing secret in `SLACK_SIGNING_SECRET`. Each call is
+checked against that secret before anything is read. A linked person's
+top-level message in their DM with the app becomes a work request for the
+helm, with a receipt in its thread; replies in that thread add to it.
+
 Work in `services/wharf`. R2 must be enabled on the account in the dashboard
 first. Secrets go in on standard input, never as arguments:
 
@@ -73,6 +93,8 @@ pnpm run wrangler d1 migrations apply lobstah-wharf-auth --remote
 openssl rand -base64 48 | npx wrangler secret put AUTH_SECRET
 openssl rand -base64 48 | npx wrangler secret put TOKEN_SECRET
 npx wrangler secret put GITHUB_CLIENT_SECRET
+npx wrangler secret put SLACK_CLIENT_SECRET   # only with a Slack app
+npx wrangler secret put SLACK_SIGNING_SECRET  # only with a Slack app
 npx wrangler secret put GITHUB_CLIENT_ID           # or a variable in the dashboard; once
 pnpm run wrangler deploy --dry-run
 pnpm run deploy
@@ -98,6 +120,13 @@ tokenEnv = "LOBSTAH_WHARF_TOKEN"
 ```
 
 `tokenEnv` names an override variable; leave it unset to use the saved login.
+A person's answer to one of this boat's cards from Slack or the hosted glass
+reaches the boat as a verified receipt, applied only to the exact card state
+answered and only once. Allow once and Allow always from the wharf write the
+same grant a click in the local glass would; `remoteAnswers = false` in this
+block keeps Allow to the local glass only, while No, decision answers and seen
+still arrive.
+
 A repo belongs to one grounds, and with no `[grounds.*]` configured every repo
 sits in the implicit `home` grounds. Configuring any grounds replaces it, so
 list every repo you still want steered. A configured `home` is a new grounds:

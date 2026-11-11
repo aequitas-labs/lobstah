@@ -1,5 +1,5 @@
 import { DecisionError, GrantError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision, reconcilePermissionCards, withDecisionLock } from '@lobstah/core';
-import type { AnswerSource, DecisionAnswer, DecisionMeta, DecisionUpload, Lane } from '@lobstah/core';
+import type { AnswerSource, DecisionAnswer, DecisionMeta, DecisionUpload, Grant, Lane } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { applyPermissionAnswer, permissionAnswerAllowed } from './grants-cli.js';
 import { buildTendReport } from './tend.js';
@@ -18,7 +18,9 @@ export interface AnswerRequest {
   text?: string;
   attach?: string[];
   uploads?: DecisionUpload[];
+  /** `wharf` only from the boat's receipt applier, after its own checks (wharf-answers.ts). */
   by: AnswerSource;
+  receipt?: string;
 }
 
 /** A standing, unframed question for `<lane>:<id>`, as the glass shows it. */
@@ -26,14 +28,14 @@ function standingQuestion(key: string) {
   return buildTendReport().attention.find((a) => a.kind === 'question' && a.key === key);
 }
 
-export function answerKey(key: string, req: AnswerRequest): { decision: DecisionMeta; answer: DecisionAnswer } {
+export function answerKey(key: string, req: AnswerRequest): { decision: DecisionMeta; answer: DecisionAnswer; grant?: Grant } {
   reconcilePermissionCards();
   if (readDecision(key)?.permission) return withDecisionLock(key, () => answerStandingKey(key, req));
   return answerStandingKey(key, req);
 }
 
 /** Validate and record an answer, holding the lifecycle lock for a permission card. */
-function answerStandingKey(key: string, req: AnswerRequest): { decision: DecisionMeta; answer: DecisionAnswer } {
+function answerStandingKey(key: string, req: AnswerRequest): { decision: DecisionMeta; answer: DecisionAnswer; grant?: Grant } {
   const maxBytes = loadConfig().limits.attachmentMaxBytes;
   if (key.startsWith('decision:')) {
     // A permission card: only the glass may allow. An allow writes the grant and tells the trap.
@@ -50,8 +52,8 @@ function answerStandingKey(key: string, req: AnswerRequest): { decision: Decisio
     }
     const answer = answerDecision({ key, ...req, maxBytes });
     const decision = readDecision(key)!;
-    if (decision.permission) applyPermissionAnswer(decision, answer);
-    return { decision, answer };
+    const grant = decision.permission ? applyPermissionAnswer(decision, answer) : undefined;
+    return { decision, answer, ...(grant ? { grant } : {}) };
   }
   const q = /^(work|chore):[A-Za-z0-9-]+$/.test(key) ? standingQuestion(key) : undefined;
   if (!q) throw new DecisionError(`no standing decision or question ${key}`, 404);

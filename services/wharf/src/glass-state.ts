@@ -2,7 +2,12 @@ import { WHARF_REVIEW_REQUEST_KINDS } from '../../../packages/core/src/backend-m
 import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
 import { LEASE_MS, identifier, object, repoIdentity, requireThat, text, tmuxPane } from './protocol.js';
 import { cardSchema, cardTables } from './cards.js';
+import { slackSchema, slackTables } from './slack-outbox.js';
 import type { Actor, Command } from './account.js';
+import type { SlackMessageIn } from './slack-ingress.js';
+
+/** A person's request for work waits this long for the helm: a sleeping boat can still take it. */
+export const WORK_REQUEST_MS = 7 * 86400_000;
 
 export const glassSchema = `
   CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -10,8 +15,9 @@ export const glassSchema = `
   CREATE TABLE IF NOT EXISTS worker_details (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS dispatch_acks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   ${cardSchema}
+  ${slackSchema}
 `;
-export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', ...cardTables];
+export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', ...cardTables, ...slackTables];
 type Result = { status: number; value: unknown };
 type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
@@ -74,6 +80,85 @@ export class GlassState {
       if (!r.kind.startsWith('review-')) this.hooks.event('human-request-expired', r.dispatch, r.id);
     }
   }
+  /**
+   * A linked person's message in their DM with the app. A top-level message
+   * asks for new work: one request per Slack message, so a retried delivery
+   * finds the same request. A reply in that request's thread adds to it; a
+   * reply under anything else (a card's message) is not a request and does
+   * nothing. The helm is woken; nothing runs until it acts.
+   */
+  slackMessage(m: SlackMessageIn, person: string, now: number): { request?: string; ignored?: string } {
+    const top = m.threadTs ?? m.ts;
+    const id = `slack-${m.channel}-${top.replace('.', '-')}`;
+    const r = this.get<WharfHumanRequest>('human_requests', id);
+    const at = new Date(now).toISOString();
+    if (!m.threadTs) {
+      if (r) return { request: id };
+      const request: WharfHumanRequest = { id, kind: 'work', by: person, at, expiresAt: new Date(now + WORK_REQUEST_MS).toISOString(), state: 'queued',
+        text: m.text, origin: { team: m.team, user: m.user, channel: m.channel, ts: m.ts } };
+      this.put('human_requests', id, request); this.hooks.event('human-request', undefined, id);
+      return { request: id };
+    }
+    if (!r || r.kind !== 'work' || !['queued', 'received'].includes(r.state) || Date.parse(r.expiresAt) <= now) return { ignored: 'not an open request thread' };
+    if (r.followUps?.some((f) => f.source === m.ts)) return { request: id };
+    r.followUps = [...(r.followUps ?? []), { text: m.text, at, source: m.ts }].slice(-20);
+    this.put('human_requests', id, r); this.hooks.event('human-request-update', undefined, id);
+    return { request: id };
+  }
+  /** The Slack message a work request came from, for its receipt to reply in that thread. */
+  requestOrigin(id: string): WharfHumanRequest['origin'] {
+    return this.get<WharfHumanRequest>('human_requests', id)?.origin;
+  }
+  /** The helm dispatched a work request: it is fulfilled by that dispatch, once. */
+  fulfillWork(id: string, dispatch: string, now: number) {
+    const r = this.get<WharfHumanRequest>('human_requests', identifier(id));
+    requireThat(r && r.kind === 'work' && ['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'no open work request to dispatch');
+    r.state = 'fulfilled'; r.dispatch = dispatch; r.outcome = `dispatched as ${dispatch}`;
+    this.put('human_requests', r.id, r);
+  }
+  /**
+   * A person's answer to a standing decision, from the glass or their Slack:
+   * human input that never takes, renews or steals a helm seat. The first
+   * answer stands; a later one is refused.
+   */
+  answerDecision(id: string, optionValue: unknown, textValue: unknown, person: string, now: number): WharfDocument {
+    const d = this.document(id);
+    requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, "This decision is already closed. Reload to see what's open.");
+    const option = optionValue === undefined ? undefined : text(optionValue, 80), answer = textValue === undefined ? undefined : text(textValue, 20000).trim();
+    requireThat(option === undefined || d.options?.includes(option), 400, 'not a decision option'); requireThat(option || answer, 400, 'answer needs an option or text');
+    d.answer = { ...(option ? { option } : {}), ...(answer ? { text: answer } : {}), at: new Date(now).toISOString(), by: person };
+    this.put('documents', d.id, d); this.hooks.event('decision-answer', d.dispatch, d.id); return d;
+  }
+  /** Seen, by a boat with read or the person. The first ack stands. No event and no helm seat. */
+  ackDocument(id: string, by: string, now: number): WharfDocument {
+    const d = this.document(id);
+    requireThat(d.published && !d.withdrawn, 409, 'document is not published or was withdrawn');
+    if (!d.ack) { d.ack = { at: new Date(now).toISOString(), by }; this.put('documents', d.id, d); }
+    return d;
+  }
+  /**
+   * A person has seen a job's question or landing, at the status it stands
+   * on: an ack of what the job said before must not hide what it says now.
+   * No event, no helm seat, no change to the job.
+   */
+  ackDispatch(id: string, statusAt: unknown, by: string, now: number): WharfAck & { status: string } {
+    requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', id).toArray().length, 404, 'dispatch not found');
+    const last = this.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
+    const status = last ? (JSON.parse(last.data) as { at: string }).at : undefined;
+    requireThat(status && statusAt === status, 409, 'This dispatch changed. Reload and try again.');
+    const standing = this.dispatchAck(id, status);
+    if (standing) return standing;
+    const ack = { status, at: new Date(now).toISOString(), by };
+    this.put('dispatch_acks', id, ack); return ack;
+  }
+  /** A person's message to a job, queued for the helm to deliver, as the glass sends it. */
+  messageJob(dispatch: string, message: unknown, person: string, now: number): WharfHumanRequest {
+    requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', dispatch).toArray().length, 404, 'dispatch not found');
+    const r: WharfHumanRequest = { id: crypto.randomUUID(), kind: 'message', dispatch, text: text(message, 16000), by: person, at: new Date(now).toISOString(),
+      expiresAt: new Date(now + 600_000).toISOString(), state: 'queued' };
+    this.put('human_requests', r.id, r); this.hooks.event('human-request', r.dispatch, r.id);
+    return { ...r, waitingForHelm: !this.hooks.helmLive(now) };
+  }
   /** Every published document, withdrawn ones too: a withdrawal ends its card. */
   publishedDocuments(): WharfDocument[] { return this.list<WharfDocument>('documents').filter((d) => d.published); }
   /** Human requests as the glass shows them, with whether one waits for a helm. */
@@ -126,17 +211,7 @@ export class GlassState {
     if (c.path === 'glass' && c.method === 'GET') return ok({ boats: this.boats(), workers: this.workers(), documents: this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn),
       requests: this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })), helmLive: this.hooks.helmLive(now) });
     if (parts[0] === 'dispatches' && parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
-      // A person has seen this job's question or landing. No event, no helm seat, no change to the job.
-      const by = this.acker(actor), id = identifier(parts[1]);
-      requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', id).toArray().length, 404, 'dispatch not found');
-      const last = this.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
-      const status = last ? (JSON.parse(last.data) as { at: string }).at : undefined;
-      // Keyed on the status time: an ack of what the job said before must not hide what it says now.
-      requireThat(status && b.at === status, 409, 'This dispatch changed. Reload and try again.');
-      const standing = this.dispatchAck(id, status);
-      if (standing) return ok(standing);
-      const ack = { status, at: new Date(now).toISOString(), by };
-      this.put('dispatch_acks', id, ack); return ok(ack);
+      return ok(this.ackDispatch(identifier(parts[1]), b.at, this.acker(actor), now));
     }
     if (parts[0] === 'documents') {
       // Boats list decisions and reports; reviews are the hosted glass's (an older boat would refuse the kind).
@@ -179,18 +254,12 @@ export class GlassState {
         d.withdrawn = true; this.put('documents', d.id, d); this.hooks.event('decision-withdrawn', d.dispatch, d.id); return ok(d);
       }
       if (parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
-        // Seen, by a boat with read or the person. The first ack stands. No event and no helm seat.
-        const acker = this.acker(actor), by = actor.kind === 'person' && c.token.startsWith('browser:') ? 'glass' : acker; requireThat(d.published && !d.withdrawn, 409, 'document is not published or was withdrawn');
-        if (!d.ack) { d.ack = { at: new Date(now).toISOString(), by }; this.put('documents', d.id, d); }
-        return ok(d);
+        const acker = this.acker(actor);
+        return ok(this.ackDocument(d.id, actor.kind === 'person' && c.token.startsWith('browser:') ? 'glass' : acker, now));
       }
       if (parts.length === 3 && parts[2] === 'answer' && c.method === 'POST') {
-        // Human input, like the local glass: never takes, renews or steals a helm seat.
-        this.person(actor); requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, "This decision is already closed. Reload to see what's open.");
-        const option = b.option === undefined ? undefined : text(b.option, 80), answer = b.text === undefined ? undefined : text(b.text, 20000).trim();
-        requireThat(option === undefined || d.options?.includes(option), 400, 'not a decision option'); requireThat(option || answer, 400, 'answer needs an option or text');
-        d.answer = { ...(option ? { option } : {}), ...(answer ? { text: answer } : {}), at: new Date(now).toISOString(), by: actor.id };
-        this.put('documents', d.id, d); this.hooks.event('decision-answer', d.dispatch, d.id); return ok(d);
+        this.person(actor);
+        return ok(this.answerDecision(d.id, b.option, b.text, actor.id, now));
       }
       if (parts.length === 4 && parts[2] === 'files' && c.method === 'GET') {
         const file = [d.markdown, ...d.attachments].find((f) => f?.id === identifier(parts[3])); requireThat(file, 404, 'document file not found'); return ok(file);
@@ -235,8 +304,16 @@ export class GlassState {
         this.hooks.helm(c, actor, now); requireThat(r.state === 'queued' && Date.parse(r.expiresAt) > now, 409, 'request already received or expired');
         r.state = 'received'; this.put('human_requests', r.id, r); this.hooks.event('human-request-received', r.dispatch, r.id); return ok(r);
       }
+      if (parts.length === 3 && parts[2] === 'respond' && c.method === 'POST') {
+        // The helm answers a work request without dispatching it: a question back, or why not. It stays open.
+        this.hooks.helm(c, actor, now);
+        requireThat(r.kind === 'work' && ['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'no open work request to respond to');
+        r.response = text(b.text, 2000).trim(); requireThat(r.response, 400, 'response needs text');
+        r.state = 'received'; this.put('human_requests', r.id, r); return ok(r);
+      }
       if (parts.length === 3 && parts[2] === 'execute' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(r.state === 'received' && Date.parse(r.expiresAt) > now, 409, 'receipt a live request first');
+        requireThat(r.kind !== 'work', 409, 'a work request is fulfilled by dispatching it with --request, or answered with respond');
         if (r.kind === 'trap-request') {
           r.state = 'authorized'; this.put('human_requests', r.id, r); this.hooks.event('trap-start-authorized', undefined, r.id); return ok(r);
         }

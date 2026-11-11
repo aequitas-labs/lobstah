@@ -671,6 +671,24 @@ export function openDecisionOrder(cards: readonly DecisionCard[], sent: (key: st
   return cards.filter((c) => !sent(c.key)).sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
 }
 
+/**
+ * Where a decision stands among the open ones, for previous / next. A card
+ * in `order` has its index. A card that is not (a run card its run answered,
+ * which stays on screen after the snapshot drops it) stands where it would
+ * sort, between the decisions asked before and after it, so previous and
+ * next still lead somewhere.
+ */
+export function decisionNeighbours(
+  order: readonly DecisionCard[],
+  card: Pick<DecisionCard, 'key' | 'at'>,
+): { listed: boolean; index: number; prev?: DecisionCard; next?: DecisionCard } {
+  const i = order.findIndex((c) => c.key === card.key);
+  if (i >= 0) return { listed: true, index: i, prev: order[i - 1], next: order[i + 1] };
+  const after = order.findIndex((c) => (c.at.localeCompare(card.at) || c.key.localeCompare(card.key)) > 0);
+  const at = after < 0 ? order.length : after;
+  return { listed: false, index: at, prev: order[at - 1], next: order[at] };
+}
+
 /** The open decisions not yet viewed, oldest first: what the new-decision alert counts. */
 export function unreadDecisions(cards: readonly DecisionCard[], sent: (key: string) => boolean, viewedHere: (key: string) => boolean): DecisionCard[] {
   return openDecisionOrder(cards, sent).filter((c) => !c.viewedAt && !viewedHere(c.key));

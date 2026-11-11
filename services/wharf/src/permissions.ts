@@ -29,6 +29,8 @@ export function boatPermissions(value: unknown, confirmAdmin: unknown): Permissi
 /** Agent capabilities are checked separately against the dispatch and epoch. */
 export function requiredPermission(path: string, method: string): Permission | undefined {
   if (path === 'requests/starts' || path === 'requests/reviews' || /^requests\/[^/]+\/start$/.test(path)) return 'work';
+  // A boat's answers to its own cards: a work-only boat runs traps, so it holds permission requests. The card routes check the boat.
+  if (path === 'cards/answers' || /^cards\/answers\/[^/]+$/.test(path)) return undefined;
   if (path === '_boat' && method === 'GET') return undefined;
   if (path === 'mirror/attention' && method === 'PUT') return 'mirror';
   if (path === 'mirror/attention' && method === 'GET' || path === 'mirror/attention/acks' && method === 'POST') return 'attention';

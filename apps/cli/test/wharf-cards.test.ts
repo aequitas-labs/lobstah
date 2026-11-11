@@ -84,6 +84,8 @@ it('the daemon restates a changed set, an unchanged one only now and then, and w
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     const headers = new Headers(init.headers);
     expect(headers.get('Authorization')).toBe('Bearer b.person.boat.secretsecretsecret');
+    // The boat asks for answers to its cards each check; none wait here.
+    if (url.endsWith('/cards/answers')) return Response.json([]);
     posts.push({ url, key: headers.get('Idempotency-Key'), body: JSON.parse(String(init.body)) });
     return fail ? Response.json({ error: 'route not found' }, { status: 404 }) : Response.json({ changed: 0 });
   }));

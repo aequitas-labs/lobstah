@@ -63,6 +63,16 @@ export function idleSinceAfterHeavy(dispatchId: string, trapId: string, idleSinc
   return ended !== undefined && ended > Date.parse(idleSince) ? new Date(ended).toISOString() : idleSince;
 }
 
+/**
+ * A dispatch-progress notice: a dispatch queued too long or stalled, or a
+ * trap idle while reporting working. Like their attention items, the glass
+ * lists them only when attentionKinds names `dispatch-progress`; the helm
+ * always gets them (`man wait`, `man tend`, the Stop hook).
+ */
+export function progressNotice(n: { kind: string }): boolean {
+  return n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working';
+}
+
 /** Current conditions, independent of notice consumption or daemon restarts. */
 export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): DispatchProgress[] {
   const out: DispatchProgress[] = [];

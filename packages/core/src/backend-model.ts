@@ -4,6 +4,8 @@ export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external' | '
 export interface DispatchInput {
   id: string; grounds?: string; repo?: string; target?: import('./configured-trap-model.js').ConfiguredTrapTarget; repoRemote?: string; brief: string; lane?: 'work' | 'chore';
   for?: string; boat?: string; followUp?: string; harness?: string; model?: string; effort?: string;
+  /** The person's work request this dispatch answers: dispatching fulfills it. */
+  request?: string;
 }
 export interface ReportInput {
   verb: BackendVerb; note?: string; waitingOn?: BackendWait; link?: string; until?: string;
@@ -61,8 +63,21 @@ export interface WharfDocumentSummary {
 }
 /** What a person asks of a review document; the boat that published it carries it out. Sending happens in the review tool. */
 export const WHARF_REVIEW_REQUEST_KINDS = ['review-dismiss'] as const;
+/**
+ * Where a person's request for new work came from: their message in their
+ * private chat with the wharf's Slack app. The thread it starts continues it.
+ */
+export interface WharfRequestOrigin { team: string; user: string; channel: string; ts: string }
 export interface WharfHumanRequest {
-  id: string; kind: 'message' | 'trap-request' | (typeof WHARF_REVIEW_REQUEST_KINDS)[number]; dispatch?: string; text?: string; boat?: string; repo?: string;
+  /**
+   * `work` is a person asking the helm for new work. The helm reads it,
+   * answers it (`response`) or dispatches it; it never runs by itself.
+   */
+  id: string; kind: 'message' | 'trap-request' | 'work' | (typeof WHARF_REVIEW_REQUEST_KINDS)[number]; dispatch?: string; text?: string; boat?: string; repo?: string;
+  /** kind work: the Slack message it came from, what the person added in its thread, and the helm's reply. */
+  origin?: WharfRequestOrigin;
+  followUps?: Array<{ text: string; at: string; source?: string }>;
+  response?: string;
   /** Review requests: the review document. */
   document?: string;
   at: string; expiresAt: string; state: 'queued' | 'received' | 'authorized' | 'fulfilled' | 'expired'; by: string;
@@ -139,6 +154,39 @@ export interface GlassCard extends GlassCardInput {
   actions: GlassCardAction[];
   /** A wharf record's own page in the glass. Boat cards open as the card itself. */
   item?: GlassCardItem;
+  /** A boat's card a person answered away from that boat: where that answer stands. */
+  relay?: GlassCardRelay;
+}
+/**
+ * A person's answer to a boat's card, from Slack or the hosted glass: the
+ * wharf records it, and the owning boat applies it or refuses it. An answer
+ * awaiting its boat is not yet a grant or a decision.
+ */
+export interface GlassCardRelay {
+  state: 'awaiting boat' | 'applied' | 'refused' | 'expired';
+  /** What was answered, as the person saw it: an option, Allow once, seen. */
+  answer: string;
+  at: string;
+  outcome?: string;
+}
+/**
+ * The receipt a boat reads for a person's verified answer to one of its
+ * cards. It names the exact card state answered; a boat applies it only to
+ * that state, and only once.
+ */
+export interface CardAnswerReceipt {
+  id: string;
+  family: GlassCardFamily;
+  key: string;
+  stateHash: string;
+  revision: number;
+  action: GlassCardAction;
+  text?: string;
+  /** The wharf person who answered. */
+  by: string;
+  at: string;
+  state: 'pending' | 'applied' | 'refused' | 'expired';
+  outcome?: string;
 }
 /**
  * A mirror boat keeps its fleet on its own local grounds and shows it on the

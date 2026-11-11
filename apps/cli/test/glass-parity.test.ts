@@ -188,8 +188,8 @@ describe('the hosted glass holds only its host parts', () => {
   const root = new URL('../../../services/wharf/glass/', import.meta.url);
 
   it('keeps every shared view in packages/glass-ui', () => {
-    // Sign-in, the wake hint, Boats, boat approval, passkey pairing, the API helper and the wharf's types: nothing that lists or shows glass items.
-    const host = ['api.ts', 'assets.d.ts', 'auth-screen.ts', 'boats.ts', 'common.ts', 'device.ts', 'main.ts', 'model.ts', 'pairing.ts', 'wake.ts'];
+    // Sign-in, the wake hint, Boats and its Slack setup, boat approval, passkey pairing, the API helper and the wharf's types: nothing that lists or shows glass items.
+    const host = ['api.ts', 'assets.d.ts', 'auth-screen.ts', 'boats.ts', 'common.ts', 'device.ts', 'main.ts', 'model.ts', 'pairing.ts', 'slack.ts', 'wake.ts'];
     const files = fs.readdirSync(new URL('src/', root)).sort();
     expect(files, 'a new view belongs in packages/glass-ui/ui/components, shared by both glasses').toEqual(host);
   });

@@ -1,6 +1,6 @@
 import { GLASS_CARD_FAMILIES } from '../../../packages/core/src/backend-model.js';
 import type {
-  DispatchView, GlassCard, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardItem, GlassCardLink, GlassCardSource, GlassCardTerminal,
+  CardAnswerReceipt, DispatchView, GlassCard, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardItem, GlassCardLink, GlassCardRelay, GlassCardSource, GlassCardTerminal,
   WharfAck, WharfDocument, WharfHumanRequest,
 } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
@@ -9,11 +9,27 @@ import type { Actor, Command } from './account.js';
 /**
  * One row per card. `seq` names the card in links (`c<seq>`); source, family
  * and key are its identity, so a source restating an item finds its card.
+ * `card_answers` holds each person's answer to a boat's card, for that boat.
  */
 export const cardSchema = `
   CREATE TABLE IF NOT EXISTS cards (seq INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, family TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(source,family,key));
+  CREATE TABLE IF NOT EXISTS card_answers (id TEXT PRIMARY KEY, card INTEGER NOT NULL, source TEXT NOT NULL, data TEXT NOT NULL);
 `;
-export const cardTables = ['cards'];
+export const cardTables = ['cards', 'card_answers'];
+/** An answer its boat has not taken in this long expires: an offline boat never applies a stale answer late. */
+export const ANSWER_RECEIPT_MS = 15 * 60_000;
+/** The answer a relayed action gives, in the words its card showed. */
+export function answerLabel(action: GlassCardAction, words?: string): string {
+  switch (action.kind) {
+    case 'answer': return action.option;
+    case 'answer-text': return words ? `"${words.length > 80 ? `${words.slice(0, 79)}…` : words}"` : 'an answer';
+    case 'allow-once': return 'Allow once';
+    case 'allow-always': return 'Allow always';
+    case 'deny': return 'No';
+    case 'seen': return 'seen';
+    default: return action.kind;
+  }
+}
 /** A card that ended is kept this long, so a projection of it can still close where it was shown. */
 export const ENDED_CARD_MS = 7 * 86400_000;
 /** At most this many cards in one boat's published set. */
@@ -122,6 +138,7 @@ export function landedCard(v: DispatchView): ProjectedCard | undefined {
 }
 /** A person's request of the fleet: its receipt and outcome. It ends fulfilled or expired. */
 export function requestCard(r: WharfHumanRequest): ProjectedCard {
+  if (r.kind === 'work') return workRequestCard(r);
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   const waiting = r.state === 'queued' && r.waitingForHelm;
   return {
@@ -129,6 +146,30 @@ export function requestCard(r: WharfHumanRequest): ProjectedCard {
     title: r.kind === 'message' ? 'Message to the helm' : r.kind === 'trap-request' ? 'Trap request' : 'Review dismissal',
     summary: [r.text ? firstLine(r.text, 300) : r.repo, waiting ? 'waiting for helm' : r.state, r.outcome].filter(Boolean).join(' · '),
     ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : {}), quiet: true,
+    ...(ended ? { terminal: { state: r.state as 'fulfilled' | 'expired', at: r.state === 'expired' ? r.expiresAt : '', ...(r.outcome ? { outcome: r.outcome } : {}) } } : {}),
+  };
+}
+/**
+ * A person's request for work, as its receipt: what was asked, and where it
+ * stands, in canned words. Received is not running: only a dispatch is, and
+ * the card then opens it. A reply from the helm asks the person, so it is
+ * the one state that stands for attention.
+ */
+export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
+  const waiting = r.state === 'queued' && r.waitingForHelm;
+  const stands = r.state === 'fulfilled' ? `Dispatched as ${r.dispatch}`
+    : r.state === 'expired' ? 'Expired before the helm took it'
+    : r.response ? `The helm replied: ${r.response}\nReply in this thread, or in the glass`
+    : r.state === 'received' ? 'Received · the helm has it'
+    : waiting ? 'Received · waiting for the helm' : 'Received · queued for the helm';
+  const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
+  const ended = r.state === 'fulfilled' || r.state === 'expired';
+  return {
+    family: 'request', key: r.id, sourceAt: r.at,
+    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.response ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}`,
+    title: firstLine(r.text ?? '', 150) || 'Work request', summary: [stands, notes].filter(Boolean).join('\n'),
+    ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : {}),
+    quiet: !r.response || ended,
     ...(ended ? { terminal: { state: r.state as 'fulfilled' | 'expired', at: r.state === 'expired' ? r.expiresAt : '', ...(r.outcome ? { outcome: r.outcome } : {}) } } : {}),
   };
 }
@@ -227,10 +268,12 @@ export class CardStore {
       : before?.terminal?.state === input.terminal.state ? { ...input.terminal, at: before.terminal.at }
       : { ...input.terminal, at: input.terminal.at || new Date(now).toISOString() };
     const restated = before && before.stateHash === input.stateHash;
+    // An answer relayed to the card's boat belongs to the state it answered: it stays while that state does.
+    const relay = restated ? before.relay : undefined;
     const card: GlassCard = {
       ...input, links: input.links ?? [], actions: input.actions ?? [], ...(terminal ? { terminal } : {}),
       id: before?.id ?? '', source, revision: restated ? before.revision : (before?.revision ?? 0) + 1,
-      observedAt: restated ? before.observedAt : new Date(now).toISOString(),
+      observedAt: restated ? before.observedAt : new Date(now).toISOString(), ...(relay ? { relay } : {}),
     };
     if (before && JSON.stringify(before) === JSON.stringify({ ...card, id: before.id })) return undefined;
     if (row) {
@@ -266,6 +309,12 @@ export class CardStore {
     }
     return changed;
   }
+  /** Where an answer relayed to this card's boat stands. Returns the card as changed. */
+  setRelay(card: GlassCard, relay: GlassCardRelay): GlassCard {
+    const changed: GlassCard = { ...card, relay };
+    this.sql.exec('UPDATE cards SET data=? WHERE seq=?', JSON.stringify(changed), Number(card.id.slice(1)));
+    return changed;
+  }
   get(id: string): GlassCard | undefined {
     const seq = /^c(\d{1,15})$/.exec(id)?.[1];
     const row = seq ? this.sql.exec<CardRow>('SELECT seq,data FROM cards WHERE seq=?', Number(seq)).toArray()[0] : undefined;
@@ -279,16 +328,61 @@ export class CardStore {
   }
 }
 
-type Hooks = { read: (actor: Actor) => void; publish: (actor: Actor) => void };
+/** `changed` hears every card that moved, inside the same transaction: where cards are shown follows. */
+type Hooks = { read: (actor: Actor) => void; publish: (actor: Actor) => void; changed: (cards: GlassCard[], now: number) => void };
 /** The account's card routes: read the cards, and a boat's restatement of its own. */
 export class Cards {
   readonly store: CardStore;
-  constructor(sql: SqlStorage, private records: CardRecords, private hooks: Hooks) { this.store = new CardStore(sql); }
-  /** Bring the wharf's own cards up to date with its records. Runs inside every command's transaction. */
-  project(now: number): GlassCard[] { return this.store.replace('wharf', wharfCards(this.records, now), now); }
+  constructor(private sql: SqlStorage, private records: CardRecords, private hooks: Hooks) { this.store = new CardStore(sql); }
+  /** Bring the wharf's own cards up to date with its records, and expire answers no boat took. Runs inside every command's transaction. */
+  project(now: number): GlassCard[] {
+    const changed = this.store.replace('wharf', wharfCards(this.records, now), now);
+    this.expireAnswers(now, changed);
+    if (changed.length) this.hooks.changed(changed, now);
+    return changed;
+  }
+  /** Answers no boat took in time expire before anyone reads them: a boat is never handed a stale one. */
+  private expireAnswers(now: number, changed: GlassCard[]) {
+    for (const row of this.sql.exec<{ id: string; card: number; data: string }>("SELECT id,card,data FROM card_answers WHERE json_extract(data,'$.state')='pending'").toArray()) {
+      const r = JSON.parse(row.data) as CardAnswerReceipt;
+      if (now - Date.parse(r.at) < ANSWER_RECEIPT_MS) continue;
+      this.settleReceipt(r, row.card, 'expired', 'its boat did not take it in time; answer again', now, changed);
+    }
+  }
+  /**
+   * A person's answer to a boat's card. The wharf records it for that boat,
+   * which alone applies it; the card shows it awaits the boat. The first
+   * answer to a state stands: pressing it again is the same answer, another
+   * one is refused.
+   */
+  answerForBoat(card: GlassCard, action: GlassCardAction, words: string | undefined, person: string, now: number): { done: true } | { refused: string } {
+    const seq = Number(card.id.slice(1));
+    const prior = this.sql.exec<{ data: string }>("SELECT data FROM card_answers WHERE card=? AND json_extract(data,'$.revision')=? AND json_extract(data,'$.state') IN ('pending','applied')",
+      seq, card.revision).toArray()[0];
+    if (prior) {
+      const r = JSON.parse(prior.data) as CardAnswerReceipt;
+      return JSON.stringify(r.action) === JSON.stringify(action) && r.text === words ? { done: true } : { refused: 'This card was already answered; its message shows where that stands.' };
+    }
+    const at = new Date(now).toISOString();
+    const receipt: CardAnswerReceipt = { id: crypto.randomUUID(), family: card.family, key: card.key, stateHash: card.stateHash, revision: card.revision,
+      action, ...(words ? { text: words } : {}), by: person, at, state: 'pending' };
+    this.sql.exec('INSERT INTO card_answers VALUES (?,?,?,?)', receipt.id, seq, card.source, JSON.stringify(receipt));
+    this.hooks.changed([this.store.setRelay(card, { state: 'awaiting boat', answer: answerLabel(action, words), at })], now);
+    return { done: true };
+  }
+  /** A receipt's end, and the card's relay with it while the card is about the state answered. */
+  private settleReceipt(r: CardAnswerReceipt, seq: number, state: 'applied' | 'refused' | 'expired', outcome: string | undefined, now: number, changed: GlassCard[]) {
+    const settled: CardAnswerReceipt = { ...r, state, ...(outcome ? { outcome } : {}) };
+    this.sql.exec('UPDATE card_answers SET data=? WHERE id=?', JSON.stringify(settled), r.id);
+    const card = this.store.get(`c${seq}`);
+    if (card?.relay && card.relay.state === 'awaiting boat' && card.stateHash.startsWith(r.stateHash)) {
+      changed.push(this.store.setRelay(card, { ...card.relay, state: state === 'applied' ? 'applied' : state, at: new Date(now).toISOString(), ...(outcome ? { outcome } : {}) }));
+    }
+  }
   execute(c: Command, actor: Actor, now: number): { status: number; value: unknown } | undefined {
     const parts = c.path.split('/');
     if (parts[0] !== 'cards') return undefined;
+    if (parts[1] === 'answers') return this.boatAnswers(c, actor, parts, now);
     // A read sees this command's records, not the last command's.
     if (parts.length === 1 && c.method === 'GET') { this.hooks.read(actor); this.project(now); return { status: 200, value: this.store.list(now) }; }
     if (parts.length === 2 && c.method === 'GET') {
@@ -303,8 +397,36 @@ export class Cards {
       const cards = b.cards.map(boatCardInput);
       requireThat(new Set(cards.map((x) => `${x.family}\n${x.key}`)).size === cards.length, 400, 'duplicate card');
       const changed = this.store.replace(`boat:${actor.id}`, cards, now);
+      if (changed.length) this.hooks.changed(changed, now);
       return { status: 200, value: { changed: changed.length } };
     }
     return undefined;
+  }
+  /**
+   * A boat reads the answers people gave its own cards, and says what became
+   * of each: applied, or refused and why. It never sees another boat's.
+   */
+  private boatAnswers(c: Command, actor: Actor, parts: string[], now: number): { status: number; value: unknown } {
+    this.hooks.publish(actor); requireThat(actor.kind === 'boat', 403, 'boat credential required');
+    const source = `boat:${actor.id}`;
+    const expired: GlassCard[] = [];
+    this.expireAnswers(now, expired);
+    if (expired.length) this.hooks.changed(expired, now);
+    if (parts.length === 2 && c.method === 'GET') {
+      return { status: 200, value: this.sql.exec<{ data: string }>("SELECT data FROM card_answers WHERE source=? AND json_extract(data,'$.state')='pending' ORDER BY json_extract(data,'$.at') LIMIT 50", source)
+        .toArray().map((r) => JSON.parse(r.data) as CardAnswerReceipt) };
+    }
+    requireThat(parts.length === 3 && c.method === 'POST', 404, 'route not found');
+    const row = this.sql.exec<{ card: number; data: string }>('SELECT card,data FROM card_answers WHERE id=? AND source=?', text(parts[2], 64), source).toArray()[0];
+    requireThat(row, 404, 'answer not found');
+    const b = object(c.body), state = b.state;
+    requireThat(state === 'applied' || state === 'refused', 400, 'an answer is applied or refused');
+    const outcome = b.outcome === undefined ? undefined : text(b.outcome, 300);
+    const r = JSON.parse(row.data) as CardAnswerReceipt;
+    if (r.state !== 'pending') { requireThat(r.state === state, 409, `this answer was already ${r.state}`); return { status: 200, value: r }; }
+    const changed: GlassCard[] = [];
+    this.settleReceipt(r, row.card, state, outcome, now, changed);
+    if (changed.length) this.hooks.changed(changed, now);
+    return { status: 200, value: { ...r, state, ...(outcome ? { outcome } : {}) } };
   }
 }
