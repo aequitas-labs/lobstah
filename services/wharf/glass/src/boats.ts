@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { html, value, when } from './common.js';
 import type { Action } from './common.js';
 import type { Boat } from './model.js';
+import { accessLabel } from './device.js';
 import { LinkedText } from '../../../../packages/glass-ui/ui/components/links.js';
 import { Age } from '../../../../packages/glass-ui/ui/components/common.js';
 import { ExpandingCard } from '../../../../packages/glass-ui/ui/components/card.js';
@@ -40,7 +41,7 @@ export function Boats({
   };
   const card = (b: Boat) => {
     const mirror = mirrors.find((m) => m.boat === b.id);
-    const access = b.revoked ? 'no access' : b.permissions.join(' + ');
+    const access = b.revoked ? 'no access' : accessLabel(b.permissions);
     const age = mirror
       ? ['mirrored ', Age(mirror.at), ' ago']
       : b.lastCheckIn
@@ -51,7 +52,7 @@ export function Boats({
       (confirmation === b.id
         ? html`<button class="btn" onClick=${stop(async () => {
             if (await action(`boats/${b.id}/revoke`, {})) setConfirmation('');
-          })}>confirm revoke ${b.name}</button><button class="btn" onClick=${stop(() => setConfirmation(''))}>keep boat</button>`
+          })}>revoke ${b.name}</button><button class="btn" onClick=${stop(() => setConfirmation(''))}>keep ${b.name}</button>`
         : html`<button class="btn" onClick=${stop(() => setConfirmation(b.id))}>revoke…</button>`);
     return html`<${ExpandingCard}
       key=${b.id}
@@ -80,5 +81,5 @@ export function Boats({
     />`;
   };
   return html`<div class="sub">Enroll or change a boat's name/access with <code>lobstah wharf login</code> on that boat, then approve here. No browser edit or grants.</div><div class="cards">${boats.map(card)}</div>
-    <div class="sec">account</div>${confirmation === 'account' ? html`<div class="bad">Delete this account's jobs, messages, files, boats and sign-in data? This cannot be undone.<button class="btn" onClick=${deleteAccount}>confirm delete account</button><button class="btn" onClick=${() => setConfirmation('')}>keep account</button></div>` : html`<button class="btn" onClick=${() => setConfirmation('account')}>delete account…</button>`}`;
+    <div class="sec">account</div>${confirmation === 'account' ? html`<div class="bad">Delete this account's dispatches, messages, files, boats and sign-in data? This cannot be undone.<button class="btn" onClick=${deleteAccount}>confirm delete account</button><button class="btn" onClick=${() => setConfirmation('')}>keep account</button></div>` : html`<button class="btn" onClick=${() => setConfirmation('account')}>delete account…</button>`}`;
 }
