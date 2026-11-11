@@ -46,7 +46,8 @@ async function job() {
 it('serves the same bundled look on the glass host only, with nonce CSP and no credentials', async () => {
   const page = await SELF.fetch('https://glass.test/'); expect(page.status).toBe(200);
   const content = await page.text(); expect(content).toContain('spyglass'); expect(content).toContain('--lobstah');
-  expect(page.headers.get('content-security-policy')).toContain("connect-src 'self'");
+  // Besides the wharf, only a boat's glass on loopback: the mirror probe and ↗ Open.
+  expect(page.headers.get('content-security-policy')).toContain("connect-src 'self' http://127.0.0.1:*;");
   expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   // The Reviews tab shows each asker's GitHub avatar; no other remote image loads.
   expect(page.headers.get('content-security-policy')).toContain("img-src 'self' blob: data: https://avatars.githubusercontent.com;");

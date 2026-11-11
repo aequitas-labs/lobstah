@@ -46,6 +46,8 @@ interface Hosted {
   settle: () => Promise<void>;
   relayed: Array<{ boat: string; read?: string; write?: { kind: string; payload: Record<string, unknown> } }>;
   focused: string[];
+  /** Every call the page made off the wharf's own origin. */
+  offOrigin: string[];
 }
 
 const windows: Window[] = [];
@@ -70,9 +72,11 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
   w.clearInterval = () => {};
   const relayed: Hosted['relayed'] = [];
   const focused: string[] = [];
+  const offOrigin: string[] = [];
   const boats = opts.boats ?? [[NORTH, 'n'], [SOUTH, 's']];
   w.fetch = async (input: string, init: RequestInit = {}) => {
     const path = String(input);
+    if (/^[a-z]+:/i.test(path)) offOrigin.push(path);
     if (path.startsWith('http://127.0.0.1:')) {
       const port = Number(new URL(path).port);
       const boat = boats.find(([b]) => b.port === port)?.[0];
@@ -115,7 +119,7 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
   };
   window.document.write(`<!doctype html><html><head><style>${GLASS_CSS}</style></head><body><script>${GLASS_SCRIPT}</script></body></html>`);
   await settle();
-  return { doc: window.document as unknown as Document, settle, relayed, focused };
+  return { doc: window.document as unknown as Document, settle, relayed, focused, offOrigin };
 }
 
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -209,6 +213,10 @@ describe('↗ Open from the hosted glass', () => {
     await h.settle();
     expect(h.focused).toHaveLength(1);
     expect(h.focused[0]).toMatch(/^n-/);
+    // The probe and focus are the page's only calls off the wharf, each to a boat's glass port on
+    // 127.0.0.1: the one loopback source the wharf's connect-src allows (services/wharf/src/glass-page.ts).
+    expect(h.offOrigin.length).toBeGreaterThan(0);
+    for (const url of h.offOrigin) expect(url, url).toMatch(/^http:\/\/127\.0\.0\.1:(4949|4950)\/api\/mirror\/(probe|focus\/[^/]+)$/);
     expect(h.relayed.filter((c) => c.write?.kind === 'focus')).toEqual([]);
   });
 
