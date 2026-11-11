@@ -139,13 +139,17 @@ describe('a Run from the hosted glass', () => {
     expect((await relayed('run-passkey-challenge', {})).status).toBe(403);
   });
 
-  it('says to pair first when no phone passkey is paired, and keeps interactive cards on the Mac', async () => {
+  // An interactive card needs expect(1), which macOS ships and CI's Linux runners don't.
+  it.skipIf(!fs.existsSync('/usr/bin/expect'))('keeps interactive cards on the Mac', async () => {
+    const interactive = await relayed('run-challenge', runCard({ interactive: true }));
+    expect(interactive.json.reason).toBe('Interactive cards run from the Mac.');
+  });
+
+  it('says to pair first when no phone passkey is paired', async () => {
     fs.rmSync(hostedFile);
     const none = await relayed('run-challenge', runCard());
     expect(none.status).toBe(409);
     expect(none.json.reason).toBe('Pair this phone first: run lobstah run passkey add --hosted on the Mac.');
-    const interactive = await relayed('run-challenge', runCard({ interactive: true }));
-    expect(interactive.json.reason).toBe('Interactive cards run from the Mac.');
     // Until inputs are sealed to the boat, a secret never crosses the wharf; a text input may.
     const secret = await relayed('run-challenge', runCard({ inputs: ['TOKEN'] }));
     expect(secret.json.reason).toBe('Secret inputs are typed on the Mac for now.');
