@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Account } from '../src/account.js';
 import { glassTables } from '../src/glass-state.js';
 import { renderCard, slackEscape, SLACK_BUDGET, trimAtBoundary } from '../src/slack-render.js';
+import { sealToken } from '../src/slack-install.js';
 import { authFixtures } from './auth-fixture.js';
 import type { GlassCard } from '../../../packages/core/src/backend-model.js';
 
@@ -37,7 +38,9 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.restoreAllMocks(); });
 async function link() {
-  await sql("INSERT INTO slack_links VALUES ('a','T1','U1','D1','2026-10-30T00:00:00.000Z',NULL)");
+  // As a finished connect leaves it: the workspace's sealed bot token, and this person's link.
+  await env.AUTH_DB.prepare('INSERT OR REPLACE INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test-only-not-a-real-token'), 'chat:write,im:write,im:history', 'a', '2026-10-30T00:00:00.000Z').run();
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: '2026-10-30T00:00:00.000Z' });
 }
 async function helm() {
   const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: 'helm-boat', permissions: ['work', 'helm'] }, key: `issue-${++sequence}` })));
@@ -98,8 +101,10 @@ it('a rate-limited edit retries the projection after Slack’s wait, never the a
 it('a standing card whose message was deleted is posted again; a refused credential stops sending; nobody unlinked is sent anything', async () => {
   const b = await helm(); await decision(b, 'first'); await deliver();
   expect(slack).toHaveLength(0);
-  await link(); await decision(b, 'second'); await deliver();
-  // Only cards that moved after linking are delivered.
+  await link(); await deliver();
+  // Linking shows every standing card, those from before it too.
+  expect(decisionPosts()).toHaveLength(1);
+  slack = []; await decision(b, 'second'); await deliver();
   expect(decisionPosts()).toHaveLength(1);
   answer = (method) => (method === 'chat.update' ? Response.json({ ok: false, error: 'message_not_found' }) : Response.json({ ok: true, ts: '2.2' }));
   // Seeing it changes the card; its message is gone, so the card is posted again, still standing.
