@@ -268,7 +268,8 @@ describe('a secret input from the hosted glass', () => {
   });
 });
 
-describe('Stop, Run again and Dismiss from the hosted glass', () => {
+// These start real runs, with /bin/bash: not on CI's Windows runner (as run-execute.test.ts).
+describe.skipIf(!RUNS_HERE)('Stop, Run again and Dismiss from the hosted glass', () => {
   it('stops a running card and dismisses a finished one, with no passkey', async () => {
     const card = runCard({ body: '#!/bin/bash\nsleep 20\n' });
     expect((await passkeyRun(card)).status).toBe(202);
