@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, ensureLayout, observeReviewRequest, writeReview } from '@lobstah/core';
+import { appendStatus, enqueue, ensureLayout, observeReviewRequest, writeReview } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, freshWakeEvents, notifiableIds, pendingNotifications } from '../src/notify.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -18,6 +18,22 @@ afterEach(() => {
 });
 
 describe('notifications', () => {
+  it('consumes successful review completions silently while ordinary chores and review failures still wake', () => {
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 8, url: 'https://github.com/acme/web/pull/8', title: 'Review the tray', author: 'a', headSha: 'abc' }, round: { id: 'round', requestedAt: new Date().toISOString() } }).item;
+    item.rounds[0]!.dispatch = 'draft-job';
+    writeReview(item);
+    appendStatus('draft-job', 'chore', 'working');
+    const baseline = captureWaitBaseline();
+    appendStatus('draft-job', 'chore', 'done', 'Draft ready');
+    enqueue({ id: 'other-chore', repo: 'web', brief: 'Inspect the release files', readOnly: true }, 'chore');
+    appendStatus('other-chore', 'chore', 'done', 'Cleanup ready');
+    expect(freshWakeEvents(baseline)).toMatchObject([{ id: 'other-chore', entry: { verb: 'done' } }]);
+    expect(baseline['chore:draft-job']).toBe(2);
+    expect(freshWakeEvents(baseline)).toEqual([]);
+    appendStatus('draft-job', 'chore', 'failed', 'Could not draft');
+    expect(freshWakeEvents(baseline)).toMatchObject([{ id: 'draft-job', entry: { verb: 'failed' } }]);
+  });
+
   it('review jobs leave notifications to the draft-ready/published path', () => {
     const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'a', headSha: 'abc' }, round: { id: 'r', requestedAt: new Date().toISOString() } }).item;
     item.rounds[0]!.dispatch = 'review-job'; writeReview(item);

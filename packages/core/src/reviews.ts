@@ -314,6 +314,11 @@ export function listReviews(): ReviewItem[] {
   return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+/** Dispatches that draft PR reviews, including completed rounds still kept in review history. */
+export function reviewDispatchIds(): Set<string> {
+  return new Set(listReviews().flatMap(item => item.rounds.flatMap(round => round.dispatch ? [round.dispatch] : [])));
+}
+
 export function latestRound(item: ReviewItem): ReviewRound | undefined {
   return item.rounds.at(-1);
 }

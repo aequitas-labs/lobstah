@@ -5,9 +5,11 @@ export const CARD_LINK_RULE = 'Always refer to a card with a clickable Markdown 
 export const CARD_RULE = 'Every question, choice or action for the human (answer, approve, review, run a command, click, sign in, test) goes on a card, with exact steps and any command in the card. Saying it in chat too is fine; chat alone is not. When a card is answered, act on it in the same turn or put the follow-up on a todo.';
 /** Choose a run card for local commands and name its input and execution flags. */
 export const RUN_CARD_RULE = 'Offer `lobstah man ask --run <script>` when the human must run a command on this machine. Use plain cards for steps the glass cannot run, such as app clicks or phone sign-ins. Use `--input NAME:secret` for secrets (values via stdin, never in the script), `--interactive` for logins/prompts, `--cwd`, `--timeout`, `--output scrubbed|exit`.';
-export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${RUN_CARD_RULE} ${CARD_LINK_RULE}`;
+/** Review drafts have their own human posting surface in both glasses. */
+export const REVIEW_DRAFT_RULE = 'Review drafts live on the glass Reviews page for the person to post. Do not put them on decision cards.';
+export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${RUN_CARD_RULE} ${CARD_LINK_RULE} ${REVIEW_DRAFT_RULE}`;
 /** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
-export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
+export const HELM_STOP_REMINDER = `If this reply requires human action, put it on a card. ${REVIEW_DRAFT_RULE}`;
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
 export const DESK_ROUTING_RULE = 'For a bounded browser, app or computer step a repo worker cannot do, dispatch --for trap:<profile> --assist <original-id>. The original worker keeps repo and PR ownership. Use man throw trap:<profile> for an absent desk; point at its app-start card instead of starting a terminal session.';
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
