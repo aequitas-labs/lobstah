@@ -99,7 +99,7 @@ export function boatDevice(env: Env, glass: string) {
           account: requested.account, helm: true, personId: result.user.id, token: `device-${result.claimedDeviceCode.id}`,
           method: 'POST', path: 'boats', key: `device-${result.claimedDeviceCode.id}`, body: { name: requested.name, permissions: JSON.parse(result.claimedDeviceCode.approvedGrants), enrol: true, expectedBoat: requested.id, proof: requested.proof },
         }))));
-        if (issued.status !== 201) throw new APIError('CONFLICT', { error: 'enrolment_failed', error_description: 'Boat enrolment failed; choose a new name or approve again with the current credential.' });
+        if (issued.status !== 201) throw new APIError('CONFLICT', { error: 'enrolment_failed', error_description: "This boat couldn't be added. Choose another name in your terminal, or approve again." });
         return ctx.json({ ...object(issued.value), account: requested.account });
       }),
     },
