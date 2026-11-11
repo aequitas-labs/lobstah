@@ -88,7 +88,7 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     if (path.endsWith('/image') || path.endsWith('/worker-image')) return new Response(new Uint8Array([137, 80, 78, 71]));
     if (path.includes('/files/')) return new Response(markdown);
     if (path.startsWith('/api/auth/device?'))
-      return Response.json({ boatName: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], description: 'Work and steer the helm.' });
+      return Response.json({ boatName: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], description: 'Work and steer the helm.', status: 'pending' });
     throw new Error('unexpected path ' + path);
   };
   w.TextDecoder = TextDecoder;
@@ -170,6 +170,15 @@ it('badges only open account decisions, updates on existing polls, and clears on
   expect(badges.at(-1)).toBe(1);
   await g.click('button', 'Sign out');
   expect(badges.at(-1)).toBe(0);
+});
+
+it("the phone menu lists the boats' fleet chips and signs out", async () => {
+  const g = await page('/');
+  await g.click('.bottombar button', 'Menu');
+  expect(g.text('#phone-menu')).toContain('Boats');
+  expect(g.text('#phone-menu')).toContain('helm');
+  await g.click('#phone-menu button', 'Sign out');
+  expect(g.text()).toContain('Continue with GitHub');
 });
 
 it('keeps the hosted glass usable when the OS denies app badges', async () => {
@@ -279,9 +288,10 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
   await g.settle();
   await g.click('#modalbox button', 'Queue message for helm');
   expect(g.writes[0]).toMatchObject({ path: '/api/glass/requests', body: { kind: 'message', dispatch: 'job', text: 'Please retry' }, credentials: 'same-origin' });
-  await g.click('#modalbox button', 'Cancel job…');
+  await g.click('#modalbox button', 'Cancel dispatch…');
   expect(g.writes).toHaveLength(1);
-  await g.click('#modalbox button', 'Confirm cancel');
+  expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its agent stops.');
+  await g.click('#modalbox button', 'Cancel dispatch');
   expect(g.writes[1]).toMatchObject({ path: '/api/glass/dispatches/job/cancel', body: {} });
   for (const write of g.writes) {
     expect(write.headers['Idempotency-Key']).toBeTruthy();
@@ -294,13 +304,22 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
 
 it('boats show repos and check-in, no edit/grant controls; revoke and delete each require confirmation', async () => {
   const g = await page('/#boats');
+  // The card shows the boat's access and age; a tap shows its repos, last check-in and trap request.
+  expect(g.text('#boats')).not.toContain('github.com/aequitas-labs/lobstah');
+  (g.doc.querySelector('#boats .card') as unknown as HTMLElement).click();
+  await g.settle();
   expect(g.text('#boats')).toContain('last check-in');
   expect(g.text('#boats')).toContain('github.com/aequitas-labs/lobstah');
   expect(Array.from(g.doc.querySelectorAll('#boats button')).some((b) => /edit|grant|rename/i.test(b.textContent ?? ''))).toBe(false);
+  // Access in the approval page's words.
+  expect(g.text('#boats')).toContain('Work, see and steer');
+  expect(g.text('#boats')).not.toContain('work + helm');
   await g.click('#boats button', 'revoke…');
   expect(g.writes).toHaveLength(0);
-  await g.click('#boats button', 'confirm revoke');
+  expect(g.text('#boats')).toContain('keep chris-macbook');
+  await g.click('#boats button', 'revoke chris-macbook');
   expect(g.writes[0]!.path).toBe('/api/glass/boats/boat/revoke');
+  expect(g.text()).toContain('Boat revoked.');
   await g.click('#boats button', 'request trap…');
   await g.click('#boats button', 'queue trap request');
   expect(g.writes[1]).toMatchObject({ body: { kind: 'trap-request', boat: 'boat', repo: 'github.com/aequitas-labs/lobstah' } });
@@ -311,16 +330,41 @@ it('boats show repos and check-in, no edit/grant controls; revoke and delete eac
   expect(g.text()).toContain('Continue with GitHub');
 });
 
+it('a boat card shows its name and state chip, then its access and age; a revoked one is greyed with no revoke', async () => {
+  const fresh = { ...snapshot.boats[0]!, id: 'fresh', name: 'studio', lastCheckIn: new Date().toISOString() };
+  const gone = { ...snapshot.boats[0]!, id: 'gone', name: 'old-mini', revoked: 1 };
+  const g = await page('/#boats', false, { snapshot: { ...snapshot, boats: [snapshot.boats[0]!, fresh, gone] } });
+  const cards = Array.from(g.doc.querySelectorAll('#boats .card'));
+  const line = (c: Element, sel: string) => (c.querySelector(sel)?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  expect(cards.map((c) => [line(c, '.gtitle'), line(c, '.gchip')])).toEqual([
+    ['chris-macbook', 'asleep'],
+    ['studio', 'online'],
+    ['old-mini', 'revoked'],
+  ]);
+  expect(line(cards[0]!, '.gcontext .gtext')).toMatch(/^Work, see and steer · checked in \d+\w ago$/);
+  // Asleep is a grey chip, with no status edge.
+  expect(cards[0]!.querySelector('.gchip')!.className).toBe('gchip dim');
+  expect(cards[0]!.className).not.toContain('gcard-edge');
+  expect(line(cards[0]!, '.gaction')).toBe('revoke…');
+  expect(cards[2]!.className).toContain('quiet');
+  expect(cards[2]!.querySelector('.gaction')).toBeNull();
+  // revoke… never expands the card; a tap or Enter does.
+  await g.click('#boats .card button', 'revoke…');
+  expect(cards[0]!.getAttribute('aria-expanded')).toBe('false');
+  cards[1]!.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event);
+  await g.settle();
+  expect(g.doc.querySelectorAll('#boats .card')[1]!.getAttribute('aria-expanded')).toBe('true');
+});
+
 it('boat approval shows the resolved name and allows only requested or lower access, never admin', async () => {
   const g = await page('/device?user_code=test-code');
-  await g.click('button', 'inspect request');
-  expect(g.text()).toContain('chris-macbook-2');
-  const select = g.doc.querySelector('[aria-label="approved boat access"]')! as unknown as HTMLSelectElement;
-  expect(Array.from(select.options).map((o) => o.value)).toEqual(['none', 'read', 'helm']);
+  expect(g.text()).toContain('Approve chris-macbook-2?');
+  const select = g.doc.querySelector('[aria-label="Access"]')! as unknown as HTMLSelectElement;
+  expect(Array.from(select.options).map((o) => o.value)).toEqual(['helm', 'read', 'none']);
   select.value = 'read';
   select.dispatchEvent(new g.window.Event('change', { bubbles: true }) as unknown as Event);
   await g.settle();
-  await g.click('button', 'approve chris');
+  await g.click('button', 'Approve');
   expect(g.writes[0]).toMatchObject({
     path: '/api/auth/wharf/approve',
     body: { userCode: 'test-code', name: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], permissions: ['work', 'read'] },

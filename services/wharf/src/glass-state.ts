@@ -123,7 +123,7 @@ export class GlassState {
    */
   answerDecision(id: string, optionValue: unknown, textValue: unknown, person: string, now: number): WharfDocument {
     const d = this.document(id);
-    requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, 'decision is not standing');
+    requireThat(d.kind === 'decision' && d.published && !d.withdrawn && !d.answer, 409, "This decision is already closed. Reload to see what's open.");
     const option = optionValue === undefined ? undefined : text(optionValue, 80), answer = textValue === undefined ? undefined : text(textValue, 20000).trim();
     requireThat(option === undefined || d.options?.includes(option), 400, 'not a decision option'); requireThat(option || answer, 400, 'answer needs an option or text');
     d.answer = { ...(option ? { option } : {}), ...(answer ? { text: answer } : {}), at: new Date(now).toISOString(), by: person };
@@ -145,7 +145,7 @@ export class GlassState {
     requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', id).toArray().length, 404, 'dispatch not found');
     const last = this.sql.exec<{ data: string }>('SELECT data FROM reports WHERE dispatch=? ORDER BY seq DESC LIMIT 1', id).toArray()[0];
     const status = last ? (JSON.parse(last.data) as { at: string }).at : undefined;
-    requireThat(status && statusAt === status, 409, 'the job has no such current status; read it again before acknowledging');
+    requireThat(status && statusAt === status, 409, 'This dispatch changed. Reload and try again.');
     const standing = this.dispatchAck(id, status);
     if (standing) return standing;
     const ack = { status, at: new Date(now).toISOString(), by };

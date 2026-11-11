@@ -4,7 +4,7 @@ import os from 'node:os';
 import * as path from 'node:path';
 import { saveWharfCredential, wharfCredential, wharfFor, agentEnvironment, loadConfig } from '@lobstah/core';
 import type { BackendScope } from '@lobstah/core';
-import { wharfLogin, cleanBoatName, systemBoatName } from '../src/wharf-login.js';
+import { wharfLogin, cleanBoatName, systemBoatName, canOpenBrowser } from '../src/wharf-login.js';
 import childProcess from 'node:child_process';
 import { wharfCommand } from '../src/wharf-commands.js';
 import { parseArgs } from '../src/usage.js';
@@ -114,4 +114,51 @@ it('login routes before credential construction and rejects extra/admin flags', 
   await expect(wharfCommand('wharf', ['login'], opts({ '--grounds': 'away', '--name': 'laptop' }), config)).resolves.toBe(true);
   expect(parseArgs('wharf', ['login', '--admin'])?.error).toContain('unknown flag');
   await expect(wharfLogin(scope, 'login', opts({ '--helm': '', '--work-only': '' }))).rejects.toThrow('not both');
+});
+
+it('opens the browser only for a person at a local terminal with a display', () => {
+  expect(canOpenBrowser({}, 'darwin', true)).toBe(true);
+  expect(canOpenBrowser({}, 'win32', true)).toBe(true);
+  expect(canOpenBrowser({ DISPLAY: ':0' }, 'linux', true)).toBe(true);
+  expect(canOpenBrowser({ WAYLAND_DISPLAY: 'wayland-0' }, 'linux', true)).toBe(true);
+  expect(canOpenBrowser({}, 'linux', true)).toBe(false);
+  expect(canOpenBrowser({}, 'darwin', false)).toBe(false);
+  for (const env of [{ CI: 'true' }, { SSH_CONNECTION: '1 2 3 4' }, { SSH_CLIENT: '1 2 3' }, { SSH_TTY: '/dev/ttys001' }]) expect(canOpenBrowser(env, 'darwin', true)).toBe(false);
+});
+
+it('opens the approval link that carries the code, and still prints it', async () => {
+  vi.stubEnv('CI', ''); vi.stubEnv('SSH_CONNECTION', ''); vi.stubEnv('SSH_CLIENT', ''); vi.stubEnv('SSH_TTY', ''); vi.stubEnv('DISPLAY', ':0');
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+  Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+  const child = { on: vi.fn(), unref: vi.fn() };
+  const spawn = vi.spyOn(childProcess, 'spawn').mockReturnValue(child as unknown as childProcess.ChildProcess);
+  try {
+    const complete = { ...code, verification_uri_complete: 'https://glass.test/device?user_code=ABCD-EFGH' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(complete)).mockResolvedValueOnce(Response.json(issued())));
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await wharfLogin(scope, 'login', opts({ '--name': 'laptop' }));
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0]![1]).toEqual(process.platform === 'win32' ? ['url.dll,FileProtocolHandler', complete.verification_uri_complete] : [complete.verification_uri_complete]);
+    expect(String(output.mock.calls[0]![0])).toContain(`at ${complete.verification_uri_complete}, code ABCD-EFGH. Opening it in your browser.`);
+
+    // A code link on another host is never opened or printed: the plain page is.
+    spawn.mockClear(); output.mockClear();
+    // The first login saved a boat, so this one names it first.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json({ name: 'laptop' })).mockResolvedValueOnce(Response.json({ ...code, verification_uri_complete: 'https://evil.test/device?user_code=ABCD-EFGH' })).mockResolvedValueOnce(Response.json(issued())));
+    await wharfLogin(scope, 'login', opts({ '--name': 'laptop' }));
+    expect(spawn.mock.calls[0]![1]).toContain('https://glass.test/device');
+    expect(JSON.stringify(output.mock.calls)).not.toContain('evil.test');
+  } finally {
+    if (tty) Object.defineProperty(process.stdout, 'isTTY', tty); else delete (process.stdout as { isTTY?: boolean }).isTTY;
+  }
+});
+
+it('prints the approval link without opening a browser over SSH', async () => {
+  vi.stubEnv('SSH_CONNECTION', '10.0.0.1 22 10.0.0.2 22');
+  const spawn = vi.spyOn(childProcess, 'spawn');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(code)).mockResolvedValueOnce(Response.json(issued())));
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  await wharfLogin(scope, 'login', opts({ '--name': 'laptop' }));
+  expect(spawn).not.toHaveBeenCalled();
+  expect(String(output.mock.calls[0]![0])).toBe('Approve boat laptop (work + read) at https://glass.test/device, code ABCD-EFGH. The browser can approve, lower access, or refuse.');
 });

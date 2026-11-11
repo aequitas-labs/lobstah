@@ -1,4 +1,4 @@
-import { DecisionError, GrantError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision } from '@lobstah/core';
+import { DecisionError, GrantError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision, reconcilePermissionCards, withDecisionLock } from '@lobstah/core';
 import type { AnswerSource, DecisionAnswer, DecisionMeta, DecisionUpload, Grant, Lane } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { applyPermissionAnswer, permissionAnswerAllowed } from './grants-cli.js';
@@ -29,6 +29,13 @@ function standingQuestion(key: string) {
 }
 
 export function answerKey(key: string, req: AnswerRequest): { decision: DecisionMeta; answer: DecisionAnswer; grant?: Grant } {
+  reconcilePermissionCards();
+  if (readDecision(key)?.permission) return withDecisionLock(key, () => answerStandingKey(key, req));
+  return answerStandingKey(key, req);
+}
+
+/** Validate and record an answer, holding the lifecycle lock for a permission card. */
+function answerStandingKey(key: string, req: AnswerRequest): { decision: DecisionMeta; answer: DecisionAnswer; grant?: Grant } {
   const maxBytes = loadConfig().limits.attachmentMaxBytes;
   if (key.startsWith('decision:')) {
     // A permission card: only the glass may allow. An allow writes the grant and tells the trap.
