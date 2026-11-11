@@ -19,12 +19,18 @@ type Step =
   | { kind: 'unusable' };
 
 /** The access a person can choose for a boat: what it asked for, or less. A mirror boat is approved as it asked, or denied. */
-const ACCESS: Record<string, { label: string; permissions: string[] }> = {
+export const ACCESS: Record<string, { label: string; permissions: string[] }> = {
   mirror: { label: 'Mirror', permissions: ['mirror', 'read'] },
   helm: { label: 'Work, see and steer', permissions: ['work', 'helm'] },
   read: { label: 'Work and see', permissions: ['work', 'read'] },
   none: { label: 'Work only', permissions: ['work'] },
 };
+
+/** A boat's access as the approval page names it ("Mirror", "Work and see"); the raw permissions when none matches. */
+export function accessLabel(permissions: readonly string[]): string {
+  const same = (p: readonly string[]) => p.length === permissions.length && p.every((x) => permissions.includes(x));
+  return Object.values(ACCESS).find((a) => same(a.permissions))?.label ?? permissions.join(' + ');
+}
 
 function choices(requested: string[]): string[] {
   if (requested.includes('mirror')) return ['mirror'];
@@ -113,7 +119,7 @@ export function DeviceConsent({ signedOut }: { signedOut: (status: 401 | 403) =>
     body = html`<form class="auth-consent-form" onSubmit=${(e: Event) => {
       e.preventDefault();
       if (code.trim()) void inspect(code.trim());
-    }}><label for="auth-consent-code">Code</label><input id="auth-consent-code" autocomplete="off" autocapitalize="characters" spellcheck=${false} maxLength="128" value=${code} onInput=${(e: Event) => setCode(value(e))} /><button class="auth-github auth-consent-primary" disabled=${!code.trim()}>Continue</button></form>`;
+    }}><label for="auth-consent-code">Code</label><input id="auth-consent-code" autocomplete="off" autocapitalize="characters" spellcheck=${false} maxLength="128" value=${code} onInput=${(e: Event) => setCode(value(e))} /><button class="auth-github auth-consent-primary" disabled=${!code.trim()}>Check code</button></form>`;
   else if (step.kind === 'review') {
     const d = step.device,
       options = choices(d.requestedPermissions),

@@ -296,10 +296,15 @@ it('boats show repos and check-in, no edit/grant controls; revoke and delete eac
   expect(g.text('#boats')).toContain('last check-in');
   expect(g.text('#boats')).toContain('github.com/aequitas-labs/lobstah');
   expect(Array.from(g.doc.querySelectorAll('#boats button')).some((b) => /edit|grant|rename/i.test(b.textContent ?? ''))).toBe(false);
+  // Access in the approval page's words.
+  expect(g.text('#boats')).toContain('Work, see and steer');
+  expect(g.text('#boats')).not.toContain('work + helm');
   await g.click('#boats button', 'revoke…');
   expect(g.writes).toHaveLength(0);
-  await g.click('#boats button', 'confirm revoke');
+  expect(g.text('#boats')).toContain('keep chris-macbook');
+  await g.click('#boats button', 'revoke chris-macbook');
   expect(g.writes[0]!.path).toBe('/api/glass/boats/boat/revoke');
+  expect(g.text()).toContain('Boat revoked.');
   await g.click('#boats button', 'request trap…');
   await g.click('#boats button', 'queue trap request');
   expect(g.writes[1]).toMatchObject({ body: { kind: 'trap-request', boat: 'boat', repo: 'github.com/aequitas-labs/lobstah' } });

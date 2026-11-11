@@ -95,7 +95,7 @@ function notify(text: string, bad = false): void {
 async function action(path: string, body: unknown): Promise<boolean> {
   try {
     await json('/api/glass/' + path, body);
-    notify(path === 'requests' ? 'Queued for the helm; it expires in 10 minutes.' : 'Saved.');
+    notify(path === 'requests' ? 'Queued for the helm; it expires in 10 minutes.' : path.endsWith('/revoke') ? 'Boat revoked.' : 'Saved.');
     await session?.page.refresh();
     return true;
   } catch (e) {
@@ -131,7 +131,7 @@ async function deleteAccount(): Promise<void> {
 function HumanRequests({ backend }: { backend: HostedBackend }) {
   const requests = backend.account()?.requests ?? [];
   if (!requests.length) return null;
-  return html`<div class="sec">Human requests</div>${requests.map(
+  return html`<div class="sec">Your requests</div>${requests.map(
     (r) =>
       html`<div class="msg" key=${r.id}><b>${r.kind}</b> · ${r.dispatch ?? r.boat ?? r.document} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`,
   )}`;
@@ -158,7 +158,7 @@ function start(mirror = false): void {
   window.addEventListener('hashchange', follow);
   page = startGlassPage(backend, {
     chips: () => [
-      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">helm ${backend.account()?.helmLive ? 'live' : 'unknown / no live lease'}</span>`,
+      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">${backend.account()?.helmLive ? 'helm live' : 'no helm signed on'}</span>`,
       html`<button class="btn" onClick=${() => void signOut()}>Sign out</button>`,
     ],
     banner: () => [

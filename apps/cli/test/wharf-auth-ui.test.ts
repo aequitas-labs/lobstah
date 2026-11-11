@@ -207,7 +207,7 @@ it('approval without a code asks for the one the terminal shows', async () => {
   expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Approve a boat');
   const input = g.doc.querySelector('#auth-consent-code') as unknown as HTMLInputElement;
   input.value = 'ABCD-EFGH'; input.dispatchEvent(new g.window.Event('input', { bubbles: true }) as unknown as Event); await g.settle();
-  await g.click('Continue');
+  await g.click('Check code');
   expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Approve studio?');
 });
 
