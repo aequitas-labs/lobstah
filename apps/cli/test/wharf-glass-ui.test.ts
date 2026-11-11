@@ -274,7 +274,7 @@ it('renders decisions as safe elements, requests only their own attachment image
   await g.click('.dmodal .dopt', 'Keep it small');
   g.input('Your answer, in your own words', 'Go ahead');
   await g.settle();
-  await g.click('.dmodal button', 'Send');
+  await g.click('.dmodal button[aria-label="Send"]');
   expect(g.writes).toContainEqual(expect.objectContaining({ path: '/api/glass/documents/card/answer', body: { option: 'Keep it small', text: 'Go ahead' } }));
   // The wharf takes no files: the answer offers none.
   expect(g.doc.querySelector('.dmodal .dattach')).toBeNull();
