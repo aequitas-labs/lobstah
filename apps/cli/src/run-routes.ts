@@ -1,4 +1,4 @@
-import { decisionDir, readDecision, readDecisionAnswer, readStoredRunScript } from '@lobstah/core';
+import { decisionDir, readDecision, readDecisionAnswer, readStoredRunScript, withdrawDecision } from '@lobstah/core';
 import type { DecisionMeta } from '@lobstah/core';
 import {
   PasskeyError,
@@ -21,7 +21,16 @@ import { RunRegistry, runStdin } from './run-exec.js';
  */
 
 /** The request kinds this module answers. */
-export const RUN_REQUEST_KINDS = ['run-passkey-challenge', 'run-passkey-register', 'run-challenge', 'run', 'run-output', 'run-line'] as const;
+export const RUN_REQUEST_KINDS = [
+  'run-passkey-challenge',
+  'run-passkey-register',
+  'run-challenge',
+  'run',
+  'run-output',
+  'run-line',
+  'run-stop',
+  'run-dismiss',
+] as const;
 export type RunRequestKind = (typeof RUN_REQUEST_KINDS)[number];
 
 export const isRunRequestKind = (kind: unknown): kind is RunRequestKind => RUN_REQUEST_KINDS.includes(kind as RunRequestKind);
@@ -64,11 +73,15 @@ export function runnableCard(key: unknown): { meta: DecisionMeta & { run: NonNul
 }
 
 const passkeyOrigin = (ctx: RunRequestContext): RunReply | undefined =>
-  new URL(ctx.origin).hostname === RUN_RP_ID ? undefined : refuse(409, `Passkeys work from ${ctx.origin.replace('127.0.0.1', RUN_RP_ID)}: open the glass there.`);
+  new URL(ctx.origin).hostname === RUN_RP_ID
+    ? undefined
+    : refuse(409, `Passkeys work from ${ctx.origin.replace('127.0.0.1', RUN_RP_ID)}: open the glass there.`);
 
 /** Answer one run request. */
 export async function handleRunRequest(kind: RunRequestKind, payload: unknown, ctx: RunRequestContext): Promise<RunReply> {
-  const wrongOrigin = passkeyOrigin(ctx);
+  const wrongOrigin = ['run-passkey-challenge', 'run-passkey-register', 'run-challenge', 'run'].includes(kind)
+    ? passkeyOrigin(ctx)
+    : undefined;
   if (wrongOrigin) return wrongOrigin;
   const p = (payload ?? {}) as Record<string, unknown>;
   try {
@@ -83,7 +96,9 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
             challenge: ctx.challenges.issue({ kind: 'register' }),
             rpId: RUN_RP_ID,
             registered: existing.length,
-            ...(existing.length ? { existingChallenge: ctx.challenges.issue({ kind: 'existing' }), credentialIds: existing.map((k) => k.credentialId) } : {}),
+            ...(existing.length
+              ? { existingChallenge: ctx.challenges.issue({ kind: 'existing' }), credentialIds: existing.map((k) => k.credentialId) }
+              : {}),
           },
         };
       }
@@ -105,7 +120,12 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         if (!readRunPasskeys(ctx.passkeysFile).length) return refuse(409, 'Set up a passkey in Settings to run cards.');
         return {
           status: 200,
-          body: { ok: true, challenge: ctx.challenges.issue({ kind: 'run', key: card.meta.key, sha256: card.meta.run.scriptSha256 }), rpId: RUN_RP_ID, credentialIds: readRunPasskeys(ctx.passkeysFile).map((k) => k.credentialId) },
+          body: {
+            ok: true,
+            challenge: ctx.challenges.issue({ kind: 'run', key: card.meta.key, sha256: card.meta.run.scriptSha256 }),
+            rpId: RUN_RP_ID,
+            credentialIds: readRunPasskeys(ctx.passkeysFile).map((k) => k.credentialId),
+          },
         };
       }
       case 'run': {
@@ -115,7 +135,7 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         const card = runnableCard(p.key);
         if ('status' in card) return card;
         if (verified.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The passkey signed a script that is not the card's.");
-        if (ctx.runs.get(card.meta.key)) return refuse(409, 'This card has already run.');
+        if (ctx.runs.get(card.meta.key)?.attempt.state === 'running') return refuse(409, 'This card is already running.');
         const input = runStdin(card.meta.run, p.inputs);
         if ('reason' in input) return refuse(400, input.reason);
         void ctx.runs.start(card.meta, input.values, input.stdin, verified.credentialId, { maxBytes: ctx.maxBytes });
@@ -126,15 +146,36 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         const refused = ctx.runs.sendLine(typeof p.key === 'string' ? p.key : '', p.line, p.secret === true);
         return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
       }
+      case 'run-stop': {
+        const refused = ctx.runs.stop(typeof p.key === 'string' ? p.key : '');
+        return refused ? refuse(409, refused) : { status: 202, body: { ok: true } };
+      }
+      case 'run-dismiss': {
+        const card = runnableCard(p.key);
+        if ('status' in card) return card;
+        if (!ctx.runs.get(card.meta.key)?.result) return refuse(409, 'Stop the command before dismissing this card.');
+        withdrawDecision(card.meta.key);
+        return { status: 200, body: { ok: true } };
+      }
       case 'run-output': {
         const key = typeof p.key === 'string' ? p.key : '';
         const live = ctx.runs.get(key);
         if (!live) return refuse(404, 'No run for that card on this glass.');
-        const after = typeof p.after === 'number' && p.after >= 0 ? p.after : 0;
+        const after = p.id && p.id !== live.attempt.id ? 0 : typeof p.after === 'number' && p.after >= 0 ? p.after : 0;
         const from = Math.max(0, after - live.dropped);
         return {
           status: 200,
-          body: { ok: true, text: live.output.slice(from), next: live.dropped + live.output.length, ...(live.result ? { result: live.result } : {}) },
+          body: {
+            ok: true,
+            id: live.attempt.id,
+            state: live.attempt.state,
+            startedAt: live.attempt.startedAt,
+            finishedAt: live.attempt.finishedAt,
+            warning: live.error,
+            text: live.output.slice(from),
+            next: live.dropped + live.output.length,
+            ...(live.result ? { result: live.result } : {}),
+          },
         };
       }
     }
