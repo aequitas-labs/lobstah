@@ -2,7 +2,7 @@ import type { GlassPrefs } from '../src/glass-diff.js';
 
 /**
  * This browser's preferences and filters, kept in localStorage — the
- * server has nothing to write. `spyglass` holds the view, the lobs switch,
+ * server has nothing to write. `spyglass` holds the view, the lobs preference,
  * and the filters; `spyglass-lob-hidden` holds the lobs this browser
  * clicked (item key → the state hash hidden).
  */
