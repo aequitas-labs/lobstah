@@ -258,3 +258,27 @@ describe('a secret input from the hosted glass', () => {
     expect(() => openSealedInput({ ...sealed, ct: ct.toString('base64url') }, privateKey)).toThrow("couldn't be opened");
   });
 });
+
+describe('Stop, Run again and Dismiss from the hosted glass', () => {
+  it('stops a running card and dismisses a finished one, with no passkey', async () => {
+    const card = runCard({ body: '#!/bin/bash\nsleep 20\n' });
+    expect((await passkeyRun(card)).status).toBe(202);
+    // Stop needs no passkey: stopping is safe and urgent.
+    expect((await relayed('run-stop', { key: card.key })).status).toBe(202);
+    await runs.settled();
+    expect((await relayed('run-output', { key: card.key })).json.state).toBe('stopped');
+    expect((await relayed('run-dismiss', { key: card.key })).status).toBe(200);
+    expect((await relayed('run-challenge', card)).status).toBe(404);
+  });
+
+  it('runs again inside the window with no passkey', async () => {
+    const page = windowKey();
+    const card = runCard();
+    const first = await passkeyRun(card, { window: page.spki });
+    await runs.settled();
+    const id = first.json.window as string;
+    const asked = await relayed('run-challenge', { ...card, window: id });
+    expect(asked.json.window).toBe(id);
+    expect((await relayed('run', { key: card.key, challenge: asked.json.challenge, window: id, windowSignature: signWith(page.privateKey, asked.json.challenge as string), inputs: {} })).status).toBe(202);
+  });
+});

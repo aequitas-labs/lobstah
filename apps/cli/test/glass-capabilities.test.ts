@@ -105,7 +105,7 @@ describe('a glass shows only what its source can fill and do', () => {
   it("runs a card from the local glass or a mirror boat's hosted glass, where the boat checks a phone's passkey", () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
     expect(MIRROR_CAPABILITIES.actions.has('run')).toBe(true);
-    for (const kind of ['run-challenge', 'run', 'run-output', 'run-pair-challenge', 'run-pair-register']) expect(mirrorWriteAllowed(kind), kind).toBe(true);
+    for (const kind of ['run-challenge', 'run', 'run-output', 'run-stop', 'run-dismiss', 'run-pair-challenge', 'run-pair-register']) expect(mirrorWriteAllowed(kind), kind).toBe(true);
     // The Mac's own passkey and an interactive card's console never go through the relay.
     for (const kind of ['run-line', 'run-passkey-challenge', 'run-passkey-register']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
   });

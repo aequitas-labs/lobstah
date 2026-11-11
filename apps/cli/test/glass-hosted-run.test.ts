@@ -151,3 +151,31 @@ describe('a secret input on the hosted glass', () => {
     expect(challenge.inputsSha256).toBe(sha256Hex(runInputsText(sent as never)));
   });
 });
+
+describe('Stop and Dismiss on the hosted glass', () => {
+  it('offers Stop while a run goes and Dismiss and Run again after, and sends them to the boat', async () => {
+    const run = hostedRun({
+      latest: { id: 'a1', key: RUN_KEY, scriptSha256: hostedRun().scriptSha256, state: 'running', startedAt: new Date(NOW - 1000).toISOString() },
+    });
+    // A failed output read ends the page's polling, as on the Mac; Stop stays.
+    const h = await page(run, {
+      answer: (s) => (s.kind === 'run-stop' ? { status: 202, body: { ok: true } } : { status: 500, body: { ok: false, reason: 'Output unavailable' } }),
+    });
+    const stop = h.g.$$('#doverlay .runfoot button').find((b) => text(b) === 'Stop') as HTMLButtonElement;
+    expect(stop).toBeTruthy();
+    stop.click();
+    await h.g.settle();
+    expect(h.sent.map((s) => s.kind)).toContain('run-stop');
+
+    const done = hostedRun({
+      latest: { id: 'a2', key: RUN_KEY, scriptSha256: hostedRun().scriptSha256, state: 'succeeded', startedAt: new Date(NOW - 2000).toISOString(), finishedAt: new Date(NOW - 1000).toISOString(), result: { exitCode: 0, timedOut: false, durationMs: 1000, outputBytes: 0, scrubbed: 0 } },
+    });
+    const d = await page(done, { answer: (s) => (s.kind === 'run-output' ? { status: 200, body: { ok: true, id: 'a2', state: 'succeeded', text: '', next: 0, result: { exitCode: 0, timedOut: false, durationMs: 1000, outputBytes: 0, scrubbed: 0 } } } : { status: 200, body: { ok: true } }) });
+    expect(text(d.g.$('#doverlay .runbtn'))).toBe('Run again');
+    const dismiss = d.g.$$('#doverlay .runfoot button').find((b) => text(b) === 'Dismiss') as HTMLButtonElement;
+    expect(dismiss).toBeTruthy();
+    dismiss.click();
+    await d.g.settle();
+    expect(d.sent.map((s) => s.kind)).toContain('run-dismiss');
+  });
+});
