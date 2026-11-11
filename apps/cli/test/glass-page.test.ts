@@ -63,11 +63,6 @@ async function openRow(g: GlassDom, tab: string, label: string) {
   await g.go(tab);
   await click(g, g.$$(`#${tab.slice(1)} tr.rowhead`).find((tr) => text(tr).includes(label)) ?? null);
 }
-async function settings(g: GlassDom, row: 'view' | 'lobs', choice: string) {
-  await click(g, g.$('#gearbtn'));
-  const rowEl = g.$$('#modalbox .settings .row').find((r) => text(r.querySelector('.lbl')).startsWith(row))!;
-  await click(g, [...rowEl.querySelectorAll('.seg button')].find((b) => text(b) === choice) ?? null);
-}
 const escape = async (g: GlassDom) => {
   g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
   await g.settle();
@@ -156,12 +151,40 @@ describe('glass page: tabs and hash routing', () => {
         expect(got[label]![1], label).toContain(line);
       }
     };
-    for (const view of ['cards', 'table'] as const) {
-      const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view } });
-      check(dots([...g.$$('#deck section')[4]!.querySelectorAll(view === 'cards' ? '.card' : '.deckline')]));
-      await g.go('#traps');
-      check(dots(view === 'cards' ? g.$$('#traps .card') : g.$$('#traps tr.rowhead')));
-    }
+    const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view: 'table' } });
+    check(dots([...g.$$('#deck section')[4]!.querySelectorAll('.deckline')]));
+    await g.go('#traps');
+    check(dots(g.$$('#traps tr.rowhead')));
+  });
+
+  it("shows each trap card's state as a lowercase chip in the dot's tone, and its work on the third line", async () => {
+    const want: Record<string, [string, string, string]> = {
+      'working trap': ['ok', 'working', ''],
+      'listening trap': ['ok', 'idle', 'listening for work'],
+      'parked trap': ['warn', 'waiting', 'waiting on review'],
+      'stale trap': ['dim', 'idle', 'not listening'],
+    };
+    const chips = (cards: Element[]) =>
+      Object.fromEntries(
+        cards.map((el) => {
+          const chip = el.querySelector('.gchip')!;
+          const tone = [...chip.classList].filter((c) => c !== 'gchip').join(' ');
+          const label = Object.keys(want).find((l) => text(el).includes(l))!;
+          return [label, [tone, text(chip), text(el.querySelector('.gnow'))]];
+        }),
+      );
+    const check = (got: Record<string, [string, string, string]>) => {
+      expect(Object.keys(got).sort()).toEqual(Object.keys(want).sort());
+      for (const [label, [tone, word, now]] of Object.entries(want)) {
+        expect(got[label]![0], label).toBe(tone);
+        expect(got[label]![1], label).toBe(word);
+        expect(got[label]![2], label).toContain(now);
+      }
+    };
+    const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view: 'cards' } });
+    check(chips([...g.$$('#deck section')[4]!.querySelectorAll('.card')]));
+    await g.go('#traps');
+    check(chips(g.$$('#traps .card')));
   });
 
   it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('copies a signed-off $harness resume command in the modal only, not on $view or deck', async ({ harness, view }) => {
@@ -250,7 +273,7 @@ describe('glass page: tabs and hash routing', () => {
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((el) => text(el).includes('wt:t1'))!;
-    expect(text(card.querySelector('.footact'))).toBe('↗ Open');
+    expect(text(card.querySelector('.gaction'))).toBe('↗ Open');
     expect(text(card)).not.toContain('codex://threads/live-session');
     expect(card.querySelectorAll('.cmd')).toHaveLength(0);
     await click(g, card);
@@ -298,9 +321,11 @@ describe('glass page: tabs and hash routing', () => {
       expect(g.$$('#traps button.open')).toHaveLength(0);
       return g.$$('#traps .card').find((c) => text(c).includes('wt:t1'))!;
     };
-    expect(text(await foot())).toContain('Running on studio, only reachable from there');
+    // The card names the boat; it never says where the trap is only reachable from (the modal does).
+    expect(text((await foot()).querySelector('.gfoot'))).toContain('⛵ studio');
+    expect(text(await foot())).not.toContain('only reachable');
     trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
-    expect(text(await foot())).toContain('Running on studio');
+    expect(text((await foot()).querySelector('.gfoot'))).toContain('⛵ studio');
     expect(text(await foot())).not.toContain('only reachable');
     const attach = await page(d, { hash: '#traps' });
     await openRow(attach, '#traps', 'wt:t1');
@@ -309,7 +334,8 @@ describe('glass page: tabs and hash routing', () => {
     trap.attachCommand = undefined;
     Object.assign(trap, { harness: 'codex', link: 'codex://threads/live-session' });
     const card = await foot();
-    expect(text(card)).toContain('Running on studio, only reachable from there');
+    expect(text(card.querySelector('.gfoot'))).toContain('⛵ studio');
+    expect(text(card)).not.toContain('only reachable');
     expect(card.querySelector('a[href^="codex:"]')).toBeNull();
     const desktopTrap = await page(d, { hash: '#traps' });
     await openRow(desktopTrap, '#traps', 'wt:t1');
@@ -516,7 +542,7 @@ describe('glass page: tabs and hash routing', () => {
       const card = trapRow(g, '#traps .card');
       expect(opens(card).map(text)).toEqual(['↗ Open']);
       expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
-      expect(text(card)).toContain('Running on studio');
+      expect(text(card.querySelector('.gfoot'))).toContain('⛵ studio');
       const modal = await page(d, { hash: '#traps' });
       await openRow(modal, '#traps', 'wt:t1');
       expect(modal.$$('#modalbox .route').map(text)).toEqual(['Open live in Claude any device']);
@@ -656,7 +682,8 @@ describe('glass page: per-section change detection', () => {
     const seen = await mutations(g, () => g.poll());
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.filter((m) => !card.contains(m.target as never))).toEqual([]);
-    expect(card.querySelector('.badge')!.className).toBe('badge v-blocked');
+    expect(card.querySelector('.gchip')!.className).toBe('gchip bad');
+    expect(text(card.querySelector('.gchip'))).toBe('blocked');
   });
 
   it('a new dispatch inserts one row and keeps every existing row node', async () => {
@@ -797,31 +824,46 @@ describe('glass page: modals', () => {
     expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
   });
 
-  it('⚙ opens settings; the view switch persists in this browser and applies everywhere', async () => {
-    const g = await page(acceptanceFleet(), { hash: '#dispatches' });
+  it('⚙ edits browser display preferences while helm settings stay read-only', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'table', lobs: false } });
     await click(g, g.$('#gearbtn'));
     expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
     expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
-    await click(g, g.$$('#modalbox .seg button').find((b) => text(b) === 'cards')!);
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).view).toBe('cards');
+    const choose = async (setting: string, value: string) => click(g, g.$$(`.settings [aria-label="${setting}"] button`).find(button => text(button) === value) ?? null);
+    await choose('view', 'cards');
     expect(g.$$('#dispatches .card')).toHaveLength(4);
-    expect(g.$$('#modalbox .seg button.on').map(text)).toEqual(['cards', 'on', 'full']);
+    await choose('lobs', 'on');
+    expect(g.$$('#lobs .lob')).toHaveLength(2);
+    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!)).toMatchObject({ view: 'cards', lobs: true });
+    await choose('view', 'table');
+    await choose('lobs', 'off');
+    expect(g.$$('#dispatches tr.rowhead')).toHaveLength(4);
+    expect(g.$$('#lobs .lob')).toHaveLength(0);
+    expect(g.$$('[data-helm-chat] button, [data-helm-chat] input, [data-helm-chat] select')).toEqual([]);
+    expect(g.posts()).toEqual([]);
+    const reloaded = await page(acceptanceFleet(), { hash: '#dispatches', prefs: JSON.parse(g.window.localStorage.getItem('spyglass')!) });
+    expect(reloaded.$$('#dispatches tr.rowhead')).toHaveLength(4);
+    expect(reloaded.$$('#lobs .lob')).toHaveLength(0);
   });
 });
 
+/** A PR card's number, from its second line: `web #41 · …`. */
+const cardNumber = (c: Element) => /#\d+/.exec(text(c.querySelector('.gcontext')))?.[0] ?? '';
+
 describe('glass page: PRs', () => {
-  it('colors every PR badge with its GitHub state class', async () => {
-    const g = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
-    const badges = Object.fromEntries(g.$$('#prs .card').map((c) => [text(c.querySelector('b')).split(' ')[0], c.querySelector('.badge')!.className]));
-    expect(badges).toEqual({
-      '#41': 'badge pr-open',
-      '#42': 'badge warn',
-      '#43': 'badge pr-draft',
-      '#50': 'badge pr-conflicts',
-      '#60': 'badge bad long',
-      '#61': 'badge pr-behind',
-      '#30': 'badge pr-merged',
-    });
+  it("edges every PR card with its badge's tone and says its status in lowercase", async () => {
+    const d = everyAttentionFleet();
+    const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
+    const cards = g.$$('#prs .card');
+    expect(cards.map(cardNumber).sort()).toEqual(d.prs.map((p) => '#' + p.number).sort());
+    for (const c of cards) {
+      const p = d.prs.find((x) => '#' + x.number === cardNumber(c))!;
+      expect(c.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
+      expect(text(c.querySelector('.gtop .gword'))).toBe(p.badge.text.toLowerCase());
+      expect(text(c.querySelector('.gaction'))).toBe('↗ Open');
+      // Two lines, nothing more: merge readiness, the watch and the gate are in the modal.
+      expect(c.querySelectorAll(':scope > .gline')).toHaveLength(2);
+    }
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#41 → #42 → #43 · floor main');
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#30 · floor main · history');
   });
@@ -851,7 +893,7 @@ describe('glass page: PRs', () => {
     g.serve(d);
     await g.poll();
     const after = g.$$('#prs .card');
-    expect(text(after[0]!.querySelector('.prname'))).toBe('#99 fresh');
+    expect(text(after[0]!.querySelector('.gtitle'))).toBe('fresh');
     expect(after.slice(1)).toEqual(cards);
     expect(g.$$('#prs h2').slice(1)).toEqual(heads);
   });
@@ -881,14 +923,13 @@ describe('glass page: PRs', () => {
     ]);
   });
 
-  it('titles: a PR card shows the number bold and the title after it; no title shows the number alone', async () => {
+  it('titles: a PR card leads with its title and puts the number on line 2; no title shows the number alone', async () => {
     for (const hash of ['#deck', '#prs']) {
       const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
-      const names = g.$$(`${hash} .card .prname`);
-      const byNumber = Object.fromEntries(names.map((n) => [text(n.querySelector('b')), n]));
-      expect(text(byNumber['#41'])).toBe(`#41 ${PR_TITLES[41]}`);
+      const cards = g.$$(`${hash} .card`).filter((c) => c.querySelector('.pricon'));
+      const byNumber = Object.fromEntries(cards.map((c) => [cardNumber(c), c.querySelector('.gtitle')!]));
+      expect(text(byNumber['#41'])).toBe(PR_TITLES[41]);
       expect(byNumber['#41']!.getAttribute('title')).toBe(PR_TITLES[41]);
-      expect(byNumber['#41']!.querySelectorAll('b')).toHaveLength(1);
       expect(text(byNumber['#43'])).toBe('#43');
       expect(byNumber['#43']!.hasAttribute('title')).toBe(false);
     }
@@ -956,31 +997,34 @@ describe('glass page: On deck', () => {
   it('a queued in-flight row shows the queued badge, its queue time, and its trap address', async () => {
     const g = await page(acceptanceFleet());
     const flight = g.$$('#deck section')[1]!;
-    const line = [...flight.querySelectorAll('.deckline')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line.querySelector('.badge'))).toBe('queued');
-    // The empty note keeps its separator (legacy fidelity); the time is the queue time.
-    expect(text(line)).toBe('queued dddddddd api · · 60s ago · wt:t2');
+    // Two lines: the instruction and its status chip; the repo and trap, with the queue time at the right.
+    const line = [...flight.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
+    expect(text(line.querySelector('.gchip'))).toBe('queued');
+    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
+    expect(text(line.querySelector('.gright'))).toBe('60s ago');
   });
 
   it('an in-flight row with no time omits the "· ago" fragment', async () => {
     const d = acceptanceFleet();
     d.dispatches = d.dispatches.map((x) => (x.id.startsWith('dddddddd') ? { ...x, verbAt: undefined } : x));
     const g = await page(d);
-    const line = [...g.$$('#deck section')[1]!.querySelectorAll('.deckline')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line)).toBe('queued dddddddd api · · wt:t2');
+    const line = [...g.$$('#deck section')[1]!.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
+    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
+    expect(line.querySelector('.gright')).toBeNull();
     expect(text(line)).not.toContain('ago');
   });
 
   it('Landed · 24h: the newest five catches, newest first, unreported badged, failed in red, nothing older', async () => {
     const g = await page(everyAttentionFleet());
     const landed = g.$$('#deck section')[2]!;
-    const lines = [...landed.querySelectorAll('.deckline')];
+    const lines = [...landed.querySelectorAll('.deckrow')];
     expect(lines).toHaveLength(5);
-    expect(lines.map((l) => text(l.querySelector('b')).split(' ')[0])).toEqual(
+    // Each row's title carries its id on hover; the title is the dispatch's, else its note's first line.
+    expect(lines.map((l) => l.querySelector('b')!.getAttribute('title')!.split(' ')[0])).toEqual(
       Array.from({ length: 5 }, (_, i) => `1${i}aaaaaa`),
     );
     expect(lines.map((l) => !!l.querySelector('.badge.unreported'))).toEqual([true, true, true, true, false]);
-    expect(lines[2]!.querySelector('.badge')!.className).toBe('badge bad');
+    expect(lines[2]!.querySelector('.gchip')!.className).toBe('gchip bad');
     expect(text(landed)).not.toContain('yesterday');
     expect(landed.querySelector('.deckmore')).toBeNull();
   });
@@ -990,17 +1034,24 @@ describe('glass page: On deck', () => {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
       const traps = g.$$('#deck section')[4]!;
       const items = [...traps.querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
-      expect(items.map((l) => text(l.querySelector('b')))).toEqual([
-        '🪤 wt:t1',
-        '🪤 wt:t10',
-        '🪤 wt:t3',
-        '🪤 wt:t4',
-        '🪤 wt:t5',
-        '🪤 wt:t6',
-        '🪤 wt:t7',
-        '🪤 wt:t2',
+      // A card leads with the name alone (components/card.ts); a deck line keeps the 🪤.
+      expect(items.map((l) => text(l.querySelector('b')).replace(/^🪤 /, ''))).toEqual([
+        'wt:t1',
+        'wt:t10',
+        'wt:t3',
+        'wt:t4',
+        'wt:t5',
+        'wt:t6',
+        'wt:t7',
+        'wt:t2',
       ]);
-      expect(items.map((l) => l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')))).toEqual([
+      const harnessOrState = (l: Element) =>
+        view === 'cards'
+          ? text(l.querySelector('.gchip')) === 'signed off'
+            ? 'signed off'
+            : l.querySelector('.gicon .harness-icon')?.getAttribute('aria-label')?.toLowerCase()
+          : (l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')));
+      expect(items.map(harnessOrState)).toEqual([
         'claude',
         'claude',
         'codex',
@@ -1028,13 +1079,15 @@ describe('glass page: On deck', () => {
     const g = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
     const prs = g.$$('#deck section')[5]!;
     const cards = [...prs.querySelectorAll('.card')];
-    expect(cards.map((c) => [text(c.querySelector('b')).split(' ')[0], c.className])).toContainEqual(['#42', 'card acked']);
-    expect(text(prs.querySelector('.card .badge.pr-conflicts'))).toBe('conflicts');
+    const acked = cards.filter((c) => c.className.includes('acked')).map(cardNumber);
+    expect(acked).toEqual(['#42']);
+    expect(cards.find((c) => cardNumber(c) === '#42')!.className).toContain('quiet');
+    expect(cards.map((c) => text(c.querySelector('.gword')))).toContain('conflicts');
   });
 
-  it('an empty fleet: every section says none, the daemon is down', async () => {
+  it('an empty fleet: every section says it is empty, the daemon is down', async () => {
     const g = await page(emptyFleet());
-    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'none', 'none', 'none', 'none', 'none']);
+    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'none', 'none']);
     expect(text(g.$('#chips'))).toBe('daemon down');
   });
 });
@@ -1111,14 +1164,11 @@ describe('glass page: lobs', () => {
     expect(g.$$('#lobs .lob .bub').map(text).join(' ')).toContain('question item 0');
   });
 
-  it('the lobs switch turns them off', async () => {
-    const g = await page(acceptanceFleet(), { prefs: { lobs: false } });
-    expect(g.$$('#lobs .lob')).toHaveLength(0);
-    await settings(g, 'lobs', 'on');
-    expect(g.$$('#lobs .lob')).toHaveLength(2);
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).lobs).toBe(true);
-    await settings(g, 'lobs', 'off');
-    expect(g.$$('#lobs .lob')).toHaveLength(0);
+  it.each([true, false])('honors the stored lobs preference %s', async (lobs) => {
+    const g = await page(acceptanceFleet(), { prefs: { lobs } });
+    expect(g.$$('#lobs .lob')).toHaveLength(lobs ? 2 : 0);
+    await click(g, g.$('#gearbtn'));
+    expect(text(g.$('.settings [aria-label="lobs"] button[aria-pressed="true"]'))).toBe(lobs ? 'on' : 'off');
   });
 });
 
@@ -1156,9 +1206,8 @@ describe('glass page: a dispatch shows its trap by name', () => {
 
   it('shows the name on the deck, in the dispatch modal, and in its log', async () => {
     const g = await page(namedFleet(), { hash: '#deck', prefs: { view: 'table' } });
-    const flight = g.$$('#deck .deckline').find((l) => text(l).includes('cccccccc'))!;
-    expect(text(flight)).toContain('claimed by crisp-heron');
-    expect(text(flight)).toMatch(/· crisp-heron$/);
+    const flight = g.$$('#deck .deckrow').find((l) => text(l).includes('cccccccc'))!;
+    expect(text(flight.querySelector('.gtext'))).toContain('🪤 crisp-heron');
     expect(text(flight)).not.toContain('wt:t1');
     await openRow(g, '#dispatches', 'cccccccc');
     expect(text(g.$('#modalbox .claimedby'))).toBe('claimed by crisp-heron');

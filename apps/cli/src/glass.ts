@@ -1,5 +1,5 @@
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
-import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus } from '@lobstah/core';
+import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
 import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
@@ -28,8 +28,6 @@ import {
   executorPath,
   helmLabel,
   helmChat,
-  setHelmChat,
-  resolveGrounds,
   laneDirs,
   listHelms,
   listNotices,
@@ -63,6 +61,7 @@ import {
   loadConfig,
   lobstahVersion,
   pendingIds,
+  dispatchPrUrls,
   prBadge,
   readEvidence,
   dispatchWorktree,
@@ -90,7 +89,8 @@ import {
   heavyGlassView,
 } from '@lobstah/core';
 import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
-import { currentAck, writeAck } from './acks.js';
+import { ackWalkingItem } from './attention-ack.js';
+import type { WalkingAck } from './attention-ack.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
@@ -100,12 +100,12 @@ import { answerPermissionsProposal, previewPermissionsProposal } from './permiss
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
-import { reviewSetupView, writeReviewMode } from './reviews-setup.js';
-import { buildTendReport, landedCatches } from './tend.js';
+import { reviewSetupView } from './reviews-setup.js';
+import { buildTendReport, landedCatches, walkingAttention } from './tend.js';
 import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
-import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
+import { deriveGlassPrs, dispatchPrHead, dispatchPrList } from './glass-prs.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -118,7 +118,8 @@ import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
 import { handleRunRequest, isRunRequestKind } from './run-routes.js';
-import { RunChallenges, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
+import { RunChallenges, hostedPasskeysFile, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
+import { RunWindows } from './run-window.js';
 import { RunRegistry } from './run-exec.js';
 
 /**
@@ -157,7 +158,6 @@ export function requestBodyCap(): number {
 /** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
-  ['helm-chat', 1024],
   ['todo-schedule', 1024],
   ['decision-viewed', 1024],
   ['checklist-tick', 1024],
@@ -169,8 +169,8 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ...['review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
   ['review-redraft', 1024],
   ['review-draft', 1024],
-  ['review-mode', 1024],
   ['pr-ack', 256 * 1024],
+  ['attention-ack', 1024],
 ]);
 
 const readJson = <T>(f: string): T | undefined => {
@@ -418,14 +418,14 @@ function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
 
 /**
  * Attention exactly as `man tend` derives it (the one place kinds are
- * decided), plus the active attentionKinds for the read-only line under the
- * heading. A config error surfaces on the page instead of failing /data.
+ * decided), as the pet walks it (walkingAttention), plus the active
+ * attentionKinds for the read-only line under the heading. A config error
+ * surfaces on the page instead of failing /data.
  */
 function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[]; attentionKinds: string[]; attentionError?: string } {
   try {
     const cfg = loadConfig();
-    // The pet's list: a question held on the helm's turn is not the human's yet.
-    return { attention: buildTendReport().attention.filter((a) => !a.held), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
+    return { attention: walkingAttention(buildTendReport()), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
   } catch (err) {
     return { attention: [], landed: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
   }
@@ -606,6 +606,7 @@ function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
  * request), so starting cards may carry their start command and ticket.
  */
 export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
+  reconcilePermissionCards();
   const cfg = loadConfig();
   refreshMissingDispatchPrs();
   const prRecords = readPrs();
@@ -651,6 +652,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   for (const d of dispatches as GlassDispatch[]) {
     const urls = d.evidence?.prUrls;
     if (urls && urls.length > 1) d.prList = dispatchPrList(urls.filter((url) => recordsByUrl.get(url)?.state !== 'CLOSED'), prs, d.evidence?.prPositions);
+    const ev = d.evidence;
+    const head = ev && dispatchPrHead(dispatchPrUrls(ev), (url) => recordsByUrl.get(url) ?? (ev.pr?.url === url ? ev.pr : undefined), prs, d, ev.prPositions);
+    if (head) d.prHead = head;
   }
   const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
@@ -787,7 +791,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
-    runPasskeys: runPasskeyStatus(),
+    runPasskeys: { ...runPasskeyStatus(), hosted: runPasskeyStatus(hostedPasskeysFile()).count },
     answerLimits: {
       maxBytes: attachmentLimit(),
       maxFiles: ANSWER_FILES_MAX,
@@ -892,6 +896,10 @@ export function serveGlass(
     presence?: GlassPresence;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
+    runWindows?: RunWindows;
+    /** A phone's hosted-glass passkeys and the pending pairing (tests); ~/.lobstah/run by default. */
+    hostedPasskeysFile?: string;
+    pairingFile?: string;
     /** Chris's go-ahead to store a run passkey, asked outside the browser; resolves to a refusal reason. */
     confirmPasskeyRegistration?: () => Promise<string | undefined>;
     /** Where run passkeys are kept (tests). */
@@ -901,6 +909,7 @@ export function serveGlass(
   } = {},
 ): http.Server {
   const runChallenges = options.runChallenges ?? new RunChallenges();
+  const runWindows = options.runWindows ?? new RunWindows();
   const runs = options.runs ?? new RunRegistry();
   const confirmWithMacPassword = macPasswordGate();
   const presence = options.presence ?? new GlassPresence();
@@ -1046,22 +1055,10 @@ export function serveGlass(
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
-          case 'helm-chat': {
-            const { grounds, chat } = (body.payload ?? {}) as { grounds?: unknown; chat?: unknown };
-            if (typeof grounds !== 'string' || grounds.length > 200 || (chat !== 'full' && chat !== 'brief')) {
-              return reply(400, { ok: false, reason: 'Helm grounds and chat full or brief are required.' });
-            }
-            let name: string;
-            try { name = resolveGrounds(loadConfig(), grounds).name; }
-            catch { return reply(400, { ok: false, reason: 'Unknown helm grounds.' }); }
-            try {
-              const seat = setHelmChat(name, chat);
-              return reply(200, { ok: true, grounds: displayGrounds(seat.grounds, loadConfig()), chat });
-            } catch (err) {
-              if (err instanceof Error && err.message.startsWith('no helm signed on')) return reply(409, { ok: false, reason: 'No helm is signed on for these grounds.' });
-              return reply(500, { ok: false, reason: 'The helm chat setting could not be stored.' });
-            }
-          }
+          // Glass settings are read-only, including requests with a valid page token.
+          case 'helm-chat':
+          case 'review-mode':
+            return reply(403, { ok: false, reason: 'Settings are read-only in glass.' });
           case 'todo-schedule': {
             // Set or move a todo's time from its row. No helm gate, the same as answering a card.
             const { grounds, id, until } = (body.payload ?? {}) as { grounds?: unknown; id?: unknown; until?: unknown };
@@ -1141,17 +1138,6 @@ export function serveGlass(
             try { revokeGrant(id, 'glass'); return reply(200, { ok: true }); }
             catch (err) { return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) }); }
           }
-          case 'review-mode': {
-            const { mode, repo, publish } = (body.payload ?? {}) as { mode?: unknown; repo?: unknown; publish?: unknown };
-            if (typeof mode !== 'string') return reply(400, { ok: false, reason: 'A reviews mode is required.' });
-            if ((repo !== undefined && (typeof repo !== 'string' || !repo)) || (publish !== undefined && typeof publish !== 'boolean')) return reply(400, { ok: false, reason: 'A repo key and boolean publish setting are required.' });
-            try {
-              writeReviewMode(mode, undefined, { repo: repo as string | undefined, publish: publish as boolean | undefined });
-              return reply(200, { ok: true });
-            } catch (err) {
-              return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) });
-            }
-          }
           case 'review-skip':
           case 'review-seen':
           case 'review-approve':
@@ -1176,40 +1162,51 @@ export function serveGlass(
             );
             return;
           }
-          case 'pr-ack': {
-            // Ack only the PR/stack states this page showed, never a newer state.
+          case 'pr-ack':
+          case 'attention-ack': {
+            // Ack only the states this page showed, never a newer state. A PR group's
+            // ack (pr-ack) names PR and stack items only; a lob click (attention-ack)
+            // names the one item it walked, of any kind the pet walks.
+            const prOnly = body.kind === 'pr-ack';
             const items = (body.payload as { items?: unknown } | undefined)?.items;
-            if (!Array.isArray(items) || items.length > 1000 || items.some((i) =>
-              !i || typeof i.key !== 'string' || !/^(pr:|stack:)/.test(i.key) || i.key.length > 300 ||
-              typeof i.stateHash !== 'string' || i.stateHash.length > 100))
-              return reply(400, { ok: false, reason: 'PR or stack attention states are required.' });
-            try {
-              const standing = buildTendReport().attention;
-              const acked = [];
-              for (const item of items) {
-                const a = standing.find((a) => a.key === item.key && a.stateHash === item.stateHash && (a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
-                if (!a) continue;
-                const ack = currentAck(a.key, a.stateHash) ?? { key: a.key, kind: a.kind, stateHash: a.stateHash, at: new Date().toISOString(), by: 'glass' };
-                writeAck(ack);
-                acked.push(ack);
+            if (!Array.isArray(items) || items.length > (prOnly ? 1000 : 1) || items.some((i) =>
+              !i || typeof i.key !== 'string' || (prOnly && !/^(pr:|stack:)/.test(i.key)) || i.key.length > 300 ||
+              typeof i.stateHash !== 'string' || i.stateHash.length > 200))
+              return reply(400, { ok: false, reason: prOnly ? 'PR or stack attention states are required.' : 'One attention item and its state are required.' });
+            void (async () => {
+              const standing = walkingAttention(buildTendReport());
+              const acked: WalkingAck[] = [];
+              for (const item of items as Array<{ key: string; stateHash: string }>) {
+                const a = standing.find((a) => a.key === item.key && a.stateHash === item.stateHash && (!prOnly || a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
+                if (a) acked.push(await ackWalkingItem(a, 'glass'));
               }
-              return reply(200, { ok: true, acked });
-            } catch {
-              return reply(500, { ok: false, reason: 'The acknowledgments could not be stored.' });
-            }
+              return acked;
+            })().then(
+              (acked) => reply(200, { ok: true, acked }),
+              () => reply(500, { ok: false, reason: 'The acknowledgments could not be stored.' }),
+            );
+            return;
           }
           case 'run-passkey-challenge':
           case 'run-passkey-register':
           case 'run-challenge':
           case 'run':
           case 'run-output':
-          case 'run-line': {
+          case 'run-stop':
+          case 'run-dismiss':
+          case 'run-line':
+          case 'run-pair-challenge':
+          case 'run-pair-register': {
             if (!isRunRequestKind(body.kind)) return reply(400, { ok: false, reason: 'Unknown run request.' });
             void handleRunRequest(body.kind, body.payload, {
               origin: `http://${req.headers.host}`,
               challenges: runChallenges,
+              windows: runWindows,
+              relayed: req.headers['x-lobstah-relay'] === 'wharf',
               confirmRegistration: options.confirmPasskeyRegistration ?? confirmWithMacPassword,
               ...(options.passkeysFile ? { passkeysFile: options.passkeysFile } : {}),
+              ...(options.hostedPasskeysFile ? { hostedPasskeysFile: options.hostedPasskeysFile } : {}),
+              ...(options.pairingFile ? { pairingFile: options.pairingFile } : {}),
               runs,
               maxBytes: attachmentLimit(),
             }).then(

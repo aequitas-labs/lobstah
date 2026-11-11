@@ -22,7 +22,7 @@ export async function json<T>(path: string, body?: unknown, method = body === un
       response.status,
       response.status === 401
         ? 'Sign in with GitHub to see your grounds.'
-        : (value.error ?? value.message ?? `Request failed (${response.status})`),
+        : (value.error_description ?? value.error ?? value.message ?? 'Something went wrong. Try again.'),
     );
   return value as T;
 }

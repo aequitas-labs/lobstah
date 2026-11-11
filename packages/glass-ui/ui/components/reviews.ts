@@ -1,17 +1,22 @@
 import { useState } from 'preact/hooks';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
-import { dismissReview, reviewRequest } from '../actions.js';
+import { dismissReview, reviewRequest, showModal } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
 import { can } from '../backend.js';
+import { getState } from '../store.js';
+import { Card, CardLink, PrIcon } from './card.js';
+import type { CardTone } from './card.js';
 
 /**
  * The Reviews tab: one row or card per PR that asked for your review,
  * the ones waiting on him first. A row opens the PR in its review tool
  * ([repos.<key>].reviewTool), where the drafted review waits as the identity's pending
- * review, to edit and send. On-demand jobs follow the repo’s draft/publish setting.
+ * review, to edit and send. A card opens the review's modal, with who asked,
+ * the findings, the reason and the actions; its Open draft goes to the review
+ * tool. On-demand jobs follow the repo’s draft/publish setting.
  */
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -80,8 +85,29 @@ const badge = (r: GlassReview) =>
 const findings = (r: GlassReview) =>
   html`${r.summary && html`<details onClick=${(e: Event) => e.stopPropagation()}><summary>Summary</summary><div class="rv-reason">${r.summary}</div></details>`}${r.blocking?.map((b) => html`<div class="rv-reason bad">${b.path}:${b.line} · ${b.body}</div>`)}`;
 
+/** A name's initials, at most two: "Dana Developer" is DD, "dana" is D. */
+export const initials = (name: string): string =>
+  name
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]!.toUpperCase())
+    .join('');
+
+/**
+ * The asker's avatar; one that can't load (offline, or blocked) shows their
+ * initials instead. It remembers which url failed rather than resetting in
+ * an effect: a page's Content-Security-Policy refuses an image before the
+ * first effect runs, and a reset there would bring the broken image back.
+ */
+function Avatar({ url, name }: { url: string; name: string }) {
+  const [failedUrl, setFailedUrl] = useState<string>();
+  if (failedUrl === url) return html`<span class="rv-initials" aria-hidden="true">${initials(name)}</span>`;
+  return html`<img src=${url} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailedUrl(url)} />`;
+}
+
 const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?? r.requestedBy ?? r.author}>
-  ${r.askerAvatarUrl && html`<img src=${r.askerAvatarUrl} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" />`}
+  ${r.askerAvatarUrl && html`<${Avatar} url=${r.askerAvatarUrl} name=${r.askerName ?? r.asker ?? r.requestedBy ?? r.author} />`}
   <span>${r.askerName ?? r.asker ?? r.requestedBy ?? r.author}</span>
   ${r.automatic && html`<span class="badge dim" title="A bot re-requested this review">automatic</span>`}
 </span>`;
@@ -108,44 +134,95 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
   </tr>`;
 }
 
-function card(r: GlassReview, canDraft: boolean, publish: boolean) {
-  const meta = reviewMeta(r);
-  return html`<div key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'card rv-card' + (r.seenAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} role="link" tabindex="0" onKeyDown=${(
-    e: KeyboardEvent,
-  ) => {
-    if (e.key === 'Enter' && e.target === e.currentTarget) openReview(r)();
-  }} onClick=${openReview(r)}><div class="top"><b title=${r.title}>${r.title}</b>${badge(r)}</div><div class="rv-asker">${asker(r)}</div><div class="meta" title=${meta.text}>${r.repo}#${r.number} · ${Age(r.requestedAt)} ago</div>${findings(r)}${r.reason && html`<div class="rv-reason">${r.reason}</div>`}<div class="foot">${staged(r)}<span class="footact"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></span></div></div>`;
+/** A review's status word: "needs you" when it waits on you, else its round's state. */
+const reviewWord = (r: GlassReview): string => (r.needsYou ? 'needs you' : reviewState(r));
+
+/** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
+function reviewTone(r: GlassReview): CardTone {
+  if (r.state === 'posted') return 'ok';
+  if (r.state === 'dismissed' || r.state === 'withdrawn') return 'dim';
+  if (r.needsYou || r.stands || r.state === 'failed') return 'bad';
+  return 'warn';
 }
 
+const DRAFTED: Record<string, string> = { approve: 'approval drafted', request_changes: 'changes drafted', comment: 'comment drafted' };
+
+/** Open the review's modal, and mark it seen. */
+const showReview = (r: GlassReview) => () => {
+  void reviewRequest('review-seen', { key: r.key });
+  showModal('review', r.key);
+};
+
+/**
+ * A review card: the PR's title, PR icon and status word on a colored edge;
+ * then repo#number, what's drafted, and age, with Open draft (↗ Open before
+ * there is one). It opens the review's modal.
+ */
+function card(r: GlassReview) {
+  const drafted = r.verdict ? DRAFTED[r.verdict] : undefined;
+  const lead = [`${r.repo}#${r.number}`, drafted].filter(Boolean).join(' · ');
+  const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;
+  const open = showReview(r);
+  return html`<${Card}
+    key=${r.key}
+    title=${r.title}
+    titleAttr=${r.title}
+    icon=${PrIcon}
+    state=${{ word: reviewWord(r), tone: reviewTone(r), mark: 'edge' }}
+    context=${[lead, ' · ', Age(r.requestedAt), ' ago']}
+    contextTitle=${`${lead} · ${ageText(r.requestedAt)} ago`}
+    action=${html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`}
+    quiet=${!OPEN.has(r.state)}
+    cls=${'rv-card' + (r.seenAt ? ' seen' : '')}
+    attrs=${{
+      id: 'review-' + encodeURIComponent(r.key),
+      'data-review': r.key,
+      role: 'button',
+      tabindex: '0',
+      onKeyDown: (e: KeyboardEvent) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) open();
+      },
+    }}
+    onClick=${open}
+  />`;
+}
+
+/** What leaves a review's card: the asker, findings, reason, pending review and every action. */
+export function reviewModal(r: GlassReview) {
+  const setup = getState().snapshot?.reviewSetup;
+  const effective = (r.repoKey && setup?.perRepo?.[r.repoKey]) || setup;
+  const meta = reviewMeta(r);
+  return [
+    html`<h3><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${() => void reviewRequest('review-seen', { key: r.key })}>${r.repo}#${r.number}</a> ${r.title} ${badge(r)}</h3>`,
+    html`<div class="sub" title=${meta.text}>${meta.nodes}</div>`,
+    html`<div class="sec">asked by</div><div class="rv-asker">${asker(r)}</div>`,
+    (r.summary || r.blocking?.length) && html`<div class="sec">findings</div>${findings(r)}`,
+    r.staged && html`<div class="sec">pending review</div><div>${staged(r)}</div>`,
+    html`<div class="sec">actions</div><div class="rv-modal-actions"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : effective?.mode !== 'notify'} publish=${r.publish ?? effective?.publish ?? false} /></div>`,
+  ];
+}
+
+/** The mode names shown beside read-only review settings. */
+const REVIEW_MODE_LABELS: Record<NonNullable<GlassSnapshot['reviewSetup']>['mode'], string> = {
+  notify: 'Notify',
+  'on-demand': 'On-demand',
+  'auto-draft': 'Auto draft',
+  'auto-review': 'Auto review',
+};
+
+/** Review rounds and the current repo's settings; all settings are read-only. */
 export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews']; setup?: GlassSnapshot['reviewSetup']; repo?: string }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>();
   const effective = (repo && setup?.perRepo?.[repo]) || setup;
   const canDraft = effective?.mode !== 'notify';
   const publish = effective?.publish ?? false;
-  const change = async (mode: string, publish: boolean) => {
-    setBusy(true);
-    setError(await reviewRequest('review-mode', { mode, publish, ...(repo ? { repo } : {}) }));
-    setBusy(false);
-  };
   return [
     setup?.enabled
-      ? html`<div class="rv-controls"><label>Review mode · ${repo || 'default'} <select aria-label="Review mode" value=${effective?.mode} disabled=${busy} onChange=${(
-          e: Event,
-        ) => {
-          const next = (e.currentTarget as HTMLSelectElement).value;
-          return change(next, next.startsWith('auto-') ? next === 'auto-review' : publish);
-        }}><option value="notify">Notify</option><option value="on-demand">On-demand</option><option value="auto-draft">Auto draft</option><option value="auto-review">Auto review</option></select></label><label title="Publish sends request changes for blocking findings, otherwise a comment. Approve always needs your click."><input type="checkbox" aria-label="Publish reviews" checked=${publish} disabled=${busy} onChange=${(
-          e: Event,
-        ) => {
-          const next = (e.currentTarget as HTMLInputElement).checked;
-          return change(effective?.mode.startsWith('auto-') ? (next ? 'auto-review' : 'auto-draft') : (effective?.mode ?? 'notify'), next);
-        }} />Publish</label><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'}</span>${error && html`<span class="bad" role="alert">${error}</span>`}</div>`
+      ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
     !inp.list.length
       ? html`<div class="empty">no review requests</div>`
       : inp.view === 'cards'
-        ? html`<div class="cards">${inp.list.map((r) => card(r, canDraft, publish))}</div>`
+        ? html`<div class="cards">${inp.list.map(card)}</div>`
         : Table(
             ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
             inp.list.map((r) => row(r, canDraft, publish)),

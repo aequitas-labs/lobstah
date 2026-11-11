@@ -141,7 +141,12 @@ describe('plugin contracts (claude-code ↔ codex)', () => {
     }
   });
 
-  it('both plugins wire the same hook events and commands', () => {
-    expect(sharedHooks(read('plugins/codex/hooks/hooks.json'))).toEqual(sharedHooks(read('plugins/claude-code/hooks/hooks.json')));
+  it('both plugins wire the shared events, with Claude failure and batch completion hooks', () => {
+    const claude = sharedHooks(read('plugins/claude-code/hooks/hooks.json'));
+    const codex = sharedHooks(read('plugins/codex/hooks/hooks.json'));
+    const { PostToolUseFailure, PostToolBatch, ...shared } = claude;
+    expect(codex).toEqual(shared);
+    expect(PostToolUseFailure).toEqual(claude.PostToolUse);
+    expect(PostToolBatch).toEqual(claude.PostToolUse);
   });
 });
