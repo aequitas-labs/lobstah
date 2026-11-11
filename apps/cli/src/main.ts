@@ -1130,6 +1130,22 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'run': {
+      if (pos[0] !== 'passkey' || pos[1] !== 'add' || !has('--hosted')) throw new UsageError(usageFor('run')!);
+      const { readMirrorStatus } = await import('@lobstah/core');
+      const status = readMirrorStatus();
+      if (!status?.glass || !status.boat) throw new Error("This Mac doesn't mirror to a hosted glass yet. Run lobstah wharf login --mirror, then try again.");
+      const { HOSTED_PASSKEY_DIALOG_PROMPT, macPasswordGate } = await import('./run-passkey.js');
+      const refused = await macPasswordGate(undefined, undefined, HOSTED_PASSKEY_DIALOG_PROMPT)();
+      if (refused) throw new Error(refused);
+      const { issuePairing } = await import('./run-pairing.js');
+      const code = issuePairing(status.glass);
+      const link = `${status.glass}/passkey?boat=${encodeURIComponent(status.boat)}&pair=${code}`;
+      const { canOpenBrowser, openBrowser } = await import('./wharf-login.js');
+      console.log(`Open this on your phone to pair its passkey with ${status.boat}. It works once, for 5 minutes:\n${link}`);
+      if (canOpenBrowser()) openBrowser(link);
+      return;
+    }
     case 'goals': {
       const cfg = loadConfig(), caller = callerSession(opt('--session'));
       const grounds = resolveGrounds(cfg, opt('--grounds') ?? (caller ? helmOf(caller.id)?.grounds : undefined));

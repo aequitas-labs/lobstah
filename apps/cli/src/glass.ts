@@ -119,7 +119,7 @@ import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
 import { handleRunRequest, isRunRequestKind } from './run-routes.js';
-import { RunChallenges, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
+import { RunChallenges, hostedPasskeysFile, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
 import { RunRegistry } from './run-exec.js';
 
 /**
@@ -791,7 +791,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
-    runPasskeys: runPasskeyStatus(),
+    runPasskeys: { ...runPasskeyStatus(), hosted: runPasskeyStatus(hostedPasskeysFile()).count },
     answerLimits: {
       maxBytes: attachmentLimit(),
       maxFiles: ANSWER_FILES_MAX,
@@ -896,6 +896,9 @@ export function serveGlass(
     presence?: GlassPresence;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
+    /** A phone's hosted-glass passkeys and the pending pairing (tests); ~/.lobstah/run by default. */
+    hostedPasskeysFile?: string;
+    pairingFile?: string;
     /** Chris's go-ahead to store a run passkey, asked outside the browser; resolves to a refusal reason. */
     confirmPasskeyRegistration?: () => Promise<string | undefined>;
     /** Where run passkeys are kept (tests). */
@@ -1209,13 +1212,17 @@ export function serveGlass(
           case 'run-output':
           case 'run-stop':
           case 'run-dismiss':
-          case 'run-line': {
+          case 'run-line':
+          case 'run-pair-challenge':
+          case 'run-pair-register': {
             if (!isRunRequestKind(body.kind)) return reply(400, { ok: false, reason: 'Unknown run request.' });
             void handleRunRequest(body.kind, body.payload, {
               origin: `http://${req.headers.host}`,
               challenges: runChallenges,
               confirmRegistration: options.confirmPasskeyRegistration ?? confirmWithMacPassword,
               ...(options.passkeysFile ? { passkeysFile: options.passkeysFile } : {}),
+              ...(options.hostedPasskeysFile ? { hostedPasskeysFile: options.hostedPasskeysFile } : {}),
+              ...(options.pairingFile ? { pairingFile: options.pairingFile } : {}),
               runs,
               maxBytes: attachmentLimit(),
             }).then(

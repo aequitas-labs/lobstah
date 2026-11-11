@@ -523,8 +523,8 @@ export interface GlassSnapshot {
   mirror?: { port: number; id: string };
   /** What the server can tell about who asked for this page. */
   viewer?: GlassViewer;
-  /** The passkeys registered to confirm run cards' Run (count only; never a key). */
-  runPasskeys?: { count: number; newestAt?: string };
+  /** The passkeys registered to confirm run cards' Run (count only; never a key), and how many phones paired one for the hosted glass. */
+  runPasskeys?: { count: number; newestAt?: string; hosted?: number };
   /** Configured repo keys, for the New trap form. */
   repoKeys?: string[];
   /** A helm is signed on and beating: a trap request will be answered. */

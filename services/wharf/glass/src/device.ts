@@ -34,7 +34,10 @@ function choices(requested: string[]): string[] {
 /** What the chosen access lets the boat do, and what it doesn't. */
 function abilities(choice: string): { can: string[]; cannot: string[] } {
   if (choice === 'mirror')
-    return { can: ['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches'], cannot: ['Take work from this wharf', 'Steer the helm'] };
+    return {
+      can: ['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches', 'Run scripts you confirm with your passkey'],
+      cannot: ['Take work from this wharf', 'Steer the helm'],
+    };
   const p = ACCESS[choice]!.permissions;
   const helm = p.includes('helm'),
     read = helm || p.includes('read');

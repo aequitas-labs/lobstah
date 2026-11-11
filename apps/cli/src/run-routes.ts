@@ -5,6 +5,7 @@ import {
   RUN_RP_ID,
   RunChallenges,
   addRunPasskey,
+  hostedPasskeysFile,
   readRunPasskeys,
   verifyExistingPasskey,
   verifyRegistration,
@@ -13,6 +14,7 @@ import {
   type RegistrationResponse,
 } from './run-passkey.js';
 import { RunRegistry, runStdin } from './run-exec.js';
+import { endPairing, pendingPairing } from './run-pairing.js';
 
 /**
  * The glass's run-card requests (`/requests` kinds `run-*`), behind its
@@ -30,6 +32,8 @@ export const RUN_REQUEST_KINDS = [
   'run-line',
   'run-stop',
   'run-dismiss',
+  'run-pair-challenge',
+  'run-pair-register',
 ] as const;
 export type RunRequestKind = (typeof RUN_REQUEST_KINDS)[number];
 
@@ -53,6 +57,9 @@ export interface RunRequestContext {
    */
   confirmRegistration: () => Promise<string | undefined>;
   passkeysFile?: string;
+  /** Where a phone's hosted-glass passkeys and the pending pairing live; the defaults under ~/.lobstah/run. */
+  hostedPasskeysFile?: string;
+  pairingFile?: string;
   /** The runs this server started. */
   runs: RunRegistry;
   /** Per-file answer limit (limits.attachmentMaxBytes), for the answer a run writes. */
@@ -60,6 +67,8 @@ export interface RunRequestContext {
 }
 
 const refuse = (status: number, reason: string): RunReply => ({ status, body: { ok: false, reason } });
+
+const PAIRING_EXPIRED = 'This pairing link has expired or was used. Run lobstah run passkey add --hosted on the Mac again.';
 
 /** The standing run card a key names, and its script as stored now, or the reason it can't run. */
 export function runnableCard(key: unknown): { meta: DecisionMeta & { run: NonNullable<DecisionMeta['run']> } } | RunReply {
@@ -156,6 +165,24 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         if (!ctx.runs.get(card.meta.key)?.result) return refuse(409, 'Stop the command before dismissing this card.');
         withdrawDecision(card.meta.key);
         return { status: 200, body: { ok: true } };
+      }
+      case 'run-pair-challenge': {
+        // A phone pairing from the hosted glass, through the relay: only under the code `run passkey add --hosted` issued.
+        const pairing = pendingPairing(p.pair, Date.now(), ctx.pairingFile);
+        if (!pairing) return refuse(403, PAIRING_EXPIRED);
+        return { status: 200, body: { ok: true, challenge: ctx.challenges.issue({ kind: 'pair', code: p.pair as string }), rpId: pairing.rpId } };
+      }
+      case 'run-pair-register': {
+        const pairing = pendingPairing(p.pair, Date.now(), ctx.pairingFile);
+        if (!pairing) return refuse(403, PAIRING_EXPIRED);
+        // The passkey's client data must name the hosted glass the pairing was issued for, and its challenge this pairing.
+        const passkey = verifyRegistration(p.registration as RegistrationResponse, ctx.challenges, pairing.origin, new Date(), {
+          rpId: pairing.rpId,
+          scope: (s) => s.kind === 'pair' && s.code === p.pair,
+        });
+        endPairing(ctx.pairingFile);
+        addRunPasskey({ ...passkey, origin: pairing.origin, rpId: pairing.rpId } as typeof passkey, ctx.hostedPasskeysFile ?? hostedPasskeysFile());
+        return { status: 201, body: { ok: true, credentialId: passkey.credentialId, createdAt: passkey.createdAt } };
       }
       case 'run-output': {
         const key = typeof p.key === 'string' ? p.key : '';

@@ -14,6 +14,7 @@ import type { AuthState } from './auth-screen.js';
 import { Boats } from './boats.js';
 import { html } from './common.js';
 import { DeviceConsent } from './device.js';
+import { PasskeyPairing } from './pairing.js';
 import { requestState } from './model.js';
 import { glassWake } from './wake.js';
 
@@ -196,6 +197,12 @@ function sessionHint(): string | undefined {
 }
 
 /** Boat approval: its own page, for a signed-in person. */
+/** Pairing a phone's passkey with a boat: its own page, like boat approval. */
+function showPairing(): void {
+  hadSession = true;
+  render(html`<${PasskeyPairing} signedOut=${(status: 401 | 403) => end(status === 403 ? 'denied' : 'expired')} />`, document.body);
+}
+
 function showDevice(): void {
   hadSession = true;
   render(html`<${DeviceConsent} signedOut=${(status: 401 | 403) => end(status === 403 ? 'denied' : 'expired')} />`, document.body);
@@ -216,6 +223,7 @@ async function boot(): Promise<void> {
   try {
     await json('/api/glass');
     if (location.pathname === '/device') return showDevice();
+    if (location.pathname === '/passkey') return showPairing();
     // Mirror boats show their own glass here; without any, the wharf's grounds show as they always have.
     // A wharf without mirror routes, or any odd answer, means no mirror boats.
     const mirrored = await json<{ boats?: unknown }>('/api/glass/mirror').catch(() => undefined);

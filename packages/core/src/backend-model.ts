@@ -128,6 +128,8 @@ export const MIRROR_WRITE_KINDS = [
   'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'helm-chat', 'todo-schedule', 'pr-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-dismiss', 'review-draft', 'review-mode', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
+  // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.
+  'run-pair-challenge', 'run-pair-register',
 ] as const;
 export type MirrorWriteKind = (typeof MIRROR_WRITE_KINDS)[number];
 /** Whether a relayed read names a path the hosted glass may read. */
