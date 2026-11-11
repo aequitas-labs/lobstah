@@ -10,12 +10,16 @@ import type { DispatchDetail, GlassOlder, GlassPrefs, GlassTab, ModalRef } from 
  */
 /** A run card's run as this page sees it. */
 export interface RunView {
+  id?: string;
+  state?: import('@lobstah/core').RunState;
+  startedAt?: string;
+  finishedAt?: string;
   /** The card as it was when Run was pressed: it stays on screen after its run answers it. */
   card?: import('../src/glass-diff.js').DecisionCard;
   busy: boolean;
   output: string;
   next: number;
-  result?: { exitCode: number; timedOut: boolean; durationMs: number; scrubbed: number };
+  result?: import('@lobstah/core').RunResult;
   error?: string;
 }
 

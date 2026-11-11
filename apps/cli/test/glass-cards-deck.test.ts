@@ -114,4 +114,21 @@ describe('the deck', () => {
     expect(text(row.querySelector('.dgo'))).toBe('Run');
     expect(text(row.querySelector('.dboat'))).toBe('⛵ studio');
   });
+
+  it("puts a run card's run state where Run was once it has run", async () => {
+    const d = fleet();
+    const at = ago(60_000);
+    const run = { scriptSha256: 'a'.repeat(64), scriptBytes: 10, inputs: [], cwd: '/r', timeoutSecs: 300, output: 'scrubbed', interpreter: '/bin/bash', script: 'echo hi', warnings: [] };
+    const latest = { id: '1', key: 'decision:run', scriptSha256: 'a'.repeat(64), state: 'failed', startedAt: at, finishedAt: at, result: { exitCode: 3, timedOut: false, durationMs: 1, outputBytes: 0, scrubbed: 0 } };
+    d.decisions = [
+      { key: 'decision:run', dispatch: d.dispatches[0]!.id, lane: 'work', title: 'Run the check', detail: 'x', options: [], attachments: [], askedBy: 'helm', askedAt: at, stateHash: 'h', run: { ...run, latest } },
+    ] as GlassFullSnapshot['decisions'];
+    d.attention = [...d.attention, { kind: 'decision', key: 'decision:run', stateHash: 'h', id: d.dispatches[0]!.id, lane: 'work', verb: 'decision', ageSecs: 60, at, standingSince: at, note: 'run' }] as GlassFullSnapshot['attention'];
+    const g = await page(d, '#deck', 'table');
+    const row = g.$('#deck .drow[data-decision="decision:run"]')!;
+    expect(row.querySelector('.dgo')).toBeNull();
+    expect(text(row.querySelector('.dsent'))).toBe('Failed · exit 3');
+    expect(row.querySelector('.dsent')!.className).toContain('bad');
+    expect(text(row.querySelector('.dboat'))).toBe('⛵ studio');
+  });
 });

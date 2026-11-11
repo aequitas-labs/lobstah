@@ -811,6 +811,12 @@ tr.rowhead:hover {
   color: var(--fg);
   border-color: var(--line-hover);
 }
+.btn.danger,
+.btn.danger:hover {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--bg);
+}
 .badge {
   border-radius: var(--badge-radius);
   padding: var(--badge-pad);

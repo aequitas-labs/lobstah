@@ -13,6 +13,7 @@ export * from './todo-fire.js';
 export * from './todo-triggers.js';
 export * from './decisions.js';
 export * from './run-cards.js';
+export * from './run-history.js';
 export * from './run-scrub.js';
 export * from './run-audit.js';
 export * from './grants.js';

@@ -147,13 +147,27 @@ function source(c: DecisionCard) {
 /**
  * A decision on the deck: the question, then its repo and age with Answer
  * (Run on a run card), highlighted while unread. A run card adds a line with
- * the boat it runs on. Who asked and the dispatch are in the decision itself.
+ * the boat it runs on; once it has run, its run's state takes Run's place.
+ * Who asked and the dispatch are in the decision itself.
  */
 function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean, focused: boolean) {
   const state = stateOf(c, draft, viewedHere);
+  const run = c.kind === 'decision' ? c.run : undefined;
+  const runState = run?.latest?.state;
+  const runLabel = run
+    ? runState === 'failed'
+      ? `Failed · exit ${run.latest?.result?.exitCode}`
+      : runState === 'succeeded'
+        ? 'Succeeded'
+        : runState === 'stopped'
+          ? 'Stopped'
+          : runState === 'running'
+            ? 'Running'
+            : 'Ready'
+    : undefined;
   const open = () => openDecision(c.key);
-  const run = c.kind === 'decision' && !!c.run;
   const boat = run ? getState().snapshot?.viewer?.machine : undefined;
+  const runTone = runState === 'failed' ? 'bad' : runState === 'succeeded' ? 'ok' : 'dim';
   const meta = [c.repo, [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
     <button type="button" class="dopen" onClick=${open} aria-label=${`${state}: ${c.kind === 'decision' ? c.title : c.note}`}>
@@ -161,7 +175,13 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
       <b class="dtitle">${titleOf(c)}</b>
     </button>
     <span class="dmeta dim">${meta}</span>
-    ${state === 'answered' ? html`<span class="dsent ok">sent</span>` : html`<button type="button" class="btn dgo" onClick=${open}>${run ? 'Run' : 'Answer'}</button>`}
+    ${
+      run?.latest
+        ? html`<span class=${'dsent ' + runTone}>${runLabel}</span>`
+        : state === 'answered'
+          ? html`<span class="dsent ok">sent</span>`
+          : html`<button type="button" class="btn dgo" onClick=${open}>${run ? 'Run' : 'Answer'}</button>`
+    }
     ${boat && html`<span class="dboat dim">⛵ ${boat}</span>`}
   </li>`;
 }
@@ -291,13 +311,13 @@ export function DecisionModal({
                 c.detail.trim() &&
                 html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => fileUrl({ kind: 'decision', key: c.key }, name)} />`,
               c.kind === 'decision' && attachments(c.key, c.attachments),
-              c.kind === 'decision' && c.run && html`<${RunCardBody} cardKey=${c.key} run=${c.run} />`,
+              c.kind === 'decision' && c.run && html`<${RunCardBody} cardKey=${c.key} run=${c.run} readOnly=${c.readOnly} />`,
               c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
                 ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
                 : c.kind === 'decision' && c.readOnly
                   ? html`<div class="dim">Closed decision</div>`
-                  : ran && (ran.busy || ran.result)
-                    ? html`<div class="danswered ok">${ran.busy ? 'running · its result answers the card' : 'answered by its run'}</div>`
+                  : c.kind === 'decision' && c.run && (ran?.busy || ran?.result || c.run.latest)
+                    ? null
                     : draft?.sent
                       ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
                       : answerForm(c, draft, extensions.join(',')),

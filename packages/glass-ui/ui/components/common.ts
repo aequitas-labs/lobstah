@@ -547,6 +547,25 @@ export function addrCell(x: GlassDispatchSummary) {
   return x.claimedBy ? WorkerAddress(x.claimedBy) : '';
 }
 
+/**
+ * The PR a dispatch leads with (prHead): the current work's PR and how many
+ * more are open. None while it builds a new PR after an earlier one ended;
+ * its modal keeps the whole PR list.
+ */
+export function prHeadCell(x: GlassDispatchSummary) {
+  const h = x.prHead;
+  if (!h) return '';
+  return [
+    html`<a href=${reviewLink(h.url)} target="_blank" rel="noopener" onClick=${stop}>${h.several ? `#${h.number}` : 'PR'}</a>`,
+    h.badge && [
+      ' ',
+      html`<span class=${'badge ' + prBadgeClass(h.badge)} title=${'observed ' + h.badge.observedAt}>${h.badge.text}</span>`,
+    ],
+    h.open > 1 && [' ', html`<span class="dim" title=${`${h.open} open PRs`}>+${h.open - 1} open</span>`],
+    x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
+  ];
+}
+
 export function prCell(x: GlassDispatchSummary) {
   // Several PRs: each in stack order with its own state; one not yet observed shows none.
   if (x.prList && x.prList.length > 1) {
