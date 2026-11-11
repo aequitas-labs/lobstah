@@ -1,7 +1,8 @@
+import { dispatchPrLines } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { loadConfig, markRepliesRule, withBriefHooks } from '@lobstah/core';
 import { MARKER, lobstahWrote, marker } from '../types.js';
-import type { MergeSource, PollContext, PrCandidate, PrRun, Source, TrackedItem, WorkItem } from '../types.js';
+import type { AsyncMergeResult, MergeSource, PollContext, PrCandidate, PrRun, Source, TrackedItem, WorkItem } from '../types.js';
 import { prEvidenceIndex, prUrlKey } from '../pr-evidence.js';
 
 export interface GithubConfig {
@@ -52,8 +53,9 @@ interface GhPull {
   state: string;
   html_url: string;
   user: { login: string };
-  head: { ref: string; sha: string };
-  base?: { ref: string };
+  head: { ref: string; sha: string; repo?: { full_name?: string } };
+  base?: { ref: string; sha?: string; repo?: { default_branch?: string; full_name?: string } };
+  stack?: { number: number; position: number; size: number; base: { ref: string } } | null;
   labels: Array<{ name: string }>;
   assignees: Array<{ login: string }>;
   mergeable_state?: string;
@@ -62,6 +64,8 @@ interface GhPull {
 
 export class GithubSource implements Source, MergeSource {
   name: string;
+  /** Share a missing-default lookup within a tick, and refresh it next tick. */
+  private defaultBranchRead?: Promise<string>;
   constructor(private cfg: GithubConfig) {
     this.name = `gh:${cfg.repo}`;
   }
@@ -78,10 +82,18 @@ export class GithubSource implements Source, MergeSource {
         authorization: `Bearer ${this.cfg.token()}`,
         accept: 'application/vnd.github+json',
         'user-agent': 'lobstah-pick',
+        'X-GitHub-Api-Version': '2026-03-10',
         ...(body ? { 'content-type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (res.status === 409 && url.endsWith('/merge-async')) {
+      const existing = await res.json() as AsyncMergeResult;
+      if (existing.status === 'pending' && existing.details?.uuid &&
+          existing.details.expected_head_sha === (body as { sha?: string })?.sha &&
+          existing.details.merge_method === (body as { merge_method?: string })?.merge_method) return existing as T;
+      throw new Error('A different merge request is already pending.');
+    }
     if (!res.ok) throw new Error(`github ${method} ${url}: ${res.status} ${await res.text()}`);
     return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
   }
@@ -205,7 +217,7 @@ export class GithubSource implements Source, MergeSource {
   async report(key: string, verb: Verb, evidence: Evidence & { uuid: string }): Promise<void> {
     const n = this.numberOf(key.replace(/@.*$/, '').replace('#pr', '#'));
     const lines = [`${marker(evidence.uuid)} **${verb}**`];
-    if (evidence.prUrl) lines.push(`PR: ${evidence.prUrl}`);
+    lines.push(...dispatchPrLines(evidence));
     if (evidence.branch) lines.push(`branch: \`${evidence.branch}\``);
     if (evidence.note) lines.push(evidence.note);
     await this.api('POST', `/repos/${this.cfg.repo}/issues/${n}/comments`, { body: lines.join('\n') });
@@ -268,7 +280,11 @@ export class GithubSource implements Source, MergeSource {
   }
 
   private async toCandidate(pr: GhPull): Promise<PrCandidate> {
-    const reviews = await this.latestReviews(pr.number);
+    const eligible = (pr.user.login === this.cfg.identity || pr.head.ref.startsWith('lobstah/')) && (!pr.head.repo?.full_name || pr.head.repo.full_name.toLowerCase() === this.cfg.repo.toLowerCase());
+    const reviews = eligible ? await this.latestReviews(pr.number) : [];
+    const defaultBranch = pr.base?.repo?.default_branch ?? await (this.defaultBranchRead ??=
+      this.api<{ default_branch: string }>('GET', `/repos/${this.cfg.repo}`).then((repository) => repository.default_branch));
+    if (!defaultBranch) throw new Error('GitHub did not return the default branch.');
     return {
       number: pr.number,
       url: pr.html_url,
@@ -276,6 +292,9 @@ export class GithubSource implements Source, MergeSource {
       headSha: pr.head.sha,
       headRef: pr.head.ref,
       baseRef: pr.base?.ref,
+      defaultBranch,
+      ...(pr.stack ? { linkedStack: { ...pr.stack, base: pr.stack.base.ref } } : {}),
+      eligible,
       labels: pr.labels.map((l) => l.name),
       assignees: pr.assignees.map((a) => a.login),
       reviews: reviews.map((r) => ({ id: r.id, author: r.user.login, state: r.state, sha: r.commit_id })),
@@ -284,9 +303,14 @@ export class GithubSource implements Source, MergeSource {
   }
 
   async mergeCandidates(): Promise<PrCandidate[]> {
-    const pulls = await this.api<GhPull[]>('GET', `/repos/${this.cfg.repo}/pulls?state=open&per_page=50`);
-    const own = pulls.filter((p) => p.user.login === this.cfg.identity || p.head.ref.startsWith('lobstah/'));
-    return Promise.all(own.map((p) => this.toCandidate(p)));
+    this.defaultBranchRead = undefined;
+    const pulls: GhPull[] = [];
+    for (let page = 1; ; page++) {
+      const batch = await this.api<GhPull[]>('GET', `/repos/${this.cfg.repo}/pulls?state=open&per_page=100&page=${page}`);
+      pulls.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return Promise.all(pulls.map((p) => this.toCandidate(p)));
   }
 
   async refresh(n: number): Promise<PrCandidate | undefined> {
@@ -305,7 +329,8 @@ export class GithubSource implements Source, MergeSource {
   }
 
   async updateBranch(n: number): Promise<void> {
-    await this.api('PUT', `/repos/${this.cfg.repo}/pulls/${n}/update-branch`, {});
+    const pr = await this.api<GhPull>('GET', `/repos/${this.cfg.repo}/pulls/${n}`);
+    await this.api('PUT', `/repos/${this.cfg.repo}/pulls/${n}/update-branch`, { expected_head_sha: pr.head.sha });
   }
 
   async requestReview(n: number, reviewers: string[]): Promise<void> {
@@ -315,8 +340,51 @@ export class GithubSource implements Source, MergeSource {
     await this.api('POST', `/repos/${this.cfg.repo}/pulls/${n}/requested_reviewers`, { reviewers: requested });
   }
 
-  async merge(n: number, method: string): Promise<void> {
-    await this.api('PUT', `/repos/${this.cfg.repo}/pulls/${n}/merge`, { merge_method: method });
+  async merge(n: number, method: string, expectedHead?: string): Promise<void> {
+    const result = await this.api<{ merged?: boolean; message?: string }>('PUT', `/repos/${this.cfg.repo}/pulls/${n}/merge`, { merge_method: method, ...(expectedHead ? { sha: expectedHead } : {}) });
+    if (result.merged !== true) throw new Error(result.message ?? 'GitHub did not merge the PR.');
+  }
+
+  /** Retarget before update-branch so GitHub merges the default branch into the head. */
+  async retarget(number: number, branch: string): Promise<void> {
+    await this.api('PATCH', `/repos/${this.cfg.repo}/pulls/${number}`, { base: branch });
+  }
+
+  /** Compare branch ancestry instead of assuming a clean rollup means up to date. */
+  async includesBase(number: number): Promise<boolean> {
+    const pr = await this.api<GhPull>('GET', `/repos/${this.cfg.repo}/pulls/${number}`);
+    if (!pr.base?.sha) throw new Error('GitHub did not return the base commit.');
+    const comparison = await this.api<{ behind_by: number }>('GET', `/repos/${this.cfg.repo}/compare/${pr.base.sha}...${pr.head.sha}`);
+    return comparison.behind_by === 0;
+  }
+
+  /** Check the same head the gate approved, including optional failing checks. */
+  async checks(number: number, head: string): Promise<'green' | 'pending' | 'red'> {
+    const [owner, repo] = this.cfg.repo.split('/');
+    const result = await this.api<{ data?: { repository?: { pullRequest?: { headRefOid: string; commits: { nodes: Array<{ commit: { statusCheckRollup?: { state: string } | null } }> } } } }; errors?: unknown[] }>('POST', '/graphql', {
+      query: 'query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){headRefOid commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}',
+      variables: { owner, repo, number },
+    });
+    const pr = result.data?.repository?.pullRequest;
+    if (result.errors?.length || !pr || pr.headRefOid !== head) return 'pending';
+    const status = pr.commits.nodes[0]?.commit.statusCheckRollup?.state;
+    return status === 'SUCCESS' ? 'green' : status === 'FAILURE' || status === 'ERROR' ? 'red' : 'pending';
+  }
+
+  /** GitHub's actual linked membership, not a branch-name inference. */
+  async linkedMembers(stack: number): Promise<number[]> {
+    const result = await this.api<{ pull_requests: Array<{ number: number; state: string }> }>('GET', `/repos/${this.cfg.repo}/stacks/${stack}`);
+    return result.pull_requests.filter((pr) => pr.state === 'open').map((pr) => pr.number);
+  }
+
+  /** Native stacks must use the asynchronous endpoint; it includes open downstack members. */
+  async mergeLinked(number: number, method: string, head: string): Promise<AsyncMergeResult> {
+    return this.api('PUT', `/repos/${this.cfg.repo}/pulls/${number}/merge-async`, { merge_method: method, sha: head, merge_action: 'default' });
+  }
+
+  /** Poll at the existing pickup cadence, without a second watcher. */
+  async linkedResult(number: number, uuid: string): Promise<AsyncMergeResult> {
+    return this.api('GET', `/repos/${this.cfg.repo}/pulls/${number}/merge-async/${encodeURIComponent(uuid)}`);
   }
 
   async comment(n: number, text: string): Promise<void> {

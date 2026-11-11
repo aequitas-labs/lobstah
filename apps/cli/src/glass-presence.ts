@@ -3,7 +3,7 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { lobstahHome } from '@lobstah/core';
-import { validShowHash } from './glass-diff.js';
+import { validShowHash } from '@lobstah/glass-ui';
 
 export { validShowHash };
 

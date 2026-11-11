@@ -9,8 +9,9 @@ import { dispatchReportKey, ensureLayout, fileReport, listReports } from '@lobst
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass, serveReport } from '../src/glass.js';
-import { parseMarkdown, parseInline } from '../src/glass-markdown.js';
-import { lobItems } from '../src/glass-lobs.js';
+import { imageDisplay, markdownImageSources, parseMarkdown, parseInline } from '../../../packages/glass-ui/src/glass-markdown.js';
+import { createHash } from 'node:crypto';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { NOTE_MAX } from '../src/glass-poll.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
@@ -135,6 +136,21 @@ describe('glass: a report page', () => {
     return page(fleet, { path: pagePath(key), files: { [md(TRAP_KEY)]: TRAP_MD, [md(HELM_KEY)]: HELM_MD, [meta(key)]: JSON.stringify(row) } });
   };
 
+  it('shows referenced attachments inline at their place and lists only the rest', async () => {
+    const fleet = everyAttentionFleet();
+    const base = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
+    const file = (name: string, type: string) => ({ name, path: `/tmp/lobstah/attachments/${name}`, bytes: 10, type });
+    // shot.png was stored as shot-2.png: a link by its first name still shows it.
+    const row = { ...base, attachments: [file('tray.png', 'image/png'), file('shot-2.png', 'image/png'), file('extra.png', 'image/png'), file('log.txt', 'text/plain')], renamed: { 'shot.png': 'shot-2.png' } };
+    const g = await page(fleet, { path: pagePath(TRAP_KEY), files: { [md(TRAP_KEY)]: '# Tray\n\n![the tray](tray.png)\n\nBetween.\n\n![the shot](shot.png)\n', [meta(TRAP_KEY)]: JSON.stringify(row) } });
+    const page_ = g.$('.reportview .mdpage')!;
+    const k = encodeURIComponent(TRAP_KEY);
+    expect([...page_.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([`/report/${k}/files/tray.png`, `/report/${k}/files/shot.png`]);
+    expect([...page_.children].map((el) => el.tagName)).toEqual(['H1', 'P', 'P', 'P']);
+    expect(g.$$('.reportview .sec').map(text)).toContain('report attachments (2)');
+    expect(g.$$('.reportview .sub').map(text).filter((t) => t.includes(' bytes'))).toEqual(['extra.png · image/png · 10 bytes', 'log.txt · text/plain · 10 bytes']);
+  });
+
   it("renders a trap's report once: headings, image, table, code, links, byline, and the ack command", async () => {
     const g = await reportPage(TRAP_KEY);
     expect(g.reportFetches()).toEqual([meta(TRAP_KEY), md(TRAP_KEY)]);
@@ -194,14 +210,17 @@ describe('glass: a report page', () => {
     expect(noToken.posts()).toEqual([]);
   });
 
-  it('shows raw HTML in a helm report as text and loads no remote or path image', async () => {
+  it('shows raw HTML in a helm report as text, a remote image as a link, and loads no remote or path image', async () => {
     const g = await reportPage(HELM_KEY);
     const page_ = g.$('.reportview .mdpage')!;
     expect(page_.querySelector('script')).toBeNull();
     expect(page_.querySelector('b')).toBeNull();
     expect(text(page_)).toContain('<script>alert(1)</script><b>bold?</b>');
     expect(page_.querySelectorAll('img')).toHaveLength(0);
-    expect(text(page_)).toContain('[image not shown: remote]');
+    const remote = [...page_.querySelectorAll('a')].find((a) => text(a) === 'remote')!;
+    expect(remote.getAttribute('href')).toBe('https://evil.example/x.png');
+    expect(remote.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(text(page_)).toContain('[image not shown: up]');
   });
 
   it('says so when the report is gone', async () => {
@@ -306,7 +325,7 @@ describe('glass: cards keep their text inside', () => {
     expect(style(badge).getPropertyValue('flex')).toMatch(/^0 1 auto$/);
     expect(style(meta)).toMatchObject({ overflow: 'hidden' });
     // happy-dom does not compute line clamping: read the rule itself.
-    const css = fs.readFileSync(new URL('../glass/glass.css', import.meta.url), 'utf8');
+    const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
     for (const sel of ['.card .meta', '.card .note']) {
       const rule = css.slice(css.indexOf(`${sel} {`), css.indexOf('}', css.indexOf(`${sel} {`)));
       expect(rule, sel).toMatch(/-webkit-line-clamp: 2;/);
@@ -361,7 +380,7 @@ describe('glass: short card badges stay whole', () => {
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
     const trap = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
     const claude = trap.querySelector('.top > .badge')!;
-    expect(text(claude)).toBe('claude');
+    expect(claude.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
     expect(claude.className).not.toContain('long');
     expect(style(claude).getPropertyValue('flex')).toBe('0 0 auto');
     // Twelve characters is still whole; thirteen is long.
@@ -376,21 +395,21 @@ describe('glass: short card badges stay whole', () => {
 });
 
 describe('glass: the open-window button', () => {
-  it('is a themed ↗ open button at the end of the foot line, and its click does not open the trap modal', async () => {
+  it('is a themed ↗ Open button at the end of the foot line, and its click does not open the trap modal', async () => {
     const d = everyAttentionFleet();
-    d.focusSupported = true;
+    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });
       const button = g.$(view === 'cards' ? '#traps .card .foot .footact button' : '#traps tr.rowhead td:last-child button')!;
-      expect(text(button)).toBe('↗ open');
+      expect(text(button)).toBe('↗ Open');
       expect(button.className).toBe('btn open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
     const button = deck.$('#deck .card .foot .footact button')!;
-    expect(text(button)).toBe('↗ open');
+    expect(text(button)).toBe('↗ Open');
     await click(deck, button);
     expect(deck.$('#overlay')!.className).toBe('');
   });
@@ -444,6 +463,24 @@ describe('glass: a block quote', () => {
   });
 });
 
+describe('glass: the image policy', () => {
+  it('loads https on a card, links it on a report, and refuses every other scheme on both', () => {
+    expect(imageDisplay('https://raw.githubusercontent.com/o/r/pr-assets/a.png', 'card')).toEqual({ kind: 'remote', url: 'https://raw.githubusercontent.com/o/r/pr-assets/a.png' });
+    expect(imageDisplay('https://raw.githubusercontent.com/o/r/pr-assets/a.png', 'report')).toEqual({ kind: 'link', url: 'https://raw.githubusercontent.com/o/r/pr-assets/a.png' });
+    for (const surface of ['card', 'report'] as const) {
+      expect(imageDisplay('tray.png', surface)).toEqual({ kind: 'attachment', name: 'tray.png' });
+      for (const refused of ['http://example.com/a.png', 'data:image/png;base64,AAAA', 'javascript:alert(1)', 'file:///etc/passwd', '//example.com/a.png', 'https://user:pw@example.com/a.png', 'shots/a.png', '../a.png', 'blob:https://x/1']) {
+        expect(imageDisplay(refused, surface), `${refused} on a ${surface}`).toBeUndefined();
+      }
+    }
+  });
+
+  it('lists every image source, in links, lists, quotes, and tables, but not in code', () => {
+    const md = '![a](a.png)\n\n- [![b](b.png)](https://x.example)\n\n> ![c](https://c.example/c.png)\n\n| x |\n|---|\n| ![d](d.png) |\n\n```\n![e](e.png)\n```\n\n`![f](f.png)`\n';
+    expect(markdownImageSources(parseMarkdown(md))).toEqual(['a.png', 'b.png', 'https://c.example/c.png', 'd.png']);
+  });
+});
+
 describe('glass: the report page route', () => {
   let server: http.Server | undefined;
   afterEach(async () => {
@@ -477,6 +514,14 @@ describe('glass: the report page route', () => {
     expect(pageRes.status).toBe(200);
     expect(pageRes.type).toBe('text/html; charset=utf-8');
     expect(pageRes.body).toBe(GLASS_PAGE);
+    // The page's CSP runs its one inline script by hash and lets a card load https images.
+    const csp = (await fetch(`${base}/report/${k}`)).headers.get('content-security-policy')!;
+    const script = /<script>([\s\S]*?)<\/script>/.exec(GLASS_PAGE)![1]!;
+    expect(GLASS_PAGE.match(/<script\b/g)).toHaveLength(1);
+    expect(csp).toContain(`script-src 'sha256-${createHash('sha256').update(script, 'utf8').digest('base64')}'`);
+    expect(csp).toContain("img-src 'self' https: data: blob:");
+    expect(csp).toContain("connect-src 'self'");
+    expect((await fetch(`${base}/`)).headers.get('content-security-policy')).toBe(csp);
     const metaRes = await get(base, `/report/${k}/meta`);
     expect(metaRes.status).toBe(200);
     expect(JSON.parse(metaRes.body)).toMatchObject({ key, title: 'Findings', author: 'headless' });

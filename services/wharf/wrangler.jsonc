@@ -23,8 +23,10 @@
   "durable_objects": { "bindings": [{ "name": "ACCOUNTS", "class_name": "Account" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Account"] }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "lobstah-wharf-files", "remote": false }],
-  // database_id is printed by `wrangler d1 create lobstah-wharf-auth`; the
-  // zero id stands until then and is enough for local runs and --dry-run.
+  // The zero id is a placeholder that stays in git. The deployment's real id
+  // lives in the git-ignored wrangler.local.jsonc, which
+  // `pnpm --filter @lobstah/wharf run wrangler <command>` merges in
+  // (`run deploy` deploys); see "Deploying" in README.md.
   "d1_databases": [{ "binding": "AUTH_DB", "database_name": "lobstah-wharf-auth", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations", "remote": false }],
 
   // No request logs, as for the telemetry and site Workers.
@@ -34,14 +36,18 @@
   },
   "logpush": false,
 
-  // GITHUB_CLIENT_ID is the OAuth app's public id, filled in once the app exists.
+  // GITHUB_CLIENT_ID is not here: it is a variable on the deployed Worker, set
+  // once (dashboard, or `wrangler secret put GITHUB_CLIENT_ID`), and keep_vars
+  // keeps it across deploys.
   // GITHUB_ALLOWLIST holds numeric GitHub account ids (5472765: chrishsu).
   "vars": {
     "GLASS_ORIGIN": "https://glass.lobstah.dev", "API_ORIGIN": "https://api.lobstah.dev",
-    "GITHUB_CLIENT_ID": "", "GITHUB_ALLOWLIST": "[\"5472765\"]", "SLACK_CLIENT_ID": "",
+    "GITHUB_ALLOWLIST": "[\"5472765\"]", "SLACK_CLIENT_ID": "",
     "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
   },
   // Secrets: AUTH_SECRET, GITHUB_CLIENT_SECRET, TOKEN_SECRET (wrangler secret put).
+  // Variables set on the Worker itself (GITHUB_CLIENT_ID) survive a deploy.
+  "keep_vars": true,
 
   // `wrangler dev --env local`: no routes, because wrangler dev sends every
   // request to the first route's host and the two origins would collapse into

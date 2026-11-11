@@ -20,15 +20,23 @@ Never use real credentials in tests or pass secrets in process arguments.
 
 ## Deploying
 
-Deployed by the maintainers with `wrangler deploy`; no script or CI job deploys
-the wharf. `wrangler.jsonc` holds the deployment, including the Cloudflare
-account; there is no secret in it.
+Deployed by the maintainers from their own machine; no CI job deploys the wharf.
+`wrangler.jsonc` holds the deployment's shape, including the Cloudflare account,
+and no id of this deployment: its D1 `database_id` is a placeholder, and the
+GitHub client ID is a variable on the Worker. This machine's real database id
+lives in `services/wharf/wrangler.local.jsonc`, which git ignores (copy
+`wrangler.local.example.jsonc`). Run wrangler for the deployment through
+`pnpm --filter @lobstah/wharf run wrangler <command>`, which merges that file
+in (with no `--`: pnpm hands it on, and wrangler reads the rest as one unknown
+command), and deploy with `pnpm --filter @lobstah/wharf run deploy`. Both refuse to run
+without the local file or with a placeholder in it, and the deploy refuses when
+the live Worker has no `GITHUB_CLIENT_ID`. Neither prints an id.
 
 | Name | Kind | Value or source |
 | --- | --- | --- |
 | `GLASS_ORIGIN` | var | `https://glass.lobstah.dev`: the browser, cookie sessions |
 | `API_ORIGIN` | var | `https://api.lobstah.dev`: boats and agents, bearer tokens only |
-| `GITHUB_CLIENT_ID` | var | the GitHub OAuth app's public client ID |
+| `GITHUB_CLIENT_ID` | Worker var, not in `wrangler.jsonc` | the GitHub OAuth app's public client ID, set once on the Worker (dashboard, or `wrangler secret put`); `keep_vars` keeps it across deploys |
 | `GITHUB_ALLOWLIST` | var | JSON array of numeric GitHub account IDs as strings (`gh api user --jq .id`) |
 | `MAX_*`, `REQUESTS_PER_MINUTE` | var | abuse caps, below |
 | `AUTH_SECRET` | secret | random, at least 32 characters: Better Auth signing and the encryption of stored GitHub tokens |
@@ -38,7 +46,7 @@ account; there is no secret in it.
 | `SLACK_CLIENT_SECRET` | secret, optional | the Slack app's client secret. With the client ID, a person can link their own Slack from the boat list |
 | `SLACK_SIGNING_SECRET` | secret, optional | the Slack app's signing secret. Unset, the API host answers no Slack call |
 | `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
-| `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/` |
+| `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/`; its id is in the git-ignored `wrangler.local.jsonc` |
 | `FILES` | R2 | `lobstah-wharf-files`, evidence files |
 
 The two origins must differ. The Worker answers only those two hosts; the
@@ -79,20 +87,22 @@ first. Secrets go in on standard input, never as arguments:
 ```bash
 npx wrangler whoami
 npx wrangler r2 bucket create lobstah-wharf-files
-npx wrangler d1 create lobstah-wharf-auth
-npx wrangler d1 migrations apply lobstah-wharf-auth --remote
+npx wrangler d1 create lobstah-wharf-auth          # put its id in wrangler.local.jsonc
+cp wrangler.local.example.jsonc wrangler.local.jsonc
+pnpm run wrangler d1 migrations apply lobstah-wharf-auth --remote
 openssl rand -base64 48 | npx wrangler secret put AUTH_SECRET
 openssl rand -base64 48 | npx wrangler secret put TOKEN_SECRET
 npx wrangler secret put GITHUB_CLIENT_SECRET
 npx wrangler secret put SLACK_CLIENT_SECRET   # only with a Slack app
 npx wrangler secret put SLACK_SIGNING_SECRET  # only with a Slack app
-pnpm build && npx wrangler deploy --dry-run
-pnpm build && npx wrangler deploy
+npx wrangler secret put GITHUB_CLIENT_ID           # or a variable in the dashboard; once
+pnpm run wrangler deploy --dry-run
+pnpm run deploy
 ```
 
-Put the `database_id` that `d1 create` prints and the OAuth app's client ID into
-`wrangler.jsonc` before the migration. `secret put` creates the Worker, asking
-first at a terminal, when it does not exist yet. Coordination uses each
+`secret put` creates the Worker, asking first at a terminal, when it does not
+exist yet. Later deploys need only `pnpm run deploy`: the local file stays on
+the deploying machine, and the Worker keeps its variables and secrets. Coordination uses each
 account's SQLite Durable Object; core does not import this service or Better Auth.
 
 ### Boats
@@ -165,6 +175,11 @@ plugins; their routes are also refused by the HTTP allowlist. The device client/
 scope approval fix predates this pin. Recheck upstream advisories before deployment;
 this narrow configuration is not a claim that every 1.7.6 plugin is safe.
 
+A mirror boat enrols by wharf, not by grounds: `lobstah wharf login --wharf <name> --mirror`
+asks for mirror and read only, and `[glass] mirror = "<name>"` starts the daemon's
+mirror (see Mirror boats). `lobstah wharf whoami --wharf <name>` names the boat and
+whether its mirror is fresh.
+
 `lobstah wharf login --grounds <grounds> [--name <boat>] [--helm|--work-only]`
 prints a browser approval URL/code and stores only that wharf's boat credential
 under `~/.lobstah/credentials/`, with owner-only file permissions where supported.
@@ -199,7 +214,7 @@ credential with an enrolment instruction. GitHub-backed browser sessions replace
 the temporary operator-provisioned PATs without expanding their work authority.
 
 Boat credentials carry a steering layer (`read < helm < admin`) and independent
-`work` permission, chosen on issue or rotation:
+`work` and `mirror` permissions, chosen on issue or rotation:
 
 | Permission | Allows |
 | --- | --- |
@@ -207,6 +222,7 @@ Boat credentials carry a steering layer (`read < helm < admin`) and independent
 | work | This boat's worker sign-on, claims and renewals |
 | helm | Read plus dispatch, message, cancel and exclusive helm lease operations |
 | admin | Helm plus approved boat enrollment, revoke boats, delete account |
+| mirror | Put this boat's glass snapshot, and take and answer the calls the hosted glass relays to it (see Mirror boats). Never work, steering or another boat's calls |
 
 Omission defaults to `work` plus `read`. The public operator `POST boats` route
 is removed; only the approved device grant drives the private issuer.
@@ -270,6 +286,11 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Addressed work boat | GET requests/starts; POST requests/:id/start | Read only its helm-authorized trap starts; consume once or record repo refusal before expiry |
 | Signed-in person | POST requests (kind `review-dismiss`) | Ask the boat that published a review to dismiss it (deleting the pending draft); authorized at once and addressed to that boat, no helm and no event. Sending a review happens in the review tool |
 | Addressed work boat | GET requests/reviews; POST requests/:id/start | Read the review requests addressed to it; mark each done or refused before expiry. The boat acts on GitHub with its own token |
+| Mirror boat | PUT mirror/snapshot | Replace this boat's latest glass snapshot: gzip, at most 2 MB, never carrying the page token |
+| Mirror boat | GET mirror/calls; POST mirror/calls/:id/take, answer | The calls addressed to it (and `watchedUntil` while a hosted glass is open); take one, then answer it with the local glass's status, type and body |
+| Mirror boat | GET mirror/files/:file | A file the person attached to a relayed answer for this boat |
+| Signed-in person | GET mirror; POST mirror/calls; GET mirror/calls/:id; POST mirror/files | The hosted glass's side: see Mirror boats |
+| Signed-in person | POST mirror/relay; GET mirror/read?boat=&path= | One call, waited for: the boat's own answer, or 202 after 20 seconds for the page to poll. `read` is a relayed read in one GET, for an image's `src` |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; approve another login to receive a new
@@ -348,6 +369,53 @@ after an R2 error. Only a minimal hashed deletion-key receipt/tombstone remains
 for the same retry; the person's sessions, GitHub identity and pending device
 codes are removed too. Old boat and dispatch credentials cannot recreate that
 account. There is no cross-account cleanup or automatic timer.
+
+## Mirror boats
+
+A mirror boat keeps its fleet on its own local grounds and shows it on the
+hosted glass. It enrols with `mirror` and `read` only (the device request's
+`mirror: true`; approval keeps it as asked or refuses it), so it takes no work
+and holds no helm. The boat stays the authority: the wharf keeps a copy of
+each boat's latest snapshot and calls in transit, never a second record.
+
+- **Snapshots.** `PUT mirror/snapshot` replaces the boat's one R2 object. The
+  wharf unpacks it once (at most 16 MB), refuses one that carries the page
+  token, and keeps its digest as the ETag. The glass's `GET /api/glass/mirror`
+  lists every unrevoked mirror boat's latest snapshot with its boat, name, put
+  time and ETag. `?known=<boat>:<etag>,…` answers the boats the page already
+  holds as `unchanged`. Revoking a boat drops its snapshot and calls.
+- **Calls.** `POST /api/glass/mirror/calls` relays one read (`read: "<path>"`)
+  or one write (`write: { kind, payload }`) to one boat. Reads are the local
+  glass's own reads and writes are its `POST /requests` kinds, from
+  `MIRROR_READ_PATHS` and `MIRROR_WRITE_KINDS` in
+  `packages/core/src/backend-model.ts`. Focus is never relayed. The boat checks
+  the same lists again before it runs a call. A new call sends that boat's
+  sockets `{ "type": "mirror-call" }`; the boat takes it, runs it against its
+  local glass over loopback, and answers. `GET /api/glass/mirror/calls/:id` is
+  202 while it waits, the boat's own status, type and body once answered
+  (sandboxed), and 410 once ten minutes pass unanswered. An expired call is
+  never delivered again.
+- **Files.** A file attached to a relayed answer goes to
+  `POST /api/glass/mirror/files` (`X-File-Name`, `X-Mirror-Boat`) and waits ten
+  minutes for its boat's `GET mirror/files/:file`.
+- **Watching.** Reading the mirror list marks a hosted glass as open for 30
+  seconds. The boats hear `{ "type": "mirror-watch", "until": … }` when that
+  begins, and `GET mirror/calls` carries `watchedUntil`, so a boat puts often
+  only while someone is looking.
+- **The hosted glass.** An account with a mirror boat runs the glass on the
+  mirror backend (`packages/glass-ui/ui/backends/mirror.ts`): every boat's
+  snapshot merged into one fleet, with the wharf's own grounds beside them
+  when it holds any of their work. With one boat the glass renders exactly
+  what that boat's local glass renders (`apps/cli/test/glass-parity.test.ts`).
+  With several, every row carries its boat's name on its repo or grounds, and
+  each read or write goes to that row's boat. A boat whose snapshot is over two
+  minutes old shows its age in the header, and its rows are read-only. ↗ Open is
+  never relayed: the page probes each boat's glass on loopback
+  (`/api/mirror/probe`, answered only for this glass's origin), and shows
+  ↗ Open only on the trap rows of the boat that answers.
+- **Limits.** Mirror routes keep no idempotency records (a put replaces, a take
+  or an answer succeeds once) and have their own per-minute budget, four times
+  the account's, so a polling glass never starves coordination.
 
 ## Opt-in CLI routing
 
@@ -466,9 +534,19 @@ approved login from the boat; no public grant-editing or rename API exists.
 
 ## Browser glass
 
-`pnpm --filter @lobstah/wharf build` bundles the existing glass stylesheet and
-shared safe Markdown elements into the Worker. The configured glass host serves
-`/` and `/device`; no separately hosted assets or hardcoded domain are needed.
+The hosted glass is the local glass: the same UI from `packages/glass-ui`, running
+on the wharf backend (`ui/backends/wharf.ts`), which reads these `/api/glass` routes
+and shows what the wharf records in the local glass's own views. Its tabs are the
+ones the wharf fills (On deck, Dispatches, Traps, Reviews, Reports) and Boats, the
+account page; PRs, grants, TODOs, notices, stats and settings stay local.
+`services/wharf/glass` holds only the host's own parts: sign-in, sign-out, the
+wake hint, Boats, the human requests list and boat approval.
+
+`pnpm --filter @lobstah/wharf build` bundles that UI into the Worker; it declares
+`@lobstah/core` and `@lobstah/glass-ui` as workspace dependencies, so `pnpm -r
+build` builds them first. The configured glass host serves `/`, `/device` and a
+report's own page, `/report/<id>`; no separately hosted assets or hardcoded domain
+are needed.
 Sign in with invited GitHub credentials, then use `/device` to inspect a CLI
 approval code and approve the displayed boat with the same or lower access, or
 refuse it. No boat or dispatch token is issued to the page.
@@ -487,15 +565,16 @@ The glass host also serves `/manifest.webmanifest` and PNG icons under `/icons/`
 install the glass as an app. Both are public and carry no account data. There is
 no service worker: nothing is cached or available offline.
 
-The URL hash is the page's place: a view (`#jobs`), or one item open over its
-view (`#decision/<id>`, `#report/<id>`, `#job/<id>`, `#trap/<id>`). A link opens
-the glass on that item, and sign-in returns to the same link. An id that is not
-listed for the signed-in account says so and reads nothing.
+The URL hash is the page's place, as in the local glass: a tab (`#dispatches`;
+`#jobs` still opens it), a decision (`#decision/<id>`), or a dispatch or trap
+opened over its tab (`#job/<id>`, `#trap/<id>`, the links boats hand out). A
+report opens on its own page (`#report/<id>` goes to `/report/<id>`). Sign-in
+returns to the same link. An id that is not listed for the signed-in account
+opens nothing and reads nothing.
 
-Opening a report in the glass acknowledges it once, as the local glass does for
-its own reports. Cards and details show what the wharf records: a decision
-answered, and a document or a job's current status acked, by which boat or by the
-person. Looking at a decision or a job does not acknowledge it.
+Opening a decision or a report acknowledges it once, for every boat and the glass;
+looking at a job does not. The views show what the wharf records: a report read,
+a decision's answer.
 
 Snapshots poll every fifteen seconds. Missing check-ins or a failed feed are
 unknown, not completion. Remote sessions show their boat and a validated command

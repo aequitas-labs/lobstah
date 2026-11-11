@@ -1,5 +1,5 @@
 import { DecisionError, GrantError, answerDecision, askDecision, decisionDir, loadConfig, markDecisionViewed, markQuestionViewed, readDecision } from '@lobstah/core';
-import type { DecisionAnswer, DecisionMeta, DecisionUpload, Lane } from '@lobstah/core';
+import type { AnswerSource, DecisionAnswer, DecisionMeta, DecisionUpload, Lane } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { applyPermissionAnswer, permissionAnswerAllowed } from './grants-cli.js';
 import { buildTendReport } from './tend.js';
@@ -18,7 +18,7 @@ export interface AnswerRequest {
   text?: string;
   attach?: string[];
   uploads?: DecisionUpload[];
-  by: 'glass' | 'cli';
+  by: AnswerSource;
 }
 
 /** A standing, unframed question for `<lane>:<id>`, as the glass shows it. */

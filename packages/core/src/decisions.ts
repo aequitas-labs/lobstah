@@ -1,11 +1,15 @@
+import { validDesktopStartLink, type DesktopAppStart } from './desktop-start-link.js';
+import type { GrantIntent } from './grants.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { AttachmentError, copyAttachments } from './attachments.js';
+import { ReportError, attachSources, linkAttachedImages } from './reports.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { newRequestId, readRequest, requestFilesDir, requestsDir, writeRequest } from './requests.js';
 import type { DecisionAnswerPayload } from './requests.js';
 import type { Attachment, Lane } from './types.js';
+import { runScriptFile, type RunCard } from './run-cards.js';
 
 /**
  * Decisions: a question the helm puts to the human (`man ask`), answered in
@@ -43,10 +47,19 @@ export interface PermissionAsk {
   harness: 'claude' | 'codex' | 'any';
   /** The trap that asked, when known: an "Allow once" is good for it alone. */
   trap?: string;
+  /** The kind of action the trap proposes approving: the card offers it, for a person to read and choose. */
+  intent?: GrantIntent;
+  /** A helm session's own command, refused by its harness's reviewer: Allow once is good for that session alone. */
+  helm?: boolean;
 }
 
 /** The options of a permission card, in order. */
 export const PERMISSION_OPTIONS = ['Allow once', 'Allow always', 'No'] as const;
+
+/** A permission card's option: approve the kind of action the trap proposed, for an hour. */
+export const INTENT_HOUR_OPTION = 'Allow this kind for 1h';
+/** A permission card's option: approve the kind of action the trap proposed, until revoked. */
+export const INTENT_ALWAYS_OPTION = 'Always allow this kind';
 
 /** Exact allow-list changes; approval may only select a subset of these stored rules. */
 export type PermissionRuleChange =
@@ -64,6 +77,8 @@ export interface PermissionsProposal {
 }
 
 export interface DecisionMeta {
+  /** A configured desktop session start action, separate from tool approval. */
+  appStart?: DesktopAppStart;
   /** `decision:<rid>`. */
   key: string;
   title: string;
@@ -88,6 +103,8 @@ export interface DecisionMeta {
   /** Set on a trap's permission request: what it asked to run or write. */
   permission?: PermissionAsk;
   permissionsProposal?: PermissionsProposal;
+  /** Set on a run card: the script the glass runs once Chris confirms it (run-cards.ts). */
+  run?: RunCard;
   /** Changes with every ask; an ack holds only while it matches. */
   stateHash: string;
 }
@@ -103,7 +120,7 @@ export interface DecisionAnswer {
   attachments: Attachment[];
   answeredAt: string;
   /** Where it was answered. */
-  by: 'glass' | 'cli';
+  by: AnswerSource;
 }
 
 /**
@@ -119,7 +136,18 @@ interface AnswerMarker {
   text?: string;
   attachments?: Attachment[];
   answeredAt: string;
-  by: 'glass' | 'cli';
+  by: AnswerSource;
+}
+
+/**
+ * Where a decision was answered: this machine's glass, the hosted glass (a
+ * mirror boat carries out what a person did there, so `wharf`), or the
+ * command line (`man answer`).
+ */
+export type AnswerSource = 'glass' | 'cli' | 'wharf';
+/** Whether a person answered in a glass, local or hosted: the only answers that may allow a permission card. */
+export function answeredInGlass(by: AnswerSource): boolean {
+  return by === 'glass' || by === 'wharf';
 }
 
 /** A file the glass uploaded: its name as the browser gave it, and its bytes. */
@@ -221,9 +249,22 @@ export function readDecision(key: string): DecisionMeta | undefined {
   return meta?.key === key ? meta : undefined;
 }
 
-export function readDecisionDetail(key: string): string | undefined {
+/** The retained directory of a withdrawn card, never a caller-supplied path. */
+export function archivedDecisionDir(key: string): string | undefined {
   const dir = decisionDir(key);
-  if (!dir || !readDecision(key)) return undefined;
+  return dir ? path.join(decisionsRoot(), '.withdrawn', path.basename(dir)) : undefined;
+}
+
+/** Read a withdrawn card for a read-only deep link or progress inspection. */
+export function readArchivedDecision(key: string): DecisionMeta | undefined {
+  const dir = archivedDecisionDir(key);
+  const meta = dir ? readJsonFile<DecisionMeta>(path.join(dir, DECISION_JSON)) : undefined;
+  return meta?.key === key ? meta : undefined;
+}
+
+export function readDecisionDetail(key: string): string | undefined {
+  const dir = readDecision(key) ? decisionDir(key) : readArchivedDecision(key) ? archivedDecisionDir(key) : undefined;
+  if (!dir) return undefined;
   try {
     return fs.readFileSync(path.join(dir, DETAIL_MD), 'utf8');
   } catch {
@@ -329,6 +370,7 @@ export function standingDecisions(): DecisionMeta[] {
 }
 
 export interface AskOptions {
+  appStart?: DesktopAppStart;
   title: string;
   /** A markdown file to copy as the detail page. */
   detailFile?: string;
@@ -347,6 +389,8 @@ export interface AskOptions {
   /** A trap's permission request. */
   permission?: PermissionAsk;
   permissionsProposal?: PermissionsProposal;
+  /** A run card: what it runs, and the script's bytes, stored as `run/script` (run-cards.ts). */
+  run?: { card: RunCard; script: Buffer };
   /** Per-file limit for attachments (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -380,6 +424,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   if (opts.replace !== undefined && !standingDecisions().some((d) => d.key === opts.replace)) {
     throw new DecisionError(`no standing decision ${opts.replace} to replace — \`lobstah man tend\` lists them`);
   }
+  if (opts.appStart && (!validDesktopStartLink(opts.appStart.url) || !/^[a-z][a-z0-9-]{0,63}$/.test(opts.appStart.profile))) throw new DecisionError('invalid desktop app start action');
   const title = checkTitle(opts.title);
   const options = checkOptions(opts.options ?? []);
   let detail = opts.detailText ?? '';
@@ -395,6 +440,15 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     detail = fs.readFileSync(opts.detailFile, 'utf8');
   }
   if (Buffer.byteLength(detail) > DECISION_DETAIL_MAX) throw new DecisionError(`detail exceeds ${DECISION_DETAIL_MAX} bytes`);
+  // As `man file` does: an --attach path may be given from the detail file's directory.
+  const pageDir = opts.detailFile !== undefined ? path.dirname(path.resolve(opts.detailFile)) : process.cwd();
+  let sources: string[];
+  try {
+    sources = opts.detailFile !== undefined ? attachSources(pageDir, opts.attach ?? [], []) : (opts.attach ?? []);
+  } catch (err) {
+    if (err instanceof ReportError) throw new DecisionError(err.message);
+    throw err;
+  }
   let rid = randomBytes(4).toString('hex');
   while (fs.existsSync(path.join(decisionsRoot(), rid))) rid = randomBytes(4).toString('hex');
   const key = `decision:${rid}`;
@@ -402,21 +456,27 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   fs.mkdirSync(dir, { recursive: true });
   let attached: Attachment[];
   try {
-    attached = copyAttachments(opts.attach ?? [], path.join(dir, 'attachments'), opts.maxBytes);
+    attached = copyAttachments(sources, path.join(dir, 'attachments'), opts.maxBytes);
   } catch (err) {
     fs.rmSync(dir, { recursive: true, force: true });
     if (err instanceof AttachmentError) throw new DecisionError(err.message);
     throw err;
   }
+  // A relative image link to an attached file shows that file: it is linked by its stored name.
+  const images = linkAttachedImages(detail, pageDir, sources, attached);
+  detail = images.markdown;
   const renamed: Record<string, string> = {};
-  (opts.attach ?? []).forEach((file, i) => {
+  sources.forEach((file, i) => {
     const base = path.basename(file);
     if (attached[i] && attached[i]!.name !== base) renamed[base] = attached[i]!.name;
   });
+  // A link rewritten to a stored name must reach that file, not a rename of it.
+  for (const name of images.linked) delete renamed[name];
   const askedAt = (opts.now ?? new Date()).toISOString();
   const meta: DecisionMeta = {
     key,
     title,
+    ...(opts.appStart ? { appStart: opts.appStart } : {}),
     options,
     ...(opts.optionNotes ? { optionNotes: Object.fromEntries(Object.entries(opts.optionNotes).filter(([o]) => options.includes(o))) } : {}),
     attachments: attached,
@@ -430,22 +490,31 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     askedAt,
     ...(opts.permission ? { permission: opts.permission } : {}),
     ...(opts.permissionsProposal ? { permissionsProposal: opts.permissionsProposal } : {}),
+    ...(opts.run ? { run: opts.run.card } : {}),
     stateHash: createHash('sha1').update(`${key}\n${askedAt}\n${title}`).digest('hex').slice(0, 16),
   };
   writeAtomic(path.join(dir, DETAIL_MD), detail);
+  // The run card's script lands before the card that names it. The copy is what runs, and only while it still hashes to the card's value.
+  if (opts.run) {
+    const script = runScriptFile(dir);
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, opts.run.script, { mode: 0o600, flag: 'wx' });
+  }
   writeAtomic(path.join(dir, DECISION_JSON), `${JSON.stringify(meta, null, 2)}\n`);
   const replaced = opts.replace !== undefined && opts.replace !== key ? [opts.replace] : [];
   for (const old of replaced) fs.rmSync(decisionDir(old)!, { recursive: true, force: true });
   return { meta, replaced };
 }
 
-/** Withdraw a standing decision: its directory is removed. An answered one stays. */
+/** Withdraw a standing decision into a read-only archive, retaining its task progress. */
 export function withdrawDecision(key: string): DecisionMeta {
   const meta = readDecision(key);
   if (!meta) throw new DecisionError(`no decision ${key}`, 404);
   const answer = readDecisionAnswer(key);
   if (answer) throw new DecisionError(`decision ${key} was already answered at ${answer.answeredAt}`, 409);
-  fs.rmSync(decisionDir(key)!, { recursive: true, force: true });
+  const archive = archivedDecisionDir(key)!;
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  atomicRenameSync(decisionDir(key)!, archive);
   return meta;
 }
 
@@ -474,7 +543,7 @@ export interface AnswerInput {
   attach?: string[];
   /** Files the glass uploaded. */
   uploads?: DecisionUpload[];
-  by: 'glass' | 'cli';
+  by: AnswerSource;
   /** Per-file limit (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -601,8 +670,9 @@ export function removeAnsweredDecision(key: string): void {
  */
 export function resolveDecisionFile(key: string, name: string): string | undefined {
   if (!name || name !== path.basename(name) || name !== path.win32.basename(name) || name === '.' || name === '..') return undefined;
-  const meta = readDecision(key);
-  const dir = decisionDir(key);
+  const active = readDecision(key);
+  const meta = active ?? readArchivedDecision(key);
+  const dir = active ? decisionDir(key) : archivedDecisionDir(key);
   if (!meta || !dir) return undefined;
   const stored = meta.renamed?.[name] ?? name;
   const hit = meta.attachments.find((a) => a.name === stored);

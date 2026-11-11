@@ -59,6 +59,9 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
     return;
   }
   if (opts.has('--helm') && opts.has('--work-only')) throw new Error('choose --helm or --work-only, not both');
+  // A mirror boat shows its own fleet on the hosted glass: it asks for mirror and read only, never work or the helm.
+  const mirror = opts.has('--mirror');
+  if (mirror && (opts.has('--helm') || opts.has('--work-only'))) throw new Error('--mirror asks for mirror and read only; drop --helm and --work-only');
   const credentialFile = opts.opt('--credential-file');
   if (credentialFile) {
     if (opts.opt('--name') || opts.has('--helm') || opts.has('--work-only')) throw new Error('credential import does not change boat name or access');
@@ -73,7 +76,7 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
   const name = opts.opt('--name') ?? current?.name ?? systemBoatName();
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error('choose --name with 1–64 letters, digits, hyphens or underscores');
   const steering = opts.has('--work-only') ? 'none' : opts.has('--helm') ? 'helm' : 'read';
-  const issued = await authPost(scope, 'device/code', { client_id: 'lobstah-cli', account: scope.location.account, name, steering, ...(old ? { boatToken: old } : {}) });
+  const issued = await authPost(scope, 'device/code', { client_id: 'lobstah-cli', account: scope.location.account, name, steering, ...(mirror ? { mirror: true } : {}), ...(old ? { boatToken: old } : {}) });
   if (issued.status !== 200) throw new Error('wharf could not start boat approval');
   const code = issued.data;
   if (typeof code.device_code !== 'string' || code.device_code.length > 256 || typeof code.user_code !== 'string' || !/^[A-Za-z0-9-]{1,128}$/.test(code.user_code) || typeof code.verification_uri !== 'string') throw new Error('invalid boat approval code');
@@ -83,7 +86,8 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
   if (!Number.isFinite(expires) || expires <= 0 || expires > 3600 || !Number.isFinite(requested) || requested <= 0) throw new Error('invalid boat approval timeout');
   let interval = Number(code.interval ?? 5);
   if (!Number.isFinite(interval) || interval < 1 || interval > 30) throw new Error('invalid boat approval interval');
-  console.log(`Approve boat ${name} (${steering === 'none' ? 'work only' : `work + ${steering}`}) at ${url.href}, code ${code.user_code}. The browser can approve, lower access, or refuse.`);
+  const access = mirror ? 'mirror + read' : steering === 'none' ? 'work only' : `work + ${steering}`;
+  console.log(`Approve boat ${name} (${access}) at ${url.href}, code ${code.user_code}. The browser can approve${mirror ? '' : ', lower access,'} or refuse.`);
   const deadline = Date.now() + Math.min(expires, requested) * 1000;
   while (Date.now() < deadline) {
     const result = await authPost(scope, 'device/token', { client_id: 'lobstah-cli', device_code: code.device_code, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' });

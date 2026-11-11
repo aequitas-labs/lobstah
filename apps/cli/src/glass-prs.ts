@@ -1,4 +1,4 @@
-import { derivePrStacks, identifyPrStacks, parsePrRef, prBadge, prNewestFirst } from '@lobstah/core';
+import { derivePrStacks, identifyPrStacks, parsePrRef, prBadge, prNewestFirst, prStackTitle, orderedDispatchPrUrls } from '@lobstah/core';
 import type { GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
 
 /**
@@ -136,8 +136,8 @@ export function deriveGlassPrs(
     visit(root);
     // A cyclic or ambiguous relation must never drop a PR from the list.
     for (const p of members) if (!ordered.includes(p)) ordered.push(p);
-    const eligible = ordered.find((p) => p.state === 'OPEN' &&
-      (p.baseRefName === (stackOptions.trunk?.(p.forgeRepo) ?? 'main') || parent.get(p.key)?.state === 'MERGED'));
+    // A stack on any base: the first open PR with no open PR below it is next.
+    const eligible = ordered.find((p) => p.state === 'OPEN' && parent.get(p.key)?.state !== 'OPEN');
     ordered.forEach((p, i) => {
       p.stackId = id;
       p.floor = root.baseRefName ?? '?';
@@ -154,8 +154,11 @@ export function deriveGlassPrs(
     const status = readiness.find((s) => s.members.some((p) => members.some((m) => p.url === m.url)));
     if (status) stacks.at(-1)!.readiness = {
       id: status.id, url: status.members.at(-1)!.url,
-      ready: status.ready, total: status.members.length, allReady: status.allReady, text: status.text,
+      ready: status.ready, total: status.members.length, allReady: status.allReady, text: status.text, state: status.state,
     };
+    const title = status?.title ??
+      (ordered.length > 1 ? prStackTitle(ordered.map((p) => evidenceByUrl.get(p.url) ?? p), [...evidenceByUrl.values()]) : undefined);
+    if (title) stacks.at(-1)!.title = title;
   }
   // Open stacks first, then finished ones; within each group, the stack whose
   // newest member sorts first leads.
@@ -227,19 +230,22 @@ export function prsAbove(records: readonly PrRecord[], key: string): GlassPr[] {
  */
 export function dispatchPrList(
   urls: readonly string[],
-  prs: ReadonlyArray<Pick<GlassPr, 'url' | 'number' | 'badge' | 'stackId' | 'position'>>,
-): Array<{ url: string; number: number; badge?: GlassPr['badge'] }> {
+  prs: ReadonlyArray<Pick<GlassPr, 'url' | 'number' | 'title' | 'badge' | 'stackId' | 'position'>>,
+  positions: NonNullable<import('@lobstah/core').Evidence['prPositions']> = {},
+): Array<{ url: string; number: number; title?: string; badge?: GlassPr['badge']; position?: number; size?: number }> {
   const byKey = new Map(prs.map((p) => [parsePrRef(p.url)?.key ?? p.url, p]));
   const rows = urls.flatMap((u, i) => {
     const ref = parsePrRef(u);
     return ref ? [{ ref, i, pr: byKey.get(ref.key) }] : [];
   });
+  const persistedOrder = new Map(orderedDispatchPrUrls({ prUrls: [...urls], prPositions: positions }).map((url, index) => [url, index]));
   const stackOrder = new Map<string, number>();
   for (const r of rows) if (r.pr && !stackOrder.has(r.pr.stackId)) stackOrder.set(r.pr.stackId, r.i);
   rows.sort((a, b) =>
+    Object.keys(positions).length ? persistedOrder.get(a.ref.url)! - persistedOrder.get(b.ref.url)! :
     a.pr && b.pr
       ? stackOrder.get(a.pr.stackId)! - stackOrder.get(b.pr.stackId)! || a.pr.position - b.pr.position
       : a.pr ? -1 : b.pr ? 1 : a.i - b.i,
   );
-  return rows.map((r) => ({ url: r.ref.url, number: r.ref.number, ...(r.pr ? { badge: r.pr.badge } : {}) }));
+  return rows.map((r) => ({ url: r.ref.url, number: r.ref.number, ...(positions[r.ref.url] ? { position: positions[r.ref.url]!.position, size: positions[r.ref.url]!.size } : {}), ...(r.pr?.title ? { title: r.pr.title } : {}), ...(r.pr ? { badge: r.pr.badge } : {}) }));
 }

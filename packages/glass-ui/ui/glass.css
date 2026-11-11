@@ -1,0 +1,2408 @@
+/*
+ * The spyglass's styles. Design tokens first: every color, the spacing
+ * scale, and the card and badge metrics live here as custom properties; the
+ * rules below refer to them instead of repeating literals.
+ */
+:root {
+  color-scheme: dark;
+  /* palette */
+  --bg: #0e1116;
+  --card: #161b22;
+  --line: #2b3240;
+  --line-hover: #3a455a;
+  --row-hover: #1c2330;
+  --inset: #10151c;
+  --seg-on: #26436b;
+  --scrim: rgba(4, 7, 11, 0.72);
+  --fg: #dbe2ea;
+  --dim: #8b96a5;
+  --ok: #4fc17c;
+  --warn: #e2b93d;
+  --bad: #e26d5c;
+  --link: #6cb2e2;
+  /* text on a filled badge */
+  --on-fill: #fff;
+  /* GitHub's dark-mode PR state colors */
+  --pr-merged: #8957e5;
+  --pr-merged-fg: #ab7df8;
+  --pr-open: #238636;
+  --pr-draft: #6e7681;
+  --pr-closed: #da3633;
+  /* the lobster's own red (the pet sprite's shell) */
+  --lobstah: #eb6644;
+  /* the Stats heatmap's five steps: none, then the accent at rising strength */
+  --heat-0: var(--inset);
+  --heat-1: color-mix(in srgb, var(--lobstah) 30%, var(--card));
+  --heat-2: color-mix(in srgb, var(--lobstah) 55%, var(--card));
+  --heat-3: color-mix(in srgb, var(--lobstah) 78%, var(--card));
+  --heat-4: var(--lobstah);
+  --heat-cell: 11px;
+  --heat-gap: 3px;
+
+  /* type */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-size: 13px;
+
+  /* spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --page-pad-block: 14px;
+  --radius: 6px;
+
+  /* cards */
+  --card-radius: 8px;
+  --card-pad: 12px 14px;
+  --card-min: 300px;
+  --deck-card-min: 240px;
+
+  /* badges */
+  --badge-radius: 5px;
+  --badge-pad: 1px 7px;
+  --badge-font: 11px;
+
+  /* modal */
+  --modal-radius: 10px;
+  --modal-width: 780px;
+  /* stacking: every modal's layer, the decision modal above it, and the new-decision alert always below both */
+  --layer-modal: 10;
+  --layer-decision-modal: 15;
+  --layer-alert: calc(var(--layer-modal) - 1);
+  /* an unread decision: a red-ish tint mixed from the palette, so it follows the theme */
+  --unread-bg: color-mix(in srgb, var(--bad) 16%, var(--card));
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--font-size)/1.45 var(--font-mono);
+  padding-block: var(--page-pad-block);
+  padding-inline: var(--space-4);
+  /* sticky footer: a full-height column whose active tab grows, so the footer sits at the viewport bottom on short pages */
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+h1 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+h1 .dim {
+  color: var(--dim);
+  font-weight: normal;
+}
+h2 {
+  font-size: 12px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 20px 0 6px;
+}
+.chips,
+.controls {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.controls {
+  margin: 0 0 14px;
+}
+.chips {
+  margin-bottom: 8px;
+}
+.chip {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 3px 9px;
+}
+.controls select,
+.newtrap select,
+.controls input[type='search'] {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  padding: 4px 8px;
+}
+.controls input[type='search'] {
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 340px;
+}
+#chain-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+#f-chain {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--link);
+}
+/* The tab bar: On deck and Reviews always; the other tabs inline from 900px, where all ten
+   fit on one line (about 840px with two-digit badges), else behind More at the bar's right. */
+.navbar {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  border-bottom: 1px solid var(--line);
+  margin: 8px 0 10px;
+}
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+.tabs a,
+.nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  color: var(--dim);
+  padding: 6px 11px;
+  border-bottom: 2px solid transparent;
+}
+.tabs a.on,
+.nav-toggle.on {
+  color: var(--fg);
+  border-color: var(--link);
+}
+.nav-toggle {
+  display: none;
+  background: none;
+  border-top: 0;
+  border-inline: 0;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.nav-toggle:hover {
+  color: var(--fg);
+}
+@media (max-width: 899px) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews']) {
+    display: none;
+  }
+  .nav-toggle {
+    display: inline-flex;
+  }
+}
+.more-sections {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--scrim);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.more-sections a {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+  color: var(--dim);
+}
+.more-sections a.on {
+  color: var(--fg);
+  background: var(--bg);
+}
+@media (max-width: 639px) {
+  .tabs a,
+  .nav-toggle,
+  .more-sections a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .more-sections {
+    left: 0;
+  }
+}
+.tabpage {
+  display: none;
+}
+.tabpage.on {
+  display: block;
+  flex: 1 0 auto;
+}
+.headerline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.headerline h1 {
+  flex: 1;
+}
+#settings-slot {
+  min-width: 34px;
+  text-align: right;
+  color: var(--dim);
+}
+#settings-slot #gearbtn {
+  margin-left: 0;
+}
+/* Card treatment and the helm-message accent, without decision/alert behavior. */
+.goals-callout {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--link);
+  border-radius: var(--card-radius);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.goals-callout h2 {
+  margin: 0 0 var(--space-2);
+}
+.goals-callout ol {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.6em;
+  margin: 0;
+  padding: 0;
+  counter-reset: goal;
+}
+.goals-callout li {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  counter-increment: goal;
+}
+.goals-callout li::before {
+  content: counter(goal) '.';
+  text-align: right;
+}
+.goal-check,
+.todo-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  cursor: default;
+}
+.goal-check {
+  display: grid;
+  grid-template-columns: 1.1em minmax(0, 1fr);
+}
+/* Todos are one compact list row each, in table and card views alike. */
+.todo-check {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+/* Read-only boxes drawn by hand: a done goal or Todo shows a green check,
+   not the browser's greyed-out disabled checkbox. */
+.goal-check input,
+.todo-check input {
+  flex: 0 0 auto;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0.2em 0;
+  border: 1.5px solid var(--dim);
+  border-radius: 3px;
+  background: transparent center / 85% no-repeat;
+  opacity: 1;
+  cursor: default;
+}
+.goal-check input {
+  font: inherit;
+  margin: calc((1lh - 1.1em) / 2) 0 0;
+}
+.goal-check input:checked,
+.todo-check input:checked {
+  border-color: var(--ok);
+  background-color: var(--ok);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%230e1116' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.goals-callout li.done s,
+.todo-check.done s {
+  color: var(--dim);
+}
+.goal-check > span,
+.todo-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.todo-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.todo-content {
+  min-width: 0;
+  flex: 1;
+}
+.todo-text {
+  display: block;
+}
+/* A chip can name several triggers: let it wrap instead of widening a phone's page. */
+.todo-content .badge {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.todo-actions {
+  margin-top: var(--space-2);
+}
+.todo-schedule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.todo-schedule input[type='text'] {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  padding: 3px 9px;
+  min-width: 0;
+  flex: 1 1 8em;
+  /* Undo the hand-drawn checkbox rule, `.todo-check input`. */
+  width: auto;
+  height: auto;
+  margin: 0;
+  cursor: text;
+}
+.deckgrid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.deckgrid h2 {
+  margin: 5px 0;
+}
+.deckgrid section {
+  width: 100%;
+  min-width: 0;
+}
+.deckline {
+  padding: 2px 0;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+a.deckline {
+  display: flex;
+  gap: 0.35em;
+}
+a.deckline > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.deckline > .dim {
+  flex-shrink: 0;
+}
+.deckline.acked,
+.card.acked,
+.rowhead.acked,
+.badge.acked {
+  opacity: 0.55;
+}
+.deckmore {
+  color: var(--dim);
+  font-size: 11px;
+  display: inline-block;
+  margin-top: 4px;
+}
+.deckline.click {
+  cursor: pointer;
+}
+.deckline.click:hover {
+  background: var(--row-hover);
+}
+.deckgrid h2 a {
+  color: inherit;
+}
+.deckgrid h2 a:hover {
+  color: var(--fg);
+}
+.deckgrid .cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--deck-card-min), 100%), 1fr));
+  gap: 10px;
+}
+.deckstack {
+  margin-bottom: 9px;
+}
+.deckstack > .dim {
+  font-size: 11px;
+  margin: 3px 0 5px;
+}
+.stacktitle {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.deckmember {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.seg button {
+  background: var(--card);
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--seg-on);
+  color: var(--fg);
+}
+.wrap {
+  overflow-x: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+th,
+td {
+  text-align: left;
+  padding: 4px 9px;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+  white-space: nowrap;
+}
+td.grow {
+  white-space: normal;
+  word-break: break-word;
+  min-width: 140px;
+}
+th {
+  color: var(--dim);
+  font-weight: normal;
+  border-top: none;
+  font-size: 11px;
+}
+tr.rowhead {
+  cursor: pointer;
+}
+tr.rowhead:hover {
+  background: var(--row-hover);
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--card-min), 100%), 1fr));
+  gap: var(--space-3);
+}
+/* One card style for every tab: even inner padding, and a top row whose badge never touches the id or the edge. */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+  cursor: pointer;
+  min-width: 0;
+  /* Nothing inside a card extends past its padding box. */
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.card:hover {
+  border-color: var(--line-hover);
+}
+.harness-icon {
+  display: inline-flex;
+  vertical-align: -3px;
+  flex: 0 0 auto;
+}
+.worker-compact {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+.worker-harness {
+  cursor: help;
+}
+.worker-harness:focus-visible {
+  outline: 2px solid var(--ok);
+  outline-offset: 3px;
+}
+.worker-tooltip {
+  position: fixed;
+  z-index: 20;
+  max-width: 264px;
+  padding: 6px 9px;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--line-hover);
+  border-radius: var(--badge-radius);
+  box-shadow: 0 3px 12px var(--scrim);
+  font-size: 12px;
+  white-space: normal;
+  pointer-events: none;
+}
+.worker-details dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  font-size: 12px;
+}
+.worker-details dt {
+  color: var(--dim);
+}
+.worker-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.card .top {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 22px;
+}
+/*
+ * The title shrinks first, down to a minimum that keeps its identity whole
+ * with its ellipsis (#99999…, an 8-character id…). Its shrink factor dwarfs a
+ * long badge's, so the badge's share rounds to nothing and it gives up space
+ * only after the title has reached that minimum.
+ */
+.card .top > b,
+.card .top > .prname {
+  flex: 1 1000000 auto;
+  min-width: min(10ch, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A PR's name is what the card is for: two lines before the ellipsis. */
+.card .top > .prname {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+.configured-traps {
+  margin-bottom: var(--space-3);
+}
+.desktop-start {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.desktop-start .btn {
+  justify-self: start;
+}
+.desktop-start .dim {
+  font-size: 12px;
+}
+/* A badge of up to 12 characters (done, claude, working) never shrinks. */
+.card .top .badge {
+  flex: 0 0 auto;
+}
+/* A longer badge (class `long`, full text in its title) truncates, but never below 12 characters or past the card. */
+.card .top .badge.long {
+  flex: 0 1 auto;
+  min-width: min(12ch, 100%);
+  max-width: min(26ch, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card .meta {
+  color: var(--dim);
+  font-size: 12px;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card .note {
+  margin-top: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.activity {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg);
+  opacity: 0.85;
+}
+.waiting {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.activity.stale {
+  color: var(--dim);
+  opacity: 1;
+}
+.card .foot {
+  margin-top: 8px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--dim);
+  font-size: 12px;
+}
+.card .foot > * {
+  min-width: 0;
+}
+/* The trap's window action sits at the right end of its foot line. */
+.card .foot .footact {
+  margin-left: auto;
+}
+/* A trap's catch count: the lobster stays with its number. */
+.catchn {
+  white-space: nowrap;
+}
+/* A small themed button, as the copy buttons are. */
+.btn {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover {
+  color: var(--fg);
+  border-color: var(--line-hover);
+}
+.badge {
+  border-radius: var(--badge-radius);
+  padding: var(--badge-pad);
+  font-size: var(--badge-font);
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  display: inline-block;
+}
+.badge.pr-merged {
+  background: var(--pr-merged);
+  border-color: var(--pr-merged-fg);
+  color: var(--on-fill);
+}
+.badge.pr-open {
+  background: var(--pr-open);
+  border-color: var(--pr-open);
+  color: var(--on-fill);
+}
+.badge.pr-draft {
+  background: var(--pr-draft);
+  border-color: var(--pr-draft);
+  color: var(--on-fill);
+}
+.badge.pr-closed {
+  background: var(--pr-closed);
+  border-color: var(--pr-closed);
+  color: var(--on-fill);
+}
+.badge.pr-conflicts {
+  background: var(--pr-closed);
+  border-color: var(--pr-closed);
+  color: var(--on-fill);
+}
+.badge.pr-behind {
+  background: var(--pr-draft);
+  border-color: var(--pr-draft);
+  color: var(--on-fill);
+}
+.badge.unreported {
+  font-weight: normal;
+  font-size: 10px;
+  padding: 0 5px;
+  vertical-align: 1px;
+}
+.v-done {
+  color: var(--ok);
+}
+.v-working,
+.v-queued {
+  color: var(--fg);
+}
+.v-needs-decision,
+.v-blocked {
+  color: var(--bad);
+  font-weight: bold;
+}
+.v-failed {
+  color: var(--bad);
+}
+.v-paused,
+.v-unknown {
+  color: var(--dim);
+}
+.dim {
+  color: var(--dim);
+}
+.ok {
+  color: var(--ok);
+}
+.warn {
+  color: var(--warn);
+}
+.bad {
+  color: var(--bad);
+}
+.detail {
+  display: none;
+}
+.detail.open {
+  display: table-row;
+}
+.detail td {
+  background: var(--inset);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: var(--dim);
+}
+.detail b {
+  color: var(--fg);
+}
+.empty {
+  color: var(--dim);
+  padding: 6px 2px;
+}
+/* Under a list whose history pages in from /data/older. */
+.older {
+  padding: 8px 2px;
+}
+#stale {
+  display: none;
+  color: var(--bad);
+}
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.dot.ok {
+  background: var(--ok);
+}
+.dot.warn {
+  background: var(--warn);
+}
+.dot.bad {
+  background: var(--bad);
+}
+.dot.dim {
+  background: var(--dim);
+}
+#overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: none;
+  z-index: var(--layer-modal);
+  padding: 28px 16px;
+  overflow: auto;
+}
+#overlay.open {
+  display: block;
+}
+.modal {
+  max-width: var(--modal-width);
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--modal-radius);
+  padding: 16px 18px;
+  position: relative;
+}
+.modal .x {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 18px;
+  line-height: 1;
+}
+.modal .x:hover {
+  color: var(--fg);
+}
+.modal h3 {
+  margin: 0 24px 2px 0;
+  font-size: 14px;
+}
+.modal .sub {
+  color: var(--dim);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.modal .sec {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin: 14px 0 4px;
+}
+.modal pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  font: inherit;
+  color: var(--fg);
+}
+.msg {
+  border-left: 3px solid var(--line);
+  padding: 3px 10px;
+  margin: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg.from-helm {
+  border-color: var(--link);
+}
+.msg .hdr {
+  color: var(--dim);
+  font-size: 11px;
+}
+.catch {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  margin: 8px 0;
+}
+.catch.click {
+  cursor: pointer;
+}
+.catch .hdr {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+/* A machine name can be long, and table cells don't wrap: keep this note inside the window column. */
+.offmachine {
+  display: inline-block;
+  min-width: 18ch;
+  max-width: 26ch;
+  white-space: normal;
+}
+#modalbox .offmachine {
+  max-width: none;
+}
+/* The trap modal's ways in: one per line, each control with where it works beside it. */
+.route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 6px 0;
+}
+.route > * {
+  min-width: 0;
+}
+/* A finger needs more room than a pointer. */
+@media (pointer: coarse) {
+  .btn.open {
+    display: inline-block;
+    margin-block: 4px;
+    padding: 8px 12px;
+  }
+}
+.loglines {
+  color: var(--dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 4px;
+}
+.cmd {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 5px 0;
+  flex-wrap: wrap;
+}
+.cmd code {
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 8px;
+  word-break: break-all;
+  cursor: pointer;
+}
+.cmd.inline {
+  display: inline-flex;
+  margin: 0;
+}
+.cmd code:hover {
+  border-color: var(--line-hover);
+}
+.cmd code.copied {
+  border-color: var(--ok);
+}
+.cmd button {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.cmd button:hover {
+  color: var(--fg);
+}
+.chip.click {
+  cursor: pointer;
+}
+.chip.click:hover {
+  border-color: var(--line-hover);
+}
+footer {
+  margin-top: 26px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 12px;
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.lob {
+  position: fixed;
+  bottom: 6px;
+  left: 0;
+  z-index: 5;
+  cursor: pointer;
+  font-size: 34px;
+  line-height: 1;
+  user-select: none;
+  animation: crawl 18s linear infinite;
+}
+a.lob {
+  color: inherit;
+}
+.lob .bub .badge {
+  display: inline-block;
+  margin: 0 0 3px;
+}
+.pet-art {
+  display: block;
+  position: relative;
+  width: 72px;
+  height: 56px;
+}
+.pet-art .sprite {
+  width: 72px;
+  height: 56px;
+  background-position: 0 0;
+  background-repeat: no-repeat;
+  background-size: 400% 100%;
+  image-rendering: pixelated;
+  animation: step 0.5s steps(4) infinite;
+}
+.lob .bub {
+  display: none;
+  position: absolute;
+  bottom: 58px;
+  right: -8px;
+  z-index: 2;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 6px 9px 5px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--fg);
+  width: max-content;
+  max-width: 150px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.lob:hover .bub {
+  display: block;
+}
+.lob .bub span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  word-break: break-word;
+}
+.pet-art .star {
+  position: absolute;
+  left: 56px;
+  top: -9px;
+  height: 14px;
+  image-rendering: pixelated;
+  z-index: 3;
+}
+.lob:hover {
+  animation-play-state: paused;
+}
+@keyframes crawl {
+  0% {
+    transform: translateX(-90px);
+  }
+  100% {
+    transform: translateX(100vw);
+  }
+}
+@keyframes step {
+  to {
+    background-position-x: -288px;
+  }
+}
+#gearbtn {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 1px 7px;
+  margin-left: 8px;
+  cursor: pointer;
+  vertical-align: 1px;
+}
+#gearbtn:hover,
+#gearbtn.on {
+  color: var(--fg);
+  border-color: var(--line-hover);
+}
+.settings .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin: 12px 0;
+}
+.settings .lbl {
+  color: var(--fg);
+  font-size: 12px;
+}
+.settings .hint {
+  display: block;
+  color: var(--dim);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* The deck's decisions: a compact row each; the decision modal takes the answer (components/decisions.ts). */
+.dlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: 8px 12px;
+}
+.drow.unread {
+  background: var(--unread-bg);
+  border-color: var(--bad);
+}
+.drow.answered {
+  opacity: 0.7;
+}
+/* A row someone followed a link to: it flashes once, then settles. */
+.drow.focus {
+  animation: dflash 1.6s ease-out 1;
+}
+.drow .dopen {
+  flex: 1 1 280px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.drow .dopen:hover .dtitle {
+  text-decoration: underline;
+}
+.drow .dtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drow .dmeta,
+.drow .dage {
+  font-size: 11px;
+}
+.drow .dlink,
+.dmodal .dlink {
+  color: var(--link);
+}
+.dstate {
+  font-size: var(--badge-font);
+  border-radius: var(--badge-radius);
+  padding: var(--badge-pad);
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+.dstate.unread {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.dstate.answered {
+  color: var(--ok);
+}
+/* The unread count: on the deck tab and the decisions heading. */
+.dbadge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 1.6em;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: bold;
+  background: var(--bad);
+  color: var(--on-fill);
+}
+/* The Reviews tab: a row's actions. */
+.rv-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* The decision modal, above any other modal and below the image overlay. */
+#doverlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: var(--layer-decision-modal);
+  padding: 28px 16px;
+  overflow: auto;
+}
+.dmodal:focus {
+  outline: none;
+}
+.dmodal .x {
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 18px;
+  color: var(--dim);
+}
+.dnav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 28px var(--space-3) 0;
+}
+.dnav .dpos {
+  color: var(--dim);
+  font-size: 11px;
+}
+.dmodal .dtop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.dmodal .dtitle {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.dmodal .dmeta {
+  font-size: 11px;
+}
+.ddone {
+  padding: 28px 8px;
+  text-align: center;
+  cursor: pointer;
+}
+.ddone .ok {
+  font-size: 15px;
+  margin-bottom: var(--space-2);
+}
+/* The new-decision alert: a corner toast on every tab, never taking focus, always below any open modal and its backdrop. */
+.dalert-live {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: var(--layer-alert);
+}
+.dalert {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--bad);
+  border-radius: var(--card-radius);
+  padding: 8px 10px;
+  box-shadow: 0 6px 24px var(--scrim);
+}
+.dalert .dalert-open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.dalert .dx {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.dcount {
+  display: inline-block;
+  min-width: 1.8em;
+  text-align: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-weight: bold;
+  background: var(--bad);
+  color: var(--on-fill);
+  animation: dglow 1.8s ease-in-out infinite;
+}
+@keyframes dglow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 10px 3px var(--bad);
+  }
+}
+/* No pulsing for reduced motion: the red stays. */
+@media (prefers-reduced-motion: reduce) {
+  .dcount,
+  .drow.focus {
+    animation: none;
+  }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The decision modal's body: detail, files, options, and the answer form. */
+@keyframes dflash {
+  0%,
+  35% {
+    border-color: var(--link);
+    box-shadow: 0 0 0 3px var(--link);
+  }
+  100% {
+    border-color: var(--line);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.dfiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 6px 0;
+}
+.dfiles .dimg img {
+  max-height: 160px;
+  max-width: 320px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: block;
+}
+.dfiles .dfile {
+  width: 100%;
+  font-size: 11px;
+}
+.doptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 6px;
+}
+/* A long label wraps inside its button; the key badge stays on the first line. */
+.btn.dopt {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  font-size: 12px;
+  padding: 3px 12px;
+  color: var(--fg);
+  white-space: normal;
+  text-align: left;
+}
+.btn.dopt .dtext {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.btn.dopt.on,
+.btn.dopt.proposal-edit[aria-pressed='true'] {
+  background: var(--seg-on);
+  border-color: var(--link);
+}
+/* What an option covers, as a permission card's "Allow always" says it. */
+.btn.dopt .dnote {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.dpermission .mdpage pre.mdcode {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A permissions proposal lists only the changing rules, one row each: sign, harness, rule. */
+.mdpage ul.proposal-changes {
+  list-style: none;
+  padding-left: 0;
+}
+.proposal-change,
+.proposal-change label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.proposal-change + .proposal-change {
+  margin-top: var(--space-1);
+}
+.proposal-change .psign {
+  flex: 0 0 1ch;
+  font-weight: 700;
+}
+.proposal-change.add .psign {
+  color: var(--ok);
+}
+.proposal-change.remove .psign {
+  color: var(--bad);
+}
+.proposal-change input {
+  align-self: center;
+  margin: 0;
+  accent-color: var(--ok);
+}
+.proposal-details summary {
+  color: var(--dim);
+  cursor: pointer;
+}
+.proposal-details pre.mdcode {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Two full lines and padding; the right padding keeps text clear of the key badge. */
+.danswer {
+  display: block;
+  width: 100%;
+  min-height: calc(2lh + 14px);
+  max-height: 50vh;
+  margin: 6px 0;
+  padding: 6px 40px 6px 8px;
+  resize: vertical;
+  overflow-y: auto;
+  field-sizing: content;
+  background: var(--inset);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+}
+/* A key hint: the number that chooses an option or focuses the text box. */
+.dkey,
+.dlegend kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  text-align: center;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border: 1px solid var(--line-hover);
+  border-radius: 4px;
+  color: var(--dim);
+  background: var(--inset);
+}
+.btn.dopt .dkey {
+  flex: none;
+  margin-right: 6px;
+}
+.btn.dopt.on .dkey {
+  border-color: var(--link);
+  color: var(--fg);
+}
+.danswer-wrap {
+  position: relative;
+}
+.danswer-wrap .dkey-text {
+  position: absolute;
+  /* Centred on the first line: border and padding (7px), then half of a line (18.85px) less the badge (16px). */
+  top: 8px;
+  right: 8px;
+  pointer-events: none;
+}
+.dlegend {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.9;
+}
+.danswer:focus {
+  outline: none;
+  border-color: var(--line-hover);
+}
+.dfoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.dfoot .dattach input {
+  display: none;
+}
+.dfoot .dchip {
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--badge-radius);
+  padding: 0 0 0 6px;
+}
+.dfoot .dx {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+}
+.dfoot .derr {
+  font-size: 11px;
+}
+.btn.dsend {
+  margin-left: auto;
+  color: var(--fg);
+  padding: 2px 14px;
+}
+.btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.danswered {
+  margin-top: 6px;
+}
+
+/* An image that opens in the in-page overlay (components/lightbox.ts). */
+.thumb,
+.dimg,
+.mdimg {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: zoom-in;
+  font: inherit;
+}
+.thumb {
+  display: block;
+  margin: 4px 0;
+}
+.thumb img {
+  max-height: 120px;
+  max-width: 240px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: block;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.lightbox .lbimg {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+.lightbox .lbclose {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lightbox .lboriginal {
+  color: var(--link);
+  font-size: 12px;
+}
+
+/* A report page: markdown rendered as elements (components/report.ts). */
+.mdpage {
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin: 6px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.mdpage h1,
+.mdpage h2,
+.mdpage h3,
+.mdpage h4 {
+  margin: 12px 0 6px;
+  line-height: 1.25;
+}
+.mdpage h1 {
+  font-size: 18px;
+}
+.mdpage h2 {
+  font-size: 15px;
+}
+.mdpage h3,
+.mdpage h4 {
+  font-size: 13px;
+}
+.mdpage p,
+.mdpage ul,
+.mdpage ol,
+.mdpage blockquote {
+  margin: 6px 0;
+}
+.mdpage ul,
+.mdpage ol {
+  padding-left: 22px;
+}
+.mdpage a {
+  color: var(--link);
+}
+.mdpage code {
+  background: var(--card);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+/* A code block keeps its lines and scrolls sideways inside its own box. */
+.mdpage pre.mdcode {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.mdpage pre.mdcode code {
+  padding: 0;
+  background: none;
+}
+/* Copy controls change no layout: the button floats over its block's corner, and inline code copies when clicked. */
+.mdcodewrap {
+  position: relative;
+}
+.copybtn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+}
+.copybtn:hover {
+  color: var(--fg);
+}
+.copyinline {
+  cursor: copy;
+}
+.copyinline:hover {
+  box-shadow: inset 0 0 0 1px var(--line-hover);
+}
+.copyinline.copied {
+  box-shadow: inset 0 0 0 1px var(--ok);
+}
+.mdpage blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+  color: var(--dim);
+}
+.mdpage img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: block;
+  margin: 6px 0;
+}
+.mdpage hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+/* A table scrolls sideways inside its wrapper; its cells wrap, each at least 12ch wide (most words fit whole). */
+.mdpage .mdtable {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.mdpage table {
+  border-collapse: collapse;
+  margin: 6px 0;
+}
+.mdpage th,
+.mdpage td {
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 12ch;
+}
+
+/* Ack stack (or Ack, for a lone PR): beside each stack group's heading, on the PR tab and the deck. */
+.prack {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 8px;
+  font-weight: normal;
+  vertical-align: middle;
+}
+
+/* New trap: a button on the Traps tab and the deck's traps heading, opening a small form. */
+.tabhead {
+  margin: 0 0 8px;
+}
+.newtrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+/* A starting trap's start commands: copy one, paste it in a terminal. */
+.startcmds {
+  margin: 6px 0;
+  font-size: 11px;
+  cursor: default;
+}
+
+/*
+ * A report on its own page (/report/<key>): full width, rendered once. A
+ * definite width, so a wide table or code line scrolls in its own box and
+ * never widens the page; long tokens (paths, hashes, URLs) wrap.
+ */
+.reportview {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+  overflow-wrap: anywhere;
+}
+.reportview h1 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+.reportview .sub {
+  color: var(--dim);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.reportview .sec {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin: 14px 0 4px;
+}
+.reportview .mdpage {
+  padding: 12px 20px;
+}
+/* A phone: the body's gutter is the page's only one. */
+@media (max-width: 600px) {
+  .reportview {
+    padding: 12px 0 32px;
+  }
+  .reportview .mdpage {
+    padding: 8px 12px;
+  }
+}
+
+/* The Stats tab: headline tiles, the catch heatmap, its legend, the top traps. */
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 100%;
+}
+.stats h2 {
+  margin: 0 0 var(--space-2);
+}
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: var(--space-2);
+}
+.stat-tile {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+}
+.stat-tile .n {
+  font-size: 22px;
+  font-weight: bold;
+  color: var(--fg);
+}
+.stats-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+.stats-empty .pet-art {
+  flex: none;
+  margin-top: 6px;
+}
+.heat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+  min-width: 0;
+}
+/* A window narrower than 53 weeks scrolls the weeks; it opens on the newest. */
+.heat-scroll {
+  overflow-x: auto;
+  padding: 2px 0 4px;
+}
+.heatmap {
+  border-collapse: separate;
+  border-spacing: var(--heat-gap);
+  width: auto;
+  margin: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  /* the day tooltips reach past their cells */
+  overflow: visible;
+}
+.heatmap td {
+  padding: 0;
+  border: 0;
+  vertical-align: middle;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--dim);
+}
+.heatmap .month {
+  position: relative;
+  height: 14px;
+}
+/* A label never widens its column: the last month's may span one week. */
+.heatmap .month span {
+  position: absolute;
+  left: 0;
+  bottom: 3px;
+  white-space: nowrap;
+}
+/* The weekday labels stay in view while a narrow window scrolls the weeks. */
+.heatmap .wd {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card);
+  padding-right: var(--space-1);
+  white-space: nowrap;
+}
+.heatmap .day,
+.heatmap .pad,
+.heat-legend .swatch {
+  width: var(--heat-cell);
+  min-width: var(--heat-cell);
+  height: var(--heat-cell);
+  border-radius: 2px;
+}
+.heatmap .day {
+  position: relative;
+  cursor: default;
+  outline: 1px solid rgba(255, 255, 255, 0.04);
+  outline-offset: -1px;
+}
+.heatmap .day:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 0;
+}
+.l0 {
+  background: var(--heat-0);
+}
+.l1 {
+  background: var(--heat-1);
+}
+.l2 {
+  background: var(--heat-2);
+}
+.l3 {
+  background: var(--heat-3);
+}
+.l4 {
+  background: var(--heat-4);
+}
+/* A day's tooltip on hover or keyboard focus: its count and date. */
+.heatmap .day:hover::after,
+.heatmap .day:focus::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  background: var(--bg);
+  border: 1px solid var(--line-hover);
+  border-radius: var(--badge-radius);
+  color: var(--fg);
+  font-size: 11px;
+  padding: 3px 7px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.heatmap .day.below:hover::after,
+.heatmap .day.below:focus::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+.heatmap .day.tl:hover::after,
+.heatmap .day.tl:focus::after {
+  left: 0;
+  transform: none;
+}
+.heatmap .day.tr:hover::after,
+.heatmap .day.tr:focus::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.heat-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+  margin-top: var(--space-1);
+}
+.heat-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--heat-gap);
+  color: var(--dim);
+  margin-left: auto;
+}
+.heat-legend .swatch {
+  display: inline-block;
+}
+.heat-legend .swatch:first-of-type {
+  margin-left: var(--space-1);
+}
+.heat-legend .swatch:last-of-type {
+  margin-right: var(--space-1);
+}
+.top-traps {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+}
+.top-traps ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.top-traps li {
+  display: grid;
+  grid-template-columns: minmax(0, 14em) minmax(40px, 32em) auto;
+  justify-content: start;
+  align-items: center;
+  gap: var(--space-3);
+}
+.top-traps .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.top-traps .bar {
+  height: 6px;
+  background: var(--inset);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.top-traps .bar span {
+  display: block;
+  height: 100%;
+  background: var(--lobstah);
+}
+.top-traps .n {
+  color: var(--dim);
+  white-space: nowrap;
+}
+.rv-person {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rv-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.rv-controls select {
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: inherit;
+}
+.rv-person img {
+  border-radius: 50%;
+  flex: 0 0 24px;
+}
+.rv-asker {
+  margin-top: 10px;
+}
+.rv-card .top {
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.rv-card .top > b {
+  flex: 1 0 100%;
+  white-space: normal;
+}
+.rv-card.seen,
+.rowhead.seen {
+  opacity: 0.78;
+}
+.rv-reason {
+  margin-top: 6px;
+  color: var(--dim);
+}
+.rv-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.rv-actions [role='alert'] {
+  white-space: normal;
+}
+.rv-staged {
+  font-size: 12px;
+}
+/* The same transparent lobster-and-star mark in both glasses. */
+.glass-brand {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+footer .glass-brand {
+  width: 18px;
+  height: 18px;
+}
+
+.grant-chip {
+  white-space: nowrap;
+  margin-inline: 6px;
+}
+.grant-scope {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.session-grants .card .top > b {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.grant-audit {
+  padding: 0;
+  list-style: none;
+}
+.grant-audit li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.grant-audit code {
+  overflow-wrap: anywhere;
+}
+
+/* The trap is the primary identity; repo/profile stays on the secondary action line. */
+.trap-deckline {
+  white-space: normal;
+}
+.trap-heading,
+.trap-secondary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.trap-secondary {
+  margin-top: var(--space-1);
+  color: var(--dim);
+  font-size: 12px;
+}
+.trap-secondary .footact {
+  margin-left: auto;
+}
+.trap-scope {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trap-address {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.trap-heading > .dim {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trap-heading > b {
+  overflow-wrap: anywhere;
+}
+
+/* Settings: each row is a key, its value and where it came from; on a phone the key sits above. */
+.cfg h2 {
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 13px;
+  color: var(--fg);
+}
+.cfg h3 {
+  font-size: 12px;
+  margin: 12px 0 4px;
+}
+.cfgtraps {
+  font-weight: normal;
+}
+.cfgrow {
+  display: grid;
+  grid-template-columns: minmax(0, 18em) minmax(0, 1fr) 4.5em;
+  gap: 2px 12px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.cfgkey {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.cfgvalue {
+  overflow-wrap: anywhere;
+}
+.cfgsource {
+  color: var(--dim);
+  font-size: 11px;
+  text-align: right;
+}
+.cfgsource.set {
+  color: var(--ok);
+}
+@media (max-width: 640px) {
+  .cfgrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .cfgkey {
+    grid-column: 1 / -1;
+  }
+}
+
+/* A standing grant: what it covers, on as many lines as it takes. */
+.standing-grants {
+  margin-bottom: 12px;
+}
+.standing-grant .top > .grant-lead {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.grant-patterns {
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+}
+.grant-patterns code {
+  overflow-wrap: anywhere;
+}
+.grant-id {
+  font-size: 11px;
+}
+
+.mdtask {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-block: var(--space-1);
+}
+.mdtask input {
+  flex: none;
+  accent-color: var(--link);
+  margin: 0;
+}
+.mdtask span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A run card: the script in full, what runs it, its inputs and Run. A long
+ * path, hash, URL or name breaks anywhere, so nothing in it pushes the modal
+ * past a phone's width.
+ */
+.runcard {
+  margin: var(--space-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.runcard > *,
+.runhead > *,
+.runmeta > *,
+.runinput > *,
+.runfoot > *,
+.runout > *,
+.runconsole > * {
+  min-width: 0;
+}
+.runcard .btn,
+.runcard .badge {
+  white-space: normal;
+  max-width: 100%;
+}
+.runscript {
+  margin: 0;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 50vh;
+}
+/* A flagged character: shown and named, so nothing in the script is invisible or reordered. */
+.runwarn {
+  background: color-mix(in srgb, var(--bad) 22%, var(--card));
+  color: var(--fg);
+  border: 1px solid var(--bad);
+  border-radius: 3px;
+  padding: 0 2px;
+  unicode-bidi: isolate;
+}
+.runwarn .runcp {
+  font-size: 10px;
+  color: var(--bad);
+  margin-left: 2px;
+}
+.runwarnings ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.runmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-3);
+  font-size: 12px;
+}
+.runinputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.runinput {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.runinput input {
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  padding: 6px 8px;
+  width: 100%;
+  max-width: 420px;
+  box-sizing: border-box;
+}
+.runfoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.runbtn:not([disabled]) {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.runout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.runlog {
+  max-height: 40vh;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+a.runbtn {
+  text-decoration: none;
+}
+/* An interactive run's console line: it reads as the next line of the terminal above it. */
+.runconsole {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.runprompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-width: 0;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+.runprompt input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.runsecret.on {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+/* The eye beside a secret: on the console line before it is sent, and on each secret line sent from this tab. */
+.runeye {
+  flex: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--dim);
+  padding: 2px 4px;
+  line-height: 0;
+  cursor: pointer;
+}
+.runeye:hover,
+.runeye:focus-visible {
+  color: var(--fg);
+  border-color: var(--line-hover);
+}
+.runsent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.runsentline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.runsentline > * {
+  min-width: 0;
+}
+.runsentname {
+  flex: none;
+  white-space: nowrap;
+}

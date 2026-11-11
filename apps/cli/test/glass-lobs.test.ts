@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { serveGlass } from '../src/glass.js';
 import type { AddressInfo } from 'node:net';
 

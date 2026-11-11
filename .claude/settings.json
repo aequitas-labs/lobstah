@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "aequitas-labs": {
+      "source": {
+        "source": "github",
+        "repo": "aequitas-labs/agent-skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "agent-skills@aequitas-labs": true
+  }
+}

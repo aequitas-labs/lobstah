@@ -1,5 +1,6 @@
+import { prepareStackMerges } from '../stack-merge.js';
 import { randomUUID } from 'node:crypto';
-import { conflictUpdate, enqueue, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, storedDescriptor, withBriefHooks } from '@lobstah/core';
+import { conflictUpdate, enqueue, postNotice, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, storedDescriptor, withBriefHooks } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { markedNote } from '../types.js';
@@ -128,7 +129,15 @@ export async function mergeLoop(
     observe(pr, 'stale-approval');
   };
 
-  for (const candidate of await ms.mergeCandidates()) {
+  const candidates = await ms.mergeCandidates();
+  const stack = await prepareStackMerges(ms, candidates, policy, state, (pr) => {
+    const review = qualifiedApproval(policy, pr);
+    if (!review) return undefined;
+    const key = approvalDedupKey(pr, review);
+    return state.approvalConsumed(key) ? undefined : { key, author: review.author };
+  }, observe, log);
+  for (const candidate of candidates) {
+    if (stack.handled.has(candidate.number)) continue;
     const prKey = `${ms.name}#${candidate.number}`;
 
     // A rebase chore in flight owns this PR until it completes.
@@ -177,6 +186,20 @@ export async function mergeLoop(
       continue;
     }
 
+    if (stack.members.has(pr.number)) {
+      const checks = await ms.checks?.(pr.number, pr.headSha);
+      if (pr.mergeableState === 'dirty' || checks === 'red') {
+        const message = `Stack stopped at #${pr.number}: ${pr.mergeableState === 'dirty' ? 'resolve the conflict and push normally.' : 'fix the failing checks.'}`;
+        if (state.newStackHold(prKey, `${pr.headSha}:${message}`)) {
+          log(message); postNotice({ kind: 'stack-stopped', repo: ms.repoKey(), url: pr.url, text: message });
+        }
+        observe(pr, 'stack-stopped'); continue;
+      }
+      if (pr.baseRef !== pr.defaultBranch || checks !== 'green' || pr.mergeableState !== 'clean') {
+        observe(pr, 'stack-checks'); continue;
+      }
+    }
+
     // Trust the forge's rollup: blocked means a required check failed;
     // unstable means only non-required checks failed and the forge itself
     // would allow the merge.
@@ -209,7 +232,10 @@ export async function mergeLoop(
         break;
       }
       default: {
-        await ms.merge(pr.number, policy.method);
+        const child = stack.children.get(pr.number);
+        if (child) state.setStackAdvance(`${ms.name}#${child.number}`, { parent: pr.number, from: pr.headRef });
+        await ms.merge(pr.number, policy.method, pr.headSha);
+        state.clearStackAdvance(prKey);
         state.consumeApproval(dedupKey);
         log(`${prKey}: merged (${policy.method}) on approval by ${approval.author}`);
       }

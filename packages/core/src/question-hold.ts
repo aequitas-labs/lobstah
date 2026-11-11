@@ -7,7 +7,7 @@ import type { HelmRegistration } from './helm.js';
 import { answeredAt } from './inbox.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { activeIds, pendingIds, storedDescriptor } from './queue.js';
-import { readStatusLog } from './status.js';
+import { questionEntry, readStatusLog } from './status.js';
 import type { Lane, StatusEntry } from './types.js';
 
 /**
@@ -119,10 +119,14 @@ export function questionHeld(q: Pick<HeldQuestion, 'key' | 'stateHash' | 'repo'>
   return holdingHelm(q.repo, now) !== undefined && currentRelease(q.key, q.stateHash) === undefined;
 }
 
-/** The standing question of a dispatch: its last entry is needs-decision or blocked, with no newer message. */
+/**
+ * The standing question of a dispatch: its newest entry that is not a
+ * permission request is needs-decision or blocked, with no newer message
+ * other than a permission card's answer.
+ */
 export function standingQuestion(id: string, lane: Lane): HeldQuestion | undefined {
-  const entry = readStatusLog(id, lane).at(-1);
-  if (!entry || (entry.verb !== 'needs-decision' && entry.verb !== 'blocked')) return undefined;
+  const entry = questionEntry(readStatusLog(id, lane));
+  if (!entry) return undefined;
   if (answeredAt(id, lane, entry.at) !== undefined) return undefined;
   return {
     key: `${lane}:${id}`,

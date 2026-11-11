@@ -9,7 +9,7 @@ import { glassReviews } from '../src/reviews.js';
 import type { GlassReview } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass } from '../src/glass.js';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, ago, emptyFleet } from './fixtures/glass-snapshots.js';

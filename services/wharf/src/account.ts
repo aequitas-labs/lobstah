@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { ReportInput, BackendEvent, DispatchInput, DispatchView, GlassCard, GlassCardAction } from '../../../packages/core/src/backend-model.js';
-import { ApiError, boatName, capability, digest, dispatchInput, hex, identifier, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
+import { ApiError, LEASE_MS, boatName, capability, digest, dispatchInput, hex, identifier, configuredTarget, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
 import { personSessionLive } from './auth.js';
@@ -10,19 +10,21 @@ import { SlackOutbox } from './slack-outbox.js';
 import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
+import { MIRROR_WATCH_MS, MirrorState, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
+import type { MirrorCleanup } from './mirror-state.js';
+import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 /** What a Slack action came to: done, a form to ask for words first, or why not, said to the person. */
 export type SlackActionResult = { done: true } | { form: { title: string; prompt: string } } | { refused: string };
 type DispatchRow = { id: string; data: string; state: string; worker: string | null; boat: string | null; epoch: number; lease: number; hash: string | null; nonce: string | null };
 type BoatRow = { id: string; name: string; hash: string; revoked: number };
-type WorkerRow = { id: string; boat: string; repo: string; seen: number };
+type WorkerRow = { id: string; boat: string; repo?: string; seen: number; target?: import('../../../packages/core/src/configured-trap-model.js').ConfiguredTrapTarget };
 type StoredResult = { status: number; value: unknown };
 type FileRow = { id: string; dispatch: string; name: string; size: number; hash: string; ready: number };
 export type Command = { account: string; helm: boolean; personId?: string; token: string; method: string; path: string; key?: string; session?: string; body: unknown; after?: string;
   personSessionId?: string;
   prepared?: { id?: string; hash: string } };
-const LEASE_MS = 90_000;
 const HELM_MS = 120_000;
 
 /** One account's only coordination authority. No alarms, timers or socket pings: Slack deliveries drain after each command. */
@@ -30,6 +32,7 @@ export class Account extends DurableObject<Env> {
   private glass: GlassState;
   private cards: Cards;
   private outbox: SlackOutbox;
+  private mirrorState: MirrorState;
   private hintPending = false;
   /** Fetch is only for the private upgrade binding: normal state uses RPC. */
   async fetch(request: Request): Promise<Response> {
@@ -172,6 +175,7 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS boat_permissions (boat TEXT PRIMARY KEY, permissions TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, boat TEXT NOT NULL, repo TEXT NOT NULL, seen INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS worker_repo ON workers(repo,seen);
+      CREATE TABLE IF NOT EXISTS configured_workers (id TEXT PRIMARY KEY, boat TEXT NOT NULL, target TEXT NOT NULL, seen INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_nicknames (worker TEXT PRIMARY KEY, nickname TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS unservable (dispatch TEXT PRIMARY KEY, repo TEXT NOT NULL, note TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS dispatches (id TEXT PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL, worker TEXT, boat TEXT, epoch INTEGER NOT NULL DEFAULT 0, lease INTEGER NOT NULL DEFAULT 0, hash TEXT, nonce TEXT);
@@ -183,9 +187,12 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS claims (dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(dispatch,epoch));
       CREATE TABLE IF NOT EXISTS catch_context (dispatch TEXT PRIMARY KEY, claim_helm INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS assistance_results (child TEXT PRIMARY KEY, parent TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS assistance_stops (child TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, dispatch TEXT NOT NULL, text TEXT NOT NULL, received INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, hash TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0);
       ${glassSchema}
+      ${mirrorSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
     this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
@@ -212,6 +219,7 @@ export class Account extends DurableObject<Env> {
         return origin?.channel === channel ? origin.ts : undefined;
       },
     });
+    this.mirrorState = new MirrorState(ctx.storage.sql, { read: (a) => this.requirePermission(a, 'read'), mirror: (a) => this.requirePermission(a, 'mirror') });
   }
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
@@ -235,7 +243,7 @@ export class Account extends DurableObject<Env> {
   }
   /** Polling is the guarantee: observe expiry on the next request, without timers. */
   private availability(now: number) {
-    const absent = this.ctx.storage.sql.exec<DispatchRow>(`SELECT d.* FROM dispatches d WHERE d.state='queued' AND NOT EXISTS (
+    const absent = this.ctx.storage.sql.exec<DispatchRow>(`SELECT d.* FROM dispatches d WHERE d.state='queued' AND json_extract(d.data,'$.target') IS NULL AND NOT EXISTS (
       SELECT 1 FROM workers w JOIN boats b ON b.id=w.boat LEFT JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND w.seen>?
       AND (p.boat IS NULL OR EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='work'))
       AND w.repo=json_extract(d.data,'$.repoRemote') AND (json_extract(d.data,'$.for') IS NULL OR json_extract(d.data,'$.for')=w.id)
@@ -263,7 +271,8 @@ export class Account extends DurableObject<Env> {
     const input = JSON.parse(d.data) as DispatchInput; const target = this.targetBoat(input);
     const unservable = this.ctx.storage.sql.exec<{ repo: string; note: string }>('SELECT repo,note FROM unservable WHERE dispatch=?', d.id).toArray()[0];
     const status = this.lastReport(d.id), ack = this.glass.dispatchAck(d.id, status?.at);
-    return { ...input, state: d.state, status, ...(ack ? { ack } : {}), ...(d.worker ? { workerId: d.worker } : {}), ...(d.boat ? { claimedBoat: d.boat } : {}), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
+    const assistance = this.ctx.storage.sql.exec<DispatchRow>(`SELECT * FROM dispatches WHERE json_extract(data,'$.target.parentDispatch')=? ORDER BY rowid LIMIT 32`, d.id).toArray().map((child) => ({ id: child.id, state: child.state, note: this.lastReport(child.id)?.note, files: this.ctx.storage.sql.exec<{ id: string; name: string; size: number }>('SELECT id,name,size FROM files WHERE dispatch=? AND ready=1 LIMIT 32', child.id).toArray() }));
+    return { ...input, ...(assistance.length ? { assistance } : {}), state: d.state, status, ...(ack ? { ack } : {}), ...(d.worker ? { workerId: d.worker } : {}), ...(d.boat ? { claimedBoat: d.boat } : {}), ...(target ? { boatName: target.name } : {}), ...(unservable ? { unservable } : {}) };
   }
   private authenticate(c: Command, hash: string, now: number): Actor {
     if (c.helm) return { kind: 'person', id: c.personId ?? 'person', permissions: personPermissions };
@@ -328,7 +337,7 @@ export class Account extends DurableObject<Env> {
     b.count++; this.set('budget', JSON.stringify(b));
   }
   private capacity() {
-    const tables = ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'files', ...glassTables];
+    const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -388,7 +397,10 @@ export class Account extends DurableObject<Env> {
       requireThat(w.seen + LEASE_MS > now, 409, 'worker sign-on expired; renew first');
       requireThat(!this.ctx.storage.sql.exec("SELECT id FROM dispatches WHERE worker=? AND state='active'", w.id).toArray().length, 409, 'worker already has an open catch');
       // Addressed work remains sticky, including absent/stale workers.
-      const d = this.ctx.storage.sql.exec<DispatchRow>(`SELECT * FROM dispatches WHERE state='queued'
+      const d = w.target ? this.ctx.storage.sql.exec<DispatchRow>(`SELECT * FROM dispatches WHERE state='queued'
+        AND json_extract(data,'$.target.profile')=? AND json_extract(data,'$.target.grounds')=? AND json_extract(data,'$.target.surface')=?
+        AND (json_extract(data,'$.boat') IS NULL OR json_extract(data,'$.boat')=?) ORDER BY rowid LIMIT 1`, w.target.profile, w.target.grounds, w.target.surface, actor.id).toArray()[0]
+        : this.ctx.storage.sql.exec<DispatchRow>(`SELECT * FROM dispatches WHERE state='queued' AND json_extract(data,'$.target') IS NULL
         AND json_extract(data,'$.repoRemote')=? AND (json_extract(data,'$.for')=? OR json_extract(data,'$.for') IS NULL)
         AND (json_extract(data,'$.boat') IS NULL OR json_extract(data,'$.boat')=?)
         ORDER BY CASE WHEN json_extract(data,'$.for')=? THEN 0 ELSE 1 END, rowid LIMIT 1`, w.repo, w.id, actor.id, w.id).toArray()[0];
@@ -420,13 +432,27 @@ export class Account extends DurableObject<Env> {
       this.requirePermission(actor, 'admin');
       const id = identifier(c.path.split('/')[1]); const target = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', id).toArray()[0];
       requireThat(target, 404, 'boat not found');
-      this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', id); this.event('boat-revoked', undefined, `boat: ${target.name}`); return ok();
+      this.ctx.storage.sql.exec('UPDATE boats SET revoked=1 WHERE id=?', id); this.event('boat-revoked', undefined, `boat: ${target.name}`);
+      // A revoked boat mirrors nothing: its snapshot and calls are dropped with its credential.
+      this.dropMirrorFiles(this.mirrorState.forget(c.account, id)); return ok();
     }
     if (c.path === 'workers/sign-on' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required');
       requireThat(b.boat === undefined, 400, 'boat credentials cannot select another boat');
-      const id = identifier(b.worker); const repo = repoIdentity(b.repoRemote); const nickname = identifier(b.repo);
-      const old = this.ctx.storage.sql.exec<WorkerRow>('SELECT * FROM workers WHERE id=?', id).toArray()[0];
+      const id = identifier(b.worker);
+      if (b.target !== undefined) {
+        const target = configuredTarget(b.target);
+        requireThat(!target.parentDispatch && b.repo === undefined && b.repoRemote === undefined, 400, 'configured worker has no repo or assistance parent');
+        requireThat(target.surface !== 'claude-desktop' || b.harness === 'claude', 400, 'desktop profile requires Claude');
+        requireThat(!this.ctx.storage.sql.exec('SELECT id FROM workers WHERE id=?', id).toArray().length, 409, 'worker identity already belongs to a repo trap');
+        const old = this.ctx.storage.sql.exec<{ id: string; boat: string; repo: string; seen: number }>('SELECT * FROM configured_workers WHERE id=?', id).toArray()[0];
+        requireThat(!old || old.boat === actor.id, 409, 'worker belongs to another boat');
+        this.ctx.storage.sql.exec('INSERT OR REPLACE INTO configured_workers VALUES (?,?,?,?)', id, actor.id, JSON.stringify(target), now);
+        this.glass.worker(id, { ...b, target }); this.event('worker-signed-on'); return ok({ id, target });
+      }
+      requireThat(!this.ctx.storage.sql.exec('SELECT id FROM configured_workers WHERE id=?', id).toArray().length, 409, 'worker identity already belongs to a configured trap');
+      const repo = repoIdentity(b.repoRemote); const nickname = identifier(b.repo);
+      const old = this.ctx.storage.sql.exec<{ id: string; boat: string; repo: string; seen: number }>('SELECT * FROM workers WHERE id=?', id).toArray()[0];
       requireThat(!old || old.boat === actor.id, 409, 'worker belongs to another boat');
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO workers VALUES (?,?,?,?)', id, actor.id, repo, now);
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO worker_nicknames VALUES (?,?)', id, nickname);
@@ -436,7 +462,7 @@ export class Account extends DurableObject<Env> {
     if (c.path === 'workers/renew' && c.method === 'POST') {
       requireThat(actor.kind === 'boat', 403, 'boat scope required'); const w = this.worker(b.worker, actor.id);
       requireThat(b.boat === undefined, 400, 'boat credentials cannot select another boat');
-      this.ctx.storage.sql.exec('UPDATE workers SET seen=? WHERE id=?', now, w.id);
+      this.ctx.storage.sql.exec(w.target ? 'UPDATE configured_workers SET seen=? WHERE id=?' : 'UPDATE workers SET seen=? WHERE id=?', now, w.id);
       this.ctx.storage.sql.exec("UPDATE dispatches SET lease=? WHERE worker=? AND boat=? AND state='active'", now + LEASE_MS, w.id, actor.id);
       return ok();
     }
@@ -447,6 +473,11 @@ export class Account extends DurableObject<Env> {
       if (d.followUp) this.dispatch(d.followUp);
       // A dispatch that answers a person's work request fulfills it in the same transaction.
       if (d.request) this.glass.fulfillWork(d.request, d.id, now);
+      if (d.target?.parentDispatch) {
+        const parent = this.dispatch(d.target.parentDispatch), origin = JSON.parse(parent.data) as DispatchInput;
+        requireThat(['queued', 'active'].includes(parent.state), 409, 'assistance parent has ended');
+        requireThat(!origin.grounds || origin.grounds === d.target.grounds, 400, 'assistance parent belongs to another grounds');
+      }
       this.ctx.storage.sql.exec("INSERT INTO dispatches(id,data,state) VALUES (?,?,'queued')", d.id, JSON.stringify(d)); this.event('queued', d.id); return ok(d);
     }
     if (c.path === 'dispatches' && c.method === 'GET') {
@@ -484,7 +515,7 @@ export class Account extends DurableObject<Env> {
         // The owner can stop work even with no helm online; this never changes its seat.
         if (actor.kind !== 'person') this.helm(c, actor, now);
         this.ctx.storage.sql.exec("UPDATE dispatches SET state='cancelled',hash=NULL,epoch=epoch+1 WHERE id=?", d.id);
-        this.event('cancelled', d.id, `cancelled by ${actor.kind}:${actor.id}`); return ok();
+        this.event('cancelled', d.id, `cancelled by ${actor.kind}:${actor.id}`); this.stopAssistanceChildren(d.id); return ok();
       }
       if (action === 'detail' && c.method === 'GET') {
         this.requirePermission(actor, 'read');
@@ -501,12 +532,15 @@ export class Account extends DurableObject<Env> {
       if (action === 'report' && c.method === 'POST') {
         requireThat(actor.kind === 'dispatch', 403, 'dispatch scope required'); const report = reportInput(b);
         requireThat(d.state === 'active', 409, 'dispatch no longer active');
+        const target = (JSON.parse(d.data) as DispatchInput).target;
+        if (target) requireThat(!report.evidence?.prUrls?.length && !report.evidence?.commits?.length, 400, 'configured results accept files, not PR or commit evidence');
         if (report.verb === 'done') requireThat(!this.ctx.storage.sql.exec('SELECT id FROM messages WHERE dispatch=? AND received=0', d.id).toArray().length, 409, 'unreceived messages; read and receipt before done');
         for (const file of report.evidence?.files ?? []) requireThat(this.ctx.storage.sql.exec('SELECT id FROM files WHERE id=? AND dispatch=? AND ready=1', file, d.id).toArray().length, 400, 'evidence file not uploaded to this dispatch');
         if (report.verb === 'paused' && !report.until) report.until = new Date(now + 86400_000).toISOString();
         this.ctx.storage.sql.exec('INSERT INTO reports(dispatch,data) VALUES (?,?)', d.id, JSON.stringify({ ...report, at: new Date(now).toISOString() }));
         this.ctx.storage.sql.exec('UPDATE dispatches SET state=?,lease=? WHERE id=?', ['done', 'failed'].includes(report.verb) ? 'done' : 'active', this.boatCanWork(d.boat) ? now + LEASE_MS : d.lease, d.id);
         this.event(report.verb, d.id);
+        if (['done', 'failed'].includes(report.verb)) { this.relayAssistanceResult(d, report); this.stopAssistanceChildren(d.id); }
         if (report.verb === 'done') {
           const claim = this.ctx.storage.sql.exec<{ claim_helm: number }>('SELECT claim_helm FROM catch_context WHERE dispatch=?', d.id).toArray()[0];
           // A claim made before this observation existed remains unknown unless a helm is live now.
@@ -540,7 +574,8 @@ export class Account extends DurableObject<Env> {
         this.ctx.storage.sql.exec('UPDATE messages SET received=1 WHERE id=? AND dispatch=?', parts[3], d.id); this.event('message-received', d.id); return ok();
       }
       if (action === 'files' && c.method === 'GET' && parts[3]) {
-        const f = this.ctx.storage.sql.exec<FileRow>('SELECT * FROM files WHERE id=? AND dispatch=? AND ready=1', identifier(parts[3]), d.id).toArray()[0];
+        const f = this.ctx.storage.sql.exec<FileRow>(`SELECT f.* FROM files f LEFT JOIN dispatches child ON child.id=f.dispatch WHERE f.id=? AND f.ready=1
+          AND (f.dispatch=? OR (child.state='done' AND json_extract(child.data,'$.target.parentDispatch')=?))`, identifier(parts[3]), d.id, d.id).toArray()[0];
         requireThat(f, 404, 'file not found'); return ok(f);
       }
       if (action === 'files' && c.method === 'POST') {
@@ -560,8 +595,35 @@ export class Account extends DurableObject<Env> {
     this.ctx.storage.sql.exec('INSERT INTO files(id,dispatch,name,size,hash) VALUES (?,?,?,?,?)', c.prepared.id, scope, name, b.size, c.prepared.hash);
     return { status: 200, value: { id: c.prepared.id } };
   }
+  /** Child results can reach only their stored parent, once, inside the report transaction. */
+  private relayAssistanceResult(child: DispatchRow, report: ReportInput): void {
+    const target = (JSON.parse(child.data) as DispatchInput).target;
+    if (!target?.parentDispatch || this.ctx.storage.sql.exec('SELECT child FROM assistance_results WHERE child=?', child.id).toArray().length) return;
+    const parent = this.dispatch(target.parentDispatch);
+    this.ctx.storage.sql.exec('INSERT INTO assistance_results VALUES (?,?)', child.id, parent.id);
+    if (!['queued', 'active'].includes(parent.state)) { this.event('assistance-retained', child.id, `Parent ${parent.id} has ended; its result is retained`); return; }
+    const files = report.evidence?.files ?? [];
+    const note = `Assistance ${child.id} ${report.verb}: ${(report.note ?? '').slice(0, 8000)}${files.length ? `\nResult files: ${files.join(', ')}` : ''}\nContinue the original dispatch; it keeps repo and PR ownership.`;
+    this.ctx.storage.sql.exec('INSERT INTO messages(dispatch,text) VALUES (?,?)', parent.id, note);
+    this.event('message', parent.id);
+  }
+
+  /** End queued assistance and ask active children to stop without reopening the original catch. */
+  private stopAssistanceChildren(parent: string): void {
+    for (const child of this.ctx.storage.sql.exec<DispatchRow>(`SELECT * FROM dispatches WHERE state IN ('queued','active') AND json_extract(data,'$.target.parentDispatch')=?`, parent).toArray()) {
+      if (child.state === 'queued') { this.ctx.storage.sql.exec("UPDATE dispatches SET state='cancelled' WHERE id=?", child.id); this.event('cancelled', child.id); }
+      else if (!this.ctx.storage.sql.exec('SELECT child FROM assistance_stops WHERE child=?', child.id).toArray().length) {
+        this.ctx.storage.sql.exec('INSERT INTO assistance_stops VALUES (?)', child.id);
+        this.ctx.storage.sql.exec('INSERT INTO messages(dispatch,text) VALUES (?,?)', child.id, `Parent ${parent} has ended. Stop this assistance step and report failed with any findings already collected.`);
+        this.event('message', child.id);
+      }
+    }
+  }
+
   private worker(value: unknown, boat: string): WorkerRow {
-    const w = this.ctx.storage.sql.exec<WorkerRow>('SELECT * FROM workers WHERE id=?', identifier(value)).toArray()[0];
+    const id = identifier(value);
+    const configured = this.ctx.storage.sql.exec<{ id: string; boat: string; target: string; seen: number }>('SELECT * FROM configured_workers WHERE id=?', id).toArray()[0];
+    const w = configured ? { ...configured, target: configuredTarget(JSON.parse(configured.target)) } : this.ctx.storage.sql.exec<{ id: string; boat: string; repo: string; seen: number }>('SELECT * FROM workers WHERE id=?', id).toArray()[0];
     requireThat(w && w.boat === boat, 403, 'sign on this worker first'); return w;
   }
 
@@ -585,6 +647,111 @@ export class Account extends DurableObject<Env> {
     // The persisted hash verifies the unguessable secret; account/id/epoch
     // are checked against this account's dispatch and claim history.
     return { ...result, value: { dispatch: r.dispatch, epoch: r.epoch, token, leaseUntil: r.leaseUntil } };
+  }
+  /** Delete what a mirror operation left in R2, after its transaction, in the R2 serial queue. */
+  private dropMirrorFiles(cleanup: MirrorCleanup) {
+    if (cleanup.keys.length) this.ctx.waitUntil(this.serialFile(() => this.env.FILES.delete(cleanup.keys)).catch(() => {}));
+  }
+  /** Tell mirror boats something through their wake sockets: a call waits, or a hosted glass is open. No content travels. */
+  private async mirrorHint(boats: ReadonlySet<string> | 'all', message: { type: 'mirror-call' } | { type: 'mirror-watch'; until: string }) {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        const a = socket.deserializeAttachment() as { actor: Actor; hash: string };
+        if (a.actor.kind !== 'boat' || (boats !== 'all' && !boats.has(a.actor.id))) continue;
+        const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
+        const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
+        if (!this.get('deleted') && row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], 'mirror')) socket.send(JSON.stringify(message));
+      } catch { /* disconnected */ }
+    }
+  }
+  /**
+   * The mirror's own rate budget, apart from the account's: a hosted glass
+   * polling a mirror boat must never starve the fleet's coordination.
+   */
+  private mirrorBudget(now: number) {
+    const window = Math.floor(now / 60000); const b = JSON.parse(this.get('mirror-budget') ?? '{"window":0,"count":0}');
+    if (b.window !== window) { b.window = window; b.count = 0; }
+    requireThat(b.count < 4 * Number(this.env.REQUESTS_PER_MINUTE), 429, 'mirror rate limit');
+    b.count++; this.set('mirror-budget', JSON.stringify(b));
+  }
+  /**
+   * Every mirror route. Mirror operations keep no idempotency records: a
+   * put replaces the boat's latest snapshot, and a take or an answer
+   * succeeds once. `bytes` is a put's gzip, an answer's body or an uploaded
+   * file; `meta` is what the request's headers said about it.
+   */
+  async mirror(command: string, bytes?: Uint8Array, meta: { status?: number; contentType?: string; name?: string; boat?: string } = {}): Promise<string> {
+    return this.serialFile(async () => {
+      const c: Command = JSON.parse(command);
+      try {
+        // A catch's own credential reaches its dispatch only, never a boat's mirror.
+        requireThat(!c.token.startsWith('d.'), 403, 'mirror routes take a mirror boat credential or a signed-in person');
+        const hash = await digest(c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
+        const run = <T>(fn: (actor: Actor, now: number) => T): T => {
+          let cleanup: MirrorCleanup = { keys: [] };
+          const result = this.ctx.storage.transactionSync(() => {
+            const now = Date.now();
+            requireThat(!this.get('deleted'), 410, 'account deleted');
+            const actor = this.authenticate(c, hash, now); this.mirrorBudget(now);
+            this.authorize(c, actor);
+            cleanup = this.mirrorState.expire(c.account, now);
+            return fn(actor, now);
+          });
+          this.dropMirrorFiles(cleanup);
+          return result;
+        };
+        if (c.path === 'mirror/snapshot' && c.method === 'PUT') {
+          run((actor) => this.mirrorState.authorizeSnapshot(actor));
+          const json = await gunzipText(bytes ?? new Uint8Array(), MIRROR_SNAPSHOT_MAX_JSON_BYTES);
+          let snapshot: unknown;
+          try { snapshot = JSON.parse(json); } catch { throw new ApiError(400, 'the snapshot is not JSON'); }
+          requireThat(snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot), 400, 'the snapshot is not a glass snapshot');
+          // The page token opens the boat's own glass for writes; it never leaves the boat.
+          requireThat(!('focusToken' in (snapshot as object)), 400, 'a mirrored snapshot never carries the page token');
+          const etag = await digest(json);
+          const actor = run((a) => a);
+          await this.env.FILES.put(mirrorSnapshotKey(c.account, actor.id), bytes!, { customMetadata: { etag } });
+          return JSON.stringify(run((a, now) => this.mirrorState.recordSnapshot(a, etag, bytes!.byteLength, now)));
+        }
+        const answer = /^mirror\/calls\/([A-Za-z0-9_-]+)\/answer$/.exec(c.path);
+        if (answer && c.method === 'POST') {
+          const id = answer[1]!;
+          run((actor, now) => this.mirrorState.authorizeAnswer(actor, id, now));
+          const status = Number(meta.status);
+          requireThat(Number.isInteger(status) && status >= 200 && status <= 599, 400, 'invalid answer status');
+          const contentType = text(meta.contentType ?? 'application/octet-stream', 200);
+          await this.env.FILES.put(mirrorAnswerKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType } });
+          return JSON.stringify(run((actor, now) => this.mirrorState.recordAnswer(actor, id, { status, contentType, bytes: bytes?.byteLength ?? 0 }, now)));
+        }
+        if (c.path === 'mirror/files' && c.method === 'POST') {
+          const boat = identifier(meta.boat), name = text(meta.name ?? 'attachment', 200);
+          requireThat(!/[\x00-\x1f/\\]/.test(name) && name !== '.' && name !== '..', 400, 'invalid file name');
+          run((actor) => this.mirrorState.authorizeFile(actor, boat));
+          const id = crypto.randomUUID();
+          await this.env.FILES.put(mirrorFileKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType: 'application/octet-stream', contentDisposition: 'attachment' } });
+          return JSON.stringify(run((actor, now) => this.mirrorState.recordFile(actor, boat, id, name, bytes?.byteLength ?? 0, now)));
+        }
+        const result = run((actor, now) => {
+          const r = this.mirrorState.execute(c, actor, now, c.account);
+          if (r.watch) {
+            const watched = Number(this.get('mirror-watched') ?? 0) > now;
+            this.set('mirror-watched', String(now + MIRROR_WATCH_MS));
+            if (!watched) this.ctx.waitUntil(this.mirrorHint('all', { type: 'mirror-watch', until: new Date(now + MIRROR_WATCH_MS).toISOString() }));
+          }
+          if (r.hint) this.ctx.waitUntil(this.mirrorHint(new Set([r.hint]), { type: 'mirror-call' }));
+          // A boat's call list says whether a hosted glass is open, so it knows how often to put.
+          if (c.path === 'mirror/calls' && c.method === 'GET' && r.status === 200) {
+            const until = Number(this.get('mirror-watched') ?? 0);
+            return { status: r.status, value: { ...(r.value as object), ...(until > now ? { watchedUntil: new Date(until).toISOString() } : {}) } };
+          }
+          return { status: r.status, value: r.value };
+        });
+        return JSON.stringify(result);
+      } catch (e) {
+        if (e instanceof ApiError) return JSON.stringify({ status: e.status, value: { error: e.message } });
+        throw e;
+      }
+    });
   }
   private serialFile<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.fileTail.catch(() => {}).then(fn); this.fileTail = result.catch(() => {}); return result;
@@ -632,7 +799,7 @@ export class Account extends DurableObject<Env> {
           await this.env.FILES.delete(files.objects.map((f) => f.key));
         }
         this.ctx.storage.transactionSync(() => {
-          for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'files', ...glassTables]) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+          for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables]) this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
           this.ctx.storage.sql.exec("DELETE FROM meta WHERE key NOT IN ('deleted','delete-authority')");
         });
         // Keep only a tombstone; the Worker also removes this person's D1 identity.
@@ -643,4 +810,22 @@ export class Account extends DurableObject<Env> {
       }
     });
   }
+}
+
+/** Unpack a gzip body as text, refusing more than `max` bytes of it. */
+async function gunzipText(bytes: Uint8Array, max: number): Promise<string> {
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+  const chunks: Uint8Array[] = []; let n = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      n += value.byteLength; requireThat(n <= max, 413, 'snapshot too large once unpacked'); chunks.push(value);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(400, 'the snapshot is not gzip');
+  } finally { await reader.cancel().catch(() => {}); }
+  const out = new Uint8Array(n); let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.length; }
+  return new TextDecoder().decode(out);
 }

@@ -1,0 +1,384 @@
+/**
+ * The glass's markdown: a small parser for report pages. It returns a tree
+ * of plain objects; the page turns the tree into elements, never into an
+ * HTML string, so raw HTML in the markdown is text and no script can run.
+ * It reads headings, paragraphs, fenced code, pipe tables, lists, block
+ * quotes, rules, and inline code, links, images, bold, and italics. A bare
+ * http(s) URL in text is a link too (glass-links.ts decides where it ends);
+ * one in a code span or a link's own text stays text. Keep this module free
+ * of Node imports: it is bundled into the page.
+ */
+
+import { urlAt } from './glass-links.js';
+
+export type MdInline =
+  | { t: 'text'; v: string }
+  | { t: 'code'; v: string }
+  | { t: 'b'; c: MdInline[] }
+  | { t: 'i'; c: MdInline[] }
+  | { t: 'a'; href: string; c: MdInline[] }
+  | { t: 'img'; alt: string; src: string }
+  | { t: 'br' };
+
+export type MdBlock =
+  | { t: 'h'; level: number; c: MdInline[] }
+  | { t: 'p'; c: MdInline[] }
+  | { t: 'code'; lang: string; v: string }
+  | { t: 'list'; ordered: boolean; start: number; items: MdBlock[][] }
+  | { t: 'table'; align: Array<'left' | 'center' | 'right' | ''>; head: MdInline[][]; rows: MdInline[][][] }
+  | { t: 'quote'; c: MdBlock[] }
+  | { t: 'hr' }
+  | { t: 'task'; id: string; text: string; checked: boolean; c: MdInline[] };
+
+/** A link the page may open: http(s), mailto, or an in-page anchor. Anything else is text. */
+export function safeHref(href: string): string | undefined {
+  const h = href.trim();
+  return /^(https?:\/\/|mailto:|#)/i.test(h) ? h : undefined;
+}
+
+/**
+ * An image the page may load: a bare filename in the report's attachments.
+ * A path, a URL, or a data URI is refused.
+ */
+export function bareImageName(src: string): string | undefined {
+  const s = src.trim();
+  return /^[^/\\:?#]+$/.test(s) && s !== '.' && s !== '..' ? s : undefined;
+}
+
+/** Where a Markdown body is shown: a decision card may load remote images, a report may not. */
+export type ImageSurface = 'card' | 'report';
+
+/**
+ * How one `![alt](src)` shows: an attachment by its bare name, a remote
+ * https image loaded inline (cards only), a plain link to a remote https
+ * image (reports), or nothing (any other scheme, a path, or a data URI).
+ */
+export type ImageDisplay =
+  | { kind: 'attachment'; name: string }
+  | { kind: 'remote'; url: string }
+  | { kind: 'link'; url: string };
+
+/** An https URL with no credentials, normalized; anything else is undefined. */
+function httpsImageUrl(src: string): string | undefined {
+  const s = src.trim();
+  if (!/^https:\/\/[^\s]+$/i.test(s)) return undefined;
+  try {
+    const url = new URL(s);
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The image policy: bare attachment names everywhere, https inline on cards and as a link on reports. */
+export function imageDisplay(src: string, surface: ImageSurface): ImageDisplay | undefined {
+  const name = bareImageName(src);
+  if (name) return { kind: 'attachment', name };
+  const url = httpsImageUrl(src);
+  if (!url) return undefined;
+  return surface === 'card' ? { kind: 'remote', url } : { kind: 'link', url };
+}
+
+// Inline -------------------------------------------------------------------
+
+function findClose(s: string, from: number, open: string, close: string): number {
+  let depth = 0;
+  for (let i = from; i < s.length; i++) {
+    if (s[i] === '\\') {
+      i++;
+      continue;
+    }
+    if (s[i] === open) depth++;
+    else if (s[i] === close) {
+      if (depth === 0) return i;
+      depth--;
+    }
+  }
+  return -1;
+}
+
+/** `[text](target)` or `![alt](target)` starting at i (at the `[`). */
+function bracketed(s: string, i: number): { text: string; target: string; end: number } | undefined {
+  const close = findClose(s, i + 1, '[', ']');
+  if (close < 0 || s[close + 1] !== '(') return undefined;
+  const paren = findClose(s, close + 2, '(', ')');
+  if (paren < 0) return undefined;
+  const target = s.slice(close + 2, paren).trim().replace(/\s+"[^"]*"$/, '').replace(/^<(.*)>$/, '$1');
+  return { text: s.slice(i + 1, close), target, end: paren + 1 };
+}
+
+/** Inline marks; `autolink` false inside a link's own text, so links never nest. */
+export function parseInline(s: string, autolink = true): MdInline[] {
+  const out: MdInline[] = [];
+  let text = '';
+  const flush = () => {
+    if (text) out.push({ t: 'text', v: text });
+    text = '';
+  };
+  for (let i = 0; i < s.length; ) {
+    const ch = s[i]!;
+    if (ch === '\\' && i + 1 < s.length && /[\\`*_{}[\]()#+\-.!|<>~]/.test(s[i + 1]!)) {
+      text += s[i + 1];
+      i += 2;
+      continue;
+    }
+    if (ch === '`') {
+      const run = /^`+/.exec(s.slice(i))![0];
+      const end = s.indexOf(run, i + run.length);
+      if (end > 0) {
+        flush();
+        out.push({ t: 'code', v: s.slice(i + run.length, end).replace(/^ (.*) $/, '$1') });
+        i = end + run.length;
+        continue;
+      }
+    }
+    if (ch === '!' && s[i + 1] === '[') {
+      const b = bracketed(s, i + 1);
+      if (b) {
+        flush();
+        out.push({ t: 'img', alt: b.text, src: b.target });
+        i = b.end;
+        continue;
+      }
+    }
+    if (ch === '[') {
+      const b = bracketed(s, i);
+      if (b) {
+        flush();
+        out.push({ t: 'a', href: b.target, c: parseInline(b.text, false) });
+        i = b.end;
+        continue;
+      }
+    }
+    if (autolink && (ch === 'h' || ch === 'H')) {
+      const url = urlAt(s, i);
+      if (url) {
+        flush();
+        out.push({ t: 'a', href: url, c: [{ t: 'text', v: url }] });
+        i += url.length;
+        continue;
+      }
+    }
+    if ((ch === '*' || ch === '_') && s[i + 1] === ch) {
+      const end = s.indexOf(ch + ch, i + 2);
+      if (end > i + 2) {
+        flush();
+        out.push({ t: 'b', c: parseInline(s.slice(i + 2, end), autolink) });
+        i = end + 2;
+        continue;
+      }
+    }
+    if (ch === '*' || (ch === '_' && (i === 0 || !/\w/.test(s[i - 1]!)))) {
+      let end = i + 1;
+      while ((end = s.indexOf(ch, end)) > 0 && (s[end + 1] === ch || (ch === '_' && /\w/.test(s[end + 1] ?? '')))) end += 2;
+      if (end > i + 1 && s[i + 1] !== ' ') {
+        flush();
+        out.push({ t: 'i', c: parseInline(s.slice(i + 1, end), autolink) });
+        i = end + 1;
+        continue;
+      }
+    }
+    if (ch === '\n') {
+      if (/ {2,}$/.test(text) || text.endsWith('\\')) {
+        text = text.replace(/( {2,}|\\)$/, '');
+        flush();
+        out.push({ t: 'br' });
+      } else text += ' ';
+      i++;
+      continue;
+    }
+    text += ch;
+    i++;
+  }
+  flush();
+  return out;
+}
+
+// Blocks -------------------------------------------------------------------
+
+const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)/;
+const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
+const HR = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
+const BULLET = /^( {0,3})([-*+])\s+(.*)$/;
+const ORDERED = /^( {0,3})(\d{1,9})[.)]\s+(.*)$/;
+const QUOTE = /^ {0,3}>\s?(.*)$/;
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+function cells(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  const out: string[] = [];
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\\' && s[i + 1] === '|') {
+      cur += '|';
+      i++;
+    } else if (s[i] === '|') {
+      out.push(cur.trim());
+      cur = '';
+    } else cur += s[i];
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+const startsBlock = (line: string) =>
+  FENCE.test(line) || HEADING.test(line) || HR.test(line) || BULLET.test(line) || ORDERED.test(line) || QUOTE.test(line);
+
+function parseBlocks(markdown: string): MdBlock[] {
+  const lines = markdown.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
+  const out: MdBlock[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+    const fence = FENCE.exec(line);
+    if (fence) {
+      const marker = fence[1]!;
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !new RegExp(`^ {0,3}${marker[0]}{${marker.length},}\\s*$`).test(lines[i]!)) body.push(lines[i++]!);
+      i++;
+      out.push({ t: 'code', lang: fence[2] ?? '', v: body.join('\n') });
+      continue;
+    }
+    const heading = HEADING.exec(line);
+    if (heading) {
+      out.push({ t: 'h', level: heading[1]!.length, c: parseInline(heading[2]!) });
+      i++;
+      continue;
+    }
+    if (HR.test(line)) {
+      out.push({ t: 'hr' });
+      i++;
+      continue;
+    }
+    if (QUOTE.test(line)) {
+      const body: string[] = [];
+      while (i < lines.length && lines[i]!.trim() && (QUOTE.test(lines[i]!) || !startsBlock(lines[i]!))) {
+        body.push(QUOTE.exec(lines[i]!)?.[1] ?? lines[i]!);
+        i++;
+      }
+      out.push({ t: 'quote', c: parseBlocks(body.join('\n')) });
+      continue;
+    }
+    const bullet = BULLET.exec(line);
+    const ordered = ORDERED.exec(line);
+    if (bullet || ordered) {
+      const isOrdered = !bullet;
+      const itemRe = isOrdered ? ORDERED : BULLET;
+      const items: string[][] = [];
+      const indent = (bullet ?? ordered)![1]!.length;
+      let contentIndent = 2;
+      while (i < lines.length) {
+        const l = lines[i]!;
+        const m = itemRe.exec(l);
+        if (m && m[1]!.length === indent) {
+          contentIndent = m[0].length - m[3]!.length;
+          items.push([m[3]!]);
+          i++;
+          continue;
+        }
+        if (!l.trim()) {
+          // A blank line ends the list unless an indented line follows.
+          if (i + 1 < lines.length && /^ {2,}\S/.test(lines[i + 1]!)) {
+            items.at(-1)!.push('');
+            i++;
+            continue;
+          }
+          break;
+        }
+        if (new RegExp(`^ {${indent + 1},}\\S`).test(l)) {
+          items.at(-1)!.push(l.slice(Math.min(contentIndent, /^ */.exec(l)![0].length)));
+          i++;
+          continue;
+        }
+        if (startsBlock(l)) break;
+        items.at(-1)!.push(l.trim());
+        i++;
+      }
+      out.push({ t: 'list', ordered: isOrdered, start: isOrdered ? Number(ordered![2]) : 1, items: items.map((body) => {
+        const task = /^\[([ xX])\](?:\s+(.*)|$)/.exec(body[0]!);
+        if (!task) return parseBlocks(body.join('\n'));
+        body[0] = task[2] ?? '';
+        const content = parseBlocks(body.join('\n'));
+        const first = content[0];
+        const inline = first?.t === 'p' ? first.c : parseInline(body[0]);
+        return [{ t: 'task' as const, id: '', text: inlineText(inline), checked: task[1]!.toLowerCase() === 'x', c: inline },
+          ...(first?.t === 'p' ? content.slice(1) : parseBlocks(body.slice(1).join('\n')))];
+      }) });
+      continue;
+    }
+    if (line.includes('|') && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1]!) && lines[i + 1]!.includes('-')) {
+      const head = cells(line);
+      const align = cells(lines[i + 1]!).map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : c.startsWith(':') ? 'left' : ''));
+      i += 2;
+      const rows: MdInline[][][] = [];
+      while (i < lines.length && lines[i]!.trim() && lines[i]!.includes('|')) {
+        const row = cells(lines[i++]!);
+        rows.push(head.map((_, k) => parseInline(row[k] ?? '')));
+      }
+      out.push({ t: 'table', align: head.map((_, k) => align[k] ?? ''), head: head.map((c) => parseInline(c)), rows });
+      continue;
+    }
+    const para: string[] = [];
+    while (i < lines.length && lines[i]!.trim() && !startsBlock(lines[i]!)) {
+      if (para.length && /^ {0,3}(=+|-+)\s*$/.test(lines[i]!)) break;
+      para.push(lines[i++]!.replace(/^ +/, ''));
+    }
+    if (para.length === 0) {
+      out.push({ t: 'p', c: parseInline(line.trim()) });
+      i++;
+      continue;
+    }
+    out.push({ t: 'p', c: parseInline(para.join('\n')) });
+  }
+  return out;
+}
+
+/** The visible text of an item, without Markdown formatting. */
+function inlineText(nodes: MdInline[]): string {
+  return nodes.map((node) => 'v' in node ? node.v : 'c' in node ? inlineText(node.c) : node.t === 'img' ? node.alt : ' ').join('');
+}
+
+/** Task items in document order, including nested lists and block quotes. */
+export function markdownTasks(blocks: MdBlock[]): Array<Extract<MdBlock, { t: 'task' }>> {
+  return blocks.flatMap((block) => block.t === 'task' ? [block] : block.t === 'list' ? block.items.flatMap(markdownTasks) : block.t === 'quote' ? markdownTasks(block.c) : []);
+}
+
+/** Each image's source in document order, in every block, link, and emphasis. */
+export function markdownImageSources(blocks: MdBlock[]): string[] {
+  const fromInline = (nodes: MdInline[]): string[] => nodes.flatMap((node) => node.t === 'img' ? [node.src] : 'c' in node ? fromInline(node.c) : []);
+  return blocks.flatMap((block): string[] => {
+    switch (block.t) {
+      case 'h':
+      case 'p':
+      case 'task':
+        return fromInline(block.c);
+      case 'list':
+        return block.items.flatMap(markdownImageSources);
+      case 'quote':
+        return markdownImageSources(block.c);
+      case 'table':
+        return [...block.head, ...block.rows.flat()].flatMap(fromInline);
+      case 'code':
+      case 'hr':
+        return [];
+    }
+  });
+}
+
+/** Parse Markdown and assign each task its document index and a short text hash. */
+export function parseMarkdown(markdown: string): MdBlock[] {
+  const blocks = parseBlocks(markdown);
+  markdownTasks(blocks).forEach((item, index) => {
+    let hash = 2166136261;
+    for (let offset = 0; offset < item.text.length; offset++) hash = Math.imul(hash ^ item.text.charCodeAt(offset), 16777619);
+    item.id = `${index}-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  });
+  return blocks;
+}

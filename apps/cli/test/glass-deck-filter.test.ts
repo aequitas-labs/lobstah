@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { sectionInputs } from '../src/glass-diff.js';
+import { sectionInputs } from '../../../packages/glass-ui/src/glass-diff.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
