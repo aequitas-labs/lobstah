@@ -108,6 +108,7 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(hook(['hook', 'user-prompt-submit'], { session_id: NOBODY }).status).toBe(0);
     expect(fs.readdirSync(path.join(home, 'wait-backoff')).sort()).toEqual(before);
   });
+  // Fourteen CLI runs: more than vitest's default 5s on a slow CI runner.
   it("a finished background task's notification keeps the backoff; three quiet cycles then double; a person's prompt resets", () => {
     takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000 });
     trap('quiet-trap');
@@ -131,7 +132,7 @@ describe('lobstah hook user-prompt-submit', () => {
       expect(hook(['hook', 'user-prompt-submit'], { session_id: session, prompt: 'what is the fleet doing?' }).status).toBe(0);
       expect(new IdleWait(session, DEFAULT_WAIT).timeoutSecs).toBe(900);
     }
-  });
+  }, 30_000);
 
   for (const harness of ['claude', 'codex'] as const) {
     it(`${harness}: captures only observed fields on hooks for both registered roles`, () => {
