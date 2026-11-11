@@ -104,6 +104,16 @@ h2 {
   letter-spacing: 0.08em;
   margin: 20px 0 6px;
 }
+/* The PRs tab's Other PRs: its heading sits on the disclosure arrow's line. */
+.otherprs > summary {
+  margin: 20px 0 6px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.otherprs > summary > h2 {
+  display: inline;
+  margin: 0;
+}
 .chips,
 .controls {
   display: flex;
