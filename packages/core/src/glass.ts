@@ -67,6 +67,11 @@ export interface TendAttention {
    * grounds (the local glass), and until the wharf has named its glass.
    */
   glass?: string;
+  /**
+   * Another mirror boat's item, read from the wharf (apps/cli/src/wharf-attention.ts):
+   * that boat's id and name. Its key is `@<boat id>/<the boat's own key>`. Absent for this boat's own items.
+   */
+  boat?: { id: string; name: string };
   /** pr:* kinds: the evidence fields the kind derives from. */
   prUrl?: string;
   /** Click destination only: prUrl remains the canonical watch/ack identity. */
@@ -451,6 +456,10 @@ export interface GlassDecision {
 
 /** A run card as the glass shows it: the stored script in full, what runs it, and what a reader could miss in it. */
 export interface GlassRunCard extends RunCard {
+  /** On the hosted glass: the boat the card runs on, set when the boats' glasses merge. */
+  boat?: string;
+  /** The boat's public key for sealing secret inputs (P-256, SPKI DER, base64url): the page seals to it on the hosted glass. */
+  sealKey?: string;
   /** Durable run metadata, with output fetched separately by the local person view. */
   latest?: import('./run-history.js').RunAttempt;
   /** The stored script's text, whole. */
@@ -521,8 +530,8 @@ export interface GlassSnapshot {
   mirror?: { port: number; id: string };
   /** What the server can tell about who asked for this page. */
   viewer?: GlassViewer;
-  /** The passkeys registered to confirm run cards' Run (count only; never a key). */
-  runPasskeys?: { count: number; newestAt?: string };
+  /** The passkeys registered to confirm run cards' Run (count only; never a key), and how many phones paired one for the hosted glass. */
+  runPasskeys?: { count: number; newestAt?: string; hosted?: number };
   /** Configured repo keys, for the New trap form. */
   repoKeys?: string[];
   /** A helm is signed on and beating: a trap request will be answered. */

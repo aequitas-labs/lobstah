@@ -1,17 +1,22 @@
 import { useState } from 'preact/hooks';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
-import { dismissReview, reviewRequest } from '../actions.js';
+import { dismissReview, reviewRequest, showModal } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
 import { can } from '../backend.js';
+import { getState } from '../store.js';
+import { Card, CardLink, PrIcon } from './card.js';
+import type { CardTone } from './card.js';
 
 /**
  * The Reviews tab: one row or card per PR that asked for your review,
  * the ones waiting on him first. A row opens the PR in its review tool
  * ([repos.<key>].reviewTool), where the drafted review waits as the identity's pending
- * review, to edit and send. On-demand jobs follow the repo’s draft/publish setting.
+ * review, to edit and send. A card opens the review's modal, with who asked,
+ * the findings, the reason and the actions; its Open draft goes to the review
+ * tool. On-demand jobs follow the repo’s draft/publish setting.
  */
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -129,13 +134,72 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
   </tr>`;
 }
 
-function card(r: GlassReview, canDraft: boolean, publish: boolean) {
+/** A review's status word: "needs you" when it waits on you, else its round's state. */
+const reviewWord = (r: GlassReview): string => (r.needsYou ? 'needs you' : reviewState(r));
+
+/** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
+function reviewTone(r: GlassReview): CardTone {
+  if (r.state === 'posted') return 'ok';
+  if (r.state === 'dismissed' || r.state === 'withdrawn') return 'dim';
+  if (r.needsYou || r.stands || r.state === 'failed') return 'bad';
+  return 'warn';
+}
+
+const DRAFTED: Record<string, string> = { approve: 'approval drafted', request_changes: 'changes drafted', comment: 'comment drafted' };
+
+/** Open the review's modal, and mark it seen. */
+const showReview = (r: GlassReview) => () => {
+  void reviewRequest('review-seen', { key: r.key });
+  showModal('review', r.key);
+};
+
+/**
+ * A review card: the PR's title, PR icon and status word on a colored edge;
+ * then repo#number, what's drafted, and age, with Open draft (↗ Open before
+ * there is one). It opens the review's modal.
+ */
+function card(r: GlassReview) {
+  const drafted = r.verdict ? DRAFTED[r.verdict] : undefined;
+  const lead = [`${r.repo}#${r.number}`, drafted].filter(Boolean).join(' · ');
+  const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;
+  const open = showReview(r);
+  return html`<${Card}
+    key=${r.key}
+    title=${r.title}
+    titleAttr=${r.title}
+    icon=${PrIcon}
+    state=${{ word: reviewWord(r), tone: reviewTone(r), mark: 'edge' }}
+    context=${[lead, ' · ', Age(r.requestedAt), ' ago']}
+    contextTitle=${`${lead} · ${ageText(r.requestedAt)} ago`}
+    action=${html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`}
+    quiet=${!OPEN.has(r.state)}
+    cls=${'rv-card' + (r.seenAt ? ' seen' : '')}
+    attrs=${{
+      id: 'review-' + encodeURIComponent(r.key),
+      'data-review': r.key,
+      role: 'button',
+      tabindex: '0',
+      onKeyDown: (e: KeyboardEvent) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) open();
+      },
+    }}
+    onClick=${open}
+  />`;
+}
+
+/** What leaves a review's card: the asker, findings, reason, pending review and every action. */
+export function reviewModal(r: GlassReview) {
+  const setup = getState().snapshot?.reviewSetup;
+  const effective = (r.repoKey && setup?.perRepo?.[r.repoKey]) || setup;
   const meta = reviewMeta(r);
-  return html`<div key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'card rv-card' + (r.seenAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} role="link" tabindex="0" onKeyDown=${(
-    e: KeyboardEvent,
-  ) => {
-    if (e.key === 'Enter' && e.target === e.currentTarget) openReview(r)();
-  }} onClick=${openReview(r)}><div class="top"><b title=${r.title}>${r.title}</b>${badge(r)}</div><div class="rv-asker">${asker(r)}</div><div class="meta" title=${meta.text}>${r.repo}#${r.number} · ${Age(r.requestedAt)} ago</div>${findings(r)}${r.reason && html`<div class="rv-reason">${r.reason}</div>`}<div class="foot">${staged(r)}<span class="footact"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></span></div></div>`;
+  return [
+    html`<h3><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${() => void reviewRequest('review-seen', { key: r.key })}>${r.repo}#${r.number}</a> ${r.title} ${badge(r)}</h3>`,
+    html`<div class="sub" title=${meta.text}>${meta.nodes}</div>`,
+    html`<div class="sec">asked by</div><div class="rv-asker">${asker(r)}</div>`,
+    (r.summary || r.blocking?.length) && html`<div class="sec">findings</div>${findings(r)}`,
+    r.staged && html`<div class="sec">pending review</div><div>${staged(r)}</div>`,
+    html`<div class="sec">actions</div><div class="rv-modal-actions"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : effective?.mode !== 'notify'} publish=${r.publish ?? effective?.publish ?? false} /></div>`,
+  ];
 }
 
 /** The mode names shown beside read-only review settings. */
@@ -158,7 +222,7 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
     !inp.list.length
       ? html`<div class="empty">no review requests</div>`
       : inp.view === 'cards'
-        ? html`<div class="cards">${inp.list.map((r) => card(r, canDraft, publish))}</div>`
+        ? html`<div class="cards">${inp.list.map(card)}</div>`
         : Table(
             ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
             inp.list.map((r) => row(r, canDraft, publish)),

@@ -1,3 +1,4 @@
+import { runSealKey } from './run-seal.js';
 import { archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, readDecision, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
 import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, GlassRunCard, LobstahRequest, TendAttention } from '@lobstah/core';
 
@@ -64,6 +65,7 @@ export function glassRunCard(d: DecisionMeta): GlassRunCard | undefined {
     script,
     warnings: scriptWarnings(script),
     ...(stored?.sha256 !== d.run.scriptSha256 ? { altered: true } : {}),
+    sealKey: runSealKey().publicKey,
   };
 }
 

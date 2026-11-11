@@ -97,6 +97,24 @@ export type WharfMirrorCall = WharfMirrorCallInput & {
   at: string; expiresAt: string; state: WharfMirrorCallState; by: string;
   answer?: { status: number; contentType: string; bytes: number; at: string };
 };
+/**
+ * One mirror boat's walking list, as another boat with the `attention`
+ * grant reads it: the items its pet walks, without ages. `unchanged` stands
+ * in for a list the reader already holds at this ETag.
+ */
+export interface WharfAttentionList {
+  boat: string; name: string;
+  /** When the boat put this list. */
+  at: string;
+  /** A digest of the list's JSON: unchanged while the boat's items are. */
+  etag: string;
+  attention?: unknown[];
+  unchanged?: true;
+}
+/** The largest attention list a boat may put, as JSON. */
+export const MIRROR_ATTENTION_MAX_BYTES = 256 * 1024;
+/** The most items one attention list may hold. */
+export const MIRROR_ATTENTION_MAX_ITEMS = 500;
 /** How long a relayed call waits for its boat. */
 export const MIRROR_CALL_MS = 600_000;
 /** The largest snapshot a boat may put, gzipped. */
@@ -125,9 +143,15 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
  * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [
-  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack',
+  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-dismiss', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
+  // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.
+  'run-pair-challenge', 'run-pair-register',
+  // A Run from the hosted glass: the boat checks a phone's passkey (or that page's window key) and runs only its stored script.
+  'run-challenge', 'run', 'run-output',
+  // Stop and Dismiss need no passkey, as on the Mac: stopping is safe and urgent.
+  'run-stop', 'run-dismiss',
 ] as const;
 export type MirrorWriteKind = (typeof MIRROR_WRITE_KINDS)[number];
 /** Whether a relayed read names a path the hosted glass may read. */

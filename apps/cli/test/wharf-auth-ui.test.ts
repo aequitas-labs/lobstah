@@ -176,13 +176,24 @@ it('boat approval is its own page: the boat, its code, what it can and cannot do
   expect(g.doc.querySelector('.auth-consent-code b')?.textContent).toBe('ABCD-EFGH');
   expect(g.doc.querySelector('.auth-consent-access')?.textContent).toBe('Access: Mirror');
   const list = (n: number) => [...g.doc.querySelectorAll(`.auth-consent-lists > div:nth-child(${n}) li`)].map((li) => li.textContent);
-  expect(list(1)).toEqual(['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches']);
-  expect(list(2)).toEqual(['Take work from this wharf', 'Steer the helm']);
+  expect(list(1)).toEqual(['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches', 'Run scripts you confirm with your passkey']);
+  expect(list(2)).toEqual(['Take work from this wharf', 'Steer the helm', "See other boats' items"]);
   expect([...g.doc.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Approve', 'Deny']);
   await g.click('Approve');
   expect(g.writes).toEqual([{ path: '/api/auth/wharf/approve', body: { userCode: 'ABCD-EFGH', name: 'studio', requestedPermissions: ['mirror', 'read'], permissions: ['mirror', 'read'] } }]);
   expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Approved');
   expect(g.doc.querySelector('#auth-detail')?.textContent).toBe('Your terminal finishes connecting on its own. You can close this page');
+});
+
+it("a mirror boat that asked to see every boat's items can be approved with that, or as a plain mirror", async () => {
+  const asked = ['mirror', 'attention', 'read'];
+  const g = await page('/device?user_code=ABCD-EFGH', 200, 200, { session: 'in', read: device({ ...mirrorBoat, requestedPermissions: asked }) });
+  expect([...g.doc.querySelectorAll('option')].map((o) => o.textContent)).toEqual(["Mirror, and see every boat's items", 'Mirror']);
+  const list = (n: number) => [...g.doc.querySelectorAll(`.auth-consent-lists > div:nth-child(${n}) li`)].map((li) => li.textContent);
+  expect(list(1)).toContain("Walk every boat's waiting items on its pet, and acknowledge them");
+  expect(list(2)).toEqual(['Take work from this wharf', 'Steer the helm']);
+  await g.click('Approve');
+  expect(g.writes).toEqual([{ path: '/api/auth/wharf/approve', body: { userCode: 'ABCD-EFGH', name: 'studio', requestedPermissions: asked, permissions: asked } }]);
 });
 
 it('a boat that asked for the helm can be approved with less, or denied', async () => {

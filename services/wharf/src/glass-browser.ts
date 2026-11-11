@@ -22,7 +22,7 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   const install = request.method === 'GET' ? glassInstall(url.pathname) : undefined;
   if (install) return install;
   // The glass, boat approval, and a report's own page (the shared glass opens reports there).
-  if (request.method === 'GET' && (['/', '/device'].includes(url.pathname) || reportPage(url.pathname))) {
+  if (request.method === 'GET' && (['/', '/device', '/passkey'].includes(url.pathname) || reportPage(url.pathname))) {
     return glassPage(await sessionHint(env, request));
   }
   requireThat(url.pathname.startsWith('/api/glass'), 404, 'route not found');

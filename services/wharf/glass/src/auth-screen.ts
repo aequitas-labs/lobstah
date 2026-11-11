@@ -28,7 +28,7 @@ export function authDestination(location: Pick<Location, 'href' | 'origin' | 'pa
   const candidate = new URLSearchParams(location.search).get('returnTo') ?? '/';
   try {
     const target = new URL(candidate, location.origin);
-    if (target.origin === location.origin && (['/', '/device'].includes(target.pathname) || REPORT_PAGE.test(target.pathname))) return target;
+    if (target.origin === location.origin && (['/', '/device', '/passkey'].includes(target.pathname) || REPORT_PAGE.test(target.pathname))) return target;
   } catch {
     /* A malformed retry target returns to the glass. */
   }

@@ -18,8 +18,13 @@ type Step =
   | { kind: 'denied'; name: string }
   | { kind: 'unusable' };
 
-/** The access a person can choose for a boat: what it asked for, or less. A mirror boat is approved as it asked, or denied. */
+/**
+ * The access a person can choose for a boat: what it asked for, or less. A
+ * mirror boat is approved as it asked, or without its pet's view of every
+ * boat, or denied.
+ */
 export const ACCESS: Record<string, { label: string; permissions: string[] }> = {
+  attention: { label: "Mirror, and see every boat's items", permissions: ['mirror', 'attention', 'read'] },
   mirror: { label: 'Mirror', permissions: ['mirror', 'read'] },
   helm: { label: 'Work, see and steer', permissions: ['work', 'helm'] },
   read: { label: 'Work and see', permissions: ['work', 'read'] },
@@ -33,14 +38,22 @@ export function accessLabel(permissions: readonly string[]): string {
 }
 
 function choices(requested: string[]): string[] {
-  if (requested.includes('mirror')) return ['mirror'];
+  if (requested.includes('mirror')) return requested.includes('attention') ? ['attention', 'mirror'] : ['mirror'];
   return ['helm', 'read', 'none'].filter((c) => c === 'none' || requested.includes(c) || (c === 'read' && requested.includes('helm')));
 }
 
 /** What the chosen access lets the boat do, and what it doesn't. */
 function abilities(choice: string): { can: string[]; cannot: string[] } {
-  if (choice === 'mirror')
-    return { can: ['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches'], cannot: ['Take work from this wharf', 'Steer the helm'] };
+  if (choice === 'mirror' || choice === 'attention')
+    return {
+      can: [
+        'Show its own dispatches on this glass',
+        'Carry out what you do here for those dispatches',
+        'Run scripts you confirm with your passkey',
+        ...(choice === 'attention' ? ["Walk every boat's waiting items on its pet, and acknowledge them"] : []),
+      ],
+      cannot: ['Take work from this wharf', 'Steer the helm', ...(choice === 'attention' ? [] : ["See other boats' items"])],
+    };
   const p = ACCESS[choice]!.permissions;
   const helm = p.includes('helm'),
     read = helm || p.includes('read');

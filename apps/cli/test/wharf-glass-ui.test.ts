@@ -171,6 +171,15 @@ it('badges only open account decisions, updates on existing polls, and clears on
   expect(badges.at(-1)).toBe(0);
 });
 
+it("the phone menu lists the boats' fleet chips and signs out", async () => {
+  const g = await page('/');
+  await g.click('.bottombar button', 'Menu');
+  expect(g.text('#phone-menu')).toContain('Boats');
+  expect(g.text('#phone-menu')).toContain('helm');
+  await g.click('#phone-menu button', 'Sign out');
+  expect(g.text()).toContain('Continue with GitHub');
+});
+
 it('keeps the hosted glass usable when the OS denies app badges', async () => {
   const g = await page('/', false, {
     badge: async () => {
@@ -265,7 +274,7 @@ it('renders decisions as safe elements, requests only their own attachment image
   await g.click('.dmodal .dopt', 'Keep it small');
   g.input('Your answer, in your own words', 'Go ahead');
   await g.settle();
-  await g.click('.dmodal button', 'Send');
+  await g.click('.dmodal button[aria-label="Send"]');
   expect(g.writes).toContainEqual(expect.objectContaining({ path: '/api/glass/documents/card/answer', body: { option: 'Keep it small', text: 'Go ahead' } }));
   // The wharf takes no files: the answer offers none.
   expect(g.doc.querySelector('.dmodal .dattach')).toBeNull();
@@ -278,9 +287,10 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
   await g.settle();
   await g.click('#modalbox button', 'Queue message for helm');
   expect(g.writes[0]).toMatchObject({ path: '/api/glass/requests', body: { kind: 'message', dispatch: 'job', text: 'Please retry' }, credentials: 'same-origin' });
-  await g.click('#modalbox button', 'Cancel job…');
+  await g.click('#modalbox button', 'Cancel dispatch…');
   expect(g.writes).toHaveLength(1);
-  await g.click('#modalbox button', 'Confirm cancel');
+  expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its agent stops.');
+  await g.click('#modalbox button', 'Cancel dispatch');
   expect(g.writes[1]).toMatchObject({ path: '/api/glass/dispatches/job/cancel', body: {} });
   for (const write of g.writes) {
     expect(write.headers['Idempotency-Key']).toBeTruthy();
@@ -293,6 +303,10 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
 
 it('boats show repos and check-in, no edit/grant controls; revoke and delete each require confirmation', async () => {
   const g = await page('/#boats');
+  // The card shows the boat's access and age; a tap shows its repos, last check-in and trap request.
+  expect(g.text('#boats')).not.toContain('github.com/aequitas-labs/lobstah');
+  (g.doc.querySelector('#boats .card') as unknown as HTMLElement).click();
+  await g.settle();
   expect(g.text('#boats')).toContain('last check-in');
   expect(g.text('#boats')).toContain('github.com/aequitas-labs/lobstah');
   expect(Array.from(g.doc.querySelectorAll('#boats button')).some((b) => /edit|grant|rename/i.test(b.textContent ?? ''))).toBe(false);
@@ -313,6 +327,32 @@ it('boats show repos and check-in, no edit/grant controls; revoke and delete eac
   await g.click('#boats button', 'confirm delete account');
   expect(g.writes[2]).toMatchObject({ path: '/api/glass/account', method: 'DELETE', body: { confirm: true } });
   expect(g.text()).toContain('Continue with GitHub');
+});
+
+it('a boat card shows its name and state chip, then its access and age; a revoked one is greyed with no revoke', async () => {
+  const fresh = { ...snapshot.boats[0]!, id: 'fresh', name: 'studio', lastCheckIn: new Date().toISOString() };
+  const gone = { ...snapshot.boats[0]!, id: 'gone', name: 'old-mini', revoked: 1 };
+  const g = await page('/#boats', false, { snapshot: { ...snapshot, boats: [snapshot.boats[0]!, fresh, gone] } });
+  const cards = Array.from(g.doc.querySelectorAll('#boats .card'));
+  const line = (c: Element, sel: string) => (c.querySelector(sel)?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  expect(cards.map((c) => [line(c, '.gtitle'), line(c, '.gchip')])).toEqual([
+    ['chris-macbook', 'asleep'],
+    ['studio', 'online'],
+    ['old-mini', 'revoked'],
+  ]);
+  expect(line(cards[0]!, '.gcontext .gtext')).toMatch(/^Work, see and steer · checked in \d+\w ago$/);
+  // Asleep is a grey chip, with no status edge.
+  expect(cards[0]!.querySelector('.gchip')!.className).toBe('gchip dim');
+  expect(cards[0]!.className).not.toContain('gcard-edge');
+  expect(line(cards[0]!, '.gaction')).toBe('revoke…');
+  expect(cards[2]!.className).toContain('quiet');
+  expect(cards[2]!.querySelector('.gaction')).toBeNull();
+  // revoke… never expands the card; a tap or Enter does.
+  await g.click('#boats .card button', 'revoke…');
+  expect(cards[0]!.getAttribute('aria-expanded')).toBe('false');
+  cards[1]!.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event);
+  await g.settle();
+  expect(g.doc.querySelectorAll('#boats .card')[1]!.getAttribute('aria-expanded')).toBe('true');
 });
 
 it('boat approval shows the resolved name and allows only requested or lower access, never admin', async () => {
