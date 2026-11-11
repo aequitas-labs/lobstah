@@ -17,6 +17,7 @@ import {
   HELM_REMINDER,
   HELM_STOP_REMINDER,
   RUN_CARD_RULE,
+  REVIEW_DRAFT_RULE,
   PARKED_TODO_RULE,
   TODO_COMMITMENT_RULE,
   WITHDRAW_CARD_RULE,
@@ -217,6 +218,10 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(HELM_REMINDER).toContain(RUN_CARD_RULE);
     // A run card is a kind of card: the Stop reminder stays the plain card rule.
     expect(HELM_STOP_REMINDER).toBe('If this reply requires human action, put it on a card.');
+    // The review-draft rule is said once, at sign-on: no per-turn reminder carries it.
+    expect(HELM_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
+    expect(HELM_STOP_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
+    expect(charter({ name: 'fleet', repos: ['web'] }).split(REVIEW_DRAFT_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] }).split(CARD_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] })).not.toContain('any question or choice for the human');
   });

@@ -14,6 +14,9 @@ import {
   loadConfig,
   noticesDir,
   postNotice,
+  observeReviewRequest,
+  readReview,
+  writeReview,
   readHelm,
   readStatusLog,
   statusPath,
@@ -147,6 +150,40 @@ describe('helm sign-on starts its cursor at the sign-on', () => {
 });
 
 describe('man wait reports only delivered catches', () => {
+  it('stays parked when a review draft completes and leaves it on Reviews', async () => {
+    signOn(HELM);
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 8, url: 'https://github.com/acme/web/pull/8', title: 'Review the tray', author: 'a', headSha: 'abc' }, round: { id: 'round', requestedAt: new Date().toISOString() } }).item;
+    item.rounds[0]!.dispatch = ID;
+    writeReview(item);
+    enqueue({ id: ID, repo: 'r', brief: 'Draft the review', readOnly: true }, 'chore');
+    claimNext('chore');
+    const env: NodeJS.ProcessEnv = { ...process.env, LOBSTAH_HOME: home };
+    delete env.CLAUDE_CODE_SESSION_ID;
+    const child = spawn(process.execPath, [cli, 'man', 'wait', '--session', HELM, '--timeout', '2'], { env, stdio: 'pipe' });
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', resolve);
+    });
+    let stdout = '';
+    child.stdout.on('data', chunk => { stdout += String(chunk); });
+    try {
+      const deadline = Date.now() + 4_000;
+      while (!liveWatcher(HELM, 'man') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+      expect(liveWatcher(HELM, 'man')).toBeDefined();
+      item.rounds[0]!.state = 'drafted';
+      writeReview(item);
+      appendStatus(ID, 'chore', 'done', 'Review draft ready');
+      complete(ID, 'chore');
+      expect(await exited, stdout).toBe(3);
+      expect(stdout).toContain('timeout: true');
+      expect(stdout).not.toContain(ID);
+      expect(stdout).not.toContain('collect the evidence');
+      expect(readReview(item.key)?.rounds[0]!.state).toBe('drafted');
+    } finally {
+      if (child.exitCode === null) child.kill();
+    }
+  }, 10_000);
+
   const land = () => {
     enqueue({ id: ID, repo: 'r', brief: 'b' });
     claimNext('work');
