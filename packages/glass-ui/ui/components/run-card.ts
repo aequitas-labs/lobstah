@@ -231,7 +231,7 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
       html`<div class="runfoot">
         ${
           view?.busy
-            ? html`<button type="button" class="btn" onClick=${() => void stopRunCard(cardKey)}>Stop</button>`
+            ? html`<button type="button" class="btn danger" onClick=${() => void stopRunCard(cardKey)}>Stop</button>`
             : here || blocked
               ? html`<button type="button" class="btn runbtn" disabled=${locked || missing.length > 0} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}</button>`
               : html`<a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}</a>`
