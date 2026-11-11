@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { generateKeyPairSync } from 'node:crypto';
 import type { GlassRunCard } from '@lobstah/core';
+import { runInputsText, sha256Hex } from '@lobstah/core';
+import { openSealedInput } from '../src/run-seal.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
@@ -71,6 +74,7 @@ describe('Run on the hosted glass', () => {
     const { g } = await page(hostedRun({ interactive: true }));
     expect((g.$('#doverlay .runbtn') as HTMLButtonElement).disabled).toBe(true);
     expect(text(g.$('#doverlay .runfoot .dim'))).toBe('Interactive cards run from the Mac.');
+    // A boat that publishes no seal key takes no secret from the hosted glass.
     const secret = await page(hostedRun({ inputs: [{ name: 'TOKEN', secret: true }] }));
     expect((secret.g.$('#doverlay .runbtn') as HTMLButtonElement).disabled).toBe(true);
     expect(text(secret.g.$('#doverlay .runfoot .dim'))).toBe('Secret inputs are typed on the Mac for now.');
@@ -110,5 +114,40 @@ describe('Run on the hosted glass', () => {
     expect(runs[1]!.payload).toMatchObject({ key: RUN_KEY, challenge: 'd2luZG93', window: 'w1' });
     expect(String(runs[1]!.payload.windowSignature)).toMatch(/^[A-Za-z0-9_-]{80,}$/);
     expect(runs[1]!.payload.credentialId).toBeUndefined();
+  });
+});
+
+describe('a secret input on the hosted glass', () => {
+  it("is sealed to the boat's key before it leaves the page, and the run challenge binds what was sent", async () => {
+    const boat = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const sealKey = (boat.publicKey.export({ format: 'der', type: 'spki' }) as Buffer).toString('base64url');
+    const run = hostedRun({ inputs: [{ name: 'TOKEN', secret: true }, { name: 'ENV', secret: false }], sealKey });
+    const answer = (s: Sent) => {
+      if (s.kind === 'run-challenge') return { status: 200, body: { ok: true, challenge: 'cGFzc2tleQ', rpId: 'glass.test', credentialIds: [], sha256: run.scriptSha256 } };
+      if (s.kind === 'run') return { status: 202, body: { ok: true, running: true, key: RUN_KEY } };
+      if (s.kind === 'run-output') return { status: 200, body: { ok: true, id: 'a1', state: 'succeeded', text: '', next: 0, result: { exitCode: 0, timedOut: false, durationMs: 1, outputBytes: 0, scrubbed: 0 } } };
+      return { status: 404, body: { ok: false } };
+    };
+    const h = await page(run, { answer });
+    const type = async (name: string, value: string) => {
+      const input = h.g.$(`#doverlay .runinput input[aria-label="${name}"]`) as HTMLInputElement;
+      input.value = value;
+      input.dispatchEvent(new h.g.window.Event('input', { bubbles: true }));
+      await h.g.settle();
+    };
+    await type('TOKEN', 'hunter2');
+    await type('ENV', 'staging');
+    expect((h.g.$('#doverlay .runbtn') as HTMLButtonElement).disabled).toBe(false);
+    await h.run();
+    const sent = h.sent.find((x) => x.kind === 'run')!.payload.inputs as Record<string, unknown>;
+    // The secret leaves the page sealed; a text input goes plain.
+    expect(JSON.stringify(sent)).not.toContain('hunter2');
+    expect(sent.ENV).toBe('staging');
+    expect(Object.keys(sent.TOKEN as object).sort()).toEqual(['ct', 'epk', 'iv']);
+    // Only the boat's key opens it.
+    expect(openSealedInput(sent.TOKEN, boat.privateKey)).toBe('hunter2');
+    // The challenge bound exactly what was sent.
+    const challenge = h.sent.find((x) => x.kind === 'run-challenge')!.payload;
+    expect(challenge.inputsSha256).toBe(sha256Hex(runInputsText(sent as never)));
   });
 });

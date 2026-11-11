@@ -2,16 +2,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createCipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes, sign } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { askDecision, ensureLayout, prepareRunCard } from '@lobstah/core';
+import { RUN_SEAL_INFO, askDecision, ensureLayout, prepareRunCard, runInputsText, sha256Hex } from '@lobstah/core';
+import type { RunInputValues, SealedInput } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges, addRunPasskey } from '../src/run-passkey.js';
 import { RUN_WINDOW_MS, RunWindows } from '../src/run-window.js';
 import { RunRegistry } from '../src/run-exec.js';
+import { openSealedInput, runSealKey } from '../src/run-seal.js';
 import { SoftPasskey } from './fixtures/soft-passkey.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -74,8 +76,11 @@ function call(host: string, url: string, init: { method?: string; body?: unknown
   });
 }
 
-/** A request from the hosted glass, as the boat's mirror loop posts it to its own glass. */
+const inputsHash = (inputs: RunInputValues) => sha256Hex(runInputsText(inputs));
+
+/** A request from the hosted glass, as the boat's mirror loop posts it to its own glass. A run challenge binds no inputs unless it names them. */
 async function relayed(kind: string, payload: unknown) {
+  if (kind === 'run-challenge' && !(payload as { inputsSha256?: string }).inputsSha256) payload = { inputsSha256: inputsHash({}), ...(payload as object) };
   const host = `127.0.0.1:${port}`;
   const token = (await call(host, '/data')).json.focusToken as string;
   return call(host, '/requests', { method: 'POST', body: { kind, payload }, headers: { Origin: `http://${host}`, 'x-lobstah-token': token, 'x-lobstah-relay': 'wharf' } });
@@ -88,9 +93,9 @@ async function local(kind: string, payload: unknown) {
   return call(host, '/requests', { method: 'POST', body: { kind, payload }, headers: { Origin: `http://${host}`, 'x-lobstah-token': token } });
 }
 
-function runCard(opts: { interactive?: boolean; inputs?: string[] } = {}): { key: string; sha256: string } {
+function runCard(opts: { interactive?: boolean; inputs?: string[]; body?: string } = {}): { key: string; sha256: string } {
   const file = path.join(home, `s-${Math.random().toString(36).slice(2)}.sh`);
-  fs.writeFileSync(file, '#!/bin/bash\necho hi\n');
+  fs.writeFileSync(file, opts.body ?? '#!/bin/bash\necho hi\n');
   const run = prepareRunCard({ scriptFile: file, cwd: home, ...(opts.interactive ? { interactive: true } : {}), ...(opts.inputs ? { inputs: opts.inputs } : {}) });
   const { meta } = askDecision({ title: 'Run it', options: ['Decline'], askedBy: 'helm', run, maxBytes: 1024 });
   return { key: meta.key, sha256: run.card.scriptSha256 };
@@ -146,9 +151,12 @@ describe('a Run from the hosted glass', () => {
     expect(none.json.reason).toBe('Pair this phone first: run lobstah run passkey add --hosted on the Mac.');
     const interactive = await relayed('run-challenge', runCard({ interactive: true }));
     expect(interactive.json.reason).toBe('Interactive cards run from the Mac.');
-    // Until inputs are sealed to the boat, a secret never crosses the wharf; a text input may.
-    const secret = await relayed('run-challenge', runCard({ inputs: ['TOKEN'] }));
-    expect(secret.json.reason).toBe('Secret inputs are typed on the Mac for now.');
+    // A relayed run challenge must bind the inputs.
+    const card = runCard();
+    const host = `127.0.0.1:${port}`;
+    const token = (await call(host, '/data')).json.focusToken as string;
+    const unbound = await call(host, '/requests', { method: 'POST', body: { kind: 'run-challenge', payload: card }, headers: { Origin: `http://${host}`, 'x-lobstah-token': token, 'x-lobstah-relay': 'wharf' } });
+    expect(unbound.status).toBe(400);
   });
 });
 
@@ -193,5 +201,60 @@ describe('the 15-minute window', () => {
     const res = await passkeyRun(card, { window: 'not-a-key-'.repeat(5) });
     expect(res.status).toBe(400);
     expect(runs.get(card.key)).toBeUndefined();
+  });
+});
+
+/** Seal a secret as the page does: ECDH with a fresh P-256 key, HKDF-SHA256, AES-256-GCM. */
+function seal(value: string, boatKey: string): SealedInput {
+  const mine = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const boat = createPublicKey({ key: Buffer.from(boatKey, 'base64url'), format: 'der', type: 'spki' });
+  const key = Buffer.from(hkdfSync('sha256', diffieHellman({ privateKey: mine.privateKey, publicKey: boat }), Buffer.alloc(0), RUN_SEAL_INFO, 32));
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]);
+  return { epk: (mine.publicKey.export({ format: 'der', type: 'spki' }) as Buffer).toString('base64url'), iv: iv.toString('base64url'), ct: ct.toString('base64url') };
+}
+
+describe('a secret input from the hosted glass', () => {
+  const secretCard = () => runCard({ inputs: ['TOKEN'], body: '#!/bin/bash\nIFS= read -r TOKEN\necho "length ${#TOKEN}"\n' });
+
+  async function run(card: { key: string; sha256: string }, sent: RunInputValues, confirmed: RunInputValues = sent) {
+    const asked = await relayed('run-challenge', { ...card, inputsSha256: inputsHash(confirmed) });
+    expect(asked.status).toBe(200);
+    return relayed('run', { key: card.key, ...phone.assert(asked.json.challenge as string, GLASS), inputs: sent });
+  }
+
+  it("is sealed to the boat's key on the card, opened only on the boat, and runs", async () => {
+    const card = secretCard();
+    const sealKey = (await call(`127.0.0.1:${port}`, '/data')).json.decisions as Array<{ key: string; run?: { sealKey?: string } }>;
+    const boatKey = sealKey.find((d) => d.key === card.key)!.run!.sealKey!;
+    expect(boatKey).toBe(runSealKey().publicKey);
+    expect(fs.statSync(path.join(home, 'run', 'seal-key.pem')).mode & 0o777).toBe(0o600);
+    expect((await run(card, { TOKEN: seal('hunter', boatKey) })).status).toBe(202);
+    await runs.settled();
+    const out = (await relayed('run-output', { key: card.key })).json;
+    expect(out).toMatchObject({ state: 'succeeded' });
+    expect(String(out.text)).toContain('length 6');
+  });
+
+  it('refuses a plain secret, swapped inputs, and a seal another key made', async () => {
+    const boatKey = runSealKey().publicKey;
+    expect((await run(secretCard(), { TOKEN: 'hunter' })).json.reason).toBe('Secret inputs must be sealed to the boat.');
+    const sealed = seal('hunter', boatKey);
+    const swapped = await run(secretCard(), { TOKEN: seal('other', boatKey) }, { TOKEN: sealed });
+    expect(swapped.status).toBe(403);
+    expect(swapped.json.reason).toBe('The inputs are not the ones that were confirmed.');
+    const stranger = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const wrong = seal('hunter', (stranger.publicKey.export({ format: 'der', type: 'spki' }) as Buffer).toString('base64url'));
+    expect((await run(secretCard(), { TOKEN: wrong })).json.reason).toBe("A sealed input couldn't be opened on this boat.");
+  });
+
+  it('opens only an untouched seal', () => {
+    const { privateKey, publicKey } = runSealKey();
+    const sealed = seal('hunter', publicKey);
+    expect(openSealedInput(sealed, privateKey)).toBe('hunter');
+    const ct = Buffer.from(sealed.ct, 'base64url');
+    ct[0] ^= 1;
+    expect(() => openSealedInput({ ...sealed, ct: ct.toString('base64url') }, privateKey)).toThrow("couldn't be opened");
   });
 });

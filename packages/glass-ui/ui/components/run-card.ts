@@ -77,8 +77,8 @@ export function runBlocked(run: GlassRunCard, passkeys?: number): string | undef
   const count = passkeys ?? (hosted ? getState().snapshot?.runPasskeys?.hosted : getState().snapshot?.runPasskeys?.count) ?? 0;
   if (run.altered) return "This script changed after it was proposed, so it can't run.";
   if (hosted && run.interactive) return 'Interactive cards run from the Mac.';
-  // Until inputs are sealed to the boat, a secret is never typed on the hosted glass.
-  if (hosted && run.inputs.some((i) => i.secret)) return 'Secret inputs are typed on the Mac for now.';
+  // A secret typed on the hosted glass is sealed to the boat's key; a boat that publishes none takes none.
+  if (hosted && !run.sealKey && run.inputs.some((i) => i.secret)) return 'Secret inputs are typed on the Mac for now.';
   if (!count)
     return hosted
       ? 'Pair this phone first: run lobstah run passkey add --hosted on the Mac.'

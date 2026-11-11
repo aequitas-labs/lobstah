@@ -17,6 +17,9 @@ import {
 import { RunRegistry, runStdin } from './run-exec.js';
 import { endPairing, pendingPairing } from './run-pairing.js';
 import { RunWindows } from './run-window.js';
+import { openRunInputs } from './run-seal.js';
+import { runInputsText, sha256Hex } from '@lobstah/core';
+import type { RunInputValues } from '@lobstah/core';
 
 /**
  * The glass's run-card requests (`/requests` kinds `run-*`), behind its
@@ -140,15 +143,22 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         if ('status' in card) return card;
         if (p.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The script this page shows is not the card's: reload it.");
         if (relayed && card.meta.run.interactive) return refuse(409, 'Interactive cards run from the Mac.');
-        // Until inputs are sealed to the boat, a secret never crosses the wharf.
-        if (relayed && card.meta.run.inputs.some((i) => i.secret)) return refuse(409, 'Secret inputs are typed on the Mac for now.');
+        // The challenge binds the inputs the page will send, by hash: a relayed Run must, so the wharf can't swap them.
+        const inputs = typeof p.inputsSha256 === 'string' && /^[a-f0-9]{64}$/.test(p.inputsSha256) ? p.inputsSha256 : undefined;
+        if (relayed && !inputs) return refuse(400, "The inputs' hash is required.");
         const sha256 = card.meta.run.scriptSha256;
         // Inside the page's window, its window key signs the challenge instead of a passkey.
         const window = p.window === undefined ? undefined : ctx.windows.get(p.window, relayed);
         if (window)
           return {
             status: 200,
-            body: { ok: true, challenge: ctx.challenges.issue({ kind: 'run', key: card.meta.key, sha256, window: window.id }), window: window.id, windowUntil: window.until, sha256 },
+            body: {
+              ok: true,
+              challenge: ctx.challenges.issue({ kind: 'run', key: card.meta.key, sha256, window: window.id, ...(inputs ? { inputs } : {}) }),
+              window: window.id,
+              windowUntil: window.until,
+              sha256,
+            },
           };
         const keys = readRunPasskeys(keysFile);
         if (!keys.length) return refuse(409, relayed ? PAIR_FIRST : 'Set up a passkey in Settings to run cards.');
@@ -157,7 +167,7 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
           status: 200,
           body: {
             ok: true,
-            challenge: ctx.challenges.issue({ kind: 'run', key: card.meta.key, sha256 }),
+            challenge: ctx.challenges.issue({ kind: 'run', key: card.meta.key, sha256, ...(inputs ? { inputs } : {}) }),
             rpId,
             credentialIds: keys.filter((k) => !relayed || k.rpId === rpId).map((k) => k.credentialId),
             sha256,
@@ -166,12 +176,12 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
       }
       case 'run': {
         // Every check before anything runs: the passkey or the window key, the card, the hash it signed, the stored copy, the inputs.
-        let verified: { key: string; sha256: string; credentialId: string };
+        let verified: { key: string; sha256: string; credentialId: string; inputs?: string };
         if (p.window !== undefined) {
           const scope = typeof p.challenge === 'string' ? ctx.challenges.spend(p.challenge) : undefined;
           if (scope?.kind !== 'run' || scope.window !== p.window) return refuse(403, 'The run challenge is unknown, spent or older than two minutes.');
           const credentialId = ctx.windows.verify(p.window, relayed, p.challenge as string, p.windowSignature);
-          verified = { key: scope.key, sha256: scope.sha256, credentialId };
+          verified = { key: scope.key, sha256: scope.sha256, credentialId, ...(scope.inputs ? { inputs: scope.inputs } : {}) };
         } else
           verified = relayed
             ? verifyHostedRunAssertion(p as unknown as AssertionResponse, ctx.challenges, keysFile)
@@ -181,9 +191,14 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         if ('status' in card) return card;
         if (verified.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The passkey signed a script that is not the card's.");
         if (relayed && card.meta.run.interactive) return refuse(409, 'Interactive cards run from the Mac.');
-        if (relayed && card.meta.run.inputs.some((i) => i.secret)) return refuse(409, 'Secret inputs are typed on the Mac for now.');
+        // The inputs must be the ones the challenge bound: a relayed Run always binds them.
+        if (relayed && !verified.inputs) return refuse(403, 'The inputs were not confirmed.');
+        if (verified.inputs && (!p.inputs || typeof p.inputs !== 'object' || sha256Hex(runInputsText(p.inputs as RunInputValues)) !== verified.inputs))
+          return refuse(403, 'The inputs are not the ones that were confirmed.');
         if (ctx.runs.get(card.meta.key)?.attempt.state === 'running') return refuse(409, 'This card is already running.');
-        const input = runStdin(card.meta.run, p.inputs);
+        const plain = openRunInputs(card.meta.run, p.inputs, relayed);
+        if ('reason' in plain) return refuse(400, plain.reason);
+        const input = runStdin(card.meta.run, plain);
         if ('reason' in input) return refuse(400, input.reason);
         // A passkey confirmation may open the page's 15-minute window, bound to its key.
         const opened = p.window === undefined && p.windowKey !== undefined ? ctx.windows.start(p.windowKey, verified.credentialId, relayed) : undefined;

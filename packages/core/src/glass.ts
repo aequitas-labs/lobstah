@@ -453,6 +453,8 @@ export interface GlassDecision {
 export interface GlassRunCard extends RunCard {
   /** On the hosted glass: the boat the card runs on, set when the boats' glasses merge. */
   boat?: string;
+  /** The boat's public key for sealing secret inputs (P-256, SPKI DER, base64url): the page seals to it on the hosted glass. */
+  sealKey?: string;
   /** Durable run metadata, with output fetched separately by the local person view. */
   latest?: import('./run-history.js').RunAttempt;
   /** The stored script's text, whole. */

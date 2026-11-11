@@ -96,7 +96,7 @@ export type ChallengeScope =
   | { kind: 'register' }
   | { kind: 'existing' }
   /** One card's Run over its script hash; `window` when the page's 15-minute window key signs it instead of a passkey. */
-  | { kind: 'run'; key: string; sha256: string; window?: string }
+  | { kind: 'run'; key: string; sha256: string; window?: string; inputs?: string }
   /** A phone's passkey for the hosted glass, made under one pairing code. */
   | { kind: 'pair'; code: string };
 
@@ -292,10 +292,15 @@ function verifyAssertion<K extends 'run' | 'existing'>(
 }
 
 /** A Run's assertion: returns the card and the script hash the passkey signed for. */
-export function verifyRunAssertion(res: AssertionResponse, challenges: RunChallenges, origin: string, file = runPasskeysFile()): { key: string; sha256: string; credentialId: string } {
+export function verifyRunAssertion(
+  res: AssertionResponse,
+  challenges: RunChallenges,
+  origin: string,
+  file = runPasskeysFile(),
+): { key: string; sha256: string; credentialId: string; inputs?: string } {
   const { scope, credentialId } = verifyAssertion(res, challenges, origin, 'run', file);
   if (scope.window) throw new PasskeyError('the run challenge was issued for a window key, not a passkey');
-  return { key: scope.key, sha256: scope.sha256, credentialId };
+  return { key: scope.key, sha256: scope.sha256, credentialId, ...(scope.inputs ? { inputs: scope.inputs } : {}) };
 }
 
 /**
@@ -304,10 +309,14 @@ export function verifyRunAssertion(res: AssertionResponse, challenges: RunChalle
  * authenticator data its relying party. The page's own origin (a relayed
  * call reaches the glass from loopback) plays no part.
  */
-export function verifyHostedRunAssertion(res: AssertionResponse, challenges: RunChallenges, file = hostedPasskeysFile()): { key: string; sha256: string; credentialId: string } {
+export function verifyHostedRunAssertion(
+  res: AssertionResponse,
+  challenges: RunChallenges,
+  file = hostedPasskeysFile(),
+): { key: string; sha256: string; credentialId: string; inputs?: string } {
   const { scope, credentialId } = verifyAssertion(res, challenges, undefined, 'run', file);
   if (scope.window) throw new PasskeyError('the run challenge was issued for a window key, not a passkey');
-  return { key: scope.key, sha256: scope.sha256, credentialId };
+  return { key: scope.key, sha256: scope.sha256, credentialId, ...(scope.inputs ? { inputs: scope.inputs } : {}) };
 }
 
 /** A current passkey's consent to registering another: an assertion over an `existing` challenge. */
