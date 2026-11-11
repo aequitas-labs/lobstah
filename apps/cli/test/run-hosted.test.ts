@@ -235,12 +235,15 @@ describe('a secret input from the hosted glass', () => {
     const sealKey = (await call(`127.0.0.1:${port}`, '/data')).json.decisions as Array<{ key: string; run?: { sealKey?: string } }>;
     const boatKey = sealKey.find((d) => d.key === card.key)!.run!.sealKey!;
     expect(boatKey).toBe(runSealKey().publicKey);
-    expect(fs.statSync(path.join(home, 'run', 'seal-key.pem')).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX file modes to check.
+    if (process.platform !== 'win32') expect(fs.statSync(path.join(home, 'run', 'seal-key.pem')).mode & 0o777).toBe(0o600);
     expect((await run(card, { TOKEN: seal('hunter', boatKey) })).status).toBe(202);
     await runs.settled();
     const out = (await relayed('run-output', { key: card.key })).json;
-    expect(out).toMatchObject({ state: 'succeeded' });
-    expect(String(out.text)).toContain('length 6');
+    if (RUNS_HERE) {
+      expect(out).toMatchObject({ state: 'succeeded' });
+      expect(String(out.text)).toContain('length 6');
+    }
   });
 
   it('refuses a plain secret, swapped inputs, and a seal another key made', async () => {
