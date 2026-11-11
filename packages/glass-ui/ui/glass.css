@@ -463,24 +463,6 @@ a.deckline > .dim {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.seg {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.seg button {
-  background: var(--card);
-  border: none;
-  color: var(--dim);
-  font: inherit;
-  padding: 4px 11px;
-  cursor: pointer;
-}
-.seg button.on {
-  background: var(--seg-on);
-  color: var(--fg);
-}
 .wrap {
   overflow-x: auto;
 }
@@ -2029,14 +2011,6 @@ a.lob {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 14px;
-}
-.rv-controls select {
-  background: var(--card);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 5px 8px;
-  font: inherit;
 }
 .rv-person img {
   border-radius: 50%;
