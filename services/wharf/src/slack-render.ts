@@ -17,7 +17,7 @@ export type SlackBlock =
   | { type: 'header'; text: { type: 'plain_text'; text: string; emoji: false } }
   | { type: 'context'; elements: Array<{ type: 'mrkdwn'; text: string }> }
   | { type: 'section'; text: { type: 'mrkdwn'; text: string } }
-  | { type: 'actions'; elements: Array<{ type: 'button'; text: { type: 'plain_text'; text: string; emoji: false }; url: string; action_id: string }> };
+  | { type: 'actions'; elements: Array<{ type: 'button'; text: { type: 'plain_text'; text: string; emoji: false }; action_id: string; url?: string; value?: string }> };
 /** A chat.postMessage or chat.update body, less its channel and timestamp. */
 export interface SlackMessage {
   text: string;
@@ -68,7 +68,7 @@ function standing(card: GlassCard): string {
   if (card.seen) return `Seen by ${slackEscape(card.seen.by)}`;
   return card.quiet ? 'In progress' : 'Waiting for you';
 }
-/** What a card offers, said in words: in this release every answer is made in the glass. */
+/** What a card offers, said in words, with every option's exact text under its number. */
 function offered(actions: GlassCardAction[]): string[] {
   const options = actions.flatMap((a) => (a.kind === 'answer' ? [a.option] : []));
   const lines = options.map((o, i) => `${i + 1}. ${slackEscape(o)}`);
@@ -83,7 +83,33 @@ function offered(actions: GlassCardAction[]): string[] {
  * names what it asks and links to the glass, where it is answered; an ended
  * card shows how it ended and offers nothing.
  */
-export function renderCard(card: GlassCard, glassOrigin: string): SlackMessage {
+/** A card action this message can take, and the opaque handle its button carries. The handle alone means nothing outside the wharf. */
+export interface CardControl { action: GlassCardAction; handle: string }
+/** How a control's button reads. An option longer than a button keeps its meaning in the body, under its number. */
+function controlLabel(action: GlassCardAction, optionNumber: number): string {
+  switch (action.kind) {
+    case 'answer': return action.option.length <= SLACK_BUDGET.buttonLabel ? action.option : `Option ${optionNumber}`;
+    case 'answer-text': return 'Answer…';
+    case 'allow-once': return 'Allow once';
+    case 'allow-always': return 'Allow always';
+    case 'deny': return 'No';
+    case 'message-helm': return 'Message the helm…';
+    default: return action.kind;
+  }
+}
+type Button = Extract<SlackBlock, { type: 'actions' }>['elements'][number];
+const button = (label: string, action: string, fields: { url?: string; value?: string }): Button =>
+  ({ type: 'button', text: { type: 'plain_text', text: clip(label, SLACK_BUDGET.buttonLabel), emoji: false }, action_id: action, ...fields });
+
+/**
+ * One card as one Slack message. The same card and controls render the
+ * same message, so a delivery can tell whether its last post still matches.
+ * A standing card names what it asks; with controls it can be answered
+ * here, without them in the glass. An ended card shows how it ended and
+ * offers nothing. Opening the card from here is seeing it, when it asks to
+ * be seen.
+ */
+export function renderCard(card: GlassCard, glassOrigin: string, controls: CardControl[] = []): SlackMessage {
   const title = clip(card.title.replace(/\s+/g, ' ').trim() || FAMILY_LABEL[card.family], SLACK_BUDGET.title);
   const context = clip(
     [FAMILY_LABEL[card.family], card.grounds && slackEscape(card.grounds), standing(card), !card.terminal && slackTime(card.sourceAt)].filter(Boolean).join(' · '),
@@ -96,15 +122,24 @@ export function renderCard(card: GlassCard, glassOrigin: string): SlackMessage {
   const summary = card.summary && room > EXCERPT.length + 40 ? fitted(slackEscape(card.summary), room) : '';
   const section = [summary, asked].filter(Boolean).join('\n\n');
   const open = `${glassOrigin}/#card/${card.id}`;
-  const buttons = [
-    { label: card.terminal ? 'Open in glass' : ask.length ? 'Answer in glass' : 'Open in glass', url: open, action: 'open-card' },
-    ...card.links.slice(0, SLACK_BUDGET.linkButtons).map((l, i) => ({ label: l.label, url: l.url, action: `open-link-${i}` })),
+  const live = card.terminal ? [] : controls;
+  const seen = live.find((c) => c.action.kind === 'seen');
+  const pressed = live.filter((c) => c.action.kind !== 'seen');
+  let option = 0;
+  const answers = pressed.map((c, i) => button(controlLabel(c.action, c.action.kind === 'answer' ? ++option : 0), `card-action-${i}`, { value: c.handle }));
+  const links = [
+    button(card.terminal || pressed.length || !ask.length ? 'Open in glass' : 'Answer in glass', 'open-card', { url: open, ...(seen ? { value: seen.handle } : {}) }),
+    ...card.links.slice(0, SLACK_BUDGET.linkButtons).map((l, i) => button(l.label, `open-link-${i}`, { url: l.url })),
   ];
+  // Five buttons to a row reads on a phone; the links come last.
+  const rows: Button[][] = [];
+  for (let i = 0; i < answers.length; i += 5) rows.push(answers.slice(i, i + 5));
+  rows.push(links);
   const blocks: SlackBlock[] = [
     { type: 'header', text: { type: 'plain_text', text: title, emoji: false } },
     { type: 'context', elements: [{ type: 'mrkdwn', text: context }] },
     ...(section ? [{ type: 'section' as const, text: { type: 'mrkdwn' as const, text: section } }] : []),
-    { type: 'actions', elements: buttons.map((b) => ({ type: 'button' as const, text: { type: 'plain_text' as const, text: clip(b.label, SLACK_BUDGET.buttonLabel), emoji: false as const }, url: b.url, action_id: b.action })) },
+    ...rows.slice(0, SLACK_BUDGET.blocks - 3).map((elements): SlackBlock => ({ type: 'actions', elements })),
   ];
   const fallback = clip(`${FAMILY_LABEL[card.family]}: ${title} · ${card.terminal ? card.terminal.state : card.quiet ? 'in progress' : 'waiting for you'}`, SLACK_BUDGET.fallback);
   return { text: fallback, blocks, unfurl_links: false, unfurl_media: false };
