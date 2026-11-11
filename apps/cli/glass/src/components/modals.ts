@@ -29,6 +29,7 @@ import {
   TrapName,
   namedText,
   prCell,
+  prHeadCell,
   prChecks,
   prLink,
   prMerge,
@@ -237,7 +238,7 @@ function trapModal(t: GlassTrap) {
   const catches = t.catches.length
     ? t.catches.map(
         (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div>${
+          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prHeadCell(c)}</div>${
             c.note && html`<div class="loglines">${NamedText(c.note)}</div>`
           }</div>`,
       )

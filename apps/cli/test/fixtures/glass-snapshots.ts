@@ -169,6 +169,7 @@ export function acceptanceFleet(): GlassFullSnapshot {
     bucket: 'done',
     evidence: { prUrl: pr41.url, pr: pr41, branch: 'lobstah/41' },
     prBadge: { ...prBadge(pr41), observedAt: pr41.observedAt },
+    prHead: { url: pr41.url, number: 41, badge: { ...prBadge(pr41), observedAt: pr41.observedAt }, open: 1, several: false },
     prGate: 'waiting-approval',
     sort: NOW - 30 * MIN,
   });
@@ -176,6 +177,7 @@ export function acceptanceFleet(): GlassFullSnapshot {
     followUp: a.id,
     evidence: { prUrl: pr42.url, pr: pr42 },
     prBadge: { ...prBadge(pr42), observedAt: pr42.observedAt },
+    prHead: { url: pr42.url, number: 42, badge: { ...prBadge(pr42), observedAt: pr42.observedAt }, open: 1, several: false },
     sort: NOW - 10 * MIN,
   });
   const c = dispatch('cccccccc-0000-4000-8000-000000000003', {
@@ -185,6 +187,7 @@ export function acceptanceFleet(): GlassFullSnapshot {
     claimedBy: 'wt:t1',
     evidence: { prUrl: pr43.url, pr: pr43, deliveredTo: 'wt:t1' },
     prBadge: { ...prBadge(pr43), observedAt: pr43.observedAt },
+    prHead: { url: pr43.url, number: 43, badge: { ...prBadge(pr43), observedAt: pr43.observedAt }, open: 1, several: false },
     attachments: [{ name: 'shot.png', path: '/tmp/shot.png', bytes: 2048, type: 'image/png' }],
     inbox: ['{"from":"helm","text":"target main"}'],
     transcript: '/Users/me/.claude/projects/x/c.jsonl',
