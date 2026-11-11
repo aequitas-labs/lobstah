@@ -1,9 +1,17 @@
 import fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
-import { readStackEpochs, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
+import { readStackEpochs, repoKey, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
 import { loadConfig } from './config.js';
+import type { Config } from './config.js';
 import { dispatchProgress } from './dispatch-progress.js';
+import { groundsList } from './helm.js';
+import { storageGrounds } from './grounds-name.js';
+import { storedDescriptor } from './queue.js';
+import { parsePrRef } from './pr.js';
+import { readPr } from './prs.js';
+import { readWatch } from './watch.js';
+import { withDirLock } from './dir-lock.js';
 
 /**
  * Helm notices: the attention channel for events that are not status-log
@@ -96,6 +104,76 @@ function cursorFile(): string {
   return path.join(noticesDir(), '.cursor');
 }
 
+/** Route unconfigured repos through their originating dispatch, then to the first reader. */
+export function noticeFilterForGrounds(grounds: string, cfg: Config): (notice: Notice) => boolean {
+  const configured = groundsList(cfg);
+  const reader = storageGrounds(grounds, cfg);
+  const groundsForRepo = (repo: string | undefined): string | undefined =>
+    repo === undefined ? undefined : configured.find((entry) => entry.repos.includes(repoKey(cfg, repo)))?.name;
+  return (notice: Notice): boolean => {
+    const explicit = configured.find((entry) => entry.name === storageGrounds(notice.grounds ?? '', cfg))?.name;
+    const owner = explicit ?? groundsForRepo(notice.repo);
+    if (owner) return owner === reader;
+    const dispatchIds: Array<string | undefined> = [notice.refId];
+    for (const value of [notice.refId, notice.url]) {
+      const ref = value ? parsePrRef(value) : undefined;
+      if (!ref) continue;
+      const watchOwner = readWatch(ref.key)?.owner;
+      if (watchOwner?.startsWith('dispatch:')) dispatchIds.push(watchOwner.slice('dispatch:'.length));
+      dispatchIds.push(...(readPr(ref.key)?.dispatches ?? []).slice().reverse());
+    }
+    for (const id of dispatchIds) {
+      if (!id) continue;
+      const dispatch = storedDescriptor(id, 'work') ?? storedDescriptor(id, 'chore');
+      const target = configured.find((entry) => entry.name === dispatch?.target?.grounds)?.name;
+      const dispatchGrounds = target ?? groundsForRepo(dispatch?.repo);
+      if (dispatchGrounds) return dispatchGrounds === reader;
+    }
+    return true;
+  };
+}
+
+/** Persist acknowledgements before advancing the shared cursor, so an interrupted write cannot replay them. */
+function consumeNotices(filter: ((notice: Notice) => boolean) | undefined, consume: boolean): Notice[] {
+  fs.mkdirSync(noticesDir(), { recursive: true });
+  return withDirLock(`${cursorFile()}.lock`, () => {
+    let seen = '';
+    try {
+      seen = fs.readFileSync(cursorFile(), 'utf8').trim();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const consumedFile = path.join(noticesDir(), '.consumed');
+    let consumed: Set<string>;
+    try {
+      const acknowledged = JSON.parse(fs.readFileSync(consumedFile, 'utf8')) as string[];
+      consumed = new Set(acknowledged.filter((seq) => seq > seen));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      consumed = new Set();
+    }
+    const fresh = listNotices(Number.MAX_SAFE_INTEGER).filter((notice) => notice.seq > seen);
+    const owned = fresh.filter((notice) => !consumed.has(notice.seq) && (!filter || filter(notice)));
+    if (consume && owned.length > 0) {
+      for (const notice of owned) consumed.add(notice.seq);
+      const consumedTemp = uniqueTempPath(consumedFile);
+      fs.writeFileSync(consumedTemp, JSON.stringify([...consumed]));
+      atomicRenameSync(consumedTemp, consumedFile);
+      let through = seen;
+      for (const notice of fresh) {
+        if (!consumed.has(notice.seq)) break;
+        through = notice.seq;
+      }
+      if (through > seen) {
+        const cursorTemp = uniqueTempPath(cursorFile());
+        fs.writeFileSync(cursorTemp, through);
+        atomicRenameSync(cursorTemp, cursorFile());
+      }
+    }
+    return owned;
+  }, { staleMs: 30_000, waitMs: 2000, busy: () => new Error('Notice delivery is busy. Try again.') });
+}
+
 let counter = 0;
 
 /**
@@ -176,8 +254,8 @@ export function listNotices(limit = 20): Notice[] {
 
 /**
  * Notices past the seen-cursor. `consume` advances the cursor over what is
- * returned; a filter leaves non-matching notices standing for their owner
- * (per-grounds consumption — one helm never eats another's notices).
+ * returned. Acknowledgements past a foreign gap prevent repeat delivery
+ * while leaving the foreign notice standing for its grounds.
  * `wakes` narrows what is returned among the owned notices: an owned notice
  * it rejects (e.g. one older than the helm's sign-on) is consumed without
  * waking anyone. A quiet kind (QUIET_NOTICE_KINDS) is consumed the same way:
@@ -188,28 +266,7 @@ export function unseenNotices(
   filter?: (n: Notice) => boolean,
   wakes?: (n: Notice) => boolean,
 ): Notice[] {
-  let seen = '';
-  try {
-    seen = fs.readFileSync(cursorFile(), 'utf8').trim();
-  } catch {
-    // never consumed
-  }
-  const fresh = listNotices(200).filter((n) => n.seq > seen);
-  const owned = filter ? fresh.filter(filter) : fresh;
-  if (consume && owned.length > 0) {
-    if (!filter) {
-      fs.writeFileSync(cursorFile(), fresh.at(-1)!.seq);
-    } else {
-      // Advance only through the contiguous consumed prefix, so a foreign
-      // notice interleaved between ours stays standing for its owner.
-      let through = seen;
-      for (const n of fresh) {
-        if (!filter(n)) break;
-        through = n.seq;
-      }
-      if (through > seen) fs.writeFileSync(cursorFile(), through);
-    }
-  }
+  const owned = consumeNotices(filter, consume);
   const progress = owned.some((n) => n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') ? dispatchProgress() : [];
   const waking = owned.filter((n) => {
     if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return false;
