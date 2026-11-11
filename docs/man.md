@@ -936,9 +936,15 @@ not). The pet also hides the clicked item itself until its state changes, so
 an ack that times out does not leave it walking. The ack changes only what the pet and the glass lobs display:
 `man tend --json` still lists the item (marked `acked`), and `man wait`, the
 park, and reminders ignore acks entirely — a human having seen a question
-must never hide it from the orchestrator that has to answer it. The glass,
-which has no write endpoint, hides a clicked lob per browser in localStorage
-instead.
+must never hide it from the orchestrator that has to answer it. Clicking a
+glass lob acknowledges its item the same way, through the page's guarded
+`attention-ack` request (`by: glass`), so it stops walking on the pet and on
+every glass. It names the item's key and the `stateHash` the page showed, so
+it acks nothing newer. That browser also hides the lob at once. A review
+notification is acknowledged on its review. An item of a grounds on a wharf
+is acknowledged on that wharf, so every boat agrees. On the hosted glass, a
+click on a boat's row is relayed to that boat, and a click on the wharf's own
+grounds acks it on the wharf.
 
 **The pet's read.** Every six seconds the pet runs `lobstah attention --json`.
 It prints `{ "attention": [...] }`: the same items, with the same fields, that

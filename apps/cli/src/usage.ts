@@ -65,6 +65,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   stats: { flags: { '--json': {}, '--per-trap': {} }, maxPositionals: 0 },
   goals: { flags: { '--grounds': { value: '<name>' }, '--session': { value: '<id>' }, '--file': { value: '<md>' } }, flagSubverbs: { '--file': ['recap'] }, positionals: '[<date>|set <line>...|add <text>|rm <n>|done <n>|undo <n>|recap-data [<date>]|recap <date> --file <md>]' },
   focus: { flags: {}, positionals: '<trap>' },
+  run: { flags: { '--hosted': {} }, positionals: 'passkey add', maxPositionals: 2 },
   tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
   heavy: { flags: { '--bg': {}, '--json': {} }, positionals: '[-- <command>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
@@ -328,6 +329,9 @@ wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster 
 Accepts its name or id with or without wt:. Reports the focus step, or why it could
 not focus. A session link can open on any supported platform; native window
 focus requires macOS.`,
+  run: `Run cards. passkey add --hosted lets a phone confirm Run on this Mac's cards from the hosted glass:
+after the macOS password dialog it opens the hosted glass's pairing page, where the phone makes a passkey.
+The link works once, for 5 minutes. This Mac must mirror to the wharf first (lobstah wharf login --mirror).`,
   heavy: `The machine's one line for heavy commands, such as full test runs and builds.
 With no command, shows the line. With one, waits for a slot, runs it, then frees the slot.
 --bg returns at once and posts the exit code and log to this dispatch's inbox.`,

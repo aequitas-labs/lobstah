@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { askDecision, ensureLayout, listGrants, loadConfig, readDecisionAnswer } from '@lobstah/core';
+import { askDecision, claimBait, enqueue, ensureLayout, listGrants, loadConfig, readDecisionAnswer, settlePermissionCards, signOnTrap } from '@lobstah/core';
 import type { MirrorStatus, WharfMirrorCall } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { askPermission } from '../src/grants-cli.js';
@@ -132,6 +132,40 @@ describe('the snapshot', () => {
 });
 
 describe('relayed calls', () => {
+  it('removes a finished tool permission from both glasses and refuses an already queued late answer', async () => {
+    const worktree = path.join(home, 'worktree');
+    fs.mkdirSync(worktree);
+    const session = 'mirror-waiting-trap';
+    const signed = signOnTrap({ sessionId: session, harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000 });
+    if (!('ok' in signed)) throw new Error('could not sign on');
+    enqueue({ id: 'mirror-work', repo: 'web', brief: 'Check the release' });
+    claimBait(signed.ok);
+    const card = askPermission({ dispatch: 'mirror-work', lane: 'work', ask: {
+      session, tool: 'Bash', call: { id: 'mirror-call' }, command: 'pnpm exec check-release', harness: 'claude',
+    } });
+    const wharf = new FakeWharf();
+    wharf.watchedUntil = new Date(now + 30_000).toISOString();
+    const m = mirror(wharf);
+    await m.pass();
+    expect((wharf.puts.at(-1)!.decisions as Array<{ key: string }>).map(item => item.key)).toContain(card.key);
+    // The person's click is queued before the boat learns the call ended.
+    wharf.queued = [call('late-allow', { write: { kind: 'decision-answer', payload: { key: card.key, option: 'Allow once' } } })];
+    settlePermissionCards({ session_id: session, hook_event_name: 'PostToolBatch', tool_calls: [{ tool_use_id: 'mirror-call' }] });
+    now += MIRROR_WATCHED_PASS_MS;
+    await m.pass();
+    expect(wharf.puts.at(-1)!.decisions).toEqual([]);
+    expect(wharf.answers.get('late-allow')?.status).toBe(404);
+    const snapshot = await (await fetch(`http://127.0.0.1:${port}/data`)).json() as { focusToken: string; decisions: unknown[] };
+    expect(snapshot.decisions).toEqual([]);
+    const localAnswer = await fetch(`http://127.0.0.1:${port}/requests`, {
+      method: 'POST', headers: { Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-Lobstah-Token': snapshot.focusToken },
+      body: JSON.stringify({ kind: 'decision-answer', payload: { key: card.key, option: 'Allow once' } }),
+    });
+    expect(localAnswer.status).toBe(404);
+    expect(readDecisionAnswer(card.key)).toBeUndefined();
+    expect(listGrants().grants).toEqual([]);
+  });
+
   it('carries out an allowed read and answers with the local glass’s own status and body', async () => {
     const wharf = new FakeWharf();
     wharf.queued = [call('stats', { read: '/data/stats' })];
@@ -147,12 +181,14 @@ describe('relayed calls', () => {
     const wharf = new FakeWharf();
     const glass = recordingGlass();
     wharf.queued = [
+      call('review-settings', { write: { kind: 'review-mode', payload: { mode: 'auto-review', publish: true } } }),
+      call('helm-chat', { write: { kind: 'helm-chat', payload: { grounds: 'fleet', chat: 'brief' } } }),
       call('focus', { write: { kind: 'focus', payload: { trapId: 'x' } } }),
       call('raw', { read: '/api/focus/x' }),
       call('climb', { read: '/data/dispatch/%2e%2e' }),
     ];
     await mirror(wharf, glass).pass();
-    for (const id of ['focus', 'raw', 'climb']) {
+    for (const id of ['review-settings', 'helm-chat', 'focus', 'raw', 'climb']) {
       expect(wharf.answers.get(id)?.status, id).toBe(403);
     }
     expect(glass.requests).toEqual([]);

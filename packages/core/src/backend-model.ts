@@ -191,14 +191,20 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
   /^\/attachment\/trap\/[A-Za-z0-9-]{1,64}\/[A-Za-z0-9%._-]{1,300}$/,
 ];
 /**
- * What the hosted glass may write on a mirror boat: every `POST /requests`
- * kind the local glass takes. Focus is not one: ↗ Open raises a window on
- * the boat's own screen and is never relayed.
+ * What the hosted glass may write on a mirror boat. Settings stay read-only
+ * on every glass: review-mode and helm-chat are never relayed. Focus is
+ * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [
-  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'helm-chat', 'todo-schedule', 'pr-ack',
+  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
-  'review-approve', 'review-comment', 'review-dismiss', 'review-draft', 'review-mode', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
+  'review-approve', 'review-comment', 'review-dismiss', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
+  // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.
+  'run-pair-challenge', 'run-pair-register',
+  // A Run from the hosted glass: the boat checks a phone's passkey (or that page's window key) and runs only its stored script.
+  'run-challenge', 'run', 'run-output',
+  // Stop and Dismiss need no passkey, as on the Mac: stopping is safe and urgent.
+  'run-stop', 'run-dismiss',
 ] as const;
 export type MirrorWriteKind = (typeof MIRROR_WRITE_KINDS)[number];
 /** Whether a relayed read names a path the hosted glass may read. */

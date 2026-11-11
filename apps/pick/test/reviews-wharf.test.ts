@@ -18,7 +18,7 @@ beforeEach(() => {
     path.join(home, 'config.toml'),
     [
       '[reviews]',
-      'enabled = true',
+      'enabled = true', 'requestedAfter = "1970-01-01T00:00:00Z"',
       'work = "headless"',
       '[repos.web]',
       'path = "/w"',
