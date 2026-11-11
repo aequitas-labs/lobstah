@@ -52,7 +52,9 @@ function translateLink(): { kind: 'dispatch' | 'trap'; id: string } | undefined 
 }
 
 function showAuth(state: AuthState): void {
-  render(html`<${AuthScreen} state=${state} authenticate=${authenticate} />`, document.body);
+  // Signing in on the way to approve a boat shows the sign-in card alone.
+  const device = authDestination(location).pathname === '/device';
+  render(html`<${AuthScreen} state=${state} authenticate=${authenticate} device=${device} />`, document.body);
 }
 
 let authBusy = false;

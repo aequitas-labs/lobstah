@@ -193,10 +193,31 @@ body:has(.auth-shell) {
   line-height: 1.8;
   margin: 0 0 20px;
 }
+/* The code is the one thing to compare with the terminal: centered, large and spaced, in its own box. */
+.auth-consent-code {
+  text-align: center;
+}
+.auth-consent-code p {
+  margin: 0 0 8px;
+  color: var(--dim);
+  font-size: 13px;
+}
 .auth-consent-code b {
-  white-space: nowrap;
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 1px;
+  font-size: 34px;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
+  padding: 10px 16px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+}
+/* On the way to approve a boat, the sign-in card stands alone. */
+.auth-main.auth-device {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
 }
 .auth-consent-access select,
 .auth-consent-form input {

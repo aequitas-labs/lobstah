@@ -171,7 +171,9 @@ it('boat approval is its own page: the boat, its code, what it can and cannot do
   expect(g.reads).toContain('/api/auth/device?user_code=ABCD-EFGH');
   expect(g.doc.querySelector('nav')).toBeNull();
   expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Approve studio?');
-  expect(g.doc.querySelector('.auth-consent-code')?.textContent).toBe('Check that your terminal shows ABCD-EFGH');
+  // The code stands on its own, under a small line: the one thing to compare with the terminal.
+  expect(g.doc.querySelector('.auth-consent-code p')?.textContent).toBe('Check that your terminal shows');
+  expect(g.doc.querySelector('.auth-consent-code b')?.textContent).toBe('ABCD-EFGH');
   expect(g.doc.querySelector('.auth-consent-access')?.textContent).toBe('Access: Mirror');
   const list = (n: number) => [...g.doc.querySelectorAll(`.auth-consent-lists > div:nth-child(${n}) li`)].map((li) => li.textContent);
   expect(list(1)).toEqual(['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches']);
@@ -211,9 +213,22 @@ it('approval without a code asks for the one the terminal shows', async () => {
 
 it('a signed-out visitor to boat approval signs in first and returns to it', async () => {
   const g = await page('/device?user_code=ABCD-EFGH', 200, 200, { session: 'out' });
-  expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Welcome aboard');
+  // Only the sign-in card: its own heading, the logo, and no intro.
+  expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Sign in to approve a boat');
+  expect(g.doc.querySelector('.auth-intro')).toBeNull();
+  expect(g.doc.querySelector('.auth-brand img')?.getAttribute('alt')).toBe('Lobstah lobster and star');
   await g.click('Continue with GitHub');
   expect(g.writes[0]!.body.callbackURL).toBe('https://glass.test/device?user_code=ABCD-EFGH');
+  // The home page's sign-in keeps its intro and title.
+  const home = await page('/', 200, 200, { session: 'out' });
+  expect(home.doc.querySelector('#auth-title')?.textContent).toBe('Welcome aboard');
+  expect(home.doc.querySelector('.auth-intro')).toBeTruthy();
+});
+
+it("trouble signing in on the way to approve a boat keeps the screen's own title, without the intro", async () => {
+  const g = await page('/api/auth/error?error=state_mismatch&returnTo=' + encodeURIComponent('/device?user_code=ABC'));
+  expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Your session timed out');
+  expect(g.doc.querySelector('.auth-intro')).toBeNull();
 });
 
 it('a refused approval says the code does not work and keeps the person signed in', async () => {

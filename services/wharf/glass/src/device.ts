@@ -118,7 +118,7 @@ export function DeviceConsent({ signedOut }: { signedOut: (status: 401 | 403) =>
     const d = step.device,
       options = choices(d.requestedPermissions),
       { can, cannot } = abilities(choice);
-    body = html`${d.previousBoatName && d.previousBoatName !== d.boatName && html`<p class="auth-detail">Previously named ${d.previousBoatName}</p>`}<p class="auth-consent-code">Check that your terminal shows <b>${code.trim()}</b></p>${
+    body = html`${d.previousBoatName && d.previousBoatName !== d.boatName && html`<p class="auth-detail">Previously named ${d.previousBoatName}</p>`}<div class="auth-consent-code"><p>Check that your terminal shows</p><b>${code.trim()}</b></div>${
       options.length > 1
         ? html`<label class="auth-consent-access">Access <select aria-label="Access" value=${choice} onChange=${(e: Event) => setChoice(value(e))}>${options.map((o) => html`<option value=${o}>${ACCESS[o]!.label}</option>`)}</select></label>`
         : html`<p class="auth-consent-access">Access: <b>${ACCESS[choice]!.label}</b></p>`

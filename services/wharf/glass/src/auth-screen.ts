@@ -79,15 +79,21 @@ function CrawlingLobster() {
 const GitHubMark = () =>
   html`<svg class="github-mark" width="20" height="20" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656" /></svg>`;
 
-export function AuthScreen({ state, authenticate }: { state: AuthState; authenticate: () => void; notice?: string }) {
+/** Signing in to approve a boat (/device): the card alone, with its own heading; trouble keeps the screen's own titles. */
+const DEVICE_TITLE: Partial<Record<AuthState, string>> = { signin: 'Sign in to approve a boat', 'signed-out': 'Sign in to approve a boat' };
+
+export function AuthScreen({ state, authenticate, device = false }: { state: AuthState; authenticate: () => void; notice?: string; device?: boolean }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const previous = useRef(state);
   useLayoutEffect(() => {
-    document.title = `${COPY[state].title} · lobstah spyglass`;
+    document.title = `${(device && DEVICE_TITLE[state]) || COPY[state].title} · lobstah spyglass`;
     if (previous.current !== state && state !== 'connecting') heading.current?.focus({ preventScroll: true });
     previous.current = state;
-  }, [state]);
-  const copy = COPY[state];
+  }, [state, device]);
+  const copy = device && DEVICE_TITLE[state] ? { title: DEVICE_TITLE[state]! } : COPY[state];
   const waiting = state === 'connecting';
-  return html`<div class="auth-shell"><header class="auth-brand"><img src=${logo} width="64" height="64" alt="Lobstah lobster and star" /><b>lobstah spyglass</b></header><main class="auth-main"><section class="auth-intro" aria-labelledby="auth-intro-title"><h1 id="auth-intro-title">Your fleet<br /><span>in sight</span></h1><ul class="auth-features"><li><span class="auth-buoy" aria-hidden="true"><img src=${buoy} width="64" height="64" alt="" /><img src=${buoyBody} width="64" height="64" alt="" /></span><span>Answer when a buoy flags you</span></li><li><img src=${trap} width="64" height="64" alt="" /><span>Know what's working and what's stuck</span></li><li><${CrawlingLobster} /><span>Haul up the catch: PRs, evidence and reports</span></li></ul></section><section class=${'auth-card auth-' + state} aria-labelledby="auth-title" aria-busy=${waiting}><div class="auth-card-body"><h2 id="auth-title" ref=${heading} tabindex="-1" aria-describedby=${copy.detail ? 'auth-detail' : undefined} role=${waiting ? 'status' : undefined}>${copy.title}</h2>${copy.detail && html`<p id="auth-detail" class="auth-detail">${copy.detail}</p>`}<button class="auth-github" type="button" disabled=${waiting} onClick=${authenticate}><${GitHubMark} /><span>Continue with GitHub</span></button><p class="auth-access">GitHub only confirms who you are. It grants no repository access</p></div></section></main><footer class="auth-footer">Nobody stares at the water</footer></div>`;
+  return html`<div class="auth-shell"><header class="auth-brand"><img src=${logo} width="64" height="64" alt="Lobstah lobster and star" /><b>lobstah spyglass</b></header><main class=${'auth-main' + (device ? ' auth-device' : '')}>${
+    !device &&
+    html`<section class="auth-intro" aria-labelledby="auth-intro-title"><h1 id="auth-intro-title">Your fleet<br /><span>in sight</span></h1><ul class="auth-features"><li><span class="auth-buoy" aria-hidden="true"><img src=${buoy} width="64" height="64" alt="" /><img src=${buoyBody} width="64" height="64" alt="" /></span><span>Answer when a buoy flags you</span></li><li><img src=${trap} width="64" height="64" alt="" /><span>Know what's working and what's stuck</span></li><li><${CrawlingLobster} /><span>Haul up the catch: PRs, evidence and reports</span></li></ul></section>`
+  }<section class=${'auth-card auth-' + state} aria-labelledby="auth-title" aria-busy=${waiting}><div class="auth-card-body"><h2 id="auth-title" ref=${heading} tabindex="-1" aria-describedby=${copy.detail ? 'auth-detail' : undefined} role=${waiting ? 'status' : undefined}>${copy.title}</h2>${copy.detail && html`<p id="auth-detail" class="auth-detail">${copy.detail}</p>`}<button class="auth-github" type="button" disabled=${waiting} onClick=${authenticate}><${GitHubMark} /><span>Continue with GitHub</span></button><p class="auth-access">GitHub only confirms who you are. It grants no repository access</p></div></section></main><footer class="auth-footer">Nobody stares at the water</footer></div>`;
 }
