@@ -129,7 +129,7 @@ it('clears expired or denied account details and gives a separate signed-out sta
     expect(g.doc.body.textContent).not.toContain('Choose the next catch');
     const count = g.reads.length; await g.poll(); expect(g.reads).toHaveLength(count);
   }
-  const g = await page('/', 200); await g.click('sign out');
+  const g = await page('/', 200); await g.click('Sign out');
   expect(g.doc.querySelector('#auth-title')?.textContent).toBe('Ashore for now');
   expect(g.doc.querySelector('#auth-detail')?.textContent).toBe("Sign in again whenever you're ready");
 });

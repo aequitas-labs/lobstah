@@ -18,6 +18,7 @@ import {
   loadConfig,
   mergeEvidence,
   parsePrRef,
+  prKeyLabel,
   pendingIds,
   queuedDescriptor,
   cancelQueued,
@@ -370,7 +371,7 @@ export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: strin
     const ownerLane = owner ? laneOf(owner) : undefined;
     postNotice({
       kind: merged ? 'pr-merged' : 'pr-closed',
-      text: `${ref.key} ${merged ? 'merged' : 'closed without merge'} — ${owner ? `dispatch ${owner.slice(0, 8)}` : 'no dispatch (watched by the helm)'} (${ref.url})`,
+      text: `${prKeyLabel(ref.key, view.title ?? after.title)} ${merged ? 'merged' : 'closed without merge'} — ${owner ? `dispatch ${owner.slice(0, 8)}` : 'no dispatch (watched by the helm)'} (${ref.url})`,
       refId: owner ?? ref.key,
       ...(owner && ownerLane ? { repo: repoOf(owner, ownerLane) } : {}),
       dedupeKey: `${merged ? 'pr-merged' : 'pr-closed'}-${ref.key}-${view.mergedAt ?? view.closedAt ?? ''}`,
@@ -537,10 +538,4 @@ export function observeDispatchPrWatches(
     }
   }
   syncStackReadiness(loadConfig(), now);
-}
-
-/** A PR title for `lobstah prs`: at most `max` characters, the last an ellipsis when cut; '' when absent. */
-export function cutTitle(title: string | undefined, max = 60): string {
-  const chars = Array.from((title ?? '').replace(/\s+/g, ' ').trim());
-  return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
 }

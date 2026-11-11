@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { IdleWait, injectedPrompt, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
+import { CONFIGURED_TRAP_INSTRUCTION, IdleWait, injectedPrompt, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
   readBrokerAgent, brokerRequest, WharfBackend, recordWharfCatch, type BrokerPoll } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
@@ -12,6 +12,7 @@ import { wharfLogin } from './wharf-login.js';
 import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
 import { readHookStdin } from './soak-site.js';
 import { WharfWake } from './wharf-wake.js';
+import { mirrorScope } from './wharf-mirror.js';
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -35,7 +36,12 @@ const OVERVIEW = new Set(['ls', 'status', 'man:tend', 'man:report', 'prs', 'repo
 export async function wharfCommand(cmd: string | undefined, pos: string[], opts: Options, config: Config): Promise<boolean> {
   if (cmd === 'goals' && backendScopes(config).some((s) => readBrokerAgent(s.grounds))) throw new Error('a hosted trap cannot write helm goals');
   if (!cmd || GLOBAL.has(cmd)) return false;
-  const grounds = opts.opt('--grounds') ?? process.env.LOBSTAH_GROUNDS;
+  // A mirror is this machine's boat on a wharf, named by --wharf: it has no wharf grounds to scope it.
+  if (cmd === 'wharf' && opts.opt('--wharf') !== undefined) { await mirrorWharfCommand(pos, opts, config); return true; }
+  const configuredName = opts.opt('--trap') ?? (opts.opt('--for')?.startsWith('trap:') ? opts.opt('--for')!.slice(5) : cmd === 'man:throw' && pos[0]?.startsWith('trap:') ? pos[0].slice(5) : undefined);
+  const configuredProfile = configuredName ? config.traps?.[configuredName] : undefined;
+  if (configuredName && !configuredProfile) throw new Error(`unknown configured profile trap:${configuredName}`);
+  const grounds = opts.opt('--grounds') ?? configuredProfile?.grounds ?? process.env.LOBSTAH_GROUNDS;
   const agentScope = backendScopes(config).find((s) => s.kind === 'wharf' && readBrokerAgent(s.grounds));
   if (agentScope && OVERVIEW.has(cmd)) throw new Error('a hosted trap sees only its own catch; use inbox or wharf receipt');
   if (!grounds && OVERVIEW.has(cmd) && !pos.length) { await refreshHostedViews(config); return false; }
@@ -119,15 +125,41 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       if (opts.opt('--pool')) throw new Error('local worktree pools cannot run on wharf grounds');
       const repo = opts.opt('--repo'); const file = opts.opt('--brief') ?? opts.opt('--bait');
       const brief = opts.opt('--brief-text') ?? (file ? fs.readFileSync(file, 'utf8') : undefined);
+      if (configuredName && configuredProfile) {
+        if (!brief || configuredProfile.grounds !== scope.grounds) throw new Error('configured dispatch needs a brief in its own grounds');
+        for (const flag of ['--repo', '--pool', '--trap-any', '--pr', '--follow-up', '--harness', '--model', '--effort']) if (opts.has(flag)) throw new Error(`${flag} does not apply to configured assistance`);
+        const parent = opts.opt('--assist');
+        if (parent) {
+          const origin = await backend.request(`dispatches/${encodeURIComponent(parent)}`) as import('@lobstah/core').DispatchView;
+          if (!['queued', 'active'].includes(origin.state) || (origin.target ? origin.target.grounds !== scope.grounds : origin.grounds ? origin.grounds !== scope.grounds : !origin.repo || !scope.repos.includes(origin.repo))) throw new Error('assistance parent has ended or belongs to another grounds');
+        }
+        const boat = await backend.request('_boat') as { id: string };
+        print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), brief, lane: opts.has('--chore') ? 'chore' : 'work', boat: boat.id,
+          for: `trap:${configuredName}`, target: { kind: 'configured-trap', profile: configuredName, grounds: scope.grounds, surface: configuredProfile.surface, ...(parent ? { parentDispatch: parent } : {}) } }, key()));
+        break;
+      }
+      if (opts.opt('--assist')) throw new Error('--assist requires --for trap:<profile>');
       if (!repo || !brief || !scope.repos.includes(repo)) throw new Error('dispatch needs --repo in this grounds and --brief or --brief-text');
       const targetBoat = opts.opt('--boat') ? await boatId(opts.opt('--boat')) : undefined;
-      print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, repoRemote: wharfRepoIdentity(config, repo), brief, lane: opts.has('--chore') ? 'chore' : 'work',
+      print(await backend.enqueue({ id: opts.opt('--id') ?? randomUUID(), repo, repoRemote: wharfRepoIdentity(config, repo), grounds: scope.grounds, brief, lane: opts.has('--chore') ? 'chore' : 'work',
         ...(targetBoat ? { boat: targetBoat } : {}),
         for: opts.opt('--for')?.replace(/^wt:/, ''), followUp: opts.opt('--follow-up'), harness: opts.opt('--harness'), model: opts.opt('--model'), effort: opts.opt('--effort') }, key()));
       break;
     }
     case 'ls': print(await backend.list()); break;
-    case 'status': print(await backend.request(`dispatches/${id()}`)); break;
+    case 'status': {
+      if (pos[0]?.startsWith('trap:')) { const { configuredTrapViews } = await import('@lobstah/core'); print(configuredTrapViews(config).find((profile) => profile.profile === pos[0]!.slice(5) && profile.grounds === scope.grounds)); }
+      else print(await backend.request(`dispatches/${id()}`)); break;
+    }
+    case 'man:roster': {
+      const { configuredTrapViews, configuredTrapSlots, rosterByAddress } = await import('@lobstah/core');
+      if (!pos.length) { print(configuredTrapViews(config).filter((profile) => profile.grounds === scope.grounds)); break; }
+      if (pos[0] !== 'forget' || !pos[1]) throw new Error('configured roster supports listing and forget; its settings live in [traps.<name>]');
+      const entry = rosterByAddress(pos[1]), slot = configuredTrapSlots().find((instance) => pos[1] === `trap:${instance.profile}` || pos[1]!.replace(/^wt:/, '') === instance.trapId);
+      if ((entry?.configured?.grounds ?? slot?.grounds) !== scope.grounds) throw new Error('configured instance belongs to another grounds or is unknown');
+      await backend.request('helm/renew', {}, key());
+      const { forgetTrap } = await import('./forget.js'); print(await forgetTrap(pos[1], config)); break;
+    }
     case 'cancel': print(await backend.request(`dispatches/${id()}/cancel`, {}, key())); break;
     case 'send': noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); print({ sent: true }); break;
     case 'inbox': print(await backend.messages(pos[0] ?? '')); break; // Explicit receipt, never implicit acknowledgement.
@@ -135,6 +167,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       const verb = pos[1]; if (!verb || !isVerb(verb)) throw new Error('report requires one of the six verbs');
       const waiting = waitingFields(verb, { waitingOn: opts.opt('--waiting-on'), link: opts.opt('--link'), until: opts.opt('--until') });
       const files = [...opts.values('--file-id')], base = key();
+      if (agent?.configured && opts.values('--pr').length) throw new Error('configured results accept files, not PR evidence');
+      if (agent?.configured && verb === 'working') await brokerRequest('progress', { ...brokerBody(agent), dispatch: pos[0], verb });
       const reportFile = opts.opt('--report');
       if (files.length + opts.values('--attach').length + Number(!!reportFile) > 32) throw new Error('at most 32 evidence files');
       if (reportFile) files.unshift(await backend.upload(pos[0] ?? '', 'report.md', readFile(reportFile, 65536), partKey(base, 'markdown')));
@@ -151,7 +185,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
           recordWharfCatch(receipt, backend.completion?.withHelm ?? null, backend.completion?.at ?? new Date().toISOString());
         } catch { /* Usage cannot fail an accepted report. */ }
       }
-      if (agent) await brokerRequest(verb === 'done' || verb === 'failed' ? 'finish' : 'progress', { ...brokerBody(agent), dispatch: pos[0] });
+      if (agent) await brokerRequest(verb === 'done' || verb === 'failed' ? 'finish' : 'progress', { ...brokerBody(agent), dispatch: pos[0], verb });
       print({ reported: verb }); break;
     }
     case 'man:ask': {
@@ -167,6 +201,20 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'man:helm': print(await backend.request('helm/take', { session, take: opts.has('--take') }, key())); break;
     case 'man:relieve': print(await backend.request('helm/release', {}, key())); break;
     case 'man:throw': {
+      if (configuredName && configuredProfile) {
+        if (configuredProfile.grounds !== scope.grounds) throw new Error('configured profile belongs to another grounds');
+        if (opts.has('--dry-run') || opts.has('--plan')) { print({ profile: configuredName, surface: configuredProfile.surface, plan: 'dry run' }); break; }
+        await backend.request('helm/renew', {}, key());
+        const { throwConfiguredTrap, configuredSignOnCommand } = await import('./configured-throw.js');
+        const result = await throwConfiguredTrap(config, configuredName, session ?? 'helm', { command: configuredSignOnCommand() });
+        print(result);
+        if (result.state === 'needs-app-start') {
+          const { glassUrl, glassPort } = await import('./glass-lifecycle.js');
+          console.log(`Open the start card on this boat: [card](${glassUrl(glassPort())}/#decision/${encodeURIComponent(result.card.key)})`);
+        }
+        break;
+      }
+
       if (!opts.has('--new') || pos.length || opts.has('--all') || opts.has('--dry-run') || opts.opt('--harness') || opts.opt('--count'))
         throw new Error('wharf throw supports --new --repo only; the boat chooses configured harness options');
       await backend.request('helm/renew', {}, key());
@@ -227,6 +275,33 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
 }
 
 /**
+ * `lobstah wharf login|logout|whoami --wharf <name>`: this machine as a
+ * mirror boat on that wharf. Login with `--mirror` asks for mirror and read
+ * access only. Whoami names the boat and how fresh its mirror is.
+ */
+async function mirrorWharfCommand(pos: string[], opts: Options, config: Config): Promise<void> {
+  const wharf = opts.opt('--wharf')!;
+  const scope = mirrorScope(config, wharf);
+  if (pos.length !== 1) throw new Error('wharf login, logout and whoami --wharf act only as this boat; no positional argument');
+  if (pos[0] === 'login' || pos[0] === 'logout') {
+    if (pos[0] === 'login' && !opts.has('--mirror') && !opts.opt('--credential-file')) throw new Error(`--wharf without grounds enrolls a mirror boat: lobstah wharf login --wharf ${wharf} --mirror`);
+    await wharfLogin(scope, pos[0], opts); return;
+  }
+  if (pos[0] !== 'whoami') throw new Error('--wharf takes login, logout or whoami');
+  const { mirrorFreshness, readMirrorStatus } = await import('@lobstah/core');
+  const boat = await wharfFor(scope).request('_boat') as { id: string; name: string; permissions: string[] };
+  const status = readMirrorStatus();
+  const mine = status?.wharf === wharf ? status : undefined;
+  console.log(toonKV({
+    wharf, boat: boat.name, id: boat.id, permissions: boat.permissions.join(' + '),
+    mirror: config.glass.mirror !== wharf ? 'off ([glass] mirror names another wharf or none)' : mirrorFreshness(mine),
+    ...(mine?.lastPutAt ? { lastPut: mine.lastPutAt } : {}),
+    ...(mine?.watchedUntil && Date.parse(mine.watchedUntil) > Date.now() ? { watching: 'a hosted glass is open' } : {}),
+    ...(mine?.error ? { error: mine.error } : {}),
+  }));
+}
+
+/**
  * `lobstah attention ack <key>` for a wharf item: tell the item's wharf, write
  * no local ack file, and show the ack in this boat's cache at once. The first
  * ack stands there, so `unack` has nothing it may remove.
@@ -268,7 +343,7 @@ export async function wharfHook(cmd: string | undefined, args: string[]): Promis
       else if (args[0] === 'stop' || cmd === 'man:haul') {
         const p = await waitBrokerAgent(agent);
         console.log(JSON.stringify({ decision: 'block', reason: p.claim
-          ? `Hosted trap ${agent.trap} assigned dispatch ${p.claim.dispatch.id}. Branch first in ${agent.worktree}; report working, then work and report done/failed.\n${p.claim.dispatch.brief}`
+          ? `Hosted trap ${agent.trap} assigned dispatch ${p.claim.dispatch.id}. ${agent.configured ? CONFIGURED_TRAP_INSTRUCTION : `Branch first in ${agent.worktree}.`} Report working, then work and report done/failed.\n${p.claim.dispatch.brief}`
           : p.messages?.length ? `New inbox messages for ${p.dispatch}:\n${p.messages.map((m) => `${m.id}: ${m.text}`).join('\n')}\nReceipt explicitly with lobstah wharf receipt.`
           : 'This hosted trap is still signed on; its park timed out. End this turn and park again.' }));
       } else if (args[0] === 'session-start') console.log(`lobstah: hosted trap ${agent.trap}, session ${input?.session_id ?? agent.session}. Its boat daemon owns claim/renew; never use a boat credential.`);

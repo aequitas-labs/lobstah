@@ -6,7 +6,7 @@ import type { PermissionsConfig } from '@lobstah/core';
 import type { DoctorRow } from './doctor.js';
 import { codexHome, planCodex, writeCodexPlan } from './codex-permissions.js';
 import type { CodexPlan, ExecpolicyCheck } from './codex-permissions.js';
-import { lobstahContext } from './permission-context.js';
+import { HELM_RELAY_COMMANDS, TRAP_COORDINATION_COMMANDS, lobstahContext } from './permission-context.js';
 
 /**
  * lobstah's Claude Code auto-mode profile. Traps and the helm run Claude Code
@@ -48,7 +48,7 @@ export function baseProfile(worktrees = worktreesDir(), glassPort?: number): Pro
   const glob = `${rulePath(worktrees)}/**`;
   return {
     environment: lobstahContext(worktrees, glassPort),
-    allow: [`Read(${glob})`, `Edit(${glob})`, 'Bash(lobstah permissions propose *)'],
+    allow: [`Read(${glob})`, `Edit(${glob})`, 'Bash(lobstah permissions propose *)', ...[...HELM_RELAY_COMMANDS, ...TRAP_COORDINATION_COMMANDS].map((command) => `Bash(lobstah ${command}:*)`)],
     deny: [],
   };
 }

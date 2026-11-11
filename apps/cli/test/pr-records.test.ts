@@ -236,6 +236,7 @@ describe('man-owned PR watches are quiet unless something needs a human', () => 
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ refId: 'pr:acme/lobstah#9' });
     expect(notices[0]!.text).toContain('no dispatch (watched by the helm)');
+    expect(notices[0]!.text).toMatch(mergedView.title ? /^pr:acme\/lobstah#9 .+ merged — / : /^pr:acme\/lobstah#9 merged — /);
     expect(readPr(ref.key)!.state).toBe('MERGED');
   });
 

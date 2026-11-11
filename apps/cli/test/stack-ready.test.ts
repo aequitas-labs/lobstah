@@ -9,7 +9,7 @@ import { addPrWatch, observePr } from '../src/pr-watch.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildDigest, renderDigest } from '../src/digest.js';
 import { deriveGlassPrs } from '../src/glass-prs.js';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { loadGlass } from './glass-dom.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { emptyFleet } from './fixtures/glass-snapshots.js';
@@ -102,6 +102,18 @@ describe('stack watch discovery and shared presentation', () => {
     const glass = deriveGlassPrs([], [], readPrs());
     expect(glass.stacks).toHaveLength(1);
     expect(glass.stacks[0]?.readiness).toMatchObject({ ready: 3, total: 3, allReady: true });
+  });
+  it('walks one item for a v12 stack, and a PR added to it re-walks that item, naming the PR', () => {
+    put(1, { baseRefName: 'v12' }); put(2); syncStackReadiness(undefined, now);
+    const walking = () => buildTendReport(now).attention.filter((a) => !a.quiet && !a.acked);
+    const first = walking();
+    expect(first).toEqual([expect.objectContaining({ kind: 'stack-ready', key: 'stack:pr:acme/web#1' })]);
+    put(3); syncStackReadiness(undefined, now);
+    const next = walking();
+    // Same key: the pet updates its one lobster; a new stateHash walks it again.
+    expect(next).toEqual([expect.objectContaining({ kind: 'stack-ready', key: first[0]!.key, note: expect.stringMatching(/^Stack updated · #3 added — stack ready to merge: acme\/web #1 → #2 → #3/) })]);
+    expect(next[0]!.stateHash).not.toBe(first[0]!.stateHash);
+    expect(deriveGlassPrs([], [], readPrs()).stacks[0]?.nextNumber).toBe(1);
   });
   it('shows partial-ready progress in one quiet item in tend, digest and glass', () => {
     put(1); put(2); put(3, { isDraft: true });
@@ -218,7 +230,7 @@ describe('stack watch discovery and shared presentation', () => {
     try {
       expect(g.$$('details.deckstack')).toHaveLength(0);
       const stackRows = g.$$('.deckgrid .deckline, .deckgrid .deckstack')
-        .filter((el) => el.textContent?.includes('stack ready to merge: acme/web #1 → #2 → #3'));
+        .filter((el) => el.textContent?.includes('3 PRs, all green'));
       expect(stackRows).toHaveLength(1);
       expect(g.$$('.lob')).toHaveLength(1);
       expect(g.$('.lob')?.getAttribute('href')).toBe(view(3).url);
@@ -226,14 +238,92 @@ describe('stack watch discovery and shared presentation', () => {
       expect(g.$$('#notices tbody tr').filter((el) => el.textContent?.includes('stack ready to merge:'))).toHaveLength(1);
     } finally { await g.close(); }
   });
+  describe('titles', () => {
+    const titles: Record<number, string> = { 1: 'Add the heavy line', 2: 'Queue pushes through a hook', 3: 'Show it in tend and the glass' };
+    const putTitled = (over: Partial<GhPrView> = {}) => [1, 2, 3].forEach((n) => put(n, { title: titles[n]!, ...over }));
+    const snapshot = () => ({ ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), notices: buildTendReport(now).notices, now: new Date(now).toISOString() });
+
+    it('tend heads the stack with its title and keeps each PR title under it', () => {
+      putTitled(); syncStackReadiness(undefined, now);
+      const text = renderTend(buildTendReport(now));
+      expect(text).toContain('stack Add the heavy line · #1 → #2 → #3: next #1');
+      expect(text).toContain('stack ready to merge: Add the heavy line (#1 → #3, 3 PRs, all green)');
+      expect(text).toContain('#2 Queue pushes through a hook · ready');
+      expect(text).toContain('#3 Show it in tend and the glass · ready');
+    });
+    it('an attention note names the PR by its title, and by its number without one', () => {
+      put(5, { title: 'Put job photos first', headRefName: 'p5', baseRefName: 'main' });
+      put(6, { headRefName: 'p6', baseRefName: 'main' });
+      const notes = buildTendReport(now).attention.map((a) => a.note);
+      expect(notes).toContain('#5 Put job photos first · ready to merge');
+      expect(notes).toContain('#6 ready to merge');
+    });
+    it('a small surface gets the headline: the title, the count and the state, on the lob too', () => {
+      putTitled(); syncStackReadiness(undefined, now);
+      const report = buildTendReport(now);
+      expect(report.attention[0]).toMatchObject({ kind: 'stack-ready', headline: 'Add the heavy line (3 PRs, all green)' });
+      expect(lobItems(report.attention, { lobs: true, preview: false })[0]?.text).toBe('Add the heavy line (3 PRs, all green)');
+    });
+    it('a long title is cut so the headline keeps its count and state', () => {
+      [1, 2].forEach((n) => put(n, { title: 'x'.repeat(100) })); syncStackReadiness(undefined, now);
+      const headline = buildTendReport(now).attention[0]!.headline!;
+      expect(headline.endsWith('… (2 PRs, all green)')).toBe(true);
+      expect(Array.from(headline).length).toBeLessThanOrEqual(60);
+    });
+    it('a stack with no title has no headline: the small surfaces keep its note', () => {
+      [1, 2].forEach((n) => put(n)); syncStackReadiness(undefined, now);
+      expect(buildTendReport(now).attention[0]!.headline).toBeUndefined();
+    });
+    it('the digest and the notice stay one line, with no per-PR titles', () => {
+      putTitled(); syncStackReadiness(undefined, now);
+      const digest = renderDigest(buildDigest({ now }));
+      expect(digest).toContain('stack ready to merge: Add the heavy line (#1 → #3, 3 PRs, all green)');
+      expect(digest).not.toContain(titles[2]);
+      const notice = buildTendReport(now).notices.find((n) => n.kind === 'stack-ready');
+      expect(notice?.text).toBe('stack ready to merge: Add the heavy line (#1 → #3, 3 PRs, all green)');
+    });
+    it('the glass carries the title on the stack and the state apart from it', () => {
+      putTitled(); syncStackReadiness(undefined, now);
+      expect(snapshot().stacks[0]).toMatchObject({ title: 'Add the heavy line', readiness: { state: '3 PRs, all green' } });
+    });
+    it('a lone PR has no stack title: its row has its own', () => {
+      put(5, { title: 'Put job photos first', headRefName: 'p5', baseRefName: 'main' });
+      expect(snapshot().stacks[0]!.title).toBeUndefined();
+    });
+    it('a stack with a merged bottom keeps a title, from the bottom of what it shows', () => {
+      putTitled(); put(1, { title: titles[1]!, state: 'MERGED' });
+      expect(snapshot().stacks[0]!.title).toBeTruthy();
+    });
+    it.each(['rows', 'cards'])('the glass %s view shows the title, the state and every PR title once', async (viewMode) => {
+      putTitled(); syncStackReadiness(undefined, now);
+      const g = await loadGlass(GLASS_PAGE, snapshot(), { now, prefs: { view: viewMode } });
+      try {
+        const deck = g.$$('.deckgrid .deckline, .deckgrid .deckstack').find((el) => el.textContent?.includes('Add the heavy line'))!;
+        expect(deck.querySelector('.stacktitle')?.textContent).toBe('Add the heavy line');
+        expect(deck.textContent).toContain('3 PRs, all green');
+        expect(deck.textContent).not.toContain('stack ready to merge');
+        for (const n of [1, 2, 3]) expect([...deck.querySelectorAll('.prname')].map((e) => e.textContent)).toContain(`#${n} ${titles[n]}`);
+        await g.go('#prs');
+        expect(g.$('#prs .stacktitle')?.textContent).toBe('Add the heavy line');
+      } finally { await g.close(); }
+    });
+    it('the glass falls back to the numbers when no PR has a title', async () => {
+      [1, 2].forEach((n) => put(n)); syncStackReadiness(undefined, now);
+      const g = await loadGlass(GLASS_PAGE, snapshot(), { now, hash: '#prs' });
+      try {
+        expect(g.$('#prs .stacktitle')).toBeNull();
+        expect(g.$('#prs')?.textContent).toContain('#1 → #2');
+      } finally { await g.close(); }
+    });
+  });
   it('renders the shared readiness once in its existing PR group', async () => {
     put(1); put(2); put(3, { isDraft: true });
     const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), now: new Date(now).toISOString() };
     const g = await loadGlass(GLASS_PAGE, d, { now, hash: '#prs' });
     try {
-      expect(g.$('#prs')?.textContent).toContain('stack waiting: 2 of 3 ready');
+      expect(g.$('#prs')?.textContent).toContain('2 of 3 ready');
       expect(g.$('#prs')?.textContent).toContain('— #3 draft');
-      expect(g.$$('#prs tr:not(.rowhead) th').filter((th) => th.textContent?.includes('stack waiting: 2 of 3 ready'))).toHaveLength(1);
+      expect(g.$$('#prs tr:not(.rowhead) th').filter((th) => th.textContent?.includes('2 of 3 ready'))).toHaveLength(1);
     } finally { await g.close(); }
   });
   it('does not group fork PRs with their apparent base branch in the glass', () => {

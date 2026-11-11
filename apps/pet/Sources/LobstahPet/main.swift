@@ -328,7 +328,6 @@ final class Pet {
 
   init(item: AttentionItem, entryIndex: Int) {
     self.item = item
-    let text = item.bubbleText
     self.screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
     self.speed = Pet.walkingSpeed(for: item.identity)
     // Keep a little spatial separation as well as a 0...2s stagger, so
@@ -385,7 +384,7 @@ final class Pet {
     star.wantsLayer = true
     star.layer?.magnificationFilter = .nearest
 
-    let label = NSTextField(wrappingLabelWithString: text.count > 66 ? String(text.prefix(63)) + "…" : text)
+    let label = NSTextField(wrappingLabelWithString: item.bubbleLine)
     label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
     let fitted = label.sizeThatFits(NSSize(width: 216, height: 120))
     bubble.setFrameSize(NSSize(width: min(236, fitted.width + 20), height: fitted.height + 12))
@@ -407,9 +406,8 @@ final class Pet {
   func update(item: AttentionItem) {
     guard self.item != item else { return }
     self.item = item
-    let text = item.bubbleText
     guard let label, let bubble else { return }
-    label.stringValue = text.count > 66 ? String(text.prefix(63)) + "…" : text
+    label.stringValue = item.bubbleLine
     let fitted = label.sizeThatFits(NSSize(width: 216, height: 120))
     bubble.setFrameSize(NSSize(width: min(236, fitted.width + 20), height: fitted.height + 12))
     bubble.setFrameOrigin(NSPoint(x: 276 - bubble.frame.width, y: 88))
@@ -558,9 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var shown = Array(items.prefix(4))
         if extra > 0 {
           let last = shown.removeLast()
-          shown.append(AttentionItem(id: last.id, verb: last.verb, note: (last.note ?? last.verb) + " (+\(extra) more)", key: last.key, kind: last.kind, prUrl: last.prUrl, stateHash: last.stateHash))
-          shown[shown.count - 1].petOpen = last.petOpen
-          shown[shown.count - 1].reviewUrl = last.reviewUrl
+          shown.append(last.standingFor(extra: extra))
         }
         let visibleKeys = Set(shown.map(\.identity))
         for key in self.petsByKey.keys.filter({ !visibleKeys.contains($0) }) {

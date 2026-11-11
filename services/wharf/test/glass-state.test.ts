@@ -15,7 +15,7 @@ const sql = async (statement: string, ...bindings: SqlStorageValue[]) => runInDu
 beforeEach(async () => {
   await authFixtures();
   await runInDurableObject(env.ACCOUNTS.getByName('a'), (_instance: Account, state) => {
-    for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
   });
   const objects = await env.FILES.list({ prefix: 'a/' }); if (objects.objects.length) await env.FILES.delete(objects.objects.map((o) => o.key));
@@ -120,6 +120,17 @@ it('shows boat repos, check-in and trap harness/current job without exposing has
   expect(glass.boats).toContainEqual(expect.objectContaining({ id: boat.id, name: 'test-boat', repos: ['github.com/test/repo'], lastCheckIn: expect.any(String) }));
   expect(glass.workers).toContainEqual(expect.objectContaining({ id: 'trap', harness: 'codex', session: 'session', boat: boat.id, current: 'job' }));
   expect(JSON.stringify(glass)).not.toContain('hash'); expect(JSON.stringify(glass)).not.toContain(boat.token);
+});
+
+it('publishes a worker\'s lease and tmux pane, and refuses a pane that is not a pane id', async () => {
+  const boat = await helmBoat();
+  const signOn = (worker: string, tmuxPane?: string) => call('workers/sign-on', { worker, repo: 'repo', repoRemote: 'github.com/test/repo', harness: 'claude', session: 'session', tmuxPane }, boat.token);
+  expect((await signOn('in-pane', '%12')).status).toBe(200);
+  expect((await signOn('bad-pane', '%1;id')).status).toBe(400);
+  const workers = (await (await call('glass')).json<{ workers: unknown[] }>()).workers;
+  expect(workers).toContainEqual(expect.objectContaining({ id: 'in-pane', tmuxPane: '%12', live: true }));
+  await sql("UPDATE workers SET seen=0 WHERE id='in-pane'");
+  expect((await (await call('glass')).json<{ workers: unknown[] }>()).workers).toContainEqual(expect.objectContaining({ id: 'in-pane', live: false }));
 });
 
 it('person trap requests wait for a helm and are bounded, without launching anything', async () => {

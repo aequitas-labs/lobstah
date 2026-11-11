@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, listNotices, postNotice, unseenNotices } from '../src/index.js';
+import { addWatch, enqueue, ensureLayout, listNotices, loadConfig, noticeFilterForGrounds, postNotice, unseenNotices } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -105,6 +105,37 @@ describe('helm notices', () => {
     expect(theirs.map((n) => n.text)).toEqual(['theirs']);
   });
 
+  it('consumes owned notices after a foreign gap once while retaining the foreign notice', () => {
+    postNotice({ kind: 'decision-answer', text: 'first', repo: 'a' });
+    postNotice({ kind: 'bait-orphaned', text: 'foreign', repo: 'b' });
+    postNotice({ kind: 'decision-answer', text: 'last', repo: 'a' });
+    const mine = (n: { repo?: string }): boolean => n.repo === 'a';
+    expect(unseenNotices(true, mine).map((n) => n.text)).toEqual(['first', 'last']);
+    expect(unseenNotices(false, mine)).toEqual([]);
+    expect(unseenNotices(true, mine)).toEqual([]);
+    expect(unseenNotices(true, (n) => n.repo === 'b').map((n) => n.text)).toEqual(['foreign']);
+    expect(unseenNotices(false)).toEqual([]);
+  });
+
+  it('keeps an unread foreign notice when more than 200 later notices are consumed', () => {
+    postNotice({ kind: 'bait-orphaned', text: 'foreign', repo: 'b' });
+    for (let index = 0; index < 205; index++) postNotice({ kind: 'decision-answer', text: String(index), repo: 'a' });
+    expect(unseenNotices(true, (notice) => notice.repo === 'a')).toHaveLength(205);
+    expect(unseenNotices(true, (notice) => notice.repo === 'a')).toEqual([]);
+    expect(unseenNotices(true, (notice) => notice.repo === 'b').map((notice) => notice.text)).toEqual(['foreign']);
+  });
+
+  it('accepts a legacy cursor and retains acknowledgements across subsequent reads', () => {
+    const old = postNotice({ kind: 'bait-orphaned', text: 'already read' })!;
+    fs.writeFileSync(path.join(home, 'notices', '.cursor'), old.seq);
+    postNotice({ kind: 'bait-orphaned', text: 'foreign', repo: 'b' });
+    postNotice({ kind: 'decision-answer', text: 'new', repo: 'a' });
+    expect(unseenNotices(true, (notice) => notice.repo === 'a').map((notice) => notice.text)).toEqual(['new']);
+    expect(JSON.parse(fs.readFileSync(path.join(home, 'notices', '.consumed'), 'utf8'))).toHaveLength(1);
+    expect(unseenNotices(true).map((notice) => notice.text)).toEqual(['foreign']);
+    expect(unseenNotices(false)).toEqual([]);
+  });
+
   it('an owned notice the wake predicate rejects is consumed without waking, and never stalls the cursor', () => {
     postNotice({ kind: 'bait-orphaned', text: 'old', repo: 'a' });
     postNotice({ kind: 'bait-orphaned', text: 'new', repo: 'a' });
@@ -113,5 +144,61 @@ describe('helm notices', () => {
     expect(unseenNotices(true, mine, wakes).map((n) => n.text)).toEqual(['new']);
     expect(unseenNotices(true, mine, wakes)).toEqual([]);
     expect(listNotices().map((n) => n.text)).toEqual(['old', 'new']); // still listed
+  });
+});
+
+describe('notice grounds ownership', () => {
+  beforeEach(() => {
+    fs.writeFileSync(path.join(home, 'config.toml'), `
+[repos.a]
+path = "/repos/a"
+origin = "https://github.com/acme/a.git"
+[repos.b]
+path = "/repos/b"
+[grounds.alpha]
+repos = ["a"]
+[grounds.beta]
+repos = ["b"]
+`);
+  });
+
+  it('consumes an unowned stack notice between owned ones without replaying later answers', () => {
+    const filter = noticeFilterForGrounds('alpha', loadConfig());
+    postNotice({ kind: 'decision-answer', text: 'first', repo: 'a' });
+    postNotice({ kind: 'stack-ready', text: 'unconfigured stack', repo: 'acme/external', refId: 'pr:acme/external#1' });
+    const last = postNotice({ kind: 'decision-answer', text: 'last', repo: 'a' })!;
+    expect(unseenNotices(true, filter).map((notice) => notice.text)).toEqual(['first', 'last']);
+    expect(fs.readFileSync(path.join(home, 'notices', '.cursor'), 'utf8')).toBe(last.seq);
+    expect(unseenNotices(false, filter)).toEqual([]);
+    expect(unseenNotices(true, filter)).toEqual([]);
+  });
+
+  it('routes an unconfigured PR repo to the dispatch that registered its watch', () => {
+    enqueue({ id: 'origin', repo: 'a', brief: 'Watch a PR outside the configured repos' });
+    addWatch('pr:acme/external#1', 'unused', { owner: 'dispatch:origin' });
+    postNotice({ kind: 'watch-failing', text: 'external PR', repo: 'acme/external', refId: 'pr:acme/external#1' });
+    const cfg = loadConfig();
+    expect(unseenNotices(true, noticeFilterForGrounds('beta', cfg))).toEqual([]);
+    expect(unseenNotices(true, noticeFilterForGrounds('alpha', cfg)).map((notice) => notice.text)).toEqual(['external PR']);
+    expect(unseenNotices(true, noticeFilterForGrounds('alpha', cfg))).toEqual([]);
+  });
+
+  it('lets the first reader consume an unowned notice with no surviving dispatch', () => {
+    postNotice({ kind: 'watch-failing', text: 'unowned', repo: 'acme/external', grounds: 'removed' });
+    const cfg = loadConfig();
+    expect(unseenNotices(false, noticeFilterForGrounds('alpha', cfg))).toHaveLength(1);
+    expect(unseenNotices(true, noticeFilterForGrounds('beta', cfg))).toHaveLength(1);
+    expect(unseenNotices(true, noticeFilterForGrounds('alpha', cfg))).toEqual([]);
+  });
+
+  it('keeps configured repo and explicit grounds ownership ahead of the dispatch fallback', () => {
+    enqueue({ id: 'origin', repo: 'a', brief: 'Original dispatch' });
+    postNotice({ kind: 'bait-orphaned', text: 'beta repo', repo: 'b', refId: 'origin' });
+    postNotice({ kind: 'bait-orphaned', text: 'beta desk', grounds: 'beta', refId: 'origin' });
+    postNotice({ kind: 'bait-orphaned', text: 'alpha forge repo', repo: 'acme/a' });
+    const cfg = loadConfig();
+    expect(unseenNotices(true, noticeFilterForGrounds('alpha', cfg)).map((notice) => notice.text)).toEqual(['alpha forge repo']);
+    expect(unseenNotices(true, noticeFilterForGrounds('alpha', cfg))).toEqual([]);
+    expect(unseenNotices(true, noticeFilterForGrounds('beta', cfg)).map((notice) => notice.text)).toEqual(['beta repo', 'beta desk']);
   });
 });

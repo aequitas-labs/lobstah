@@ -1,7 +1,7 @@
 // Build the marketing page: apps/site/index.html with its stylesheet and
 // script inlined, written to apps/site/dist with the art it uses. The page
 // wears the glass's theme: the design tokens and the card, badge, button and
-// lobster rules are read from apps/cli/glass/glass.css at build time, never
+// lobster rules are read from packages/glass-ui/ui/glass.css at build time, never
 // copied by hand. Nothing here deploys or publishes anything.
 //
 //   node scripts/build-site.mjs            build once into apps/site/dist
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const site = path.join(root, 'apps', 'site');
-const glassCss = path.join(root, 'apps', 'cli', 'glass', 'glass.css');
+const glassCss = path.join(root, 'packages', 'glass-ui', 'ui', 'glass.css');
 
 const CSS_TAG = '<link rel="stylesheet" href="./site.css" />';
 const META_TAG = '<!-- head:meta -->';

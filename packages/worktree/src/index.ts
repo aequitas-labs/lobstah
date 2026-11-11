@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import {
   acquireWorktreeLock,
   activeIds,
+  applyHeavyHooks,
   chainWorktree,
   dispatchWorktree,
   laneOf,
@@ -412,6 +413,7 @@ function outputTail(stdout: string, stderr: string): string {
 
 /** Run the repo's `setup` commands in `dir`, with stdin closed, and record that they ran. */
 export async function runSetup(repo: RepoConfig, dir: string): Promise<void> {
+  applyHeavyHooks(dir);
   for (const cmd of repo.setup ?? []) {
     const child = shell(cmd, { cwd: dir, env: setupEnv(repo) });
     child.child.stdin?.end();
@@ -624,6 +626,7 @@ export async function chooseWorktree(input: ChooseInput): Promise<WorktreeChoice
  * setup ran.
  */
 export async function prepareReuse(repo: RepoConfig, dir: string): Promise<{ setupRan: boolean }> {
+  applyHeavyHooks(dir);
   await fetchShared(dir, 'origin', repo.trunk);
   if (!(repo.setup?.length)) return { setupRan: false };
   if (recordedSetupHash(dir) === setupHash(repo, dir)) return { setupRan: false };
