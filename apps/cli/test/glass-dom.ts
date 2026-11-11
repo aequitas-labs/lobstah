@@ -49,7 +49,7 @@ export interface GlassDom {
   setScroll(y: number): void;
   /** Calls made by the page to scrollTo, for distinguishing entry from polls. */
   scrolls(): number[];
-  /** Call one of the page's window functions (showModal, closeModal, setView…). */
+  /** Call one of the page's window functions (showModal, closeModal…). */
   call(name: string, ...args: unknown[]): Promise<void>;
   $(sel: string): Element | null;
   $$(sel: string): Element[];
