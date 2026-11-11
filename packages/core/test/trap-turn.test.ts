@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { appendStatus, beatTrap, claimNext, dispatchProgress, enqueue, ensureLayout, idleWorkingTrap,
-  laneDirs, listNotices, loadConfig, noticeDispatchProgress, noticeStands, trapWorkingStop, unseenNotices, resumeTrapTurn } from '../src/index.js';
+import { appendStatus, beatTrap, checkHeavyLine, claimNext, dispatchProgress, enqueue, ensureLayout, idleWorkingTrap,
+  joinHeavyLine, laneDirs, releaseHeavyTicket, listNotices, loadConfig, noticeDispatchProgress, noticeStands, trapWorkingStop, unseenNotices, resumeTrapTurn } from '../src/index.js';
 import type { TrapRegistration } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -108,4 +108,46 @@ it('a new user turn clears idleness and gets a fresh one-shot correction without
   expect(dispatchProgress()).toHaveLength(0);
   expect(trapWorkingStop(trap)?.reason).toContain('about to go idle');
   expect(trapWorkingStop(trap)).toEqual({});
+});
+
+describe("a trap's heavy job counts as working", () => {
+  /** The trap ends its turn on `working`: the correction, then the idle Stop. */
+  const goIdle = (): void => {
+    trapWorkingStop(trap);
+    trapWorkingStop(trap);
+  };
+
+  it('a job waiting or running in the heavy line holds the notice and withdraws one already standing', () => {
+    goIdle();
+    advance(60); noticeDispatchProgress();
+    const standing = listNotices()[0]!;
+    expect(standing.kind).toBe('trap-idle-working');
+    const waiting = joinHeavyLine({ pid: process.pid, command: 'pnpm test', trap: 'seat', dispatch: 'job', lane: 'work' });
+    expect(dispatchProgress()).toHaveLength(0);
+    expect(noticeStands(standing)).toBe(false); // The helm's Stop hook stops blocking on it.
+    expect(checkHeavyLine(waiting.seq).kind).toBe('run');
+    advance(25 * 60); noticeDispatchProgress();
+    expect(dispatchProgress()).toHaveLength(0);
+    expect(listNotices().filter((n) => n.kind === 'trap-idle-working')).toHaveLength(1); // Only the withdrawn one.
+  });
+
+  it('once the job ends, the notice returns only after the grace period', () => {
+    goIdle();
+    const ticket = joinHeavyLine({ pid: process.pid, command: 'pnpm test', trap: 'seat', dispatch: 'job', lane: 'work' });
+    checkHeavyLine(ticket.seq);
+    advance(25 * 60);
+    releaseHeavyTicket(ticket.seq, 0);
+    const endedAt = new Date().toISOString();
+    advance(59); expect(dispatchProgress()).toHaveLength(0);
+    advance(1);
+    expect(dispatchProgress()).toEqual([expect.objectContaining({ state: 'idle-while-working', since: endedAt, ageSecs: 60 })]);
+  });
+
+  it("another trap's or dispatch's job changes nothing", () => {
+    goIdle();
+    joinHeavyLine({ pid: process.pid, command: 'pnpm test', trap: 'other', dispatch: 'other-job', lane: 'work' });
+    advance(60);
+    expect(dispatchProgress()[0]?.state).toBe('idle-while-working');
+    expect(dispatchProgress()[0]?.ageSecs).toBe(60);
+  });
 });

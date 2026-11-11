@@ -34,7 +34,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await runInDurableObject(env.ACCOUNTS.getByName(account), (_instance: Account, state) => {
-    for (const table of ['boats', 'boat_permissions', 'workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
+    for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
   });
   await env.AUTH_DB.exec('DELETE FROM rateLimit');
@@ -50,6 +50,10 @@ it('serves the same bundled look on the glass host only, with nonce CSP and no c
   expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   expect(page.headers.get('cache-control')).toBe('no-store'); expect(content).not.toContain(token);
   expect((await SELF.fetch('https://glass.test/device')).status).toBe(200);
+  // A report opens on its own page, as in the local glass; the page reads the report through /api/glass.
+  const report = await SELF.fetch('https://glass.test/report/r1');
+  expect(report.status).toBe(200); expect(report.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+  for (const path of ['/report/', '/report/a/b', '/report/..%2Fdevice', '/report/' + 'a'.repeat(129)]) expect((await SELF.fetch('https://glass.test' + path)).status, path).toBe(404);
   expect((await SELF.fetch('https://state.test/')).status).toBe(404);
 });
 it('requires its cookie, not an API bearer, and derives the account rather than trusting a selector', async () => {

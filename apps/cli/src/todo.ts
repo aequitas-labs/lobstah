@@ -1,22 +1,48 @@
 import {
   DEFAULT_HELM,
+  ageLabel,
   claimHelmGoalsNudge,
+  claimTodoFirings,
   displayGrounds,
+  fireDueTodos,
+  formatTodoRecurrence,
   goalDate,
   goalLine,
   listTodos,
   loadConfig,
+  overdueTodoNote,
+  peekTodoFirings,
   readGoals,
+  readPr,
+  shortTodoTime,
+  TodoError,
   shownTodos,
   shownTodosByGrounds,
+  parsePrRef,
+  parseTodoTrigger,
+  prEvidence,
+  readTodoTrigger,
+  readWatch,
+  resolveTodoTrigger,
   staleTodoNote,
   staleTodos,
+  todoFiredBy,
   todoLine,
+  todoOverdue,
+  todoScheduled,
+  todoWaitingOn,
+  ghPrViewDirect,
+  upsertPr,
   toonTable,
+  toonKV,
   type Todo,
+  type TodoDueEvent,
+  type TodoTriggerSet,
+  type TodoTriggerTarget,
   type TodoView,
   type HelmConfig,
 } from '@lobstah/core';
+import { addPrWatch } from './pr-watch.js';
 
 export type { TodoView };
 
@@ -31,13 +57,22 @@ export function todoStaleDays(): number {
 
 function view(grounds: string, todos: Todo[], days: number, now: number, display: (g: string) => string): TodoView[] {
   const stale = new Set(staleTodos(todos, days, now).map((t) => t.id));
+  const tz = helmTimezone();
   return todos.map((t) => ({
     grounds: display(grounds),
+    groundsKey: grounds,
     id: t.id,
     text: t.text,
     createdAt: t.createdAt,
     done: t.state === 'done',
     stale: stale.has(t.id),
+    ...(t.dueAt ? { dueAt: t.dueAt } : {}),
+    overdue: todoOverdue(t, now),
+    ...(t.state === 'open' && t.firing && t.firing.cause.kind !== 'time' ? { firedBy: todoFiredBy(t.firing.cause, tz) } : {}),
+    ...(t.state === 'open' && t.triggers ? { waitingOn: todoWaitingOn(t.triggers) } : {}),
+    ...(t.every ? { every: formatTodoRecurrence(t.every) } : {}),
+    ...(t.snoozes ? { snoozes: t.snoozes } : {}),
+    ...(t.lastDoneAt ? { lastDoneAt: t.lastDoneAt } : {}),
   }));
 }
 
@@ -50,8 +85,8 @@ function displayName(): (g: string) => string {
   }
 }
 
-/** `[helm].timezone` for the 04:00-local day boundary; absent or a config error uses the system zone. */
-function helmTimezone(): string | undefined {
+/** `[helm].timezone` for todo times and the 04:00-local day boundary; absent or a config error uses the system zone. */
+export function helmTimezone(): string | undefined {
   try {
     return loadConfig().helm.timezone;
   } catch {
@@ -78,22 +113,156 @@ export function todoStaleLine(todos: TodoView[]): string | undefined {
   return staleTodoNote(todos.filter((t) => t.stale).length, todoStaleDays());
 }
 
-/** A `state` column (open or done) appears only when a done-today todo is listed. */
-export function todoTable(todos: TodoView[], withGrounds: boolean): string {
+/** The tend count line for overdue todos, or undefined. */
+export function todoOverdueLine(todos: TodoView[]): string | undefined {
+  return overdueTodoNote(todos.filter((t) => t.overdue).length);
+}
+
+/** Overdue first and waiting for a time last; everything else keeps its order. */
+function todoRank(t: TodoView): number {
+  if (t.overdue) return 0;
+  return t.dueAt !== undefined && !t.done ? 2 : 1;
+}
+
+/** What a todo's `due` cell says: the time ahead, or how long ago it passed. */
+function dueCell(t: TodoView, now: number): string {
+  if (t.firedBy) return `fired: ${t.firedBy}`;
+  if (t.done || t.dueAt === undefined) return '';
+  return t.overdue ? `overdue ${ageLabel(now - Date.parse(t.dueAt))}` : shortTodoTime(t.dueAt, now, helmTimezone());
+}
+
+/** `state`, `due`, `every`, `waiting` and `snoozes` columns appear only when a listed todo uses them. */
+export function todoTable(todos: TodoView[], withGrounds: boolean, now = Date.now()): string {
   const anyDone = todos.some((t) => t.done);
-  const cols = [...(withGrounds ? ['grounds'] : []), 'id', ...(anyDone ? ['state'] : []), 'text', 'added'];
+  const anyDue = todos.some((t) => !t.done && (t.dueAt !== undefined || t.firedBy !== undefined));
+  const anyWaiting = todos.some((t) => t.waitingOn !== undefined);
+  const anyRepeating = todos.some((t) => t.every !== undefined);
+  const anySnoozed = todos.some((t) => t.snoozes !== undefined);
+  const cols = [
+    ...(withGrounds ? ['grounds'] : []),
+    'id',
+    ...(anyDone ? ['state'] : []),
+    'text',
+    ...(anyDue ? ['due'] : []),
+    ...(anyRepeating ? ['every'] : []),
+    ...(anyWaiting ? ['waiting'] : []),
+    ...(anySnoozed ? ['snoozes'] : []),
+    'added',
+  ];
+  const ranked = [...todos].sort((a, b) => todoRank(a) - todoRank(b));
   return toonTable(
     'todos',
-    todos.map((t) => ({ grounds: t.grounds, id: t.id, state: t.done ? 'done' : 'open', text: t.text, added: t.createdAt.slice(0, 10) })),
+    ranked.map((t) => ({
+      grounds: t.grounds,
+      id: t.id,
+      state: t.done ? 'done' : 'open',
+      text: t.text,
+      due: dueCell(t, now),
+      every: t.every ?? '',
+      waiting: t.waitingOn ?? '',
+      snoozes: t.snoozes ?? 0,
+      added: t.createdAt.slice(0, 10),
+    })),
     cols,
   );
+}
+
+/**
+ * Record what has come due, then hand this grounds' undelivered firings to
+ * this wake. `claim` false is `--peek`: it shows them without using them up.
+ * A damaged todo file never fails a wait: the next write names the damage.
+ */
+export function takeTodoDue(grounds: string, claim: boolean, now = Date.now()): TodoDueEvent[] {
+  const tz = helmTimezone();
+  fireDueTodos(now, tz);
+  try {
+    return claim ? claimTodoFirings(grounds, now, tz) : peekTodoFirings(grounds, tz);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The daemon's `todoFiring` hook. A damaged file is logged once, not on every
+ * tick, until it's fixed or a different problem replaces it.
+ */
+export function createTodoFiring(): (now: number, log: (message: string) => void) => void {
+  let logged = new Set<string>();
+  return (now, log) => {
+    const { errors } = fireDueTodos(now, helmTimezone());
+    for (const error of errors) if (!logged.has(error)) log(error);
+    logged = new Set(errors);
+  };
+}
+
+/** The triggers on a new todo: read and checked, with what is already true and which PRs need a watch. */
+export interface PreparedTodoTriggers {
+  triggers: TodoTriggerSet;
+  /** Conditions true now, which fire on the next check. */
+  already: string[];
+  /** Open PRs named by a trigger with no watch yet. Registered once the todo is stored. */
+  unwatched: string[];
+}
+
+/** The target as `--when` will check it, reading a named PR from GitHub so its record is fresh. */
+function readyTrigger(input: string): TodoTriggerTarget {
+  const target = resolveTodoTrigger(parseTodoTrigger(input));
+  if (target.kind !== 'pr') return target;
+  const ref = parsePrRef(target.key)!;
+  if (readWatch(ref.key) && readPr(ref.key)) return target;
+  try {
+    upsertPr(prEvidence(ref, ghPrViewDirect(ref), new Date().toISOString()));
+  } catch (err) {
+    throw new TodoError(`GitHub can't read ${ref.key}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return target;
+}
+
+/** Refuses, storing nothing, on anything lobstah can't observe. Watches wait until the todo is stored. */
+export function prepareTodoTriggers(values: readonly string[], mode: TodoTriggerSet['mode'], createdAt: string): PreparedTodoTriggers {
+  const targets = values.map(readyTrigger);
+  const already: string[] = [];
+  const unwatched: string[] = [];
+  for (const target of targets) {
+    const reading = readTodoTrigger(target, createdAt);
+    if (reading.state === 'met') already.push(reading.as);
+    if (target.kind !== 'pr' || readWatch(target.key)) continue;
+    const state = readPr(target.key)?.state;
+    if (state !== 'MERGED' && state !== 'CLOSED' && !unwatched.includes(target.key)) unwatched.push(target.key);
+  }
+  return { triggers: { mode, items: targets }, already, unwatched };
+}
+
+/** Stand watch on an open PR a trigger named, as `report --pr` would; the helm owns it. Returns what to say. */
+export function watchTriggerPr(key: string): string {
+  addPrWatch(parsePrRef(key)!);
+  return `watching ${key}: also wakes the helm on failing checks and requested changes`;
+}
+
+/** The `next` line of a `todo-due` event. */
+function todoDueNext(event: TodoDueEvent): string {
+  const skip = event.repeats ? `\`lobstah todo skip ${event.id}\` to pass this one; ` : '';
+  return `do it, then \`lobstah todo done ${event.id}\`; ${skip}\`lobstah todo snooze ${event.id} --until <time>\` to retry later; then re-arm \`lobstah man wait\`.`;
+}
+
+/** `man wait`: one `todo-due` event per firing. */
+export function emitTodoDue(events: readonly TodoDueEvent[], display: (grounds: string) => string): void {
+  for (const event of events) {
+    console.log(toonKV({ event: 'todo-due', todo: event.id, grounds: display(event.grounds), text: event.text, firedBy: event.firedBy }));
+    console.log(`next: ${todoDueNext(event)}`);
+  }
+}
+
+/** The Stop hook's line for one firing. */
+export function todoDueLine(event: TodoDueEvent): string {
+  return `- todo-due ${event.id}: ${event.text} (${event.firedBy}). Next: ${todoDueNext(event)}`;
 }
 
 /**
  * The todo block re-injected into the helm's context at session start and
  * after compaction, beside the charter. Empty when the grounds has none.
  */
-export function todoContext(grounds: string, now = Date.now()): string {
+export function todoContext(grounds: string, now: number = Date.now()): string {
   let todos: Todo[];
   let helm: HelmConfig;
   try {
@@ -104,15 +273,21 @@ export function todoContext(grounds: string, now = Date.now()): string {
   }
   if (todos.length === 0) return '';
   todos.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id - b.id);
-  const shown: Todo[] = todos.slice(0, helm.briefTodoLimit);
+  // Overdue and scheduled todos stay named; only unscheduled todos use the brief limit.
+  const overdue = todos.filter((todo) => todoOverdue(todo, now));
+  const scheduled = todos.filter((todo) => todoScheduled(todo, now));
+  const others = todos.filter((todo) => !todoOverdue(todo, now) && !todoScheduled(todo, now));
+  const shown: Todo[] = others.slice(0, Math.max(0, helm.briefTodoLimit - overdue.length));
   const staleIds = new Set(staleTodos(todos, helm.todoStaleDays, now).map((todo) => todo.id));
   const note = staleTodoNote(staleIds.size, helm.todoStaleDays);
-  const remaining: number = todos.length - shown.length;
+  const remaining: number = others.length - shown.length;
   return [
     `Your todos (\`lobstah todo done <id>\` when finished, \`lobstah todo drop <id>\` when no longer needed):`,
-    'Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.',
-    ...shown.map((todo) => `${todoLine(todo)}${staleIds.has(todo.id) ? ' [stale]' : ''}`),
+    'Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.',
+    ...overdue.map((todo) => `${todoLine(todo)} [overdue]`),
+    ...shown.map((todo) => `${todoLine(todo)}${todo.triggers ? ` [waiting on ${todoWaitingOn(todo.triggers)}]` : ''}${staleIds.has(todo.id) ? ' [stale]' : ''}`),
     ...(remaining > 0 ? [`… and ${remaining} more (lobstah todo ls)`] : []),
+    ...scheduled.map((todo) => `${todoLine(todo)} [due ${shortTodoTime(todo.dueAt!, now, helm.timezone)}${todo.snoozes ? `; snoozed ${todo.snoozes}` : ''}]${todo.triggers ? ` [waiting on ${todoWaitingOn(todo.triggers)}]` : ''}`),
     ...(note ? [note] : []),
   ].join('\n');
 }
@@ -145,4 +320,10 @@ export function quietGoalsNudge(grounds: string, sessionId: string, now = Date.n
   if (open.length === 0 || !claimHelmGoalsNudge(grounds, sessionId, date, helm.goalsNudgeSecs, now)) return undefined;
   const line = `goals ${goals.length - open.length}/${goals.length} · open: ${open.map((goal) => `${goal.number}. ${goal.text}`).join('; ')}`.replace(/\s+/g, ' ');
   return line.length <= 200 ? line : `${line.slice(0, 199)}…`;
+}
+
+/** Full open todo list for `todo ls` and helm passes, including future and snoozed items. */
+export function renderTodoList(grounds: string, now: number = Date.now()): string {
+  const todos = todoViews(now, grounds, { openOnly: true }).sort((a, b) => Number(b.stale) - Number(a.stale) || a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
+  return todos.length > 0 ? todoTable(todos, false, now) : toonKV({ todos: 'none', grounds: displayName()(grounds) });
 }

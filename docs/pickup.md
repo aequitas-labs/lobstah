@@ -368,9 +368,18 @@ The loop's doctrine, in full:
   new push invalidates it and the gate waits for a fresh one.
   When an approval no longer covers the head, pickup re-requests review from
   that approver once per push.
-- **Stacks merge through the forge's stack-aware path.** A PR in a native
-  stack goes through GitHub's asynchronous stack merge API; a standalone PR
-  through the ordinary merge call. `method` is per repo and applies to both.
+- **Stacks merge into the default branch.** For ordinary branch stacks,
+  pickup merges the bottom PR first. It then retargets the next PR to the
+  default branch, merges that branch into the head with GitHub's
+  `update-branch` API, and waits for current-head checks and approval.
+  It never rebases or force-pushes this transition. A conflict or red check
+  stops the stack and posts a `stack-stopped` notice.
+- **GitHub-linked stacks use the asynchronous API.** Membership comes from
+  GitHub's `stack` resource, not branch names. Once every open member passes
+  the gate, pickup calls `PUT pulls/<top>/merge-async` and saves the request
+  id. Later ticks poll the result; queued or pending does not mean merged.
+  Missing, branching or out-of-scope members hold the stack.
+  `method` remains per repo for both paths.
 - **`scope = "own"` is the safety default.** Pickup merges work it dispatched.
   Widening to human-authored PRs is a deliberate config change.
 
@@ -381,7 +390,8 @@ A PR behind its base splits deterministically:
 | Condition | Action |
 |---|---|
 | Behind, no conflict | Update the branch through the forge API, re-enter the gate next tick |
-| Behind, real conflict | Write a rebase chore — resolve, push to the PR's branch, report `done` — then re-enter the gate, which re-requests stale review once per head |
+| Stack transition, conflict or red check | Stop and report; wait for a normal resolution push |
+| Standalone PR, real conflict | Write a rebase chore — resolve, push to the PR's branch, report `done` — then re-enter the gate, which re-requests stale review once per head |
 
 Rebase chores go through the **chore lane** (`~/.lobstah/chores/`, defined in
 the [design's queue contract](design.md#queue-contract)), never the primary queue. Same descriptor schema,

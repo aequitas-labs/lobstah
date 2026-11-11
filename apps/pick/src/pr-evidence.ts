@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs } from '@lobstah/core';
+import { dispatchPrUrls, laneDirs } from '@lobstah/core';
 import type { Evidence } from '@lobstah/core';
 
 /** Trailing-slash-insensitive comparison key for a PR URL. */
@@ -29,12 +29,13 @@ export function prEvidenceIndex(): Map<string, string> {
   for (const f of files) {
     const file = path.join(stateDir, f);
     try {
-      const prUrl = (JSON.parse(fs.readFileSync(file, 'utf8')) as Evidence).prUrl;
-      if (!prUrl) continue;
-      const key = prUrlKey(prUrl);
+      const urls = dispatchPrUrls(JSON.parse(fs.readFileSync(file, 'utf8')) as Evidence);
+      for (const url of urls) {
+      const key = prUrlKey(url);
       const mtime = fs.statSync(file).mtimeMs;
       const cur = byUrl.get(key);
       if (!cur || mtime > cur.mtime) byUrl.set(key, { uuid: f.slice(0, -'.evidence'.length), mtime });
+      }
     } catch {
       // unreadable evidence — skip; the branch-name mapping may still hold
     }

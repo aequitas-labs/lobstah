@@ -1,6 +1,6 @@
 import { WHARF_REVIEW_REQUEST_KINDS } from '../../../packages/core/src/backend-model.js';
 import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
-import { identifier, object, repoIdentity, requireThat, text } from './protocol.js';
+import { LEASE_MS, identifier, object, repoIdentity, requireThat, text, tmuxPane } from './protocol.js';
 import { cardSchema, cardTables } from './cards.js';
 import { slackSchema, slackTables } from './slack-outbox.js';
 import type { Actor, Command } from './account.js';
@@ -83,18 +83,20 @@ export class GlassState {
     return this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) }));
   }
   worker(id: string, body: Record<string, unknown>) {
-    const info: Record<string, string> = {};
+    const info: Record<string, unknown> = {};
     for (const key of ['harness', 'session'] as const) if (body[key] !== undefined) info[key] = identifier(body[key]);
+    if (body.target !== undefined) info.target = body.target;
+    if (body.tmuxPane !== undefined) info.tmuxPane = tmuxPane(body.tmuxPane);
     this.put('worker_details', id, info);
   }
   workers() {
-    return this.sql.exec<{ id: string; boat: string; boatName: string; repoRemote: string; seen: number; details: string | null; current: string | null }>(`SELECT w.id,w.boat,b.name AS boatName,w.repo AS repoRemote,w.seen,i.data AS details,
+    return this.sql.exec<{ id: string; boat: string; boatName: string; repoRemote: string | null; seen: number; details: string | null; current: string | null }>(`SELECT w.id,w.boat,b.name AS boatName,w.repo AS repoRemote,w.seen,i.data AS details,
       (SELECT id FROM dispatches d WHERE d.worker=w.id AND d.state='active' LIMIT 1) AS current
-      FROM workers w JOIN boats b ON b.id=w.boat LEFT JOIN worker_details i ON i.id=w.id LIMIT 100`).toArray().map(({ seen, details, ...w }) => ({ ...w, ...JSON.parse(details ?? '{}'), lastCheckIn: new Date(seen).toISOString() }));
+      FROM (SELECT id,boat,repo,seen FROM workers UNION ALL SELECT id,boat,NULL AS repo,seen FROM configured_workers) w JOIN boats b ON b.id=w.boat LEFT JOIN worker_details i ON i.id=w.id LIMIT 100`).toArray().map(({ seen, details, ...w }) => ({ ...w, live: seen + LEASE_MS > Date.now(), ...JSON.parse(details ?? '{}'), lastCheckIn: new Date(seen).toISOString() }));
   }
   boats() {
     return this.sql.exec<{ id: string; name: string; revoked: number; permissions: string; seen: number | null }>(`SELECT b.id,b.name,b.revoked,coalesce(p.permissions,'["work"]') AS permissions,
-      (SELECT max(seen) FROM workers w WHERE w.boat=b.id) AS seen FROM boats b LEFT JOIN boat_permissions p ON p.boat=b.id LIMIT 100`).toArray().map(({ permissions, seen, ...b }) => ({ ...b, permissions: JSON.parse(permissions),
+      (SELECT max(seen) FROM (SELECT boat,seen FROM workers UNION ALL SELECT boat,seen FROM configured_workers) w WHERE w.boat=b.id) AS seen FROM boats b LEFT JOIN boat_permissions p ON p.boat=b.id LIMIT 100`).toArray().map(({ permissions, seen, ...b }) => ({ ...b, permissions: JSON.parse(permissions),
       lastCheckIn: seen ? new Date(seen).toISOString() : null,
       repos: this.sql.exec<{ repo: string }>('SELECT DISTINCT repo FROM workers WHERE boat=? LIMIT 100', b.id).toArray().map((r) => r.repo),
     }));

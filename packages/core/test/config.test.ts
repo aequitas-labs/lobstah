@@ -72,12 +72,13 @@ describe('config precedence: descriptor > repo > global > default', () => {
   it('defaults and validates the brief todo cap and quiet goals interval', () => {
     expect(loadConfig().helm.briefTodoLimit).toBe(5);
     expect(loadConfig().helm.goalsNudgeSecs).toBe(7200);
+    expect(loadConfig().helm.passIntervalSecs).toBe(7200);
     fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\nbriefTodoLimit = 2\ngoalsNudgeSecs = 60\n');
     expect(loadConfig().helm.briefTodoLimit).toBe(2);
     expect(loadConfig().helm.goalsNudgeSecs).toBe(60);
-    for (const key of ['briefTodoLimit', 'goalsNudgeSecs']) {
+    for (const key of ['briefTodoLimit', 'goalsNudgeSecs', 'passIntervalSecs']) {
       fs.writeFileSync(path.join(home, 'config.toml'), `[helm]\n${key} = 0\n`);
-      expect(loadConfig().helm[key as 'briefTodoLimit' | 'goalsNudgeSecs']).toBe(0);
+      expect(loadConfig().helm[key as 'briefTodoLimit' | 'goalsNudgeSecs' | 'passIntervalSecs']).toBe(0);
       for (const value of ['-1', '1.5', '"5"', 'true', 'inf', 'nan']) {
         fs.writeFileSync(path.join(home, 'config.toml'), `[helm]\n${key} = ${value}\n`);
         expect(() => loadConfig()).toThrow(`[helm].${key} must be a non-negative whole number`);

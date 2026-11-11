@@ -1,3 +1,4 @@
+import { dispatchPrLines } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { MARKER, lobstahWrote, marker } from '../types.js';
 import type { Source, TrackedItem, WorkItem } from '../types.js';
@@ -182,7 +183,7 @@ export class LinearSource implements Source {
   async report(key: string, verb: Verb, evidence: Evidence & { uuid: string }): Promise<void> {
     const issue = await this.issueByKey(key);
     const lines = [`${marker(evidence.uuid)} **${verb}**`];
-    if (evidence.prUrl) lines.push(`PR: ${evidence.prUrl}`);
+    lines.push(...dispatchPrLines(evidence));
     if (evidence.branch) lines.push(`branch: \`${evidence.branch}\``);
     if (evidence.note) lines.push(evidence.note);
     await this.commentOn(issue, lines.join('\n'));

@@ -8,7 +8,7 @@ import { atomicRenameSync, configPath, lobstahHome, uniqueTempPath } from '@lobs
 import type { CodexRulesConfig, PermissionsConfig } from '@lobstah/core';
 import type { Change } from './permissions.js';
 import type { DoctorRow } from './doctor.js';
-import { lobstahContext } from './permission-context.js';
+import { HELM_RELAY_COMMANDS, TRAP_COORDINATION_COMMANDS, lobstahContext } from './permission-context.js';
 
 /**
  * The Codex half of lobstah's permission profile. Codex has no classifier
@@ -49,6 +49,11 @@ export function codexHome(env: NodeJS.ProcessEnv = process.env, home = os.homedi
 export function codexBaseRules(): CodexRule[] {
   return [
     { decision: 'allow', pattern: ['lobstah', 'permissions', 'propose'], justification: 'The helm may propose a change; only the person in the glass can approve applying it.' },
+    ...[...HELM_RELAY_COMMANDS, ...TRAP_COORDINATION_COMMANDS].map((command): CodexRule => ({
+      decision: 'allow',
+      pattern: ['lobstah', command],
+      justification: 'Lobstah coordination commands carry work, reports and glass answers; they need no separate approval.',
+    })),
   ];
 }
 

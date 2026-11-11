@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs, listNotices, loadConfig, repoKey, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS, QUIET_NOTICE_KINDS } from '@lobstah/core';
+import { laneDirs, storedDescriptor, storageGrounds, listNotices, loadConfig, repoKey, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS, QUIET_NOTICE_KINDS } from '@lobstah/core';
 import type { Descriptor, Lane } from '@lobstah/core';
 import { buildTendReport, repoOf } from './tend.js';
 import type { TendReport } from './tend.js';
@@ -72,6 +72,8 @@ export interface DigestOptions {
   cursor?: string;
   /** Limit the digest to these repo keys (a helm's grounds). Items whose repo is unknowable stay in. */
   repos?: Set<string>;
+  /** Explicit owner for configured catches and notices with no repository. */
+  grounds?: string;
   now?: number;
 }
 
@@ -82,8 +84,9 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
   // empty grounds is not handed old landings as news.
   const sinceMs = Math.max(reportedThroughMs(name, now), wakeFloorMs(readHelm(name)));
   const since = new Date(sinceMs).toISOString();
-  const inGrounds = (repo: string | undefined): boolean =>
-    opts.repos === undefined || repo === undefined || opts.repos.has(repo);
+  const config = loadConfig();
+  const inGrounds = (repo: string | undefined, grounds?: string): boolean =>
+    (!opts.grounds || !grounds || storageGrounds(grounds, config) === storageGrounds(opts.grounds, config)) && (opts.repos === undefined || repo === undefined || opts.repos.has(repo));
 
   const landed: DigestLanding[] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
@@ -93,7 +96,7 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
       const at = Date.parse(last.at) || 0;
       if (at <= sinceMs || at > now) continue;
       const repo = repoOf(id, lane);
-      if (!inGrounds(repo)) continue;
+      if (!inGrounds(repo, storedDescriptor(id, lane)?.target?.grounds)) continue;
       landed.push({
         id,
         lane,
@@ -112,7 +115,7 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
   // above, and PR kinds are something to look at, not something that
   // blocks work — they walk in tend and the pet, but stay out of the digest.
   const attention = tend.attention.filter(
-    (a) => (a.kind === 'question' || a.kind === 'watch') && (a.verb === 'watch' || inGrounds(repoOf(a.id, a.lane))),
+    (a) => (a.kind === 'question' || a.kind === 'watch') && (a.verb === 'watch' || inGrounds(repoOf(a.id, a.lane), storedDescriptor(a.id, a.lane)?.target?.grounds)),
   );
   const standing: DigestAttention[] = attention.map((a) => ({
     id: a.id,
@@ -126,7 +129,7 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
     .filter((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)))
     .filter((n) => {
       const at = Date.parse(n.at) || 0;
-      return at > sinceMs && at <= now && inGrounds(n.repo);
+      return at > sinceMs && at <= now && inGrounds(n.repo, n.grounds);
     })
     .map((n) => ({ kind: n.kind, at: n.at, ...(n.refId ? { trap: n.refId } : {}), ...(n.repo ? { repo: n.repo } : {}), text: n.text }));
 
@@ -157,7 +160,7 @@ export function dueHelmDigest(
 ): Digest | undefined {
   const last = lastReportedAt(helm.grounds);
   if (last !== undefined && now - last < reportSecs * 1000) return undefined;
-  const d = buildDigest({ cursor: helm.grounds, repos: new Set(helm.repos), now });
+  const d = buildDigest({ cursor: helm.grounds, grounds: helm.grounds, repos: new Set(helm.repos), now });
   return d.changed ? d : undefined;
 }
 
