@@ -87,3 +87,20 @@ export function linkParts(text: string): LinkPart[] {
   if (plain) out.push(plain);
   return out;
 }
+
+/**
+ * Whether a link's `href` leaves the glass served at `origin`: an http(s)
+ * URL on another origin (GitHub, Linear, ume, the Mac's own glass seen from
+ * the hosted one). A hash route, a relative path and a URL on `origin`
+ * itself stay in the glass. Another scheme (`claude://`, `vscode://`,
+ * `mailto:`) opens an app, not a page, so it is not external either.
+ */
+export function isExternalHref(href: string, origin: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(href, origin);
+  } catch {
+    return false;
+  }
+  return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin !== new URL(origin).origin;
+}
