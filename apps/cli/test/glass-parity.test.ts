@@ -148,6 +148,17 @@ describe('the hosted glass renders exactly what the local glass renders', () => 
       const [l, h] = [await local('#' + tab), await hosted('#' + tab)];
       const page = `#page-${tab}`;
       expect(html(l.$(page)).length, 'the view renders').toBeGreaterThan(40);
+      if (tab === 'settings') {
+        // Run cards' passkeys differ on purpose: the Mac registers its own; the hosted glass says how a phone pairs.
+        expect(h.doc.querySelector('.runpasskeys')?.textContent).toContain('lobstah run passkey add --hosted');
+        const without = (el: Element | null | undefined) => {
+          const copy = el?.cloneNode(true) as Element | undefined;
+          copy?.querySelector('.runpasskeys')?.replaceWith('');
+          return html(copy);
+        };
+        expect(without(h.doc.querySelector(page))).toBe(without(l.$(page)));
+        return;
+      }
       expect(html(h.doc.querySelector(page))).toBe(html(l.$(page)));
     });
   }

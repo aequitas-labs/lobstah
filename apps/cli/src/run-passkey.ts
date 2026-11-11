@@ -36,6 +36,9 @@ export interface RunPasskey {
   alg: number;
   createdAt: string;
   signCount: number;
+  /** A phone's passkey for the hosted glass: the origin and relying party it was paired for. */
+  origin?: string;
+  rpId?: string;
 }
 
 /** A refused registration or assertion; `status` is the HTTP status the glass answers with. */
@@ -92,7 +95,8 @@ function writeRunPasskeys(list: RunPasskey[], file = runPasskeysFile()): void {
 export type ChallengeScope =
   | { kind: 'register' }
   | { kind: 'existing' }
-  | { kind: 'run'; key: string; sha256: string }
+  /** One card's Run over its script hash; `window` when the page's 15-minute window key signs it instead of a passkey. */
+  | { kind: 'run'; key: string; sha256: string; window?: string }
   /** A phone's passkey for the hosted glass, made under one pairing code. */
   | { kind: 'pair'; code: string };
 
@@ -247,22 +251,35 @@ export interface AssertionResponse {
 function verifyAssertion<K extends 'run' | 'existing'>(
   res: AssertionResponse,
   challenges: RunChallenges,
-  origin: string,
+  /** The page's origin; undefined for a phone's passkey, which must name the origin it was paired for. */
+  origin: string | undefined,
   kind: K,
   file: string,
 ): { scope: Extract<ChallengeScope, { kind: K }>; credentialId: string } {
   // No assertion is no confirmation: refused as unauthorized, like a wrong one.
   if (!res || typeof res !== 'object' || (['credentialId', 'clientDataJSON', 'authenticatorData', 'signature'] as const).some((f) => typeof res[f] !== 'string'))
     throw new PasskeyError('a passkey assertion is required');
-  const clientRaw = b64u(res.clientDataJSON, 'clientDataJSON');
-  const clientData = readClientData(clientRaw, 'webauthn.get', origin);
-  const scope = challenges.spend(clientData.challenge);
-  if (scope?.kind !== kind) throw new PasskeyError(`the ${kind === 'run' ? 'run' : 'passkey'} challenge is unknown, spent or older than two minutes`);
   const passkeys = readRunPasskeys(file);
   const passkey = passkeys.find((k) => k.credentialId === res.credentialId);
+  const expectedOrigin = origin ?? passkey?.origin;
+  const clientRaw = b64u(res.clientDataJSON, 'clientDataJSON');
+  if (!expectedOrigin) {
+    // Spend the challenge all the same: an unknown passkey never leaves one to retry.
+    try {
+      challenges.spend(JSON.parse(clientRaw.toString('utf8')).challenge);
+    } catch {
+      /* not JSON: nothing to spend */
+    }
+    throw new PasskeyError('that passkey is not registered for runs');
+  }
+  const clientData = readClientData(clientRaw, 'webauthn.get', expectedOrigin);
+  const scope = challenges.spend(clientData.challenge);
+  if (scope?.kind !== kind) throw new PasskeyError(`the ${kind === 'run' ? 'run' : 'passkey'} challenge is unknown, spent or older than two minutes`);
   if (!passkey) throw new PasskeyError('that passkey is not registered for runs');
+  // A phone's passkey names the relying party it was paired for; one without it is no phone passkey.
+  if (origin === undefined && !passkey.rpId) throw new PasskeyError('that passkey is not registered for runs');
   const authRaw = b64u(res.authenticatorData, 'authenticatorData');
-  const auth = readAuthenticatorData(authRaw);
+  const auth = readAuthenticatorData(authRaw, origin === undefined ? passkey.rpId : RUN_RP_ID);
   const signed = Buffer.concat([authRaw, createHash('sha256').update(clientRaw).digest()]);
   const key = createPublicKey({ key: Buffer.from(passkey.publicKey, 'base64url'), format: 'der', type: 'spki' });
   if (!verifySignature('sha256', signed, key, b64u(res.signature, 'signature'))) throw new PasskeyError('the passkey signature does not verify');
@@ -277,6 +294,19 @@ function verifyAssertion<K extends 'run' | 'existing'>(
 /** A Run's assertion: returns the card and the script hash the passkey signed for. */
 export function verifyRunAssertion(res: AssertionResponse, challenges: RunChallenges, origin: string, file = runPasskeysFile()): { key: string; sha256: string; credentialId: string } {
   const { scope, credentialId } = verifyAssertion(res, challenges, origin, 'run', file);
+  if (scope.window) throw new PasskeyError('the run challenge was issued for a window key, not a passkey');
+  return { key: scope.key, sha256: scope.sha256, credentialId };
+}
+
+/**
+ * A Run confirmed on the hosted glass with a phone's passkey: the client
+ * data must name the origin that passkey was paired for, and the
+ * authenticator data its relying party. The page's own origin (a relayed
+ * call reaches the glass from loopback) plays no part.
+ */
+export function verifyHostedRunAssertion(res: AssertionResponse, challenges: RunChallenges, file = hostedPasskeysFile()): { key: string; sha256: string; credentialId: string } {
+  const { scope, credentialId } = verifyAssertion(res, challenges, undefined, 'run', file);
+  if (scope.window) throw new PasskeyError('the run challenge was issued for a window key, not a passkey');
   return { key: scope.key, sha256: scope.sha256, credentialId };
 }
 

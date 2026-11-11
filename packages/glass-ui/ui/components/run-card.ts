@@ -3,7 +3,16 @@ import { can } from '../backend.js';
 import { html } from '../html.js';
 import { getState } from '../store.js';
 import type { RunView } from '../store.js';
-import { dismissRunCard, followRunCard, passkeysWorkHere, runPasskeyUrl, runRunCard, sendRunLine, stopRunCard } from '../actions.js';
+import {
+  dismissRunCard,
+  followRunCard,
+  passkeysWorkHere,
+  runPasskeyUrl,
+  runRunCard,
+  runWindowMinutes,
+  sendRunLine,
+  stopRunCard,
+} from '../actions.js';
 import { useEffect, useState } from 'preact/hooks';
 
 /**
@@ -58,10 +67,22 @@ function Warnings({ warnings }: { warnings: ScriptWarning[] }) {
   )}</ul></div>`;
 }
 
-/** Why Run can't be pressed yet, or undefined when it can. */
-export function runBlocked(run: GlassRunCard, passkeys = getState().snapshot?.runPasskeys?.count ?? 0): string | undefined {
+/**
+ * Why Run can't be pressed yet, or undefined when it can. On the hosted
+ * glass (the card names its boat) Run needs a phone passkey paired with that
+ * boat, and an interactive card runs only from the Mac.
+ */
+export function runBlocked(run: GlassRunCard, passkeys?: number): string | undefined {
+  const hosted = run.boat !== undefined;
+  const count = passkeys ?? (hosted ? getState().snapshot?.runPasskeys?.hosted : getState().snapshot?.runPasskeys?.count) ?? 0;
   if (run.altered) return "This script changed after it was proposed, so it can't run.";
-  if (!passkeys) return 'Set up a passkey in Settings to run cards.';
+  if (hosted && run.interactive) return 'Interactive cards run from the Mac.';
+  // Until inputs are sealed to the boat, a secret is never typed on the hosted glass.
+  if (hosted && run.inputs.some((i) => i.secret)) return 'Secret inputs are typed on the Mac for now.';
+  if (!count)
+    return hosted
+      ? 'Pair this phone first: run lobstah run passkey add --hosted on the Mac.'
+      : 'Set up a passkey in Settings to run cards.';
   return undefined;
 }
 
@@ -188,7 +209,9 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
   useEffect(() => {
     if (saved && can('run')) void followRunCard(cardKey);
   }, [cardKey, saved?.id, saved?.state]);
-  const here = passkeysWorkHere();
+  const hosted = run.boat !== undefined;
+  const here = passkeysWorkHere(hosted);
+  const confirmed = runWindowMinutes(run.boat ?? '');
   const missing = run.inputs.filter((i) => !values[i.name]).map((i) => i.name);
   const locked = readOnly || !!blocked || !!view?.busy;
   const start = () => {
@@ -231,13 +254,26 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
       html`<div class="runfoot">
         ${
           view?.busy
-            ? html`<button type="button" class="btn danger" onClick=${() => void stopRunCard(cardKey)}>Stop</button>`
-            : here || blocked
-              ? html`<button type="button" class="btn runbtn" disabled=${locked || missing.length > 0} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}</button>`
+            ? !hosted && html`<button type="button" class="btn danger" onClick=${() => void stopRunCard(cardKey)}>Stop</button>`
+            : here || blocked || hosted
+              ? html`<button type="button" class="btn runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}</button>`
               : html`<a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}</a>`
         }
-        ${view?.result && html`<button type="button" class="btn" onClick=${() => void dismissRunCard(cardKey)}>Dismiss</button>`}
-        ${!view?.busy && html`<span class="dim">${blocked ? !run.altered && blocked : here ? 'Confirm with your passkey to run.' : 'Passkeys work from the glass at localhost.'}</span>`}
+        ${view?.result && !hosted && html`<button type="button" class="btn" onClick=${() => void dismissRunCard(cardKey)}>Dismiss</button>`}
+        ${
+          !view?.busy &&
+          html`<span class="dim">${
+            blocked
+              ? !run.altered && blocked
+              : confirmed
+                ? `Confirmed for ${confirmed} more ${confirmed === 1 ? 'minute' : 'minutes'}.`
+                : here
+                  ? 'Confirm with your passkey to run.'
+                  : hosted
+                    ? "This browser can't use passkeys."
+                    : 'Passkeys work from the glass at localhost.'
+          }</span>`
+        }
       </div>`
     }
     ${!view && html`<div class="runstate dim">Ready</div>`}

@@ -45,14 +45,14 @@ interface ListedBoat {
 /**
  * What the mirror fills: every tab and action of the local glass, and the
  * wharf's Boats tab, but not the pet's presence (it shows items on its own
- * machine's screen), not ↗ Open, which shows only once the probe finds
- * this browser on a boat, and not Run: a run card runs only from the glass
- * at localhost on the Mac itself, so the hosted glass shows it as the wharf
- * does, without Run (the relay takes no run request either).
+ * machine's screen), and not ↗ Open, which shows only once the probe
+ * finds this browser on a boat. Run is relayed: the boat checks a phone's
+ * passkey, paired for the hosted glass, or that page's 15-minute window key,
+ * and runs only its own stored script.
  */
 export const MIRROR_CAPABILITIES: GlassCapabilities = {
   tabs: [...ALL_CAPABILITIES.tabs, 'boats'],
-  actions: new Set([...ALL_CAPABILITIES.actions].filter((a) => a !== 'presence' && a !== 'focus' && a !== 'run')),
+  actions: new Set([...ALL_CAPABILITIES.actions].filter((a) => a !== 'presence' && a !== 'focus')),
   daemon: false,
 };
 

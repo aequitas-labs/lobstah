@@ -102,9 +102,11 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(narrow.$('#doverlay .runscript')).not.toBeNull();
     expect(narrow.$('#doverlay .runbtn')).toBeNull();
   });
-  it('runs a card only from the local glass: neither hosted glass offers Run, and a mirror boat relays no run request', () => {
+  it("runs a card from the local glass or a mirror boat's hosted glass, where the boat checks a phone's passkey", () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
-    expect(MIRROR_CAPABILITIES.actions.has('run')).toBe(false);
-    for (const kind of ['run-challenge', 'run', 'run-output', 'run-line', 'run-passkey-challenge', 'run-passkey-register']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
+    expect(MIRROR_CAPABILITIES.actions.has('run')).toBe(true);
+    for (const kind of ['run-challenge', 'run', 'run-output', 'run-pair-challenge', 'run-pair-register']) expect(mirrorWriteAllowed(kind), kind).toBe(true);
+    // The Mac's own passkey and an interactive card's console never go through the relay.
+    for (const kind of ['run-line', 'run-passkey-challenge', 'run-passkey-register']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
   });
 });

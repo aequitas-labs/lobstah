@@ -120,6 +120,7 @@ import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
 import { handleRunRequest, isRunRequestKind } from './run-routes.js';
 import { RunChallenges, hostedPasskeysFile, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
+import { RunWindows } from './run-window.js';
 import { RunRegistry } from './run-exec.js';
 
 /**
@@ -896,6 +897,7 @@ export function serveGlass(
     presence?: GlassPresence;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
+    runWindows?: RunWindows;
     /** A phone's hosted-glass passkeys and the pending pairing (tests); ~/.lobstah/run by default. */
     hostedPasskeysFile?: string;
     pairingFile?: string;
@@ -908,6 +910,7 @@ export function serveGlass(
   } = {},
 ): http.Server {
   const runChallenges = options.runChallenges ?? new RunChallenges();
+  const runWindows = options.runWindows ?? new RunWindows();
   const runs = options.runs ?? new RunRegistry();
   const confirmWithMacPassword = macPasswordGate();
   const presence = options.presence ?? new GlassPresence();
@@ -1219,6 +1222,8 @@ export function serveGlass(
             void handleRunRequest(body.kind, body.payload, {
               origin: `http://${req.headers.host}`,
               challenges: runChallenges,
+              windows: runWindows,
+              relayed: req.headers['x-lobstah-relay'] === 'wharf',
               confirmRegistration: options.confirmPasskeyRegistration ?? confirmWithMacPassword,
               ...(options.passkeysFile ? { passkeysFile: options.passkeysFile } : {}),
               ...(options.hostedPasskeysFile ? { hostedPasskeysFile: options.hostedPasskeysFile } : {}),
