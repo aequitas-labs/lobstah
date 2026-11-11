@@ -87,8 +87,24 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</span></button>`;
       })}</div>`,
     instant && options.length > 0 && draft?.option && draft?.error && html`<div class="bad derr">${draft.error}</div>`,
+    // The dock's compose row: attach, the text box, and Send, as matching icon buttons beside it.
     !permission &&
-      html`<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
+      html`<div class="dcompose">${
+        can('answer-files') &&
+        html`<label class="btn dattach dicon" title="Attach images or files">${AttachIcon}<input
+          type="file"
+          multiple
+          aria-label="Attach"
+          accept=${accept}
+          disabled=${sending}
+          onChange=${(e: Event) => {
+            const input = e.currentTarget as HTMLInputElement;
+            void addFiles(key, input.files).then(() => {
+              input.value = '';
+            });
+          }}
+        /></label>`
+      }<div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
       class="danswer"
       rows="2"
       aria-keyshortcuts=${textKey}
@@ -102,29 +118,22 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         setDraft(key, { text: el.value, error: undefined });
       }}
       onPaste=${can('answer-files') ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
-    ></textarea></div>`,
+    ></textarea></div><button type="button" class="btn dsend dicon" aria-label="Send" title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div>`,
     !permission &&
+      (files.length > 0 || (draft?.error && !(instant && draft.option))) &&
       html`<div class="dfoot">
-      ${
-        can('answer-files') &&
-        html`<label class="btn dattach" title="attach images or files">attach<input type="file" multiple accept=${accept} disabled=${sending} onChange=${(
-          e: Event,
-        ) => {
-          const input = e.currentTarget as HTMLInputElement;
-          void addFiles(key, input.files).then(() => {
-            input.value = '';
-          });
-        }} /></label>`
-      }
       ${files.map(
         (f, i) =>
           html`<span key=${f.name + i} class="dchip">${f.name}<button type="button" class="dx" title="remove" disabled=${sending} onClick=${() => removeFile(key, i)}>×</button></span>`,
       )}
       ${draft?.error && !(instant && draft.option) && html`<span class="bad derr">${draft.error}</span>`}
-      <button type="button" class="btn dsend" disabled=${sending} onClick=${() => void sendAnswer(key)}>${sending ? 'Sending…' : 'Send'}</button>
     </div>`,
   ];
 }
+
+/** The dock's icons: a paperclip to attach, an arrow to send. Each button carries its own label. */
+const AttachIcon = html`<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>`;
+const SendIcon = html`<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5" /><path d="M5 12l7-7 7 7" /></svg>`;
 
 /** A decision's title: the helm's, or the worker's note for a raw question. */
 const titleOf = (c: DecisionCard) => (c.kind === 'decision' ? LinkedText(c.title) : NamedText(c.note));

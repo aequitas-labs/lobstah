@@ -214,7 +214,10 @@ describe('glass: the decision modal', () => {
     expect([...c.querySelectorAll('.doptions .dopt .dlabel')].map(text)).toEqual(['v1', 'v2']);
     expect((c.querySelector('textarea.danswer') as HTMLTextAreaElement).value).toBe('');
     expect(c.querySelector('.dattach input[type="file"]')!.getAttribute('accept')).toBe('.png,.txt');
-    expect(text(c.querySelector('.dsend'))).toBe('Send');
+    // Attach and Send are icon buttons: each names itself to a screen reader and in its tooltip.
+    expect(['aria-label', 'title'].map((a) => c.querySelector('.dsend')!.getAttribute(a))).toEqual(['Send', 'Send']);
+    expect(c.querySelector('.dattach input')!.getAttribute('aria-label')).toBe('Attach');
+    expect(c.querySelector('.dattach')!.getAttribute('title')).toBe('Attach images or files');
     // Oldest first: the question (10m), then this decision (2m).
     expect(text(c.querySelector('.dpos'))).toBe('2 of 2');
     expect(views(g)).toEqual([KEY]);

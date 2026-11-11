@@ -1931,6 +1931,43 @@ a.lob {
 .danswer-wrap {
   position: relative;
 }
+/* The dock's compose row: attach, the text box, Send. The buttons sit at the box's foot as it grows. */
+.dcompose {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.dcompose .danswer-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Attach and Send: the same 44px square, an icon each; the label is the button's aria-label and title. */
+.btn.dicon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 6px 0;
+  padding: 0;
+}
+.dattach {
+  position: relative;
+}
+/* The file input stays focusable for the keyboard, unseen; the label around it opens it on a click. */
+.dattach input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.dattach:focus-within {
+  border-color: var(--line-hover);
+  color: var(--fg);
+}
 .danswer-wrap .dkey-text {
   position: absolute;
   /* Centred on the first line: border and padding (7px), then half of a line (18.85px) less the badge (16px). */
@@ -1955,9 +1992,6 @@ a.lob {
   align-items: center;
   gap: 6px;
 }
-.dfoot .dattach input {
-  display: none;
-}
 .dfoot .dchip {
   font-size: 11px;
   border: 1px solid var(--line);
@@ -1975,9 +2009,7 @@ a.lob {
   font-size: 11px;
 }
 .btn.dsend {
-  margin-left: auto;
   color: var(--fg);
-  padding: 2px 14px;
 }
 .btn:disabled {
   cursor: default;
