@@ -81,8 +81,6 @@ export const GLASS_ACTIONS = [
   'focus',
   /** Ask the helm for a new trap. */
   'trap-request',
-  /** Switch the helm between brief and full chat. */
-  'helm-chat',
   /** Set or move a TODO's time. */
   'todo-schedule',
   /** Acknowledge PR and stack attention. */

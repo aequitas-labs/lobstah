@@ -702,6 +702,12 @@ tr.rowhead:hover {
   color: var(--fg);
   border-color: var(--line-hover);
 }
+.btn.danger,
+.btn.danger:hover {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--bg);
+}
 .badge {
   border-radius: var(--badge-radius);
   padding: var(--badge-pad);
@@ -2029,14 +2035,6 @@ a.lob {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 14px;
-}
-.rv-controls select {
-  background: var(--card);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 5px 8px;
-  font: inherit;
 }
 .rv-person img {
   border-radius: 50%;

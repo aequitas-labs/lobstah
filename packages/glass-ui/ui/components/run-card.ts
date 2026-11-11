@@ -3,8 +3,8 @@ import { can } from '../backend.js';
 import { html } from '../html.js';
 import { getState } from '../store.js';
 import type { RunView } from '../store.js';
-import { passkeysWorkHere, runPasskeyUrl, runRunCard, sendRunLine } from '../actions.js';
-import { useState } from 'preact/hooks';
+import { dismissRunCard, followRunCard, passkeysWorkHere, runPasskeyUrl, runRunCard, sendRunLine, stopRunCard } from '../actions.js';
+import { useEffect, useState } from 'preact/hooks';
 
 /**
  * A run card's body in the decision modal: the script in full, with every
@@ -151,10 +151,14 @@ function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; 
   const ended =
     view.result &&
     (view.result.timedOut
-      ? `Timed out and stopped (exit 124)`
-      : `Exit ${view.result.exitCode} in ${(view.result.durationMs / 1000).toFixed(1)}s`);
+      ? `Failed · timed out · exit 124`
+      : view.result.stopped
+        ? 'Stopped'
+        : `${view.result.exitCode === 0 ? 'Succeeded' : 'Failed'} · exit ${view.result.exitCode}`);
   return html`<div class="runout">
     <div class="runstate">${view.busy ? html`<span class="warn">Running…</span>` : ended && html`<span class=${view.result!.exitCode === 0 ? 'ok' : 'bad'}>${ended}</span>`}${view.result?.scrubbed ? html`<span class="dim"> · ${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
+    ${view.startedAt && html`<div class="dim">Started ${new Date(view.startedAt).toLocaleString()}</div>`}
+    ${view.finishedAt && html`<div class="dim">Finished ${new Date(view.finishedAt).toLocaleString()}</div>`}
     ${(view.output || (interactive && view.busy)) && html`<pre class="runscript runlog"><code>${view.output}</code></pre>`}
     ${sent.length > 0 && html`<ul class="runsent" aria-label="Secret lines sent from this tab">${sent.map((value, i) => html`<${SentSecret} key=${i} value=${value} n=${i + 1} />`)}</ul>`}
     ${interactive && view.busy && html`<${ConsoleLine} cardKey=${cardKey} onSent=${onSent} />`}
@@ -162,17 +166,35 @@ function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; 
   </div>`;
 }
 
-export function RunCardBody({ cardKey, run }: { cardKey: string; run: GlassRunCard }) {
+export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: string; run: GlassRunCard; readOnly?: boolean }) {
   const blocked = runBlocked(run);
   // Typed values live only in this component until Run sends them, then they are cleared.
   const [values, setValues] = useState<Record<string, string>>({});
-  const view = getState().runs?.[cardKey];
+  const saved = run.latest;
+  const local = getState().runs?.[cardKey];
+  const restored = saved
+    ? {
+        busy: saved.state === 'running',
+        output: '',
+        next: 0,
+        result: saved.result,
+        startedAt: saved.startedAt,
+        finishedAt: saved.finishedAt,
+      }
+    : undefined;
+  // A failed output poll must still offer Stop while the saved attempt is running.
+  const view =
+    local?.error && !local.result && restored ? { ...local, ...restored, output: local.output, error: local.error } : (local ?? restored);
+  useEffect(() => {
+    if (saved && can('run')) void followRunCard(cardKey);
+  }, [cardKey, saved?.id, saved?.state]);
   const here = passkeysWorkHere();
   const missing = run.inputs.filter((i) => !values[i.name]).map((i) => i.name);
-  const locked = !!blocked || !!view?.busy || !!view?.result;
+  const locked = readOnly || !!blocked || !!view?.busy;
   const start = () => {
     const inputs = values;
     setValues({});
+    sentSecrets.delete(cardKey);
     void runRunCard(cardKey, run.scriptSha256, inputs);
   };
   return html`<div class="runcard" data-run=${cardKey}>
@@ -205,10 +227,20 @@ export function RunCardBody({ cardKey, run }: { cardKey: string; run: GlassRunCa
     }
     ${
       can('run') &&
-      (here || blocked
-        ? html`<div class="runfoot"><button type="button" class="btn runbtn" disabled=${locked || missing.length > 0} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : 'Confirm with your passkey and run')} onClick=${start}>${view?.busy ? 'Running…' : 'Run'}</button>${blocked ? html`<span class="dim">${!run.altered && blocked}</span>` : html`<span class="dim">Asks for your passkey (Touch ID), then runs on this Mac.</span>`}</div>`
-        : html`<div class="runfoot"><a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>Run from localhost</a><span class="dim">Passkeys work from the glass at localhost.</span></div>`)
+      (!readOnly || view?.busy) &&
+      html`<div class="runfoot">
+        ${
+          view?.busy
+            ? html`<button type="button" class="btn danger" onClick=${() => void stopRunCard(cardKey)}>Stop</button>`
+            : here || blocked
+              ? html`<button type="button" class="btn runbtn" disabled=${locked || missing.length > 0} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}</button>`
+              : html`<a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}</a>`
+        }
+        ${view?.result && html`<button type="button" class="btn" onClick=${() => void dismissRunCard(cardKey)}>Dismiss</button>`}
+        ${!view?.busy && html`<span class="dim">${blocked ? !run.altered && blocked : here ? 'Confirm with your passkey to run.' : 'Passkeys work from the glass at localhost.'}</span>`}
+      </div>`
     }
+    ${!view && html`<div class="runstate dim">Ready</div>`}
     <${RunOutput} view=${view} cardKey=${cardKey} interactive=${!!run.interactive} />
   </div>`;
 }

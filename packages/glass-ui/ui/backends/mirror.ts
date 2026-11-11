@@ -23,9 +23,9 @@ import { viewerDevice } from '../../../core/src/viewer-device.js';
  * fleet (mirror-merge.ts). Reads and writes go to the row's boat through
  * the wharf's relay (`/api/glass/mirror/relay`), which hands the call to
  * the boat and answers with the boat's own response, so every tab and
- * action of the local glass works here as it does there. ↗ Open is the one
- * thing never relayed: it shows only on the trap rows of the boat this
- * browser runs on, found by a probe of that boat's glass over loopback.
+ * review action works here as it does there. Review settings and helm chat
+ * stay read-only. ↗ Open shows only on the trap rows of the boat this browser
+ * runs on, found by a probe of that boat's glass over loopback.
  * Jobs on a wharf's own grounds stay as the wharf backend shows them, side
  * by side with the boats.
  */
@@ -48,11 +48,12 @@ interface ListedBoat {
  * machine's screen), not ↗ Open, which shows only once the probe finds
  * this browser on a boat, and not Run: a run card runs only from the glass
  * at localhost on the Mac itself, so the hosted glass shows it as the wharf
- * does, without Run (the relay takes no run request either).
+ * does, without Run (the relay takes no run request either). Review settings
+ * and helm chat are visible values, with no editing controls.
  */
 export const MIRROR_CAPABILITIES: GlassCapabilities = {
   tabs: [...ALL_CAPABILITIES.tabs, 'boats'],
-  actions: new Set([...ALL_CAPABILITIES.actions].filter((a) => a !== 'presence' && a !== 'focus' && a !== 'run')),
+  actions: new Set([...ALL_CAPABILITIES.actions].filter((a) => !['presence', 'focus', 'run'].includes(a))),
   daemon: false,
 };
 

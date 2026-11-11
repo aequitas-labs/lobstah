@@ -18,6 +18,7 @@ describe('a dispatch with several PRs in the glass', () => {
     many!.evidence = { ...(many!.evidence ?? {}), prUrl: urls[0], prUrls: urls };
     one!.evidence = { ...(one!.evidence ?? {}), prUrl: 'https://github.com/o/r/pull/7' };
     delete one!.evidence.prUrls;
+    one!.prHead = { url: 'https://github.com/o/r/pull/7', number: 7, open: 1, several: false };
     const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#dispatches', prefs: { view: 'table' } });
     open.push(g);
     const row = (id: string) => g.$$('#dispatches tr.rowhead').find((tr) => (tr.textContent ?? '').trim().startsWith(id.slice(0, 8)))!;

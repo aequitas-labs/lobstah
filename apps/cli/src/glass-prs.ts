@@ -1,5 +1,5 @@
 import { derivePrStacks, identifyPrStacks, parsePrRef, prBadge, prNewestFirst, prStackTitle, orderedDispatchPrUrls } from '@lobstah/core';
-import type { GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
+import type { GlassDispatchSummary, GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
 
 /**
  * The PR picture is derived only from observations already on disk. Read
@@ -248,4 +248,40 @@ export function dispatchPrList(
       : a.pr ? -1 : b.pr ? 1 : a.i - b.i,
   );
   return rows.map((r) => ({ url: r.ref.url, number: r.ref.number, ...(positions[r.ref.url] ? { position: positions[r.ref.url]!.position, size: positions[r.ref.url]!.size } : {}), ...(r.pr?.title ? { title: r.pr.title } : {}), ...(r.pr ? { badge: r.pr.badge } : {}) }));
+}
+
+/**
+ * The PR a dispatch's card leads with: the work it is doing now. Its open
+ * PRs come first, and the top of the stack leads, with how many are open.
+ * A reported PR not yet observed counts as open. With none open, an ended
+ * PR leads only while no report came after it ended (a dispatch parked on
+ * a PR that just merged); a dispatch that reported since is building
+ * something new, so none leads. A finished dispatch leads with its newest
+ * ended PR. Earlier PRs stay in its PR list.
+ */
+export function dispatchPrHead(
+  urls: readonly string[],
+  observed: (url: string) => PrEvidence | undefined,
+  prs: ReadonlyArray<Pick<GlassPr, 'url' | 'number' | 'badge' | 'stackId' | 'position'>>,
+  d: Pick<GlassDispatchSummary, 'bucket' | 'verbAt'>,
+  positions: NonNullable<import('@lobstah/core').Evidence['prPositions']> = {},
+): GlassDispatchSummary['prHead'] {
+  const rows = dispatchPrList(urls, prs, positions).map((r) => ({ ...r, pr: observed(r.url) }));
+  const ended = (pr?: PrEvidence) => pr?.state === 'MERGED' || pr?.state === 'CLOSED';
+  const open = rows.filter((r) => !ended(r.pr));
+  const several = rows.length > 1;
+  const view = (r: (typeof rows)[number]) => ({
+    url: r.url,
+    number: r.number,
+    ...(r.pr ? { badge: { ...prBadge(r.pr), observedAt: r.pr.observedAt } } : {}),
+    open: open.length,
+    several,
+  });
+  const top = open.at(-1);
+  if (top) return view(top);
+  const endedAt = (pr: PrEvidence) => pr.mergedAt ?? pr.closedAt ?? pr.observedAt;
+  const last = rows.sort((a, b) => endedAt(b.pr!).localeCompare(endedAt(a.pr!)))[0];
+  if (!last) return undefined;
+  const reportedSince = d.verbAt !== undefined && Date.parse(d.verbAt) > Date.parse(endedAt(last.pr!));
+  return d.bucket !== 'done' && reportedSince ? undefined : view(last);
 }
