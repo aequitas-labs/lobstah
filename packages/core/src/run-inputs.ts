@@ -26,6 +26,19 @@ export type RunInputValues = Record<string, string | SealedInput>;
 /** The HKDF info that names what a sealed key is for. */
 export const RUN_SEAL_INFO = 'lobstah run input v1';
 
+/** The HKDF info for a line typed into an interactive run: a sealed line never opens as an input, nor an input as a line. */
+export const RUN_LINE_SEAL_INFO = 'lobstah run line v1';
+
+/**
+ * What the hosted page signs for one line, with the page key that started the
+ * run: the card, the run's attempt, the line's number in that run, whether it's
+ * secret, and the sealed line. The boat takes only the next number, so the
+ * wharf can't replay, reorder or unmask a line.
+ */
+export function runLineSignedText(key: string, attempt: string, seq: number, secret: boolean, sealed: SealedInput): string {
+  return JSON.stringify([RUN_LINE_SEAL_INFO, key, attempt, seq, secret, sealed.epk, sealed.iv, sealed.ct]);
+}
+
 export function isSealedInput(value: unknown): value is SealedInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;

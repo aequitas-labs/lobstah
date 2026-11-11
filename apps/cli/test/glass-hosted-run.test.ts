@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import type { GlassRunCard } from '@lobstah/core';
-import { runInputsText, sha256Hex } from '@lobstah/core';
+import { RUN_LINE_SEAL_INFO, runInputsText, runLineSignedText, sha256Hex } from '@lobstah/core';
+import type { SealedInput } from '@lobstah/core';
 import { openSealedInput } from '../src/run-seal.js';
+import { pageKeySigned } from '../src/run-window.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
@@ -71,7 +73,7 @@ describe('Run on the hosted glass', () => {
     expect(text(g.$('#doverlay .runfoot .dim'))).toBe('Pair this phone first: run lobstah run passkey add --hosted on the Mac.');
   });
 
-  it('keeps an interactive card, and one with a secret input, on the Mac', async () => {
+  it('keeps an interactive card, and one with a secret input, on the Mac when the boat publishes no seal key', async () => {
     const { g } = await page(hostedRun({ interactive: true }));
     expect((g.$('#doverlay .runbtn') as HTMLButtonElement).disabled).toBe(true);
     expect(text(g.$('#doverlay .runfoot .dim'))).toBe('Interactive cards run from the Mac.');
@@ -221,6 +223,60 @@ describe('a secret input on the hosted glass', () => {
     // The challenge bound exactly what was sent.
     const challenge = h.sent.find((x) => x.kind === 'run-challenge')!.payload;
     expect(challenge.inputsSha256).toBe(sha256Hex(runInputsText(sent as never)));
+  });
+});
+
+describe('an interactive run on the hosted glass', () => {
+  /** Wait without settling: the run's output poll keeps a timer pending while it runs. */
+  async function until<T>(get: () => T | null | undefined | false): Promise<T> {
+    for (let i = 0; i < 100; i++) {
+      const got = get();
+      if (got) return got;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    throw new Error('timed out');
+  }
+
+  it('seals each line to the boat and signs it with the page key that started the run', async () => {
+    const boat = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const sealKey = (boat.publicKey.export({ format: 'der', type: 'spki' }) as Buffer).toString('base64url');
+    const run = hostedRun({ interactive: true, sealKey });
+    let lines = 0;
+    const answer = (s: Sent) => {
+      if (s.kind === 'run-challenge') return { status: 200, body: { ok: true, challenge: 'cGFzc2tleQ', rpId: 'glass.test', credentialIds: [], sha256: run.scriptSha256 } };
+      if (s.kind === 'run') return { status: 202, body: { ok: true, running: true, key: RUN_KEY, window: 'w1', windowUntil: NOW + 15 * 60_000 } };
+      if (s.kind === 'run-line') {
+        lines += 1;
+        return { status: 200, body: { ok: true } };
+      }
+      if (s.kind === 'run-output')
+        return { status: 200, body: { ok: true, id: 'a1', state: lines < 2 ? 'running' : 'succeeded', text: '', next: 0, ...(lines < 2 ? {} : { result: { exitCode: 0, timedOut: false, durationMs: 5, outputBytes: 0, scrubbed: 1 } }) } };
+      return { status: 404, body: { ok: false } };
+    };
+    const h = await page(run, { answer });
+    expect((h.g.$('#doverlay .runbtn') as HTMLButtonElement).disabled).toBe(false);
+    (h.g.$('#doverlay .runbtn') as HTMLButtonElement).click();
+    const field = await until(() => h.g.$('#doverlay .runlinein') as HTMLInputElement | null);
+    await until(() => h.sent.some((s) => s.kind === 'run-output'));
+    const type = async (value: string, count: number) => {
+      field.value = value;
+      field.dispatchEvent(new h.g.window.Event('input', { bubbles: true }) as unknown as Event);
+      await new Promise((r) => setTimeout(r, 30));
+      h.g.$('#doverlay .runlinein')!.dispatchEvent(new h.g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event);
+      await until(() => lines === count);
+    };
+    await type('pearl', 1);
+    (h.g.$('#doverlay .runsecret') as HTMLButtonElement).click();
+    await type('hunter2', 2);
+    const pageKey = String(h.sent.find((s) => s.kind === 'run')!.payload.windowKey);
+    const sent = h.sent.filter((s) => s.kind === 'run-line').map((s) => s.payload);
+    // Neither line leaves the page in clear.
+    expect(JSON.stringify(sent)).not.toContain('pearl');
+    expect(JSON.stringify(sent)).not.toContain('hunter2');
+    expect(sent.map((p) => [p.attempt, p.seq, p.secret])).toEqual([['a1', 0, false], ['a1', 1, true]]);
+    // Only the boat's key opens each, and the page key sent with Run signed each.
+    expect(sent.map((p) => openSealedInput(p.sealed, boat.privateKey, RUN_LINE_SEAL_INFO))).toEqual(['pearl', 'hunter2']);
+    for (const p of sent) expect(pageKeySigned(pageKey, runLineSignedText(RUN_KEY, 'a1', p.seq as number, p.secret as boolean, p.sealed as SealedInput), p.signature)).toBe(true);
   });
 });
 

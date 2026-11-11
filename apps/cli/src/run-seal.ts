@@ -40,14 +40,14 @@ export function runSealKey(file = sealKeyFile()): { privateKey: KeyObject; publi
   return cached;
 }
 
-/** Open one sealed input with this boat's key, or refuse it. */
-export function openSealedInput(sealed: unknown, privateKey: KeyObject): string {
+/** Open one sealed input (or, under `RUN_LINE_SEAL_INFO`, one sealed line) with this boat's key, or refuse it. */
+export function openSealedInput(sealed: unknown, privateKey: KeyObject, info = RUN_SEAL_INFO): string {
   if (!isSealedInput(sealed)) throw new PasskeyError('A sealed input is malformed.', 400);
   try {
     const peer = createPublicKey({ key: Buffer.from(sealed.epk, 'base64url'), format: 'der', type: 'spki' });
     if (peer.asymmetricKeyType !== 'ec' || peer.asymmetricKeyDetails?.namedCurve !== 'prime256v1') throw new Error('not P-256');
     const shared = diffieHellman({ privateKey, publicKey: peer });
-    const key = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), RUN_SEAL_INFO, 32));
+    const key = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), info, 32));
     const iv = Buffer.from(sealed.iv, 'base64url');
     const ct = Buffer.from(sealed.ct, 'base64url');
     if (iv.length !== 12 || ct.length < 17) throw new Error('short');

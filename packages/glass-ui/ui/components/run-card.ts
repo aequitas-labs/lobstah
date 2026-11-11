@@ -70,13 +70,14 @@ function Warnings({ warnings }: { warnings: ScriptWarning[] }) {
 /**
  * Why Run can't be pressed yet, or undefined when it can. On the hosted
  * glass (the card names its boat) Run needs a phone passkey paired with that
- * boat, and an interactive card runs only from the Mac.
+ * boat.
  */
 export function runBlocked(run: GlassRunCard, passkeys?: number): string | undefined {
   const hosted = run.boat !== undefined;
   const count = passkeys ?? (hosted ? getState().snapshot?.runPasskeys?.hosted : getState().snapshot?.runPasskeys?.count) ?? 0;
   if (run.altered) return "This script changed after it was proposed, so it can't run.";
-  if (hosted && run.interactive) return 'Interactive cards run from the Mac.';
+  // Lines typed on the hosted glass are sealed to the boat's key too: a boat that publishes none runs interactive cards from the Mac.
+  if (hosted && run.interactive && !run.sealKey) return 'Interactive cards run from the Mac.';
   // A secret typed on the hosted glass is sealed to the boat's key; a boat that publishes none takes none.
   if (hosted && !run.sealKey && run.inputs.some((i) => i.secret)) return 'Secret inputs are typed on the Mac for now.';
   if (!count)

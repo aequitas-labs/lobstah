@@ -163,6 +163,15 @@ describe('relayed calls', () => {
     expect(await answered.json()).toEqual({ ok: false, reason: 'already answered' });
   });
 
+  it('relays a sealed line for an interactive run to its boat as the page sent it', async () => {
+    const north = await enrol('north', ['mirror', 'read']);
+    const payload = { key: 'decision:0a1b2c3d', attempt: 'a1', seq: 0, secret: false, sealed: { epk: 'ZXBr', iv: 'aXY', ct: 'Y3Q' }, signature: 'c2ln' };
+    const call = await relay(north, { write: { kind: 'run-line', payload } });
+    expect(call.write).toEqual({ kind: 'run-line', payload });
+    const waiting = await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>();
+    expect(waiting.calls.find((c) => c.id === call.id)?.write).toEqual({ kind: 'run-line', payload });
+  });
+
   it('delivers a call to the boat it names only', async () => {
     const north = await enrol('north', ['mirror', 'read']), south = await enrol('south', ['mirror', 'read']);
     const call = await relay(north, { read: '/data/settings' });

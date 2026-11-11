@@ -801,6 +801,14 @@ The person reviews and runs the script from the glass. Scripts read declared
 inputs from stdin, one line each in `--input` order. `scrubbed` returns
 scrubbed output to the helm. `exit` returns only the exit code.
 
+From the phone: a Mac that mirrors to a hosted glass runs its cards from
+there too. Run `lobstah run passkey add --hosted` on the Mac, open the link it
+prints on the phone within 5 minutes, and tap Pair. Then press Run on the card
+on the hosted glass: the phone's passkey confirms it, and covers 15 minutes of
+runs on that page. Secret inputs, and every line typed into an interactive
+run, are sealed to the Mac, so the wharf can't read them. Only the page that
+started an interactive run can type into it.
+
 ### The periodic report
 
 `lobstah man tend` is the full picture on demand; `lobstah man report` is the
