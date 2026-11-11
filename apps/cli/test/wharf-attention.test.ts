@@ -7,12 +7,12 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { BackendError, appendStatus, claimNext, enqueue, ensureLayout, writeMirrorStatus } from '@lobstah/core';
+import { BackendError, appendStatus, claimNext, enqueue, ensureLayout, loadConfig, writeMirrorStatus } from '@lobstah/core';
 import type { MirrorStatus, WharfAttentionList, WharfMirrorCall } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { MIRROR_ATTENTION_OFF_MS, MIRROR_ATTENTION_READ_MS, WharfMirror, loopbackGlass } from '../src/wharf-mirror.js';
 import type { MirrorWharf } from '../src/wharf-mirror.js';
-import { otherBoatsPath, readOtherBoats, writeOtherBoats } from '../src/wharf-attention.js';
+import { otherBoatsAttention, otherBoatsPath, readOtherBoats, writeOtherBoats } from '../src/wharf-attention.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
@@ -181,6 +181,17 @@ describe('the pet walks every boat', () => {
     const pr = (extra = {}) => item('pr:acme/web#9', { kind: 'pr:draft', verb: 'pr:draft', prUrl: 'https://github.com/acme/web/pull/9', ...extra });
     cache([list('boat-n', 'north', [pr()]), list('boat-s', 'south', [pr(), item('work:s')])]);
     expect(walking().map((a) => a.key)).toEqual(['@boat-n/pr:acme/web#9', '@boat-s/work:s']);
+  });
+
+  it('walks an item of a wharf grounds once: from this boat when it views that grounds, else from the boat that does', () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), MIRRORED);
+    const hosted = (key: string, grounds: string) => item(key, { grounds, wharf: 'lobstah', note: `[${grounds}@lobstah] Which base?` });
+    cache([list('boat-n', 'north', [hosted('work:srv-viewed', 'shared'), hosted('work:srv-other', 'theirs')])]);
+    // This boat's own view of the shared grounds already walks its items (hostedAttention).
+    const mine = [{ key: `work:srv-${'a'.repeat(40)}`, grounds: 'shared', wharf: 'lobstah' }];
+    const others = otherBoatsAttention(loadConfig(), mine);
+    expect(others.map((a) => a.key)).toEqual(['@boat-n/work:srv-other']);
+    expect(otherBoatsAttention(loadConfig(), []).map((a) => a.key)).toEqual(['@boat-n/work:srv-viewed', '@boat-n/work:srv-other']);
   });
 
   it('walks no other boat on a Mac that mirrors to no wharf', () => {
