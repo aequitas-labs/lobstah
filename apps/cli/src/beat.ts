@@ -1,3 +1,4 @@
+import { cancelledTrapTool } from './trap-cancellation.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { beatTrap, loadConfig, lobstahHome, readTrap, trapBySession, trapIdAbove } from '@lobstah/core';
@@ -43,13 +44,18 @@ function probePr(input: PostToolHookInput | undefined, opts: { now?: number; run
  * `lobstah soak beat`: the post-tool hook. Refreshes the trap's liveness,
  * writes its catch's activity, and records the catch's PR once its branch
  * has one. It never fails the tool call: every path returns normally and
- * prints nothing, and errors go to logs/beat.log.
+ * prints only a cancellation stop, and errors go to logs/beat.log.
  */
 export function runBeat(
   input: PostToolHookInput | undefined = readHookStdin() as PostToolHookInput | undefined,
   opts: { now?: number; run?: ProbeRun } = {},
 ): BeatResult | undefined {
   try {
+    const cancelled = cancelledTrapTool(input?.session_id);
+    if (cancelled) {
+      console.log(JSON.stringify({ continue: false, stopReason: cancelled, hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: cancelled } }));
+      return undefined;
+    }
     if (!loadConfig().soak.beat) return undefined;
     const result = beatTrap({
       cwd: input?.cwd ?? process.cwd(),
