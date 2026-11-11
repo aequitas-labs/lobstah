@@ -1,4 +1,4 @@
-import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata, Grant } from '@lobstah/core';
+import type { GlassPr, GlassSnapshot, GlassStack, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
 import {
   DECK_TRAPS_MAX,
   INFLIGHT_MAX,
@@ -35,9 +35,15 @@ import {
   trapDisplayName,
   trapScope,
   windowAction,
+  dispatchContext,
+  verbTone,
+  verbWord,
 } from './common.js';
 import { GrantChip } from './session-grants.js';
 import { trapCard } from './traps.js';
+import { dispatchCard } from './dispatches.js';
+import { Card } from './card.js';
+import { getState } from '../store.js';
 import { reportMeta } from './reports.js';
 import { PrAck } from './prs.js';
 import { DeckDecisions } from './decisions.js';
@@ -69,13 +75,39 @@ interface DeckItem {
   href?: string;
   /** A block under the card or line: a starting trap's start commands. */
   extra?: Children;
-  /** The item's own card, used as is in the cards view: a trap's. */
+  /** The item's own card, used as is in the cards view: a trap's, a dispatch's. */
   card?: Children;
+  /** The item's own row, used as is in the list view: a dispatch's two-line row. */
+  row?: Children;
   open?: () => void;
   acked?: boolean;
 }
 
 type View = GlassPrefs['view'] | undefined;
+
+/**
+ * A dispatch on the deck in the list view: two lines, the same parts as its
+ * card. Line 1 is its instruction and status chip; line 2 its repo and trap,
+ * with its age at the right.
+ */
+function dispatchRow(p: {
+  key: string;
+  title: Children;
+  titleAttr: string;
+  verb: string;
+  context: Children;
+  at?: string;
+  open: () => void;
+}) {
+  return html`<div key=${p.key} class="deckrow click" onClick=${p.open}>
+    <div class="gline"><b class="gtitle" title=${p.titleAttr}>${p.title}</b><span class="gfill"></span><span class=${'gchip ' + verbTone(p.verb)}>${verbWord(p.verb)}</span></div>
+    <div class="gline dim"><span class="gtext">${p.context}</span>${p.at && html`<span class="gright">${Age(p.at)} ago</span>`}</div>
+  </div>`;
+}
+
+/** A landed catch's title: its dispatch's, while the snapshot still lists it; else its note's first line; else its id. */
+const landedTitle = (x: LandedCatch): string =>
+  getState().snapshot?.dispatches.find((d) => d.id === x.id)?.title || (x.note ?? '').split('\n')[0]!.trim() || x.id.slice(0, 8);
 
 function deckItem(it: DeckItem, view: View) {
   const badge =
@@ -92,6 +124,7 @@ function deckItem(it: DeckItem, view: View) {
       : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
   if (view === 'cards' && it.card) return it.card;
+  if (view !== 'cards' && it.row) return it.row;
   if (view === 'cards')
     return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b title=${it.trap?.address}>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${(it.action || it.trap?.scope) && html`<div class="foot">${it.trap?.scope && html`<span class="trap-scope" title=${it.trap.scope}>${it.trap.scope}</span>`}<span class="footact">${it.action}</span></div>`}</div>`;
   if (it.trap)
@@ -189,6 +222,16 @@ export function Deck({
   const shownGoals = goals.filter((g) => g.lines.length);
   const view = inp.view;
   const flight = inp.inflight.map((x): DeckItem => ({
+    card: dispatchCard(x),
+    row: dispatchRow({
+      key: x.lane + ':' + x.id,
+      title: x.title || x.id.slice(0, 8),
+      titleAttr: `${x.id.slice(0, 8)} · ${x.title}`,
+      verb: x.verb,
+      context: dispatchContext(x.repo, x.for || x.claimedBy),
+      at: x.verbAt,
+      open: opener('dispatch', x.lane + ':' + x.id),
+    }),
     key: x.lane + ':' + x.id,
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
     worker: x.worker,
@@ -204,14 +247,32 @@ export function Deck({
       .join(' · '),
     open: opener('dispatch', x.lane + ':' + x.id),
   }));
-  const landed = inp.landed.map((x): DeckItem => ({
-    key: x.key,
-    title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
-    badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
-    meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
-    metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
-    open: opener('dispatch', x.lane + ':' + x.id),
-  }));
+  const landed = inp.landed.map((x): DeckItem => {
+    const title = landedTitle(x);
+    const trap = getState().snapshot?.dispatches.find((d) => d.id === x.id);
+    const context = [
+      dispatchContext(x.repo, trap?.for || trap?.claimedBy),
+      x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`],
+    ];
+    const open = opener('dispatch', x.lane + ':' + x.id);
+    return {
+      card: html`<${Card}
+      key=${x.key}
+      title=${title}
+      titleAttr=${`${x.id.slice(0, 8)} · ${title}`}
+      state=${{ word: verbWord(x.verb), tone: verbTone(x.verb), mark: 'chip' }}
+      context=${[context, ' · ', Age(x.at), ' ago']}
+      onClick=${open}
+    />`,
+      row: dispatchRow({ key: x.key, title, titleAttr: `${x.id.slice(0, 8)} · ${title}`, verb: x.verb, context, at: x.at, open }),
+      key: x.key,
+      title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
+      badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
+      meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
+      metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
+      open,
+    };
+  });
   const reports = inp.reports.map((r): DeckItem => {
     const meta = reportMeta(r);
     return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, href: reportPageUrl(r.key), acked: !!r.acked };

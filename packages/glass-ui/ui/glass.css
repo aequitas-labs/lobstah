@@ -588,7 +588,8 @@ tr.rowhead:hover {
   overflow: hidden;
 }
 .gtitle {
-  flex: 0 1 auto;
+  /* The title gives way first: the icon, state and action never shrink. */
+  flex: 0 1000000 auto;
   font-size: 14px;
 }
 .gtext {
@@ -616,10 +617,18 @@ tr.rowhead:hover {
   white-space: nowrap;
 }
 .gchip {
+  max-width: min(26ch, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
   border: 1px solid currentColor;
   border-radius: 999px;
   padding: 0 8px;
   font-size: 12px;
+}
+/* A status word over 12 characters (class long, full word in its title) may shrink, never below 12. */
+.gchip.long {
+  flex: 0 1 auto;
+  min-width: min(12ch, 100%);
 }
 .gchip.ok,
 .gword.ok {
@@ -1234,11 +1243,12 @@ a.lob {
   flex-direction: column;
   gap: 6px;
 }
+/* A decision on the deck: the question across, then its repo and age with Answer, then a run card's boat. */
 .drow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px var(--space-2);
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--card-radius);
@@ -1256,7 +1266,7 @@ a.lob {
   animation: dflash 1.6s ease-out 1;
 }
 .drow .dopen {
-  flex: 1 1 280px;
+  grid-column: 1 / -1;
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
@@ -1278,8 +1288,35 @@ a.lob {
   white-space: nowrap;
 }
 .drow .dmeta,
-.drow .dage {
+.drow .dage,
+.drow .dboat {
   font-size: 11px;
+}
+.drow .dmeta {
+  grid-column: 1;
+  min-width: 0;
+}
+.drow .dgo,
+.drow .dsent {
+  grid-column: 2;
+}
+.drow .dboat {
+  grid-column: 1 / -1;
+}
+/* A dispatch on the deck's list view: two lines, the same parts as its card. */
+.deckrow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.deckrow.click {
+  cursor: pointer;
+}
+.deckrow:hover .gtitle {
+  text-decoration: underline;
 }
 .drow .dlink,
 .dmodal .dlink {

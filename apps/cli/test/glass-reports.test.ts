@@ -309,12 +309,12 @@ describe('glass: cards keep their text inside', () => {
     x.verb = longBadge as never;
     x.note = longMeta;
     const g = await page(d, { prefs: { view: 'cards' } });
-    const card = g.$$('#deck .card').find((c) => text(c).includes(x.id.slice(0, 8)))!;
-    const badge = card.querySelector('.top .badge')!;
-    const meta = card.querySelector('.meta')!;
-    expect(badge.getAttribute('title')).toBe(longBadge);
-    // /data cuts a note to NOTE_MAX characters; the modal's detail has all of it.
-    expect(meta.getAttribute('title')).toContain(`${longMeta.slice(0, NOTE_MAX)}…`);
+    const card = g.$$('#deck .card').find((c) => c.querySelector('b')?.getAttribute('title')?.startsWith(x.id.slice(0, 8)))!;
+    // A long status word truncates with its text in the title; the note is in the dispatch's modal, not on its card.
+    const badge = card.querySelector('.gchip')!;
+    expect(badge.getAttribute('title')).toBe(longBadge.replace(/-/g, ' '));
+    expect(text(card)).not.toContain(longMeta.slice(0, 40));
+    expect(NOTE_MAX).toBeGreaterThan(0);
     const style = (el: Element) => g.window.getComputedStyle(el as never);
     expect(style(card)).toMatchObject({ overflow: 'hidden' });
     expect(style(card).getPropertyValue('overflow-wrap')).toBe('anywhere');
@@ -323,19 +323,14 @@ describe('glass: cards keep their text inside', () => {
     expect(style(badge).getPropertyValue('max-width').replace(/\s/g, '')).toBe('min(26ch,100%)');
     expect(style(badge).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
     expect(style(badge).getPropertyValue('flex')).toMatch(/^0 1 auto$/);
-    expect(style(meta)).toMatchObject({ overflow: 'hidden' });
     // happy-dom does not compute line clamping: read the rule itself.
     const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
-    for (const sel of ['.card .meta', '.card .note']) {
-      const rule = css.slice(css.indexOf(`${sel} {`), css.indexOf('}', css.indexOf(`${sel} {`)));
-      expect(rule, sel).toMatch(/-webkit-line-clamp: 2;/);
-      expect(rule, sel).toMatch(/overflow: hidden;/);
-    }
-    expect(style(card.querySelector('.top > b')!)).toMatchObject({ textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
-    // The title keeps room for its identity (#99999, an 8-character id); the badge gives way first.
-    expect(style(card.querySelector('.top > b')!).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(10ch,100%)');
-    // A short badge carries no title.
-    const short = g.$$('#deck .card .top .badge').find((b) => text(b) === 'working');
+    // The shared card's title and text lines wrap to two lines, then clamp (components/card.ts).
+    const rule = css.slice(css.indexOf('.gtitle,\n.gtext {'), css.indexOf('}', css.indexOf('.gtitle,\n.gtext {')));
+    expect(rule).toMatch(/-webkit-line-clamp: 2;/);
+    expect(rule).toMatch(/overflow: hidden;/);
+    // A short status word carries no title.
+    const short = g.$$('#deck .card .gchip').find((b) => text(b) === 'working');
     expect(short?.getAttribute('title') ?? null).toBeNull();
   });
 });
@@ -370,13 +365,12 @@ describe('glass: short card badges stay whole', () => {
     d.landed[0] = { ...d.landed[0]!, repo: 'a-repository-name-long-enough-to-crowd-the-badge', verb: 'done', at: ago(60_000) };
     const g = await page(d, { prefs: { view: 'cards' } });
     const style = (el: Element) => g.window.getComputedStyle(el as never);
-    const landed = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('a-repository-name-long'))!;
-    const done = landed.querySelector('.top > .badge')!;
+    const landed = g.$$('#deck .card').find((c) => text(c.querySelector('.gtext')).includes('a-repository-name-long'))!;
+    const done = landed.querySelector('.gchip')!;
     expect(text(done)).toBe('done');
-    expect(done.className).not.toContain('long');
     expect(done.getAttribute('title')).toBeNull();
     expect(style(done).getPropertyValue('flex')).toBe('0 0 auto');
-    const title = landed.querySelector('.top > b')!;
+    const title = landed.querySelector('.gtitle')!;
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
     const trap = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
     // A trap card's harness is the icon after its name (components/card.ts); it never shrinks either.
@@ -388,7 +382,7 @@ describe('glass: short card badges stay whole', () => {
       const e = everyAttentionFleet();
       e.dispatches.find((v) => v.bucket !== 'done')!.verb = verb as never;
       const p = await page(e, { hash: '#dispatches', prefs: { view: 'cards' } });
-      const badge = p.$$('#dispatches .card .top .badge').find((b) => text(b) === verb)!;
+      const badge = p.$$('#dispatches .card .gchip').find((b) => text(b) === verb.replace(/-/g, ' '))!;
       expect(badge.className.includes('long'), verb).toBe(long);
     }
   });

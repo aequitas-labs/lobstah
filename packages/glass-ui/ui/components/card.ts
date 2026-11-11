@@ -52,7 +52,7 @@ export function Card(p: CardProps) {
   const state =
     p.state &&
     (mark === 'chip'
-      ? html`<span class=${'gchip ' + p.state.tone}>${p.state.word}</span>`
+      ? html`<span class=${'gchip ' + p.state.tone + (p.state.word.length > 12 ? ' long' : '')} title=${p.state.word.length > 12 ? p.state.word : undefined}>${p.state.word}</span>`
       : html`<span class=${'gword ' + p.state.tone}>${p.state.word}</span>`);
   return html`<div class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
     <div class="gline gtop"><b class="gtitle" title=${p.titleAttr}>${p.title}</b>${p.icon && html`<span class="gicon">${p.icon}</span>`}<span class="gfill"></span>${state}</div>

@@ -16,6 +16,11 @@ async function page(d: GlassSnapshot, opts: Partial<GlassDomOptions> = {}): Prom
   return g;
 }
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** Click an element and let the page settle (a card opens its modal). */
+async function click(g: GlassDom, el: Element | null | undefined) {
+  (el as unknown as HTMLElement).click();
+  await g.settle();
+}
 
 function fleet(stale: boolean): GlassSnapshot {
   const d = acceptanceFleet();
@@ -29,7 +34,12 @@ describe('glass: the activity line sits under the verb and note', () => {
   for (const view of ['cards', 'table'] as const) {
     it(`${view}: fresh activity shows its summary and age`, async () => {
       const g = await page(fleet(false), { hash: '#dispatches', prefs: { view } });
-      const el = g.$$('#dispatches .activity')[0];
+      // A dispatch card keeps its activity for its modal (components/card.ts); a table row shows it inline.
+      if (view === 'cards') {
+        expect(g.$$('#dispatches .card .activity')).toHaveLength(0);
+        await click(g, g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb')));
+      }
+      const el = g.$$(view === 'cards' ? '#modalbox .activity' : '#dispatches .activity')[0];
       expect(text(el)).toBe('Edit src/parse.ts · 12s ago');
       expect(el?.className).toBe('activity');
     });
@@ -37,9 +47,8 @@ describe('glass: the activity line sits under the verb and note', () => {
 
   it('stale activity is dim and says so, with its age', async () => {
     const g = await page(fleet(true), { hash: '#dispatches', prefs: { view: 'cards' } });
-    const card = g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb'))!;
-    expect(text(card.querySelector('.note'))).toBe('building the parser');
-    const el = card.querySelector('.activity')!;
+    await click(g, g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb')));
+    const el = g.$('#modalbox .activity')!;
     expect(el.className).toBe('activity stale');
     expect(text(el)).toBe('stale · Edit src/parse.ts · 20m ago');
   });
@@ -53,7 +62,9 @@ describe('glass: a paused dispatch says what it waits on', () => {
     x.waiting = { on: 'review', link: 'https://ume.example.com/s/abc', since: ago(12 * 60_000), waitedSecs: 720 };
     const g = await page(d, { hash: '#dispatches', prefs: { view: 'cards' } });
     const card = g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb'))!;
-    const w = card.querySelector('.waiting')!;
+    expect(text(card.querySelector('.gchip'))).toBe('paused');
+    await click(g, card);
+    const w = g.$('#modalbox .waiting')!;
     expect(text(w)).toBe('paused: waiting on review · 12m · ume.example.com/s/abc');
     const a = w.querySelector('a')!;
     expect(a.getAttribute('href')).toBe('https://ume.example.com/s/abc');

@@ -1,6 +1,7 @@
-import type { GlassDispatchSummary as GlassDispatch } from '@lobstah/core';
+import type { GlassDispatchSummary as GlassDispatch, GlassDispatchSummary } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
+import { Card } from './card.js';
 import {
   heavyPlace,
   ActivityLine,
@@ -11,11 +12,11 @@ import {
   WaitingLine,
   Table,
   addrCell,
-  namedText,
-  badgeLong,
-  badgeTitle,
+  dispatchContext,
   opener,
   prCell,
+  verbTone,
+  verbWord,
 } from './common.js';
 import type { OlderControl } from './common.js';
 
@@ -50,16 +51,31 @@ function row(x: GlassDispatch, chain: boolean | undefined) {
   return html`<tr key=${key} class="rowhead" onClick=${opener('dispatch', key)}><td>${chain && x.followUp && html`<span class="dim">↳ </span>`}${x.id.slice(0, 8)}</td><td>${x.lane} / ${x.bucket}</td><td>${x.repo}</td><td class=${'v-' + x.verb}>${x.verb}${heavyPlace({ dispatch: x.id }) ? html`<div class="dim">${heavyPlace({ dispatch: x.id })}</div>` : ''}</td><td class="grow">${NamedText(x.note ?? '', 90)}${WaitingLine(x)}${WorkerIndicator(x)}${ActivityLine(x)}</td><td>${Age(x.verbAt)}</td><td>${addrCell(x)}</td><td>${prCell(x)}</td></tr>`;
 }
 
-function card(x: GlassDispatch) {
+/**
+ * A dispatch as a card: its instruction and status chip, then its repo, the
+ * trap that has it, and its age. The id, note, worker, PR and the rest are in
+ * its modal; the id still finds it in search.
+ */
+export function dispatchCard(x: GlassDispatchSummary) {
   const key = x.lane + ':' + x.id;
-  return html`<div key=${key} class="card" onClick=${opener('dispatch', key)}><div class="top"><b>${x.id.slice(0, 8)}</b>${WorkerIndicator(x)}<span class=${'badge v-' + x.verb + badgeLong(x.verb)} title=${badgeTitle(x.verb)}>${x.verb}</span>${heavyPlace({ dispatch: x.id }) ? html`<span class="dim">${heavyPlace({ dispatch: x.id })}</span>` : ''}</div><div class="meta" title=${`${x.repo} · ${x.lane} ${x.bucket}`}>${x.repo} · ${x.lane} ${x.bucket}${x.verbAt && [' · ', Age(x.verbAt)]}</div>${x.note && html`<div class="note" title=${namedText(x.note)}>${NamedText(x.note)}</div>`}${WaitingLine(x)}${ActivityLine(x)}<div class="foot">${addrCell(x)} ${prCell(x)}</div></div>`;
+  return html`<${Card}
+    key=${key}
+    title=${x.title || x.id.slice(0, 8)}
+    titleAttr=${`${x.id.slice(0, 8)} · ${x.title}`}
+    state=${{ word: verbWord(x.verb), tone: verbTone(x.verb), mark: 'chip' }}
+    context=${dispatchContext(x.repo, x.for || x.claimedBy, x.verbAt)}
+    onClick=${opener('dispatch', key)}
+  />`;
 }
 
 export function Dispatches({ inp, more }: { inp: SectionInputs['dispatches']; more?: OlderControl }) {
   const list = inp.list;
   const older = more && html`<${ShowOlder} kind="dispatches" more=${more} />`;
   if (inp.view === 'cards')
-    return [list.length ? html`<div class="cards">${list.map(card)}</div>` : html`<div class="empty">no dispatches match</div>`, older];
+    return [
+      list.length ? html`<div class="cards">${list.map(dispatchCard)}</div>` : html`<div class="empty">no dispatches match</div>`,
+      older,
+    ];
   return [
     Table(
       ['id', 'lane / bucket', 'repo', 'verb', 'note', 'age', 'addressed', 'pr'],

@@ -425,6 +425,23 @@ export function TrapName(trapId: string): Children {
   return html`<a class="trapname" href="#traps" title=${address} onClick=${open}>${name}</a>`;
 }
 
+/** A dispatch verb as a card's status word: lowercase, spaced ("needs decision"). */
+export const verbWord = (verb: string): string => verb.replace(/-/g, ' ');
+
+/** A dispatch verb's tone: red when it needs a person, amber in progress, green done, grey queued or unknown. */
+export function verbTone(verb: string): 'ok' | 'warn' | 'bad' | 'dim' {
+  if (verb === 'needs-decision' || verb === 'blocked' || verb === 'failed') return 'bad';
+  if (verb === 'done') return 'ok';
+  if (verb === 'working' || verb === 'paused') return 'warn';
+  return 'dim';
+}
+
+/** A dispatch's context line: its repo, 🪤 the trap that has it, and how long ago it last moved. */
+export function dispatchContext(repo: string | undefined, trap: string | undefined, at?: string): Children {
+  const parts: Children[] = [repo, trap && ['🪤 ', WorkerAddress(trap)], at && [Age(at), ' ago']].filter(Boolean);
+  return parts.flatMap((p, i) => (i ? [' · ', p] : [p]));
+}
+
 /** A worker address: a `wt:<id>` shows as TrapName; any other address shows as it is. */
 export const WorkerAddress = (address: string): Children => {
   const m = /^wt:([a-z0-9][a-z0-9-]*)$/.exec(address);

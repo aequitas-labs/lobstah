@@ -144,17 +144,25 @@ function source(c: DecisionCard) {
   return parts.flatMap((m, i) => (i ? [' · ', m] : [m]));
 }
 
+/**
+ * A decision on the deck: the question, then its repo and age with Answer
+ * (Run on a run card), highlighted while unread. A run card adds a line with
+ * the boat it runs on. Who asked and the dispatch are in the decision itself.
+ */
 function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean, focused: boolean) {
   const state = stateOf(c, draft, viewedHere);
   const open = () => openDecision(c.key);
+  const run = c.kind === 'decision' && !!c.run;
+  const boat = run ? getState().snapshot?.viewer?.machine : undefined;
+  const meta = [c.repo, [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
     <button type="button" class="dopen" onClick=${open} aria-label=${`${state}: ${c.kind === 'decision' ? c.title : c.note}`}>
       ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
       <b class="dtitle">${titleOf(c)}</b>
     </button>
-    <span class="dmeta dim">${source(c)}</span>
-    <span class="dage dim">${Age(c.at)} ago</span>
-    <span class=${'dstate ' + state}>${state === 'answered' ? `answered · ${draft!.sent}` : state}</span>
+    <span class="dmeta dim">${meta}</span>
+    ${state === 'answered' ? html`<span class="dsent ok">sent</span>` : html`<button type="button" class="btn dgo" onClick=${open}>${run ? 'Run' : 'Answer'}</button>`}
+    ${boat && html`<span class="dboat dim">⛵ ${boat}</span>`}
   </li>`;
 }
 

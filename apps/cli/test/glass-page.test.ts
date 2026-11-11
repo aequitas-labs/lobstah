@@ -687,7 +687,8 @@ describe('glass page: per-section change detection', () => {
     const seen = await mutations(g, () => g.poll());
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.filter((m) => !card.contains(m.target as never))).toEqual([]);
-    expect(card.querySelector('.badge')!.className).toBe('badge v-blocked');
+    expect(card.querySelector('.gchip')!.className).toBe('gchip bad');
+    expect(text(card.querySelector('.gchip'))).toBe('blocked');
   });
 
   it('a new dispatch inserts one row and keeps every existing row node', async () => {
@@ -987,31 +988,34 @@ describe('glass page: On deck', () => {
   it('a queued in-flight row shows the queued badge, its queue time, and its trap address', async () => {
     const g = await page(acceptanceFleet());
     const flight = g.$$('#deck section')[1]!;
-    const line = [...flight.querySelectorAll('.deckline')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line.querySelector('.badge'))).toBe('queued');
-    // The empty note keeps its separator (legacy fidelity); the time is the queue time.
-    expect(text(line)).toBe('queued dddddddd api · · 60s ago · wt:t2');
+    // Two lines: the instruction and its status chip; the repo and trap, with the queue time at the right.
+    const line = [...flight.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
+    expect(text(line.querySelector('.gchip'))).toBe('queued');
+    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
+    expect(text(line.querySelector('.gright'))).toBe('60s ago');
   });
 
   it('an in-flight row with no time omits the "· ago" fragment', async () => {
     const d = acceptanceFleet();
     d.dispatches = d.dispatches.map((x) => (x.id.startsWith('dddddddd') ? { ...x, verbAt: undefined } : x));
     const g = await page(d);
-    const line = [...g.$$('#deck section')[1]!.querySelectorAll('.deckline')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line)).toBe('queued dddddddd api · · wt:t2');
+    const line = [...g.$$('#deck section')[1]!.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
+    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
+    expect(line.querySelector('.gright')).toBeNull();
     expect(text(line)).not.toContain('ago');
   });
 
   it('Landed · 24h: the newest five catches, newest first, unreported badged, failed in red, nothing older', async () => {
     const g = await page(everyAttentionFleet());
     const landed = g.$$('#deck section')[2]!;
-    const lines = [...landed.querySelectorAll('.deckline')];
+    const lines = [...landed.querySelectorAll('.deckrow')];
     expect(lines).toHaveLength(5);
-    expect(lines.map((l) => text(l.querySelector('b')).split(' ')[0])).toEqual(
+    // Each row's title carries its id on hover; the title is the dispatch's, else its note's first line.
+    expect(lines.map((l) => l.querySelector('b')!.getAttribute('title')!.split(' ')[0])).toEqual(
       Array.from({ length: 5 }, (_, i) => `1${i}aaaaaa`),
     );
     expect(lines.map((l) => !!l.querySelector('.badge.unreported'))).toEqual([true, true, true, true, false]);
-    expect(lines[2]!.querySelector('.badge')!.className).toBe('badge bad');
+    expect(lines[2]!.querySelector('.gchip')!.className).toBe('gchip bad');
     expect(text(landed)).not.toContain('yesterday');
     expect(landed.querySelector('.deckmore')).toBeNull();
   });
@@ -1194,9 +1198,8 @@ describe('glass page: a dispatch shows its trap by name', () => {
 
   it('shows the name on the deck, in the dispatch modal, and in its log', async () => {
     const g = await page(namedFleet(), { hash: '#deck', prefs: { view: 'table' } });
-    const flight = g.$$('#deck .deckline').find((l) => text(l).includes('cccccccc'))!;
-    expect(text(flight)).toContain('claimed by crisp-heron');
-    expect(text(flight)).toMatch(/· crisp-heron$/);
+    const flight = g.$$('#deck .deckrow').find((l) => text(l).includes('cccccccc'))!;
+    expect(text(flight.querySelector('.gtext'))).toContain('🪤 crisp-heron');
     expect(text(flight)).not.toContain('wt:t1');
     await openRow(g, '#dispatches', 'cccccccc');
     expect(text(g.$('#modalbox .claimedby'))).toBe('claimed by crisp-heron');
