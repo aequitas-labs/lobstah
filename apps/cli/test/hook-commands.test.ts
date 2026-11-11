@@ -407,7 +407,11 @@ describe('lobstah hook', () => {
         Stop: 'lobstah hook stop',
         SessionEnd: 'lobstah hook session-end',
         // Claude Code alone reports an auto-mode refusal.
-        ...(plugin === 'claude-code' ? { PermissionDenied: 'lobstah hook permission-denied' } : {}),
+        ...(plugin === 'claude-code' ? {
+          PermissionDenied: 'lobstah hook permission-denied',
+          PostToolUseFailure: 'lobstah hook post-tool-use',
+          PostToolBatch: 'lobstah hook post-tool-use',
+        } : {}),
       });
     }
   });

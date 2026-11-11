@@ -16,6 +16,10 @@ import {
   readDecision,
   readDecisionDetail,
   readStatusLog,
+  appendStatus,
+  askDecision,
+  settlePermissionCards,
+  stowTrap,
   signOnTrap,
   standingDecisions,
   takeHelm,
@@ -24,6 +28,7 @@ import {
 } from '@lobstah/core';
 import { askPermission, callRequests, confirm, patchPaths, personOnly, rosterConfigPatch } from '../src/grants-cli.js';
 import { answerKey } from '../src/decision-answer.js';
+import { buildGlassSnapshot } from '../src/glass.js';
 import { harnessCommand } from '../src/throw.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -58,6 +63,107 @@ function trap(session: string, harness: 'claude' | 'codex'): { name: string; wor
 }
 
 const ALLOW = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } };
+
+describe('a permission card follows its tool call', () => {
+  const session = 'waiting-trap';
+  const command = 'pnpm exec check-release';
+  /** Register and claim a dispatch as the harness does before asking. */
+  function claim(harness: 'claude' | 'codex' = 'claude'): void {
+    trap(session, harness);
+    enqueue({ id: 'waiting-work', repo: 'web', brief: 'Check the release' });
+    claimBait(trapBySession(session)!);
+  }
+  /** A harness request with a stable call id, shared by its completion hooks. */
+  function request(id: string, harness: 'claude' | 'codex' = 'claude'): void {
+    const result = run(['hook', 'permission-request'], {
+      session_id: session, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_use_id: id,
+      ...(harness === 'codex' ? { turn_id: 'first-turn' } : {}), tool_input: { command },
+    });
+    expect(result.status, result.stderr).toBe(0);
+  }
+
+  it.each(['claude', 'codex'] as const)('retires a completed %s call and refuses a late local answer', harness => {
+    claim(harness);
+    request('finished-call', harness);
+    const [card] = standingDecisions();
+    expect(card!.permission?.call?.id).toBe('finished-call');
+    const result = run(['hook', 'post-tool-use'], {
+      session_id: session, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'finished-call', tool_input: { command },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(standingDecisions()).toEqual([]);
+    expect(() => answerKey(card!.key, { option: 'Allow once', by: 'glass' })).toThrow(/no decision/);
+    expect(listGrants().grants).toEqual([]);
+  });
+
+  it.each(['PostToolUseFailure', 'PermissionDenied', 'PostToolBatch'])('retires a failed, denied or timed-out call through %s', event => {
+    claim();
+    request('ended-call');
+    const result = run(['hook', event === 'PermissionDenied' ? 'permission-denied' : 'post-tool-use'], {
+      session_id: session, hook_event_name: event, tool_name: 'Bash', tool_use_id: 'ended-call', tool_input: { command },
+      tool_calls: [{ tool_use_id: 'ended-call', tool_name: 'Bash', tool_input: { command }, is_error: true }],
+      error: 'Permission prompt timed out',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(standingDecisions()).toEqual([]);
+    expect(listGrants().grants).toEqual([]);
+  });
+
+  it('keeps parallel calls separate even when their command is identical', () => {
+    claim();
+    request('first-call');
+    request('second-call');
+    expect(standingDecisions()).toHaveLength(2);
+    settlePermissionCards({ session_id: session, hook_event_name: 'PostToolUse', tool_use_id: 'first-call' });
+    expect(standingDecisions().map(card => card.permission?.call?.id)).toEqual(['second-call']);
+  });
+
+  it.each(['Stop', 'SessionEnd', 'UserPromptSubmit'])('retires automatic cards on %s while preserving an explicit proposal', event => {
+    claim();
+    request('old-call');
+    const proposal = askPermission({ dispatch: 'waiting-work', lane: 'work', ask: { command: 'npm publish', harness: 'claude' } });
+    settlePermissionCards({ session_id: session, hook_event_name: event });
+    expect(standingDecisions().map(card => card.key)).toEqual([proposal.key]);
+  });
+
+  it('retires a superseded Codex turn', () => {
+    claim('codex');
+    request('old-call', 'codex');
+    const result = run(['hook', 'pre-tool-use'], {
+      session_id: session, hook_event_name: 'PreToolUse', turn_id: 'next-turn', tool_use_id: 'next-call', tool_name: 'Read', tool_input: { file_path: 'readme' },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(standingDecisions()).toEqual([]);
+  });
+
+  it('retires legacy cards by command when no call identity was saved', () => {
+    claim();
+    askDecision({ title: 'Legacy permission', options: ['Allow once', 'No'], dispatch: 'waiting-work', lane: 'work', askedBy: 'worker',
+      permission: { session, tool: 'Bash', command, harness: 'claude' }, maxBytes: 1_000_000 });
+    settlePermissionCards({ session_id: session, hook_event_name: 'PostToolBatch', tool_calls: [{ tool_use_id: 'legacy-call', tool_name: 'Bash', tool_input: { command } }] });
+    expect(standingDecisions()).toEqual([]);
+  });
+
+  it.each(['working', 'paused', 'done', 'failed'])('refuses a stale answer after the dispatch reports %s before another snapshot is read', verb => {
+    claim();
+    request('old-call');
+    const [card] = standingDecisions();
+    appendStatus('waiting-work', 'work', verb, 'Continuing the work', new Date(Date.parse(card!.askedAt) + 1).toISOString());
+    expect(() => answerKey(card!.key, { option: 'Allow once', by: 'glass' })).toThrow(/no decision/);
+    expect(buildGlassSnapshot().decisions).toEqual([]);
+    expect(listGrants().grants).toEqual([]);
+  });
+
+  it('retires an explicit dispatch proposal when its trap signs off', () => {
+    claim();
+    const registration = trapBySession(session)!;
+    const card = askPermission({ dispatch: 'waiting-work', lane: 'work', ask: { command, harness: 'claude', trap: registration.name } });
+    stowTrap(registration.trapId);
+    expect(buildGlassSnapshot().decisions).toEqual([]);
+    expect(() => answerKey(card.key, { option: 'Allow once', by: 'glass' })).toThrow(/no decision/);
+    expect(listGrants().grants).toEqual([]);
+  });
+});
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-grants-'));
@@ -461,12 +567,18 @@ describe('a helm command auto mode refused', () => {
     expect(listGrants().grants).toEqual([]);
   });
 
-  it("in a claimed trap becomes the trap's card; its Allow once and Allow always pass the trap's PreToolUse in auto mode", () => {
+  it("retires a denied trap call; a later retry card can still allow its PreToolUse in auto mode", () => {
     const t = trap('auto-trap', 'claude');
     enqueue({ id: 'auto-job', repo: 'web', brief: 'Land the PR' });
     claimBait(trapBySession('auto-trap')!);
+    const request = (id: string) => run(['hook', 'permission-request'], {
+      session_id: 'auto-trap', hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_use_id: id, tool_input: { command: MERGE },
+    });
+    request('denied-call');
     denied('auto-trap', MERGE);
     denied('auto-trap', MERGE);
+    expect(standingDecisions()).toHaveLength(0);
+    request('retry-call');
     expect(standingDecisions()).toHaveLength(1);
     const card = standingDecisions()[0]!;
     expect(card).toMatchObject({ dispatch: 'auto-job', options: ['Allow once', 'Allow always', 'Allow this tool family for 15 min', 'No'] });

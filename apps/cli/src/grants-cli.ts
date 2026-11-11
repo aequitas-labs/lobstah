@@ -38,6 +38,7 @@ import {
   toonTable,
   useGrant,
   answeredInGlass,
+  settlePermissionCards,
 } from '@lobstah/core';
 import type {
   AnswerSource,
@@ -419,7 +420,9 @@ function intentGrantIds(requests: GrantRequest[], base: GrantRequest, call: Call
 function readStdinJson(): Record<string, unknown> | undefined {
   try {
     const text = fs.readFileSync(0, 'utf8');
-    return text.trim() ? (JSON.parse(text) as Record<string, unknown>) : undefined;
+    const input = text.trim() ? (JSON.parse(text) as Record<string, unknown>) : undefined;
+    if (input) settlePermissionCards(input);
+    return input;
   } catch {
     return undefined;
   }
@@ -579,7 +582,8 @@ function askTrapPermission(call: CallInput, trap: TrapRegistration, dispatch: st
     const tools = toolFamily(call.tool);
     if (
       !standingDecisions().some(
-        (d) => d.permission?.sessionGrant?.session === call.session && d.permission?.sessionGrant?.tools === tools,
+        (d) => d.permission?.sessionGrant?.session === call.session && d.permission?.sessionGrant?.tools === tools
+          && (!call.callId || d.permission.call?.id === call.callId),
       )
     )
       requestSessionGrant({
@@ -587,6 +591,7 @@ function askTrapPermission(call: CallInput, trap: TrapRegistration, dispatch: st
         tools,
         hosts: toolHosts(call.input).hosts,
         reason: 'This tool call needs permission',
+        call: { ...(call.callId ? { id: call.callId } : {}), ...(call.turn ? { turn: call.turn } : {}) },
       });
     return;
   }
@@ -596,6 +601,7 @@ function askTrapPermission(call: CallInput, trap: TrapRegistration, dispatch: st
       (d) =>
         d.dispatch === dispatch &&
         d.permission?.harness === harness &&
+        (!call.callId || d.permission.call?.id === call.callId) &&
         d.permission.command === request.command &&
         d.permission.path === request.path,
     );
@@ -611,6 +617,7 @@ function askTrapPermission(call: CallInput, trap: TrapRegistration, dispatch: st
           session: call.session,
           tool: call.tool,
           trap: trap.name ?? trap.trapId,
+          call: { ...(call.callId ? { id: call.callId } : {}), ...(call.turn ? { turn: call.turn } : {}) },
         },
       });
   }
@@ -618,11 +625,9 @@ function askTrapPermission(call: CallInput, trap: TrapRegistration, dispatch: st
 
 /**
  * `lobstah hook permission-denied`: Claude Code's PermissionDenied hook, run
- * when auto mode refuses a call. A claimed trap's refused call gets the same
- * permission card a PermissionRequest would file; the helm's refused shell
- * command gets a helm command card. Either way the block reaches Chris
- * without the session noticing it. It never changes the denial. Never fails:
- * an error files nothing.
+ * when auto mode refuses a call. A trap's pending call card is retired;
+ * the helm's refused shell command gets a helm command card. It never
+ * changes the denial. Never fails: an error files nothing.
  */
 export function permissionDeniedHook(): void {
   try {
@@ -632,8 +637,7 @@ export function permissionDeniedHook(): void {
     const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
     const trap = trapBySession(h.session_id);
     if (trap) {
-      // A configured desk keeps its harness's reviewer as the only approval flow, as on PermissionRequest.
-      if (trap.claimed && !trap.configured) askTrapPermission({ harness: 'claude', tool: h.tool_name, input, session: h.session_id }, trap, trap.claimed, cwd);
+      // The denied call has ended. Any retry that needs permission files its own card.
       return;
     }
     const command = input.command;
@@ -793,7 +797,7 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
     lane: opts.lane,
     ...(opts.repo ? { repo: opts.repo } : {}),
     askedBy: 'worker',
-    permission: opts.ask,
+    permission: { ...opts.ask, source: opts.ask.source ?? (opts.ask.call ? 'hook' : 'proposal') },
     maxBytes: loadConfig().limits.attachmentMaxBytes,
   }).meta;
 }
@@ -1018,6 +1022,7 @@ type SessionOptions = {
   duration?: string;
   reason: string;
   command?: string;
+  call?: PermissionAsk['call'];
 };
 
 /** The card option that allows a tool glob for every trap, until revoked. */
@@ -1047,17 +1052,21 @@ export function requestSessionGrant(opts: SessionOptions): DecisionMeta {
   if (!opts.reason.trim()) throw new GrantError('--reason is required');
   const duration = opts.duration ?? '15m';
   const trap = listTraps().find((t) => t.sessionId === session);
+  const lane = trap?.claimed ? (['work', 'chore'] as const).find(lane => readSessionClaim(trap.claimed!, lane)?.by === `wt:${trap.trapId}`) : undefined;
   const standing = !opts.command && trap !== undefined;
   return askDecision({
     title: `Allow ${opts.tools} for ${duration}?`.slice(0, 200),
     ...(trap?.repo ? { repo: trap.repo } : {}),
+    ...(trap?.claimed && lane ? { dispatch: trap.claimed, lane } : {}),
     detailText: `${trap ? `Trap: ${trapDisplayName(trap)}\n\n` : ''}Session: \`${session}\`\n\nTools: \`${opts.tools}\`\n\n${opts.command ? `Bash prefix: \`${opts.command}\`\n\n` : ''}Hosts: \`${(opts.hosts ?? []).join(', ') || 'not pinned'}\`\n\n${opts.reason}\n\nExpires automatically. Revoke at any time in the glass. Clicks and screenshots have no URL and ride this window.${standing ? `\n\n- **${STANDING_TOOL_OPTION}**: \`${opts.tools}\` in every trap and every later session, without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists it).` : ''}`,
     options: [...new Set([`Allow for ${duration}`, 'Allow for 1h', ...(standing ? [STANDING_TOOL_OPTION] : []), 'Deny'])],
     askedBy: 'worker',
     permission: {
       harness: 'any',
+      source: opts.call ? 'hook' : 'proposal',
       session,
       tool: opts.tools,
+      ...(opts.call ? { call: opts.call } : {}),
       sessionGrant: {
         session,
         tools: opts.tools,

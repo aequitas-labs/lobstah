@@ -101,3 +101,4 @@ export * from './desktop-start-link.js';
 export * from './desktop-start.js';
 export { CONFIGURED_TRAP_INSTRUCTION } from './configured-trap-model.js';
 export * from './configured-trap-health.js';
+export * from './permission-cards.js';
