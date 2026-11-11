@@ -1,4 +1,4 @@
-import { configuredTrapViews } from '@lobstah/core';
+import { configuredTrapViews, orderedDispatchPrUrls } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
@@ -131,6 +131,7 @@ export interface TendDispatch {
   prUrl?: string;
   /** Every PR of a dispatch that has more than one, `prUrl` first. */
   prUrls?: string[];
+  prPositions?: import('@lobstah/core').Evidence['prPositions'];
   /** PR state as last observed by the chain's pr: watch. */
   pr?: PrEvidence;
   /** The checkout it ran in (the origin's, for a follow-up that reused it). */
@@ -702,6 +703,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     ...(answered ? { answeredAt: answered } : {}),
     prUrl: evidence.prUrl,
     ...(evidence.prUrls && evidence.prUrls.length > 1 ? { prUrls: evidence.prUrls } : {}),
+    prPositions: evidence.prPositions,
     pr: evidence.pr,
     ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
     ...(bucket === 'queued' ? {} : livenessView(id, lane)),
@@ -721,10 +723,13 @@ function prsOf(chain: TendDispatch[]): string[] | undefined {
   const urls = [...new Set(chain.flatMap((d) => d.prUrls ?? []))]
     .filter((url) => readPr(parsePrRef(url)?.key ?? url)?.state !== 'CLOSED');
   if (urls.length < 2) return undefined;
-  return urls.map((u) => {
+  const positions = Object.assign({}, ...chain.map((dispatch) => dispatch.prPositions ?? {})) as NonNullable<import('@lobstah/core').Evidence['prPositions']>;
+  const ordered = orderedDispatchPrUrls({ prUrls: urls, prPositions: positions });
+  return ordered.map((u) => {
     const ref = parsePrRef(u);
     const record = ref ? readPr(ref.key) : undefined;
-    return record ? `${prBadge(record).text} ${u}` : u;
+    const prefix = positions[u] ? `${positions[u]!.position}/${positions[u]!.size} ` : '';
+    return prefix + (record ? `${prBadge(record).text} ${u}` : u);
   });
 }
 

@@ -36,6 +36,7 @@ export type NoticeKind =
   | 'pr-merged'
   | 'pr-closed'
   | 'stack-ready'
+  | 'stack-stopped'
   | 'watch-held'
   | 'watch-failing'
   | 'watch-recovered'

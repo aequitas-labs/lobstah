@@ -536,6 +536,7 @@ export function prCell(x: GlassDispatchSummary) {
     return [
       x.prList.map((p, i) => [
         i ? ' → ' : '',
+        p.position && p.size ? `${p.position}/${p.size} ` : '',
         html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" title=${p.title} onClick=${stop}>#${p.number}</a>`,
         p.badge && [' ', html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`],
       ]),

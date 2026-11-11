@@ -1,3 +1,4 @@
+import { dispatchPrLines } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -60,8 +61,9 @@ export function liveStatus(id: string, lane: Lane, verb: Verb, createdAt: string
   const ahead = worktree && trunk && git(worktree, 'rev-list', '--count', `origin/${trunk}..HEAD`);
   if (ahead !== undefined && trunk) lines.push(`ahead of ${trunk}: ${ahead} commit${ahead === '1' ? '' : 's'}`);
   if (ahead !== undefined && trunk) fingerprint.push(`ahead of ${trunk}: ${ahead}`);
-  if (evidence.prUrl) lines.push(`draft PR: ${evidence.prUrl}`);
-  if (evidence.prUrl) fingerprint.push(`draft PR: ${evidence.prUrl}`);
+  const pullRequests = evidence.prUrls?.length ? dispatchPrLines(evidence) : evidence.prUrl ? [`draft PR: ${evidence.prUrl}`] : [];
+  lines.push(...pullRequests);
+  fingerprint.push(...pullRequests);
   lines.push(`updated ${new Date(now).toISOString()}`);
   return { body: lines.join('\n'), fingerprint: fingerprint.join('\n') };
 }

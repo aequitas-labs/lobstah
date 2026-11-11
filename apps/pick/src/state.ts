@@ -10,6 +10,8 @@ export interface MapEntry {
   /** A review round opened only by held identity comments (the active-round guard). */
   heldOnly?: boolean;
   lastReported?: Verb;
+  /** PR changes still report when the dispatch verb has not changed. */
+  reportedPrs?: string;
   lastInboundAt?: string;
   recovered?: boolean;
   /** Issue dispatches started for this key; legacy entries count as one. */
@@ -26,10 +28,28 @@ export interface MapEntry {
   liveCommentUnavailable?: boolean;
 }
 
+/** A successor cannot advance until its predecessor has merged into the default branch. */
+export interface StackAdvance {
+  parent: number;
+  from: string;
+  updateHead?: string;
+}
+
+/** An accepted native merge remains observable across daemon restarts. */
+export interface PendingStackMerge {
+  number: number;
+  uuid?: string;
+  enqueued?: boolean;
+  members: number[];
+}
+
 interface StateFile {
   map: Record<string, MapEntry>;
   consumedApprovals: Record<string, string>;
   requestedReviews: Record<string, string>;
+  stackHolds?: Record<string, string>;
+  stackAdvances?: Record<string, StackAdvance>;
+  stackMerges?: Record<string, PendingStackMerge>;
   rebases: Record<string, { uuid: string; failed?: boolean }>;
 }
 
@@ -99,6 +119,31 @@ export class PickupState {
     this.data.requestedReviews[prKey] = headSha;
     this.save();
   }
+
+  /** Announce a held stack once per reason and head. */
+  newStackHold(key: string, reason: string): boolean {
+    if (this.data.stackHolds?.[key] === reason) return false;
+    (this.data.stackHolds ??= {})[key] = reason; this.save(); return true;
+  }
+  /** Pending native requests must remain visible even when their PRs leave the open list. */
+  stackMergeEntries(source: string): Array<[string, PendingStackMerge]> {
+    return Object.entries(this.data.stackMerges ?? {}).filter(([key]) => key.startsWith(source + ':stack:'));
+  }
+
+  /** Read a persisted bottom-up transition. */
+  stackAdvance(key: string): StackAdvance | undefined { return this.data.stackAdvances?.[key]; }
+  /** Save before merging a predecessor so a restart cannot lose the successor. */
+  setStackAdvance(key: string, step: StackAdvance): void {
+    (this.data.stackAdvances ??= {})[key] = step; this.save();
+  }
+  /** Retire a transition only after its successor is ready on the default branch. */
+  clearStackAdvance(key: string): void { delete this.data.stackAdvances?.[key]; this.save(); }
+  /** Native merge requests still need a result or eventual merge observation. */
+  stackMerge(key: string): PendingStackMerge | undefined { return this.data.stackMerges?.[key]; }
+  /** Retain GitHub's asynchronous request id. */
+  setStackMerge(key: string, pending: PendingStackMerge): void { (this.data.stackMerges ??= {})[key] = pending; this.save(); }
+  /** Remove a completed native request. */
+  clearStackMerge(key: string): void { delete this.data.stackMerges?.[key]; this.save(); }
 
   rebase(prKey: string): { uuid: string; failed?: boolean } | undefined {
     return this.data.rebases[prKey];

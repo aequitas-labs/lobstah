@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, atomicRenameSync, lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch, cachedPrStackLink, githubBlockedUntil } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch, cachedPrStackLink, githubBlockedUntil, derivePrStacks, laneOf } from '@lobstah/core';
 import type { GhPrView, PrRef } from '@lobstah/core';
 import { addPrWatch, observePr, pollSecs } from './pr-watch.js';
+import { recordDispatchPrs } from './pr-stack.js';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
 
 type LinkView = GhPrView & { number: number; url: string };
@@ -41,6 +42,8 @@ export function discoverPrStack(
   const file = path.join(lobstahHome(), 'pr-stack-links.json');
   let checked: Record<string, number>;
   try { checked = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { checked = {}; }
+  const owner = readPrs().find((record) => record.key === ref.key)?.dispatches.at(-1);
+  const forId = owner && laneOf(owner) ? owner : undefined;
   const todo = [ref.key], visited = new Set<string>();
   // Bound malformed chains. A normal nine-PR stack takes at most one call per missing link.
   while (todo.length && visited.size < 32) {
@@ -56,7 +59,7 @@ export function discoverPrStack(
         (direction === 'head' ? r.headRefName : r.baseRefName) === branch);
       if (known.length) {
         known.filter(own).forEach((r) => {
-          if (!readWatch(r.key)) addPrWatch(parsePrRef(r.key)!, { everySecs });
+          if (!readWatch(r.key)) addPrWatch(parsePrRef(r.key)!, { everySecs, ...(forId ? { forId } : {}) });
           todo.push(r.key);
         });
         continue;
@@ -76,9 +79,21 @@ export function discoverPrStack(
         // gh pr list cannot read unresolved review threads. The normal
         // watch check supplies them; discovery must not announce readiness first.
         observePr(found, view, { now: new Date(now), discovered: true });
-        if (!readWatch(found.key)) addPrWatch(found, { everySecs });
+        if (!readWatch(found.key)) addPrWatch(found, { everySecs, ...(forId ? { forId } : {}) });
         todo.push(found.key);
       } catch { /* Existing watch retries at its normal cadence; never invent readiness. */ }
+    }
+  }
+  const records = readPrs();
+  const owners = records.find((record) => record.key === ref.key)?.dispatches ?? [];
+  for (const stack of derivePrStacks(records)) {
+    if (!stack.members.some((member) => parsePrRef(member.url)?.key === ref.key) || !stack.members.every(own)) continue;
+    const positions = Object.fromEntries(stack.members.map((member, index) => [member.url, {
+      bottom: stack.members[0]!.url, position: index + 1, size: stack.members.length,
+    }]));
+    for (const id of owners) {
+      const lane = laneOf(id);
+      if (lane) recordDispatchPrs(id, lane, { urls: [ref.url, ...stack.members.map((member) => member.url)], positions }, true);
     }
   }
   const tmp = uniqueTempPath(file);
