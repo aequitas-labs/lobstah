@@ -3,7 +3,9 @@ import { displayGrounds, GOAL_WORDING_RULE, helmChat, loadConfig, readHelm, type
 export const CARD_LINK_RULE = 'Always refer to a card with a clickable Markdown link, using the url printed by lobstah man ask.';
 /** What goes on a card: the one source the charter and the prompt reminder share. */
 export const CARD_RULE = 'Every question, choice or action for the human (answer, approve, review, run a command, click, sign in, test) goes on a card, with exact steps and any command in the card. Saying it in chat too is fine; chat alone is not. When a card is answered, act on it in the same turn or put the follow-up on a todo.';
-export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${CARD_LINK_RULE}`;
+/** Choose a run card for local commands and name its input and execution flags. */
+export const RUN_CARD_RULE = 'Offer `lobstah man ask --run <script>` when the human must run a command on this machine. Use plain cards for steps the glass cannot run, such as app clicks or phone sign-ins. Use `--input NAME:secret` for secrets (values via stdin, never in the script), `--interactive` for logins/prompts, `--cwd`, `--timeout`, `--output scrubbed|exit`.';
+export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${RUN_CARD_RULE} ${CARD_LINK_RULE}`;
 /** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
 export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";

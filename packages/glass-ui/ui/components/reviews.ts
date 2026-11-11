@@ -80,8 +80,29 @@ const badge = (r: GlassReview) =>
 const findings = (r: GlassReview) =>
   html`${r.summary && html`<details onClick=${(e: Event) => e.stopPropagation()}><summary>Summary</summary><div class="rv-reason">${r.summary}</div></details>`}${r.blocking?.map((b) => html`<div class="rv-reason bad">${b.path}:${b.line} · ${b.body}</div>`)}`;
 
+/** A name's initials, at most two: "Dana Developer" is DD, "dana" is D. */
+export const initials = (name: string): string =>
+  name
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]!.toUpperCase())
+    .join('');
+
+/**
+ * The asker's avatar; one that can't load (offline, or blocked) shows their
+ * initials instead. It remembers which url failed rather than resetting in
+ * an effect: a page's Content-Security-Policy refuses an image before the
+ * first effect runs, and a reset there would bring the broken image back.
+ */
+function Avatar({ url, name }: { url: string; name: string }) {
+  const [failedUrl, setFailedUrl] = useState<string>();
+  if (failedUrl === url) return html`<span class="rv-initials" aria-hidden="true">${initials(name)}</span>`;
+  return html`<img src=${url} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailedUrl(url)} />`;
+}
+
 const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?? r.requestedBy ?? r.author}>
-  ${r.askerAvatarUrl && html`<img src=${r.askerAvatarUrl} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" />`}
+  ${r.askerAvatarUrl && html`<${Avatar} url=${r.askerAvatarUrl} name=${r.askerName ?? r.asker ?? r.requestedBy ?? r.author} />`}
   <span>${r.askerName ?? r.asker ?? r.requestedBy ?? r.author}</span>
   ${r.automatic && html`<span class="badge dim" title="A bot re-requested this review">automatic</span>`}
 </span>`;

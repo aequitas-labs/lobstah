@@ -502,7 +502,10 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   }
   writeAtomic(path.join(dir, DECISION_JSON), `${JSON.stringify(meta, null, 2)}\n`);
   const replaced = opts.replace !== undefined && opts.replace !== key ? [opts.replace] : [];
-  for (const old of replaced) fs.rmSync(decisionDir(old)!, { recursive: true, force: true });
+  for (const old of replaced) {
+    if (readDecision(old)?.run) withdrawDecision(old);
+    else fs.rmSync(decisionDir(old)!, { recursive: true, force: true });
+  }
   return { meta, replaced };
 }
 
