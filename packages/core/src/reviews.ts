@@ -574,7 +574,7 @@ export function acknowledgeReview(key: string, now = Date.now()): boolean {
   return true;
 }
 
-/** Pet-only review notifications. Requests never stand in tend or on deck. */
+/** Review notifications for the person's lobsters, the pet's and the glass's. Requests never stand in tend or on deck. */
 export function reviewAttention(now: number, items: ReviewItem[] = listReviews()): TendAttention[] {
   return items.flatMap(item => {
     const r = latestRound(item);

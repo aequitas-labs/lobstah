@@ -243,7 +243,7 @@ import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThr
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
-import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS } from './tend.js';
+import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS, walkingAttention } from './tend.js';
 import { runCull } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
@@ -2279,6 +2279,8 @@ async function mainCli(): Promise<void> {
     case 'attention': {
       const sub = pos[0];
       const report = buildTendReport();
+      // The pet's lobsters: the same list the glass's lobs walk.
+      const walking = walkingAttention(report);
       if (loadConfig().reviews.enabled) report.attention.push(...reviewAttention(Date.now()));
       pruneStaleAcks(report.attention);
       if (sub === 'ack' || sub === 'unack') {
@@ -2303,9 +2305,7 @@ async function mainCli(): Promise<void> {
         break;
       }
       if (has('--json')) {
-        // The pet also receives completed-review notifications, which stay
-        // out of the helm's tend report. Held questions remain hidden.
-        console.log(JSON.stringify({ attention: report.attention.filter((a) => !a.held) }));
+        console.log(JSON.stringify({ attention: walking }));
         break;
       }
       console.log(

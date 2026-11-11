@@ -101,7 +101,7 @@ import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
 import { reviewSetupView, writeReviewMode } from './reviews-setup.js';
-import { buildTendReport, landedCatches } from './tend.js';
+import { buildTendReport, landedCatches, walkingAttention } from './tend.js';
 import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
@@ -418,14 +418,14 @@ function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
 
 /**
  * Attention exactly as `man tend` derives it (the one place kinds are
- * decided), plus the active attentionKinds for the read-only line under the
- * heading. A config error surfaces on the page instead of failing /data.
+ * decided), as the pet walks it (walkingAttention), plus the active
+ * attentionKinds for the read-only line under the heading. A config error
+ * surfaces on the page instead of failing /data.
  */
 function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[]; attentionKinds: string[]; attentionError?: string } {
   try {
     const cfg = loadConfig();
-    // The pet's list: a question held on the helm's turn is not the human's yet.
-    return { attention: buildTendReport().attention.filter((a) => !a.held), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
+    return { attention: walkingAttention(buildTendReport()), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
   } catch (err) {
     return { attention: [], landed: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
   }
