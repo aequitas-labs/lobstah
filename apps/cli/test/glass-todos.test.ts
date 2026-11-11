@@ -92,8 +92,8 @@ describe('todo chips', () => {
   });
 
   it('a done row shows no chip and no button', async () => {
-    const g = await open([todo({ id: 1, done: true, dueAt: new Date(NOW + HOUR).toISOString() }), todo({ id: 2 })], '#deck');
-    const done = g.$$('#deck .todo-check')[0]!;
+    const g = await open([todo({ id: 1, done: true, dueAt: new Date(NOW + HOUR).toISOString() }), todo({ id: 2 })]);
+    const done = g.$$('#todos .todo-done-today .todo-check')[0]!;
     expect(done.querySelector('.badge')).toBeNull();
     expect(done.querySelector('button')).toBeNull();
   });
@@ -149,5 +149,49 @@ describe('the Deck preview', () => {
     expect(rows[0]!.querySelector('.badge')).not.toBeNull();
     expect(rows[0]!.querySelector('button')).toBeNull();
     expect(g.$('#deck .todos .deckmore')!.textContent).toBe('More (3)');
+  });
+});
+
+describe('the count', () => {
+  // 25 open and 50 done since 04:00, as Chris's glass had: the count is of the 25.
+  const mix = () => [
+    ...Array.from({ length: 50 }, (_, i) => todo({ id: i + 1, done: true })),
+    ...Array.from({ length: 25 }, (_, i) => todo({ id: 51 + i })),
+  ];
+  const openRows = (g: GlassDom, tab: string) => g.$$(`#${tab} .todos > .todo-checklist > .todo-check`);
+
+  it('the Deck shows the first five open todos and More counts the other open ones, never the done ones', async () => {
+    const g = await open(mix(), '#deck');
+    const rows = openRows(g, 'deck');
+    expect(rows).toHaveLength(5);
+    expect(rows.every((r) => !r.classList.contains('done'))).toBe(true);
+    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('More (20)');
+    const done = g.$('#deck .todos .todo-done-today')!;
+    expect(done.textContent).toBe('50 done today');
+    expect(done.getAttribute('href')).toBe('#todos');
+  });
+
+  it('the page lists every open todo, and the done ones apart, in a closed Done today section', async () => {
+    const g = await open(mix());
+    expect(openRows(g, 'todos')).toHaveLength(25);
+    const done = g.$('#todos .todo-done-today') as HTMLDetailsElement;
+    expect(done.open).toBe(false);
+    expect(done.querySelector('summary')!.textContent).toBe('Done today (50)');
+    expect(done.querySelectorAll('.todo-check.done')).toHaveLength(50);
+    expect(g.$('#todos .empty')).toBeNull();
+  });
+
+  it('with only done todos, says none is open and counts nothing', async () => {
+    const g = await open([todo({ id: 1, done: true }), todo({ id: 2, done: true })], '#deck');
+    expect(openRows(g, 'deck')).toHaveLength(0);
+    expect(g.$('#deck .todos .empty')!.textContent).toBe('No open TODOs');
+    expect(g.$('#deck .todos .deckmore')).toBeNull();
+    expect(g.$('#deck .todos .todo-done-today')!.textContent).toBe('2 done today');
+  });
+
+  it('with only open todos, has no done line', async () => {
+    const g = await open([todo({ id: 1 }), todo({ id: 2 })], '#deck');
+    expect(openRows(g, 'deck')).toHaveLength(2);
+    expect(g.$('#deck .todos .todo-done-today')).toBeNull();
   });
 });

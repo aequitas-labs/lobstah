@@ -190,6 +190,13 @@ export interface ReviewRound {
   publish?: boolean;
   /** An explicit Draft action started this job; automatic work cannot publish in on-demand mode. */
   onDemand?: boolean;
+  /**
+   * A person asked for this round's next draft (a redraft from the CLI or
+   * the glass). The daily cap ([reviews].maxPerDay) bounds only the reviews
+   * lobstah starts on its own, so it never stops this one; the job still
+   * counts toward the day's total.
+   */
+  byHand?: boolean;
   verdict?: ReviewVerdict;
   blocking?: BlockingFinding[];
   needsYou?: boolean;
@@ -520,7 +527,7 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   if (!item || !r) return `no review item ${key}`;
   if (r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
   const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, verdict: _v, blocking: _b, notification: _n, needsYou: _y, seenAt: _seen, acknowledgedAt: _ack, ...rest } = r;
-  item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha };
+  item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha, byHand: true };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
 

@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   dropReservation,
+  TrapCapError,
   enqueue,
   ensureLayout,
   expireReservations,
@@ -38,14 +39,16 @@ afterEach(() => {
 const T0 = Date.parse('2026-09-01T00:00:00Z');
 
 describe('trap reservations', () => {
-  it('counts a new reservation before another capped throw, but lets an existing trap return', () => {
+  it('counts a new reservation before another capped throw; a trap coming back takes a slot too', () => {
     const first = reserveTrap({ repo: 'r', maxTraps: 1, creationReason: 'need first trap' }).reservation;
     expect(first.creationReason).toBe('need first trap');
-    expect(() => reserveTrap({ repo: 'r', maxTraps: 1 })).toThrow('1/1 traps');
+    expect(() => reserveTrap({ repo: 'r', maxTraps: 1 })).toThrow('1/1 traps in use');
     const next = reserveTrap({ repo: 'other', maxTraps: 1 }).reservation;
     expect(next.repo).toBe('other');
     dropReservation(first.trapId);
-    expect(() => reserveTrap({ repo: 'r', maxTraps: 0, returning: { trapId: first.trapId, worktree: '/kept' } })).not.toThrow();
+    // At its cap, a stowed trap coming back is refused like a new one; below it, it returns.
+    expect(() => reserveTrap({ repo: 'r', maxTraps: 0, returning: { trapId: first.trapId, worktree: '/kept' } })).toThrow(TrapCapError);
+    expect(() => reserveTrap({ repo: 'r', maxTraps: 1, returning: { trapId: first.trapId, worktree: '/kept' } })).not.toThrow();
   });
   it('reserves a name and id, stores only the ticket hash, and posts trap-starting', () => {
     const { reservation, ticket } = reserveTrap({ repo: 'r', harness: 'claude', name: 'amber-gull', startSecs: 60, now: T0 });

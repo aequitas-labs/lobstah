@@ -4,7 +4,7 @@ import type { SectionInputs } from '../../src/glass-diff.js';
 import { dismissReview, reviewRequest, showModal } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
-import { Age, Table, ageText } from './common.js';
+import { Age, RepoName, Table, ageText } from './common.js';
 import { can } from '../backend.js';
 import { getState } from '../store.js';
 import { Card, CardLink, PrIcon } from './card.js';
@@ -169,7 +169,7 @@ function card(r: GlassReview) {
     titleAttr=${r.title}
     icon=${PrIcon}
     state=${{ word: reviewWord(r), tone: reviewTone(r), mark: 'edge' }}
-    context=${[lead, ' · ', Age(r.requestedAt), ' ago']}
+    context=${[RepoName(`${r.repo}#${r.number}`), drafted && ` · ${drafted}`, ' · ', Age(r.requestedAt), ' ago']}
     contextTitle=${`${lead} · ${ageText(r.requestedAt)} ago`}
     action=${html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`}
     quiet=${!OPEN.has(r.state)}

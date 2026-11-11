@@ -240,6 +240,8 @@ import { mergeHaulHook } from './hooks.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
+import { createCodexClaimWatch } from './codex-claim-watch.js';
+import { createCodexHookWatch } from './codex-hook-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
@@ -291,7 +293,8 @@ import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
 import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, onCodexServer, startMode, throwBatch, throwTrap } from './throw.js';
-import { trapSummary } from './trap-list.js';
+import { repoTrapRows, trapSummary } from './trap-list.js';
+import { trapPrWaitAsDone } from './trap-pr-wait.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle, trapTabTitle } from './terminal-title.js';
@@ -1621,15 +1624,19 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'report': {
-      const [id, verb, ...rest] = pos;
-      if (!id || !verb) throw new Error(`report requires an id and a verb (${VERBS.join('|')})`);
+      const [id, asked, ...rest] = pos;
+      if (!id || !asked) throw new Error(`report requires an id and a verb (${VERBS.join('|')})`);
       const lane = findLane(id);
       const note = rest.join(' ') || undefined;
-      const reportedPrs = values('--pr');
+      const askedWaiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
+      // A trap doesn't park on its own PR's CI or review: that pause is recorded as done --pr, which frees the trap.
+      const prDone = trapPrWaitAsDone(id, lane, asked, askedWaiting, values('--pr'));
+      const verb = prDone ? 'done' : asked;
+      const reportedPrs = prDone ? prDone.prs : values('--pr');
       const prUrl = reportedPrs[0];
       const noWatch = has('--no-watch');
-      const waiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
-      const saysWaiting = waiting.waitingOn !== undefined || waiting.link !== undefined || waiting.until !== undefined;
+      const waiting = prDone ? {} : askedWaiting;
+      const saysWaiting = !prDone && (askedWaiting.waitingOn !== undefined || askedWaiting.link !== undefined || askedWaiting.until !== undefined);
       if (saysWaiting && isVerb(verb)) {
         try {
           waitingFields(verb, waiting);
@@ -1710,6 +1717,7 @@ async function mainCli(): Promise<void> {
       const titleTrap = titleClaim?.by.startsWith('wt:') ? readTrap(titleClaim.by.slice(3)) : undefined;
       const asksPermission = permCommand !== undefined || permPath !== undefined;
       const entry = appendStatus(id, lane, verb, runNote ? `${note ?? ''}${runNote}`.trim() : note, undefined, saysWaiting ? waiting : undefined, true, asksPermission);
+      if (prDone) console.log(`note: a trap doesn't park on its own PR; recorded done --pr ${prDone.prs.join(' --pr ')}. The PR's watch starts the next round on review feedback, a failing check or a merge.`);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
       if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from
@@ -2470,6 +2478,7 @@ async function mainCli(): Promise<void> {
           result = await throwTrap({
             ...base,
             address: pos[0]!,
+            stopStale: has('--stop-stale'),
             onLaunch: (launched) => {
               if (!json) console.log(launchedText(launched, timeoutSecs));
             },
@@ -2502,8 +2511,10 @@ async function mainCli(): Promise<void> {
       const groundsName = opt('--grounds') ?? (caller?.id !== undefined ? helmOf(caller.id)?.grounds : undefined);
       const grounds = groundsName !== undefined ? resolveGrounds(cfg, groundsName) : undefined;
       const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos });
+      // Each repo's traps in use against its cap: a resume past the cap waits like a new trap.
+      const capacity = repoTrapRows(cfg, [...new Set(rows.flatMap((r) => (r.repo && cfg.repos[r.repo] ? [r.repo] : [])))].sort());
       if (has('--json')) {
-        console.log(JSON.stringify({ plan: 'dry-run', grounds: grounds ? displayGrounds(grounds.name, cfg) : 'all', traps: rows }, null, 2));
+        console.log(JSON.stringify({ plan: 'dry-run', grounds: grounds ? displayGrounds(grounds.name, cfg) : 'all', traps: rows, capacity }, null, 2));
         break;
       }
       const count = (action: string) => rows.filter((r) => r.action === action).length;
@@ -2517,6 +2528,7 @@ async function mainCli(): Promise<void> {
           unresolved: count('unresolved'),
         }),
       );
+      if (capacity.length) console.log(toonTable('repo-traps', capacity, ['repo', 'traps']));
       console.log(
         toonTable(
           'throw',
@@ -2725,6 +2737,20 @@ async function mainCli(): Promise<void> {
         }),
       );
       console.log(toonHelp([`lobstah man relieve --session ${sessionId}   (step down)`]));
+      break;
+    }
+    case 'man:tidy-panes': {
+      const apply = has('--apply');
+      if (apply) gateHelm(callerSession(opt('--session')));
+      const { tidyPanes } = await import('./tidy-panes.js');
+      const { plan, done } = await tidyPanes(apply);
+      if (plan.length === 0) {
+        console.log(toonKV({ panes: 'nothing to tidy on lobstah\'s tmux server' }));
+        break;
+      }
+      console.log(toonTable('tidy', plan.map((p) => ({ pane: p.pane, title: p.title, action: p.action === 'stop' ? `stop Codex ${p.codexPid}, close` : p.action, why: p.why })), ['pane', 'title', 'action', 'why']));
+      if (apply) for (const line of done) console.log(line);
+      else console.log(toonHelp(['lobstah man tidy-panes --apply   (stop those Codex processes and close the panes)']));
       break;
     }
     case 'man:relieve': {
@@ -3657,8 +3683,11 @@ async function mainCli(): Promise<void> {
               }
             : {}),
           note:
-            'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
-            'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ' +
+            (reg.harness === 'codex'
+              ? 'this session now takes assigned work: run `lobstah soak --wait --timeout 600` in the foreground, ' +
+                'and keep the turn open until it returns. On Codex, a background listener that finishes after your turn ends starts no new turn, so its brief is lost. '
+              : 'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
+                'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ') +
             "Never `man wait` (that is the orchestrator's command, not yours).",
         }),
       );
@@ -3938,6 +3967,8 @@ async function mainCli(): Promise<void> {
           },
           todoFiring: createTodoFiring(),
           codexServerWatch: createCodexServerWatch(),
+          codexClaimWatch: createCodexClaimWatch(),
+          codexHookWatch: createCodexHookWatch(),
         });
       } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
       break;

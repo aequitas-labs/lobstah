@@ -669,7 +669,11 @@ export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.cl
       kind: 'trap-claim-idle',
       refId: bait.id,
       repo: bait.descriptor.repo,
-      text: `${trapRepoLabel(reg)} claimed ${bait.id} ${Math.floor(age / 1000)}s ago but has not reported. The brief will be re-delivered at its next park; check that the session is awake.`,
+      text:
+        `${trapRepoLabel(reg)} claimed ${bait.id} ${Math.floor(age / 1000)}s ago but has not reported. ` +
+        (reg.harness === 'codex'
+          ? 'An idle Codex session never parks, so lobstah wakes it with the brief, then puts the dispatch back in the queue if it still does not report.'
+          : 'The brief will be re-delivered at its next park; check that the session is awake.'),
       dedupeKey: `trap-claim-idle-${bait.id}-${bait.claim.at}`,
     });
   }
@@ -802,6 +806,12 @@ export interface GhostSweepAction {
   defective?: boolean;
   /** True when the catch was paused and the pause expired. */
   pauseExpired?: boolean;
+  /**
+   * A ghosted Codex trap's own process and thread: left running, it keeps
+   * the thread's writer lock, and a re-throw shows "open in another app".
+   * The daemon stops it once it confirms the process still holds the thread.
+   */
+  codexProcess?: HarnessProcess & { threadId: string };
 }
 
 /** A queue failure must not stop a trap signing off. */
@@ -882,7 +892,8 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     const worktreeNote = removal
       ? `; worktree ${removal.removed ? 'removed' : 'kept'}: ${reg.worktree}; branch ${removal.branch}; modified files ${removal.modifiedFiles ?? 'unknown'}; unpushed commits ${removal.unpushedCommits ?? 'unknown'}${removal.reason ? ` (${removal.reason})` : ''}`
       : reg.configured ? '; working folder kept; re-soaking its configured profile restores the same address' : '; worktree kept; re-soaking restores the same address';
-    actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}) });
+    const codexProcess = reg.harness === 'codex' && !reg.codexServer && reg.harnessProcess ? { ...reg.harnessProcess, threadId: reg.sessionId } : undefined;
+    actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}), ...(codexProcess ? { codexProcess } : {}) });
     fs.rmSync(regPath(reg.trapId), { force: true });
     fs.rmSync(beatPath(reg.trapId), { force: true });
     fs.rmSync(prProbePath(reg.trapId), { force: true });
@@ -939,7 +950,8 @@ export function baitBrief(id: string, d: Descriptor): string {
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     '`working` means you are still executing and will report again. If the next move belongs to a person or to the helm, report `needs-decision` with the question. If you are waiting on an external await, report `paused` and name it. Never end a turn on `working`.',
     'Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.',
-    `Before you wait on something external (a PR review or deploy), report \`lobstah report ${id} paused "<note>" --waiting-on review|pr|deploy|external --link <url>\`.`,
+    ...(d.target ? [] : ['Never park on your PR\'s CI or review: once the PR is up, finish with `done --pr <url>`. Its watch starts the next round on review feedback, a failing check or a merge.']),
+    `Before you wait on something else external (a deploy), report \`lobstah report ${id} paused "<note>" --waiting-on deploy|external --link <url>\`.`,
     'Run full test suites, full builds and Playwright as `lobstah heavy -- <command>`: one line per machine keeps them from overloading it. A focused test file or single-package build doesn\'t need it. Your pushes queue on their own.',
     'A full run\'s output is long. To keep it out of your own context, you can hand the run to a subagent (Claude Code\'s Agent tool, Codex\'s `spawn_agent`) that runs it, or reads its log, and returns only the failures: each failing test or step with its first error lines.',
     'After EVERY report, run `lobstah soak --wait` again — it delivers inbox answers and your next assignment. Never end your turn without it unless you are signing off (`lobstah stow`).',

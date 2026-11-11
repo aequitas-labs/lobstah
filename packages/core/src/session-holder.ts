@@ -20,6 +20,8 @@ export interface SessionHolder {
   trap?: string;
   /** Only a listener was found: the session's `soak --wait`, whose own session is still running. */
   listener?: boolean;
+  /** It holds the Codex thread's writer lock: any other Codex process on the thread shows "open in another app". */
+  codexWriter?: boolean;
 }
 
 /** One running Claude process, from the file Claude keeps for it. */
@@ -113,7 +115,7 @@ export function processRemoteLink(proc: Pick<ClaudeProcess, 'bridgeSessionId'>):
  * terminal, a process recorded at sign-on by any trap, a trap registered on
  * it, or its listener. A second process on the session would be a second writer.
  */
-export function sessionHolders(sessionId: string, opts: { claudeHome?: string } = {}): SessionHolder[] {
+export function sessionHolders(sessionId: string, opts: { claudeHome?: string; codexThread?: boolean } = {}): SessionHolder[] {
   const holders: SessionHolder[] = claudeSessionProcesses(sessionId, opts.claudeHome).map(({ pid, pane }) => ({ pid, ...(pane ? { pane } : {}) }));
   const addProcess = (pid: number, trap?: string) => {
     const known = holders.find((h) => h.pid === pid);
@@ -137,12 +139,42 @@ export function sessionHolders(sessionId: string, opts: { claudeHome?: string } 
   for (const entry of listRoster()) {
     if (entry.sessionId === sessionId && entry.harnessProcess && harnessProcessAlive(entry.harnessProcess)) addProcess(entry.harnessProcess.pid, entry.name);
   }
+  // A Codex process still writing the thread, from an earlier start lobstah lost track of.
+  if (opts.codexThread) {
+    for (const pid of codexThreadHolders(sessionId)) {
+      addProcess(pid);
+      holders.find((h) => h.pid === pid)!.codexWriter = true;
+    }
+  }
   // A process found another way explains its own listener.
   if (!holders.some((h) => h.pid !== undefined)) {
     const watcher = readSessionWatcher(sessionId);
     if (watcher) holders.push({ pid: watcher.pid, listener: true, ...(watcher.trapId ? { trap: `wt:${watcher.trapId}` } : {}) });
   }
   return holders;
+}
+
+/** Codex's lock on one thread: the process holding it is the thread's one writer. */
+export function codexThreadLockFile(threadId: string, env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'thread-writer-locks', `${threadId}.lock`);
+}
+
+/**
+ * The processes holding a Codex thread's writer lock. Codex lets one process
+ * write a thread; another that opens it shows "This conversation is open in
+ * another app" and never takes a turn. Empty when no process holds it, or
+ * when the lock can't be read (no lsof, or not macOS or Linux).
+ */
+export function codexThreadHolders(threadId: string, env: NodeJS.ProcessEnv = process.env): number[] {
+  const lock = codexThreadLockFile(threadId, env);
+  if (process.platform === 'win32' || !fs.existsSync(lock)) return [];
+  try {
+    const out = execFileSync('lsof', ['-t', lock], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.split('\n').map((line) => Number(line.trim())).filter((pid) => Number.isInteger(pid) && pid > 0 && pidRunning(pid));
+  } catch {
+    // lsof exits 1 when no process has the file open.
+    return [];
+  }
 }
 
 /** The traps and roster records a session check reads; a caller looping over many traps reads them once. */
@@ -172,6 +204,9 @@ export function sessionHolderText(sessionId: string, holders: SessionHolder[]): 
     if (h.listener) return `listener pid ${h.pid}${h.trap ? ` (trap ${h.trap})` : ''}: stop it with \`lobstah soak stop-listener --session ${sessionId}\``;
     if (h.pid === undefined) return `trap ${h.trap}, registered with no known process: \`lobstah stow --wt ${h.trap}\` signs it off`;
     const where = [h.pane ? `tmux pane ${h.pane}` : '', h.trap ? `trap ${h.trap}` : ''].filter(Boolean).join(', ');
+    if (h.codexWriter) {
+      return `Codex process ${h.pid}${where ? ` (${where})` : ''} holds the thread, so a new Codex on it would only show "This conversation is open in another app": re-throw with --stop-stale to stop it first, or \`kill ${h.pid}\``;
+    }
     return `process ${h.pid}${where ? ` (${where})` : ''}: type /exit in it, or \`kill ${h.pid}\``;
   });
   return `session ${sessionId.slice(0, 8)} is still open, and a second process would be a second writer. Held by ${held.join('; ')}`;

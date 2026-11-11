@@ -6,6 +6,7 @@ import { listReservations } from './trap-start.js';
 import { pendingIds, queuedDescriptor, storedDescriptor } from './queue.js';
 import { readStatusLog } from './status.js';
 import { planThrow, type ThrowPlanRow } from './throw-plan.js';
+import { sessionHolders } from './session-holder.js';
 
 export interface TrapAvailability {
   state: 'free' | 'busy';
@@ -38,19 +39,59 @@ export function trapAvailability(reg: TrapRegistration, now = Date.now()): TrapA
   return { state: 'free', text: 'free' };
 }
 
-export interface RepoTrapCount { repo: string; used: number; limit?: number; names: string[]; text: string }
+export interface RepoTrapCount {
+  repo: string;
+  /** Traps in use: signed on (free or busy) or starting. The cap counts these. */
+  used: number;
+  limit?: number;
+  /** The in-use traps' names. */
+  names: string[];
+  /** Roster traps not in use: stowed, and ghosted (the ghost sweep released them). The cap does not count them. */
+  stowed: number;
+  ghosted: number;
+  /** Ghosted traps whose harness session is still open: held, not in use. The helm can end the session. */
+  held: string[];
+  text: string;
+}
 
-/** Roster entries are the count; include older unrostered registrations and in-flight new reservations once. */
+/**
+ * A repo's traps against its cap (`[repos.<key>].traps`). The cap counts the
+ * traps in use: signed on and listening, free or busy, plus those starting.
+ * Stowed and ghosted traps don't count: they hold a roster place and a
+ * checkout, not a slot. A ghosted trap whose session is still open is named
+ * apart, as held, so the helm can end that session.
+ */
 export function repoTrapCount(cfg: Config, repo: string): RepoTrapCount {
-  const entries = new Map<string, string>();
-  for (const r of [...listRoster(), ...listTraps(), ...listReservations()]) {
-    if (r.repo === repo) entries.set(r.trapId, r.name ?? `wt:${r.trapId}`);
+  const inUse = new Map<string, string>();
+  for (const r of [...listTraps(), ...listReservations()]) {
+    if (r.repo === repo) inUse.set(r.trapId, r.name ?? `wt:${r.trapId}`);
+  }
+  let stowed = 0;
+  let ghosted = 0;
+  const held: string[] = [];
+  for (const e of listRoster()) {
+    if (e.repo !== repo || inUse.has(e.trapId)) continue;
+    if (e.state === 'stowed') stowed++;
+    else {
+      ghosted++;
+      if (e.sessionId && sessionHolders(e.sessionId).length) held.push(e.name);
+    }
   }
   const limit = cfg.repos[repo]?.traps;
-  const used = entries.size;
-  const text = `${used}/${limit ?? 'unlimited'} traps` + (limit !== undefined && used > limit
-    ? ' (over limit; stow live traps, then use man roster forget on an unwanted trap to free its roster place)' : '');
-  return { repo, used, limit, names: [...entries.values()].sort(), text };
+  const used = inUse.size;
+  const idle = stowed + ghosted;
+  const text =
+    `${used}/${limit ?? 'unlimited'} traps in use` +
+    (idle ? ` +${idle} stowed/ghosted` : '') +
+    (held.length ? `; ${held.sort().join(', ')} ghosted with ${held.length === 1 ? 'its session' : 'their sessions'} still open (end ${held.length === 1 ? 'it' : 'them'})` : '') +
+    (limit !== undefined && used > limit ? ' (over limit; stow a trap to free its place)' : '');
+  return { repo, used, limit, names: [...inUse.values()].sort(), stowed, ghosted, held: held.sort(), text };
+}
+
+/** Whether one more trap may come into use for a repo: new, or returning from stowed or ghosted. */
+export function trapCapReached(cfg: Config, repo: string): boolean {
+  const count = repoTrapCount(cfg, repo);
+  return count.limit !== undefined && count.used >= count.limit;
 }
 
 /** Existing candidates to show before an explicit --new, including unavailable ghosted checkouts. */
@@ -81,11 +122,11 @@ export function selectRepoTrap(cfg: Config, repo: string, harness?: string, now 
     now - trapLastSeen(r) <= cfg.soak.ttlSecs * 1000 && trapAvailability(r, now).state === 'free')
     .sort((a, b) => Number(!!b.firstParkedAt) - Number(!!a.firstParkedAt) || (a.name ?? a.trapId).localeCompare(b.name ?? b.trapId));
   if (live[0]) return { action: 'reuse', registration: live[0], why: `free live ${repo} trap${harness ? ` (${harness})` : ''}` };
+  // A stowed or ghosted trap coming back takes a slot, like a new one: at the cap, the work waits.
+  if (trapCapReached(cfg, repo)) return { action: 'wait', why: trapCapacityReason(cfg, repo, harness, now) };
   const rows = planThrow(cfg, { repo }, { now });
   const returning = rows.find((r) => !failedStarts.has(r.trapId) && (r.action === 'resume' || r.action === 'cold') && (!harness || r.harness === harness));
   if (returning) return { action: 'return', row: returning, why: `no suitable free live trap; ${returning.why}` };
-  const count = repoTrapCount(cfg, repo);
-  if (count.limit !== undefined && count.used >= count.limit) return { action: 'wait', why: trapCapacityReason(cfg, repo, harness, now) };
   return { action: 'new', why: `no suitable free live or returnable stowed trap for ${repo}${harness ? ` (${harness})` : ''}` };
 }
 
@@ -95,14 +136,14 @@ export function trapCapacityReason(cfg: Config, repo: string, harness?: string, 
   if (count.used > 0 && live.length === count.used && live.every((r) => trapAvailability(r, now).state === 'busy')) {
     return `all ${count.used} ${repo} traps are busy${harness ? `; waiting for a ${harness} trap` : ''}`;
   }
-  return `${repo}: ${count.text}; waiting for a suitable free trap${harness ? ` (${harness})` : ''}; check man roster / man throw --plan --repo ${repo} for stowed, ghosted or starting traps`;
+  return `${repo}: ${count.text}; waiting for a suitable free trap${harness ? ` (${harness})` : ''}; check man roster / man throw --plan --repo ${repo} for traps to stow or starting traps`;
 }
 
 /** Preflight explicit new throws, including dry runs: a reason never overrides capacity. */
 export function guardNewTraps(cfg: Config, repo: string, count: number, reason?: string): void {
   const capacity = repoTrapCount(cfg, repo);
   if (capacity.limit !== undefined && capacity.used + count > capacity.limit) {
-    throw new Error(`${repo}: ${capacity.text}; cannot create ${count} more. Existing traps: ${capacity.names.join(', ') || '(none)'}. Use lobstah dispatch --repo ${repo} --trap-any --brief <file>, or stow and man roster forget an unwanted trap.`);
+    throw new Error(`${repo}: ${capacity.text}; cannot bring ${count} more into use. Traps in use: ${capacity.names.join(', ') || '(none)'}. Use lobstah dispatch --repo ${repo} --trap-any --brief <file>, which waits for a free one, or stow a trap in use.`);
   }
   const reusable = reusableTraps(cfg, repo);
   if (reusable.length && !reason?.trim()) {

@@ -207,7 +207,7 @@ function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): Thr
   const mode = startMode(entry, harness, [entry.worktree, repo.path], opts);
   if (mode.action === 'resume') {
     // From any trap, pane or terminal: a resume beside a live process makes two writers on one session.
-    const holders = sessionHolders(entry.sessionId, opts.claudeHome ? { claudeHome: opts.claudeHome } : {});
+    const holders = sessionHolders(entry.sessionId, { ...(opts.claudeHome ? { claudeHome: opts.claudeHome } : {}), codexThread: harness === 'codex' });
     if (holders.length) return { ...done('skip', sessionHolderText(entry.sessionId, holders)), sessionHeld: true };
   }
   const where = checkout === 'kept' ? 'kept checkout' : `checkout recreated from ${trapRef(entry.trapId)}`;

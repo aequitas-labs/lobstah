@@ -41,6 +41,8 @@ describe('a dispatch card', () => {
     expect(text(card.querySelector('.gtitle'))).toBe(x.brief.split('\n')[0]!.trim());
     expect(text(card.querySelector('.gchip'))).toBe('needs decision');
     expect(text(card.querySelector('.gcontext'))).toMatch(/^web · 🪤 hardy-kelp · \d+\w ago$/);
+    // The repo carries GitHub's repo icon, which reads as nothing: the name is the text.
+    expect(card.querySelector('.gcontext .reponame svg.repoicon')?.getAttribute('aria-hidden')).toBe('true');
     // The id, note, worker, PR, waiting and activity lines are in the dispatch's modal.
     expect(card.querySelector('.gnow')).toBeNull();
     expect(card.querySelector('.gfoot')).toBeNull();

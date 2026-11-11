@@ -189,9 +189,13 @@ worker's verb and note stay the primary line. `lobstah status <id>` prints
 the same line as `activity:`, and `lobstah ls` has an `activity` column. See
 [Activity](vocabulary.md#activity).
 
-A worker that waits on something outside lobstah (a ume review, a PR
-review, a deploy) reports `paused "<note>" --waiting-on review --link <url>`
-before it waits. Tend, `status`, `ls`, and the glass then show
+A worker that waits on something outside lobstah (a ume review, a
+deploy) reports `paused "<note>" --waiting-on review --link <url>`
+before it waits. A trap never parks on its own PR's CI or review: once the
+PR is up it reports `done --pr <url>`, which frees it, and the PR's watch
+starts the next round on review feedback, a failing check or a merge. A
+trap's `paused --waiting-on pr|review` about its own PR is recorded as
+`done --pr`. Tend, `status`, `ls`, and the glass then show
 `paused: waiting on review` with the link and the time waited. It is a
 state, not a question: nothing to answer, no attention, no pet. A paused
 headless worker is never counted as wedged and its wall clock stops.
@@ -1369,13 +1373,34 @@ lobstah man roster set <trap> --harness codex --model <m> --terminal iterm --con
 lobstah man throw <trap> [--timeout <secs>]         # bring one trap back; wait until it listens
 lobstah man throw <trap> --bypass                   # a person, at a terminal: this start skips permission checks
 lobstah man throw <trap> --remote-control           # this start can be driven from a phone: Claude's Remote Control, or Codex's shared server
+lobstah man throw <trap> --stop-stale               # a leftover Codex process still holds the trap's thread: stop it, then throw
 lobstah man throw --all                             # every eligible trap in your grounds, at once
 lobstah man throw --repo <key>                      # every eligible trap of one repo
 lobstah man throw --new --repo <key> --count N      # N fresh traps (see "Starting a new trap")
 lobstah man throw --dry-run <trap>... | --all | --repo <key> | --new ...
                                                     # what a throw would do; launches nothing (--plan too)
 lobstah man roster forget <trap> [--force]          # remove a stowed trap's record, worktree, and ref
+lobstah man tidy-panes [--apply]                    # dead panes and duplicate or leftover Codex panes on lobstah's tmux server
 ```
+
+Codex lets one process write a thread. Another Codex on the same thread
+shows "This conversation is open in another app" and never takes a turn.
+When a throw finds a leftover Codex process holding the trap's thread, it
+names the process and refuses; `--stop-stale` stops it first. Only processes
+holding that thread's writer lock are stopped, and never one a signed-on trap
+runs in. When the daemon sweeps a ghosted Codex trap, it stops the trap's own
+Codex process too, once it confirms the process still holds the thread.
+
+`man tidy-panes` lists what it would tidy on lobstah's tmux server; `--apply`
+does it. Each trap keeps one Codex pane: the one it recorded at sign-on.
+- A dead pane closes.
+- Another Codex pane named for a live trap is a duplicate: its Codex stops
+  and the pane closes.
+- A Codex pane named for a trap that is no longer signed on is a leftover,
+  and is tidied the same way.
+- A pane whose Codex holds the writer lock of a live trap's thread stays,
+  whatever its title says.
+- Panes running anything but Codex are left alone.
 
 `man throw --remote-control` makes one start reachable from a phone, new
 (`--new`) or returning. A Codex trap attaches to Codex's shared app-server, so its
