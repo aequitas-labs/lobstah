@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { ensureLayout, signOnTrap, soakingDir, stowTrap } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { viewerDevice } from '../../../packages/core/src/viewer-device.js';
 
 let home: string;
 let worktree: string;
@@ -43,6 +44,19 @@ const request = (id: string, init: RequestInit = {}) => fetch(`${base}/api/focus
   headers: { Origin: base, 'x-lobstah-focus-token': token },
   ...init,
 });
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+/** /data as a proxy with its own hostname would ask for it. */
+const dataFromProxy = (headers: Record<string, string> = {}): Promise<{ focusToken?: string; viewer?: { onMachine: boolean; windowFocus: boolean; machine: string; device: string } }> => new Promise((resolve, reject) => {
+  const req = httpRequest(`${base}/data`, { headers: { Host: 'glass.example.net', ...headers } }, (res) => {
+    let body = '';
+    res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    res.on('end', () => resolve(JSON.parse(body) as { focusToken?: string }));
+  });
+  req.on('error', reject);
+  req.end();
+});
 const wrongHostStatus = (id: string): Promise<number | undefined> => new Promise((resolve, reject) => {
   const req = httpRequest(`${base}/api/focus/${id}`, {
     method: 'POST',
@@ -53,6 +67,54 @@ const wrongHostStatus = (id: string): Promise<number | undefined> => new Promise
   });
   req.on('error', reject);
   req.end();
+});
+
+describe('glass viewer', () => {
+  it('gives the page token and open only to its own address', async () => {
+    const own = (await (await fetch(`${base}/data`)).json()) as { focusToken?: string; viewer: { onMachine: boolean; windowFocus: boolean; machine: string } };
+    expect(own.focusToken).toBe(token);
+    expect(own.viewer.onMachine).toBe(true);
+    expect(own.viewer.windowFocus).toBe(process.platform === 'darwin');
+    const proxied = await dataFromProxy();
+    expect(proxied.focusToken).toBeUndefined();
+    expect(proxied.viewer).toEqual({ onMachine: false, windowFocus: false, machine: own.viewer.machine, device: 'unknown' });
+  });
+
+  it('tells a phone from a desktop by User-Agent and client hint, and an unrecognised device is neither', async () => {
+    const device = async (headers: Record<string, string>) => (await dataFromProxy(headers)).viewer?.device;
+    expect(await device({ 'User-Agent': IPHONE })).toBe('phone');
+    expect(await device({ 'User-Agent': ANDROID })).toBe('phone');
+    expect(await device({ 'User-Agent': MAC })).toBe('desktop');
+    expect(await device({ 'User-Agent': 'curl/8.7.1' })).toBe('unknown');
+    expect(await device({ 'User-Agent': MAC, 'Sec-CH-UA-Mobile': '?1' })).toBe('phone');
+    expect(await device({ 'User-Agent': MAC, 'Sec-CH-UA-Mobile': '?0' })).toBe('desktop');
+    expect(viewerDevice('Mozilla/5.0 (X11; Linux x86_64)')).toBe('desktop');
+    expect(viewerDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe('desktop');
+    expect(viewerDevice('Mozilla/5.0 (iPad; CPU OS 15_0 like Mac OS X)')).toBe('phone');
+    expect(viewerDevice()).toBe('unknown');
+  });
+
+  it('answers a device with its own page, not a 304 for another device', async () => {
+    const desktop = await fetch(`${base}/data`, { headers: { 'User-Agent': MAC } });
+    const etag = desktop.headers.get('etag')!;
+    expect((await fetch(`${base}/data`, { headers: { 'User-Agent': MAC, 'if-none-match': etag } })).status).toBe(304);
+    const phone = await fetch(`${base}/data`, { headers: { 'User-Agent': IPHONE, 'if-none-match': etag } });
+    expect(phone.status).toBe(200);
+    expect(((await phone.json()) as { viewer: { device: string } }).viewer.device).toBe('phone');
+  });
+
+  it('writes the attach command for the viewer, only for a live tmux trap', () => {
+    const fleet = fs.readdirSync(soakingDir());
+    expect(fleet).toHaveLength(1);
+    const file = path.join(soakingDir(), fleet[0]!);
+    const reg = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+    fs.writeFileSync(file, JSON.stringify({ ...reg, window: { tmuxPane: '%7' } }));
+    const trap = (local: boolean) => buildGlassSnapshot({ local }).traps.find((t) => t.trapId === trapId)!;
+    expect(trap(true).attachCommand).toBe('tmux -L lobstah attach -t %7');
+    expect(trap(false).attachCommand).toMatch(/^ssh \S+ -t tmux -L lobstah attach -r -t %7$/);
+    stowTrap(trapId);
+    expect(trap(true).attachCommand).toBeUndefined();
+  });
 });
 
 describe('glass focus endpoint', () => {
@@ -75,7 +137,7 @@ describe('glass focus endpoint', () => {
     stowTrap(trapId);
     const result = await request(trapId);
     expect(result.status).toBe(409);
-    expect(await result.json()).toMatchObject({ focused: false, reason: 'Trap is not live.' });
+    expect(await result.json()).toMatchObject({ focused: false, reason: 'Trap is not live' });
     expect(focus).not.toHaveBeenCalled();
   });
 

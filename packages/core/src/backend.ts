@@ -41,7 +41,7 @@ export function localBackend(reg: TrapRegistration): CoordinationBackend {
 
 /** Explicit whitelist: never spread a full local descriptor into HTTP. */
 export function coordinationDescriptor(d: Descriptor): DispatchInput {
-  return { id: d.id, repo: d.repo, brief: d.brief, for: d.for, followUp: d.followUp,
+  return { id: d.id, repo: d.repo, target: d.target, brief: d.brief, for: d.for, followUp: d.followUp,
     harness: d.harness, model: d.model, effort: d.effort };
 }
 

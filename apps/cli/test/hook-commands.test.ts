@@ -6,13 +6,17 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm,
   noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop, baitBrief } from '@lobstah/core';
+import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import {
   charter,
   DISPATCH_UNBLOCKED_RULE,
   FILE_REPORT_RULE,
+  CARD_RULE,
   HELM_REMINDER,
+  HELM_STOP_REMINDER,
+  RUN_CARD_RULE,
   PARKED_TODO_RULE,
   TODO_COMMITMENT_RULE,
   WITHDRAW_CARD_RULE,
@@ -62,6 +66,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-hook-cmds-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  recordHelmPass('fleet', DEFAULT_HELM);
   fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\narmGraceSecs = 0.2\n');
 });
 afterEach(() => {
@@ -151,6 +156,7 @@ describe('lobstah hook user-prompt-submit', () => {
         const context = JSON.parse(res.stdout).hookSpecificOutput;
         expect(context.hookEventName).toBe('UserPromptSubmit');
         expect(context.additionalContext).toContain(HELM_REMINDER);
+        expect(context.additionalContext).toContain(CARD_RULE);
         expect(context.additionalContext.includes('First message of the day')).toBe(prompt === 'First turn');
         expect(context.prompt).toBeUndefined();
       }
@@ -205,6 +211,13 @@ describe('lobstah hook user-prompt-submit', () => {
 
   it('includes the same reminder in the helm charter Role section', () => {
     expect(charter({ name: 'fleet', repos: ['web'] }).split('Role:')[1]?.split('Fences:')[0]).toContain(HELM_REMINDER);
+    expect(CARD_RULE).toBe('Every question, choice or action for the human (answer, approve, review, run a command, click, sign in, test) goes on a card, with exact steps and any command in the card. Saying it in chat too is fine; chat alone is not. When a card is answered, act on it in the same turn or put the follow-up on a todo.');
+    expect(HELM_REMINDER).toContain(CARD_RULE);
+    expect(HELM_REMINDER).toContain(RUN_CARD_RULE);
+    // A run card is a kind of card: the Stop reminder stays the plain card rule.
+    expect(HELM_STOP_REMINDER).toBe('If this reply requires human action, put it on a card.');
+    expect(charter({ name: 'fleet', repos: ['web'] }).split(CARD_RULE)).toHaveLength(2);
+    expect(charter({ name: 'fleet', repos: ['web'] })).not.toContain('any question or choice for the human');
   });
 });
 
@@ -376,7 +389,7 @@ describe('lobstah hook', () => {
   it('bare prints its card; an unknown event is a usage error', () => {
     const bare = hook(['hook'], {});
     expect(bare.status).toBe(0);
-    expect(bare.stdout).toContain('session-start|user-prompt-submit|stop|post-tool-use|session-end|permission-request|pre-tool-use|grant-check');
+    expect(bare.stdout).toContain('session-start|user-prompt-submit|stop|post-tool-use|session-end|permission-request|pre-tool-use|grant-check|permission-denied');
     const unknown = hook(['hook', 'pre-compact'], {});
     expect(unknown.status).toBe(2);
   });
@@ -393,6 +406,8 @@ describe('lobstah hook', () => {
         PreToolUse: 'lobstah hook pre-tool-use',
         Stop: 'lobstah hook stop',
         SessionEnd: 'lobstah hook session-end',
+        // Claude Code alone reports an auto-mode refusal.
+        ...(plugin === 'claude-code' ? { PermissionDenied: 'lobstah hook permission-denied' } : {}),
       });
     }
   });

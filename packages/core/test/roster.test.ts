@@ -166,6 +166,129 @@ describe('planThrow', () => {
     }
   });
 
+  it('a Claude trap whose session is open in any process is refused, not resumed; once it ends the trap resumes', async () => {
+    const claudeHome = path.join(home, 'claude');
+    const reg = signOn('early-pebble');
+    stowTrap(reg.trapId);
+    const project = path.join(claudeHome, 'projects', reg.worktree.replace(/[^A-Za-z0-9-]/g, '-'));
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, `${reg.sessionId}.jsonl`), '{}\n');
+    expect(planThrow(loadConfig(), { all: true }, { claudeHome })[0]).toMatchObject({ action: 'resume' });
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    try {
+      fs.mkdirSync(path.join(claudeHome, 'sessions'), { recursive: true });
+      fs.writeFileSync(path.join(claudeHome, 'sessions', `${holder.pid}.json`), JSON.stringify({ pid: holder.pid, sessionId: reg.sessionId, tmux: 'lobstah:@1.%14' }));
+      const [held] = planThrow(loadConfig(), { all: true }, { claudeHome });
+      expect(held).toMatchObject({ action: 'skip', sessionHeld: true });
+      expect(held!.why).toContain(`process ${holder.pid} (tmux pane %14)`);
+      holder.kill('SIGKILL');
+      await new Promise((resolve) => holder.once('exit', resolve));
+      expect(planThrow(loadConfig(), { all: true }, { claudeHome })[0]).toMatchObject({ action: 'resume' });
+    } finally {
+      holder.kill('SIGKILL');
+    }
+  });
+
+  describe('a session another trap holds or claims', () => {
+    const THREAD = '01aaaaaa-8888-7777-8666-444444444444';
+    /** A saved Claude transcript for a session, so only the claim can stop its resume. */
+    const claudeTranscript = (claudeHome: string, worktree: string, sessionId: string): void => {
+      const project = path.join(claudeHome, 'projects', worktree.replace(/[^A-Za-z0-9-]/g, '-'));
+      fs.mkdirSync(project, { recursive: true });
+      fs.writeFileSync(path.join(project, `${sessionId}.jsonl`), '{}\n');
+    };
+    /** Rewrite a roster record's session, as an older lobstah left it. Signing on would release the claim. */
+    const claimSession = (trapId: string, sessionId: string): void => {
+      const file = path.join(home, 'roster', `${trapId}.json`);
+      fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), sessionId }));
+    };
+
+    it('starts cold, naming the live trap, rather than resume its session', () => {
+      const claudeHome = path.join(home, 'claude');
+      const live = signOn('early-pebble');
+      const stale = signOn('smooth-gull', { sessionId: '22222222-3333-4444-8555-666666666666' });
+      stowTrap(stale.trapId);
+      claimSession(stale.trapId, live.sessionId);
+      claudeTranscript(claudeHome, stale.worktree, live.sessionId);
+      const [row] = planThrow(loadConfig(), { names: ['smooth-gull'] }, { claudeHome });
+      expect(row).toMatchObject({ name: 'smooth-gull', action: 'cold', checkout: 'kept' });
+      expect(row!.sessionHeld).toBeUndefined();
+      expect(row!.resumeFrom).toBeUndefined();
+      expect(row!.why).toContain(`session ${live.sessionId.slice(0, 8)} belongs to live trap early-pebble`);
+      expect(row!.why).toContain('second writer');
+    });
+
+    it('starts both traps cold when two records claim one Codex thread', () => {
+      const codexHome = path.join(home, 'codex');
+      const day = path.join(codexHome, 'sessions', '2026', '10', '23');
+      fs.mkdirSync(day, { recursive: true });
+      fs.writeFileSync(path.join(day, `rollout-2026-10-23T00-00-00-${THREAD}.jsonl`), '{"type":"session_meta","payload":{"originator":"codex-tui"}}\n');
+      const first = signOn('mellow-brook', { harness: 'codex', sessionId: THREAD });
+      stowTrap(first.trapId);
+      const second = signOn('quiet-wave', { harness: 'codex', sessionId: '01bbbbbb-8888-7777-8666-444444444444' });
+      stowTrap(second.trapId);
+      claimSession(second.trapId, THREAD);
+      const rows = planThrow(loadConfig(), { all: true }, { codexHome });
+      expect(rows.map((r) => [r.name, r.action])).toEqual([['mellow-brook', 'cold'], ['quiet-wave', 'cold']]);
+      expect(rows[0]!.why).toContain(`session ${THREAD.slice(0, 8)} is also claimed by trap quiet-wave`);
+      expect(rows[1]!.why).toContain(`session ${THREAD.slice(0, 8)} is also claimed by trap mellow-brook`);
+    });
+
+    it('resumes as before when the session is the trap\'s alone', () => {
+      const claudeHome = path.join(home, 'claude');
+      const other = signOn('early-pebble', { sessionId: '22222222-3333-4444-8555-666666666666' });
+      const mine = signOn('smooth-gull');
+      stowTrap(mine.trapId);
+      claudeTranscript(claudeHome, mine.worktree, mine.sessionId);
+      expect(other.sessionId).not.toBe(mine.sessionId);
+      expect(planThrow(loadConfig(), { names: ['smooth-gull'] }, { claudeHome })[0]).toMatchObject({ action: 'resume', resumeFrom: mine.worktree });
+    });
+
+    it('two Codex threads that only start alike each resume, and the plan names them in full', () => {
+      const codexHome = path.join(home, 'codex');
+      const day = path.join(codexHome, 'sessions', '2026', '10', '23');
+      fs.mkdirSync(day, { recursive: true });
+      const threads = ['01a1601e-8888-7777-8666-444444444444', '01a1601e-9999-7777-8666-555555555555'];
+      for (const [index, name] of ['mellow-brook', 'quiet-wave'].entries()) {
+        fs.writeFileSync(path.join(day, `rollout-2026-10-23T00-00-00-${threads[index]}.jsonl`), '{"type":"session_meta","payload":{"originator":"codex-tui"}}\n');
+        stowTrap(signOn(name, { harness: 'codex', sessionId: threads[index]! }).trapId);
+      }
+      const rows = planThrow(loadConfig(), { all: true }, { codexHome });
+      expect(rows.map((r) => r.action)).toEqual(['resume', 'resume']);
+      expect(rows[0]!.why).toContain(`codex resume ${threads[0]}`);
+      expect(rows[1]!.why).toContain(`codex resume ${threads[1]}`);
+    });
+
+    it('a sign-on takes the session from the older record, whose next throw starts cold', () => {
+      const claudeHome = path.join(home, 'claude');
+      const older = signOn('smooth-gull');
+      stowTrap(older.trapId);
+      claudeTranscript(claudeHome, older.worktree, older.sessionId);
+      const newer = signOn('early-pebble');
+      expect(newer.sessionId).toBe(older.sessionId);
+      expect(readRoster(newer.trapId)!.sessionId).toBe(SESSION);
+      expect(readRoster(older.trapId)!.sessionId).toBe('');
+      const [row] = planThrow(loadConfig(), { names: ['smooth-gull'] }, { claudeHome });
+      expect(row).toMatchObject({ action: 'cold' });
+      expect(row!.sessionId).toBeUndefined();
+      expect(row!.why).toContain('no saved session: another trap took it over');
+    });
+
+    it('a sign-on drops the older record\'s process with its session', async () => {
+      const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+      try {
+        const harnessProcess: HarnessProcess = { pid: holder.pid!, startedAt: processStartedAt(holder.pid!)! };
+        const older = signOn('smooth-gull', { harnessProcess });
+        stowTrap(older.trapId);
+        signOn('early-pebble');
+        expect(readRoster(older.trapId)!.harnessProcess).toBeUndefined();
+      } finally {
+        holder.kill('SIGKILL');
+        await new Promise((resolve) => holder.once('exit', resolve));
+      }
+    });
+  });
+
   it('an unconfigured repo, a foreign anchor, and a pre-roster worktree are unresolved', () => {
     const reg = signOn('amber-gull');
     stowTrap(reg.trapId);

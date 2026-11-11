@@ -1,5 +1,160 @@
 # Changelog
 
+## 0.8.7 — 2026-11-10
+
+### The hosted glass shows this machine's fleet
+
+A boat can now mirror its own glass to a wharf while its fleet stays on local
+grounds. With `[glass] mirror = "<wharf>"` and
+`lobstah wharf login --wharf <wharf> --mirror` (mirror and read access only),
+the daemon puts the glass snapshot on the wharf, without the page token. It
+does so within seconds of a change while a hosted glass is open, and every five
+minutes otherwise. It carries out on the local glass the reads and writes made
+there, and a relayed answer is recorded `by: wharf`. On one boat the hosted
+glass renders exactly what the local glass does, in every tab: PRs, TODOs,
+Notices, Grants, Stats, Settings and the rest. Several boats show at once as one
+fleet, each row naming its boat, and each call goes to its row's boat. A boat
+asleep for over two minutes shows its age, and its rows are read-only. ↗ Open is
+never relayed: it shows only on the trap rows of the boat the browser runs on,
+which a loopback probe finds. `lobstah wharf whoami --wharf <wharf>` and
+`lobstah doctor` say how fresh the mirror is. (#372, #375, #377)
+
+### A question and a permission request are two cards
+
+A trap that asks a question and has a permission request pending gets both: a
+decision card that takes options or text, and a permission card with Allow once,
+Allow always and No. Either can come first. Answering one never answers or
+clears the other. (#371)
+
+### One Open per trap
+
+Every trap row shows a single ↗ Open, which takes the trap's best route: raise
+its window on this Mac, else its live link, else its session link. The trap
+modal lists every way in, each with where it works. (#373)
+
+### Stale builds are caught
+
+- A running glass or daemon reports the version it started with, so after an
+  upgrade `lobstah daemon restart` restarts a detached glass that still serves
+  the old page, and `glass status` and `doctor` flag one. (#367)
+- `lobstah pet install` builds the desktop pet from the sources the npm package
+  now ships, and stamps it with the CLI version. `doctor` warns when the pet is
+  behind, and the daemon rebuilds a stale one. (#370)
+
+### Also new
+
+- A trap whose command waits or runs in the heavy line is working: no
+  `idle-while-working` notice until the run ends and the grace period passes.
+  (#368)
+- Trap briefs and skills suggest summarizing a long heavy run through a subagent
+  (the Agent tool, or Codex's `spawn_agent`). (#369)
+- lobstah's ume plans and reports wear the glass's look (`.ume/theme.css`).
+  (#374)
+
+## 0.8.6 — 2026-11-09
+
+### The hosted glass is the local glass
+
+The wharf's glass now runs the local glass's own UI: its header, tabs, deck,
+dispatch table and modal, decision modal, report pages, traps and reviews. It
+shows only the tabs and controls the wharf can fill, and adds just its sign-in,
+Boats and boat approval. The shared UI lives in `packages/glass-ui` behind one
+backend interface, and a parity test fails the build when the two glasses
+render a view differently. (#355–#360)
+
+### A glass Allow is the go in auto mode
+
+In Claude Code's auto mode, the classifier never sees a glass answer, so it
+refused commands already allowed there. A refused call now files a card through
+a new PermissionDenied hook. For a trap, PreToolUse honours Allow once and Allow
+always. For the helm, the card reads `The helm wants to run: <command>`, and
+Allow once covers that exact command for its session. (#364)
+
+### Checklists and images on cards and reports
+
+Task lists in a card's detail or a report are checkboxes. Ticks are saved beside
+the document, show on desktop and phone, and never answer the card;
+`man ask --show <key>` prints them. A withdrawn card keeps a read-only archive
+at its link. Card details show remote `https:` images inline, with a plain link
+when one won't load, and `man ask --detail` maps relative image links to its
+`--attach` files as `man file` does. Reports show attached images where the
+text names them. The glass page sends a strict Content-Security-Policy.
+(#352, #353)
+
+### Also new
+
+- Wharf deploys keep the deployment's ids out of git: they live in a
+  git-ignored `wrangler.local.jsonc`, and
+  `pnpm --filter @lobstah/wharf run deploy` merges them in. (#363)
+- CI retries a failed Windows test run once on one worker. (#361)
+
+## 0.8.5 — 2026-11-05
+
+### The desk: traps without a repo
+
+A `[traps.<name>]` profile is a worker that serves one grounds from a plain
+folder, with no git checkout, setup or culling. `soak --trap <name>` signs one
+on and keeps it through stow, and `dispatch --for trap:<name>` queues work only
+for it. The helm can send a desk step with `--assist`, and its findings and
+attachments reach the original dispatch exactly once. A Claude Desktop profile
+that isn't running gets one card with a prefilled link to start it. (#339, #343)
+
+### The glass puts trap names first
+
+Trap names lead headers, lists and cards. The repo or profile sits beside them,
+and Claude Code and Codex show as their icons on trap cards and rows. A
+read-only Settings tab shows the effective config, with secrets masked. Todos
+show when they're due, and a row can set or snooze their time. Code on a card
+has a copy button. Below 900px, every tab except On deck and Reviews sits behind
+More. (#299, #314, #334, #337, #341, #345, #346)
+
+### Intent grants: approve a kind of action once
+
+A trap can propose the commands it needs on its card, as patterns with a
+one-line label. Besides Allow once, the card offers **Allow this kind for 1h**,
+for this trap, and **Always allow this kind**, for every trap in the repo. A
+call matching the patterns runs and is recorded. Anything else goes to the
+harness's own reviewer, unchanged. Broad patterns are refused: a bare command,
+shell syntax, or a command that runs other commands. The Grants tab lists every
+grant with its uses and a Revoke button. `lobstah grant ls` and `grant revoke`
+do the same from the CLI. (#347, #348)
+
+### Allow cards name the trap and command; reports never need one
+
+A command card now reads `<trap> wants to run: <command>`, with the full command
+first and the trap's own description after it. A trap's `lobstah report` never
+becomes an Allow card, so a held question always reaches the helm. A tool card
+can be allowed always, for every trap. Codex connector calls no longer file a
+card before Codex's reviewer decides. The helm's `dispatch` and `send` relays
+are allowed by default. (#313, #316, #324, #351)
+
+### Also new
+
+- **tmux traps:** `[soak] terminal = "tmux"` opens traps as panes in lobstah's
+  own tmux server, titled with their repo and name. `lobstah tmux [repo]` opens
+  an independent view, and a glass click opens a Terminal window on a pane
+  nothing shows. (#312, #315, #317, #318, #320)
+- **The heavy line:** `lobstah heavy -- <command>` queues full test runs, builds
+  and agents' pushes for a few slots per machine. `man tend` and the glass show
+  the line. (#326–#329)
+- **Todos with a time:** `todo add --at`, `--in`, `--every "weekdays 09:00"`
+  and `--when <trigger>`, which waits on a card, dispatch, PR or trap. Each wakes
+  the helm once. Due todos and today's goals show automatically. (#323, #325,
+  #331–#333)
+- **Phones:** `man throw --remote-control` starts a Claude or Codex trap that a
+  phone can drive, and the glass offers a phone only what works there. A session
+  can hold only one trap and one writer. (#317, #342)
+- PR rows and notices show titles, not only numbers. One pet notification per
+  stack, on any base. (#300, #336)
+
+### Fixes
+
+- Thrown Codex traps sign on again: hooks are trusted with the hash Codex 0.166
+  reports, and a checkout's committed hooks are trusted for the session. (#304,
+  #340)
+- Traps keep parking after a Mac sleep. (#321)
+- A throw never resumes a session another trap holds. (#338)
+
 ## 0.8.4 — 2026-10-29
 
 ### The permission profile adds context, never restrictions

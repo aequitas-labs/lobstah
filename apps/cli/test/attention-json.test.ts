@@ -72,6 +72,23 @@ describe('attention --json', () => {
     const parsed = JSON.parse(result.stdout) as { attention: Item[] };
     expect(parsed.attention.find((a) => a.kind === 'pr:draft')).toMatchObject({ key: 'pr:acme/web#9', prUrl: PR_URL, reviewUrl });
   });
+  it('feeds the pet a stack with its title and the repo review tool, on the Linear app', () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), `readySettleSecs = 0\nattentionKinds = ["stack-ready"]\n[repos.web]\npath = "/missing"\norigin = "git@github.com:acme/web.git"\nreviewTool = "linear-app"\n`);
+    const observed = new Date().toISOString();
+    for (const n of [41, 42]) {
+      upsertPr({
+        url: `https://github.com/acme/web/pull/${n}`, number: n, title: n === 41 ? 'Put job photos first' : 'Show them on the card', state: 'OPEN', draft: false,
+        reviewDecision: '', mergeStateStatus: 'CLEAN', headSha: `sha-${n}`, headRefName: `b${n}`, baseRefName: n === 41 ? 'main' : 'b41',
+        checks: { total: 1, passed: 1, failed: 0, pending: 0 }, observedAt: observed,
+      });
+    }
+    const parsed = JSON.parse(lobstah('attention', '--json').stdout) as { attention: Item[] };
+    expect(parsed.attention.find((a) => a.kind === 'stack-ready')).toMatchObject({
+      headline: 'Put job photos first (2 PRs, all green)',
+      prUrl: 'https://github.com/acme/web/pull/42',
+      reviewUrl: 'linear://review/acme/web/pull/42',
+    });
+  });
   it('prints only { attention }, with the same items and fields as man tend --json', () => {
     standingItems();
     expect(lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet').status).toBe(0);

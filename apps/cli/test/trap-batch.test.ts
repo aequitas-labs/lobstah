@@ -112,7 +112,7 @@ describe('man throw --all', () => {
     expect(fresh).toHaveLength(2);
     expect(fresh.every((n) => n.quiet)).toBe(true);
     const summary = listNotices(100).find((n) => n.kind === 'trap-batch')!;
-    expect(summary.text).toContain('2 available (0 resumed, 2 cold, 0 new), 1 skipped, 1 failed — failed: crisp-tern');
+    expect(summary.text).toContain('2 available (0 resumed, 2 cold, 0 new), 1 skipped, 1 failed — failed: r · crisp-tern');
     // What wakes the helm: the summary and the failed start, nothing per trap.
     expect(unseenNotices(true).map((n) => n.kind).sort()).toEqual(['trap-batch', 'trap-start-failed']);
   });
@@ -134,6 +134,8 @@ describe('man throw --all', () => {
     expect(seen[0]!.argv[0]).toBe('claude');
     const traps = listTraps();
     expect(traps).toHaveLength(2);
+    // The title a tmux pane opens with is the one sign-on sets.
+    expect(seen.map((l) => l.trap).sort()).toEqual(traps.map((t) => `r · ${t.name}`).sort());
     expect(new Set(traps.map((t) => t.trapId)).size).toBe(2);
     expect(traps.every((t) => t.worktree.includes(`soak-${t.trapId}`))).toBe(true);
     expect(listNotices(100).filter((n) => n.kind === 'trap-batch')).toHaveLength(1);

@@ -117,6 +117,14 @@ export function captureHarnessProcess(): HarnessProcess | undefined {
   return startedAt ? { pid: found.pid, startedAt } : undefined;
 }
 
+/**
+ * Whether a process ending should sign off this trap. Another process on the
+ * same session ending says nothing about the trap's own, which may still run.
+ */
+export function endingProcessOwnsTrap(recorded: HarnessProcess | undefined, ending: number | undefined): boolean {
+  return recorded === undefined || ending === undefined || recorded.pid === ending;
+}
+
 /** True while the recorded process runs: the same pid, started at the same time. */
 export function harnessProcessAlive(proc: HarnessProcess): boolean {
   return processStartedAt(proc.pid) === proc.startedAt;

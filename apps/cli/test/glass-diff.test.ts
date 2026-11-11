@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as detector from '../src/glass-diff.js';
+import * as detector from '../../../packages/glass-ui/src/glass-diff.js';
 
 // The pure section selectors, imported exactly as the page's bundle imports
 // them (the tests feed them partial snapshots: each section reads only its slice).

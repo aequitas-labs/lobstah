@@ -1,7 +1,7 @@
 import { Account } from './account.js';
 import { ApiError, boundedBody, identifier } from './protocol.js';
 import { authOrigins, authRequest, deletionReceipt, personSession } from './auth.js';
-import { accountResponse } from './account-response.js';
+import { accountResponse, mirrorRawBody } from './account-response.js';
 import { glassBrowser } from './glass-browser.js';
 import { slackIngress } from './slack-ingress.js';
 import type { Command } from './account.js';
@@ -49,7 +49,8 @@ export default {
       let body: unknown = {};
       const route = segments.slice(3).join('/');
       if (route === 'boats' && request.method === 'POST') throw new ApiError(404, 'boats enroll through approved login only');
-      const upload = /^(dispatches|documents)\/[A-Za-z0-9_-]+\/files$/.test(route) && request.method === 'POST';
+      // Uploads, a mirror boat's snapshot and its answers carry raw bytes, read where they are stored.
+      const upload = /^(dispatches|documents)\/[A-Za-z0-9_-]+\/files$/.test(route) && request.method === 'POST' || mirrorRawBody(route, request.method);
       if (request.method !== 'GET' && !upload) {
         const bytes = await boundedBody(request);
         try { body = bytes.length ? JSON.parse(new TextDecoder().decode(bytes)) : {}; } catch { throw new ApiError(400, 'invalid JSON'); }

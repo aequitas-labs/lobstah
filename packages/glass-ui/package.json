@@ -1,0 +1,19 @@
+{
+  "name": "@lobstah/glass-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && tsc -p ui"
+  },
+  "dependencies": {
+    "@lobstah/core": "workspace:*"
+  },
+  "devDependencies": {
+    "htm": "^3.1.1",
+    "preact": "^10.29.8"
+  },
+  "license": "MIT"
+}

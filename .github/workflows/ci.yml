@@ -23,7 +23,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm test
+      # The fast run first. A failed Windows run is retried once on one worker
+      # (vitest.config.ts), which is slower but keeps the worker RPC channel up.
+      - name: pnpm test
+        shell: bash
+        run: |
+          if pnpm test; then exit 0; fi
+          if [ "$RUNNER_OS" != "Windows" ]; then exit 1; fi
+          echo "::warning::pnpm test failed on Windows with 2 workers; retrying once on 1 worker"
+          LOBSTAH_TEST_WORKERS=1 pnpm test
       # Exercise the Worker's SQL tests on both OSes (Node 20 has no node:sqlite).
       - uses: actions/setup-node@v4
         with:

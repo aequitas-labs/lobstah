@@ -1,7 +1,175 @@
+import { execFileSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
+import { parse } from 'smol-toml';
+import { readTrapAnchor } from '@lobstah/core';
 import { codexHookHash, type CodexHook, type HookHandler } from './hook-readiness.js';
+import { codexHookTrustToml, codexHookTrustValues, type CodexHookList, type CodexHookTrustValues } from './codex-hook-list.js';
 import { installedCodexPlugin } from './plugin-version.js';
+
+type HookGroups = Record<string, Array<{ matcher?: string; hooks?: HookHandler[] }>>;
+
+/** One command hook from a hooks.json, under the key and hash Codex trusts it by. */
+export interface CodexHookEntry {
+  /** `<hooks.json path or plugin id>:<snake_event>:<group>:<handler>`. */
+  key: string;
+  event: string;
+  command: string;
+  hash: string;
+}
+
+/** A hook that would hold a Codex trap at "Hooks need review" before its first prompt. */
+export interface CodexHookBlocker extends CodexHookEntry {
+  /** In plain words: why Codex would ask about it. */
+  reason: string;
+}
+
+const snakeEvent = (event: string): string => event.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+
+/** The command hooks of one hooks.json, keyed the way Codex keys their trust. */
+function hookEntries(source: string, hooks: HookGroups | undefined): CodexHookEntry[] {
+  const out: CodexHookEntry[] = [];
+  for (const [event, groups] of Object.entries(hooks ?? {})) {
+    if (!Array.isArray(groups)) continue;
+    for (const [g, group] of groups.entries()) {
+      for (const [h, handler] of (Array.isArray(group?.hooks) ? group.hooks : []).entries()) {
+        if (handler?.type !== 'command' || typeof handler.command !== 'string') continue;
+        out.push({ key: `${source}:${snakeEvent(event)}:${g}:${h}`, event, command: handler.command,
+          hash: codexHookHash(event as CodexHook, group.matcher, handler) });
+      }
+    }
+  }
+  return out;
+}
+
+const readHooks = (text: string | undefined): HookGroups | undefined => {
+  if (text === undefined) return undefined;
+  try {
+    return (JSON.parse(text) as { hooks?: HookGroups }).hooks ?? {};
+  } catch {
+    return undefined;
+  }
+};
+
+const git = (cwd: string, args: string[]): string | undefined => {
+  try {
+    return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return undefined;
+  }
+};
+
+export interface CodexFolderTrust {
+  args: string[];
+  detail: string;
+  /** The folder these args trust, when they trust one. */
+  trustedPath?: string;
+}
+
+/**
+ * Only a matching soak-created linked checkout receives session folder trust.
+ * Primary/adopted checkouts and explicit untrusted decisions keep Codex's
+ * native prompt. Hook trust is separate: these flags authorize no hook hash.
+ */
+export function codexTrapFolderTrust(cwd: string, trapId: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): CodexFolderTrust {
+  const review = (why: string): CodexFolderTrust => ({ args: [], detail: `Codex may wait at Folder access / Trust this folder for ${cwd}; ${why}` });
+  const anchor = readTrapAnchor(cwd);
+  if (anchor?.createdBy !== 'soak' || anchor.trapId !== trapId) return review('no launch trust is supplied for a primary or adopted checkout');
+  const paths = git(cwd, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'])?.trim().split(/\r?\n/);
+  if (!paths || paths.length !== 3 || path.resolve(paths[1]!) === path.resolve(paths[2]!)) return review('it is not a linked worktree');
+  const canonicalCwd = fs.realpathSync.native(cwd);
+  if (fs.realpathSync.native(paths[0]!) !== canonicalCwd) return review('the launch directory is not the checkout root');
+  const codexDir = (opts.env ?? process.env).CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
+  const configFile = path.join(codexDir, 'config.toml');
+  let projects: Record<string, { trust_level?: string }> = {};
+  try {
+    projects = (parse(fs.readFileSync(configFile, 'utf8')) as { projects?: typeof projects }).projects ?? {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return review('the existing folder trust configuration could not be read');
+  }
+  const common = path.resolve(paths[2]!);
+  const primary = path.basename(common) === '.git' ? path.dirname(common) : common;
+  const spelling = (value: string): string => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  const targets = new Set([cwd, canonicalCwd, primary].map(spelling));
+  if (Object.entries(projects).some(([key, project]) => targets.has(spelling(key)) && project.trust_level === 'untrusted'))
+    return review('an explicit untrusted decision is preserved');
+  return {
+    // Codex splits override keys on dots without unquoting path segments.
+    // One inline table keeps the native pathname literal, including dots.
+    args: ['-c', `projects={${JSON.stringify(canonicalCwd)}={trust_level="trusted"}}`],
+    trustedPath: canonicalCwd,
+    detail: `Folder access: launch-only trust for lobstah-created worktree ${canonicalCwd}; hook trust remains separate`,
+  };
+}
+
+/**
+ * The project hooks.json Codex loads for a checkout: in a linked worktree it
+ * reads the main checkout's `.codex/hooks.json`, not the worktree's own
+ * (observed with Codex 0.160.1), and keys its trust by that absolute path.
+ */
+export function codexProjectHooksFile(cwd: string): string | undefined {
+  // git prints forward slashes on Windows too; path.resolve gives native ones.
+  const native = (p: string | undefined): string | undefined => (p?.trim() ? path.resolve(p.trim()) : undefined);
+  const common = native(git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  if (!common) return undefined;
+  const root = path.basename(common) === '.git' ? path.dirname(common) : native(git(cwd, ['rev-parse', '--show-toplevel']));
+  const file = root ? path.join(root, '.codex', 'hooks.json') : undefined;
+  return file && fs.existsSync(file) ? file : undefined;
+}
+
+/**
+ * The checkout's project hooks lobstah supplies session trust for: exactly
+ * those Codex will load, and only when that file matches the
+ * `.codex/hooks.json` committed at the checkout's HEAD. A local edit, or a
+ * file the repo does not track, gets no trust from lobstah.
+ */
+export function codexProjectHookTrust(cwd: string): { file?: string; supplied: CodexHookEntry[]; unverified?: string } {
+  const file = codexProjectHooksFile(cwd);
+  if (!file) return { supplied: [] };
+  const loaded = readHooks(fs.readFileSync(file, 'utf8'));
+  const committed = readHooks(git(cwd, ['show', 'HEAD:.codex/hooks.json']));
+  if (!loaded) return { file, supplied: [], unverified: `${file} is not valid hooks JSON` };
+  if (!committed) return { file, supplied: [], unverified: `${file} is not committed at this checkout's HEAD` };
+  if (!isDeepStrictEqual(loaded, committed)) return { file, supplied: [], unverified: `${file} differs from the .codex/hooks.json committed at this checkout's HEAD` };
+  return { file, supplied: hookEntries(file, loaded) };
+}
+
+/** Codex's own trust record: `[hooks.state."<key>"]` in `$CODEX_HOME/config.toml`. */
+function codexHookState(codexDir: string): Record<string, { enabled?: boolean; trusted_hash?: string }> {
+  try {
+    const cfg = parse(fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf8')) as { hooks?: { state?: Record<string, { enabled?: boolean; trusted_hash?: string }> } };
+    return cfg.hooks?.state ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The hooks that would hold a Codex trap in `cwd` at "Hooks need review"
+ * before its first prompt: the user's `$CODEX_HOME/hooks.json` and the
+ * checkout's project hooks, less those Codex already trusts at their current
+ * hash and those lobstah supplies for the session. A disabled hook never asks.
+ */
+export function codexTrapHookBlockers(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): CodexHookBlocker[] {
+  const env = opts.env ?? process.env;
+  const codexDir = env.CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
+  const state = codexHookState(codexDir);
+  const userFile = path.join(codexDir, 'hooks.json');
+  const user = fs.existsSync(userFile) ? hookEntries(userFile, readHooks(fs.readFileSync(userFile, 'utf8'))) : [];
+  const project = codexProjectHookTrust(cwd);
+  const loaded = project.file ? hookEntries(project.file, readHooks(fs.readFileSync(project.file, 'utf8'))) : [];
+  const supplied = new Set(project.supplied.map((e) => e.key));
+  const out: CodexHookBlocker[] = [];
+  for (const e of [...user, ...loaded]) {
+    const entry = state[e.key];
+    if (entry?.enabled === false || entry?.trusted_hash === e.hash || supplied.has(e.key)) continue;
+    const why = entry?.trusted_hash ? 'changed since it was trusted' : 'never trusted';
+    out.push({ ...e, reason: project.unverified && e.key.startsWith(`${project.file}:`) ? `${why}; lobstah supplies no trust because ${project.unverified}` : why });
+  }
+  return out;
+}
 
 /** The commands this CLI authorizes for its own trap lifecycle, never repo hooks. */
 const COMMANDS: Record<CodexHook, string> = {
@@ -15,22 +183,40 @@ const COMMANDS: Record<CodexHook, string> = {
 };
 
 /**
- * Codex 0.160.1 blocks before its first prompt when any hook needs review.
- * Supply trust for only the installed plugin's exact, vetted lobstah commands
- * as a session flag. No persisted config writes, no blanket trust bypass,
+ * Codex blocks before its first prompt when any hook needs review.
+ * Supply trust for only the installed plugin's exact, vetted lobstah commands,
+ * and for `cwd`'s project hooks when they match the committed file (see
+ * codexProjectHookTrust), as a session flag. No persisted config writes, no blanket trust bypass,
  * and no changes to enabled=false or to any other hook's trust.
+ *
+ * With `listed` (see listCodexHooks), Codex supplies the hash for a vetted command: since 0.166
+ * a plugin hook's trust also covers the plugin's contents, which lobstah can't
+ * compute. Without an answer from Codex, lobstah computes the hook hash itself,
+ * which is all that Codex before 0.166 asks for.
  *
  * hooks.state is one inline TOML value: plugin IDs contain dots and must not
  * be interpreted as dotted override paths. Codex merges session hook state
  * with user state field by field (codex-hooks config_rules).
  */
-export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): string[] {
+export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string; listed?: CodexHookList } = {}): string[] {
+  const entries = codexTrapHookTrust(opts).map(({ key, values }) => `${JSON.stringify(key)}=${codexHookTrustToml(values)}`);
+  return entries.length ? ['-c', `hooks.state={${entries.join(',')}}`] : [];
+}
+
+/** One hook lobstah is prepared to trust, and the values that trust it. */
+export interface CodexHookTrustEntry {
+  key: string;
+  values: CodexHookTrustValues;
+}
+
+/** The hooks a Codex trap may trust, by the rules on codexTrapHookArgs: its own vetted commands and committed project hooks. */
+export function codexTrapHookTrust(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string; listed?: CodexHookList } = {}): CodexHookTrustEntry[] {
   const plugin = installedCodexPlugin(opts);
   if (!plugin) return [];
   const file = path.join(plugin.root, 'hooks', 'hooks.json');
   const config = JSON.parse(fs.readFileSync(file, 'utf8')) as { hooks?: Record<string, Array<{ matcher?: string; hooks?: HookHandler[] }>> };
   if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks)) throw new Error(`invalid lobstah hooks in ${file}`);
-  const entries: string[] = [];
+  const entries: CodexHookTrustEntry[] = [];
   for (const [event, groups] of Object.entries(config.hooks)) {
     const command = Object.hasOwn(COMMANDS, event) ? COMMANDS[event as CodexHook] : undefined;
     if (!command || !Array.isArray(groups)) throw new Error(`cannot authorize unknown lobstah hook ${event} in ${file}; update the CLI and plugin together`);
@@ -41,9 +227,54 @@ export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string
           throw new Error(`cannot authorize ${event} in ${file}: expected exactly ${command}`);
         }
         const key = `lobstah@lobstah:hooks/hooks.json:${event.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}:${g}:${h}`;
-        entries.push(`${JSON.stringify(key)}={trusted_hash=${JSON.stringify(codexHookHash(event as CodexHook, group.matcher, handler))}}`);
+        const reported = opts.listed?.get(key);
+        if (reported?.command !== undefined && reported.command !== command) {
+          throw new Error(`cannot authorize ${event}: Codex reports \`${reported.command}\`, expected exactly ${command}`);
+        }
+        const values: CodexHookTrustValues = reported
+          ? codexHookTrustValues(reported.currentHash)
+          : { trusted_hash: codexHookHash(event as CodexHook, group.matcher, handler) };
+        entries.push({ key, values });
       }
     }
   }
-  return entries.length ? ['-c', `hooks.state={${entries.join(',')}}`] : [];
+  // The checkout's own committed project hooks, keyed by the file Codex loads.
+  for (const e of opts.cwd ? codexProjectHookTrust(opts.cwd).supplied : []) {
+    const reported = opts.listed?.get(e.key);
+    // A project hook is vetted by its hash, so Codex's answer only counts when the two agree.
+    const values = reported && codexHookTrustValues(reported.currentHash).trusted_hash === e.hash
+      ? codexHookTrustValues(reported.currentHash)
+      : { trusted_hash: e.hash };
+    entries.push({ key: e.key, values });
+  }
+  return entries;
+}
+
+/**
+ * `lobstah doctor`: the hooks that would hold a Codex trap in each
+ * configured repo at "Hooks need review" before it can sign on. Skips when
+ * the Codex plugin is not installed. Read-only.
+ */
+export function codexTrapHooksRow(
+  repos: Record<string, { path: string }>,
+  opts: { env?: NodeJS.ProcessEnv; home?: string } = {},
+): { check: string; status: 'ok' | 'fail' | 'skip'; detail: string } {
+  const check = 'codex trap hooks';
+  if (!installedCodexPlugin(opts)) return { check, status: 'skip', detail: 'Codex plugin not installed' };
+  const blocked: string[] = [];
+  let supplied = 0;
+  for (const [name, repo] of Object.entries(repos)) {
+    if (!fs.existsSync(repo.path)) continue;
+    supplied += codexProjectHookTrust(repo.path).supplied.length;
+    const blockers = codexTrapHookBlockers(repo.path, opts);
+    if (blockers.length) blocked.push(`${name}: ${blockers.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ')}`);
+  }
+  if (blocked.length === 0) {
+    return { check, status: 'ok', detail: `no hook would hold a Codex trap at hook review${supplied ? ` (lobstah supplies session trust for ${supplied} committed project hook${supplied > 1 ? 's' : ''})` : ''}` };
+  }
+  return {
+    check,
+    status: 'fail',
+    detail: `a Codex trap stops at "Hooks need review" and cannot sign on — ${blocked.join(' · ')}. Trust them in Codex's /hooks, or commit the project's .codex/hooks.json as checked out`,
+  };
 }

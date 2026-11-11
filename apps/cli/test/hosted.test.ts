@@ -9,7 +9,7 @@ import { ackItemExists } from '../src/acks.js';
 import { commandScope, wharfCommand } from '../src/wharf-commands.js';
 import { buildGlassSnapshot, glassDispatchJson } from '../src/glass.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
-import { lobItems } from '../src/glass-lobs.js';
+import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { parseArgs } from '../src/usage.js';
 let home: string;

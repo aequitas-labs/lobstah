@@ -68,7 +68,8 @@ it.each(['claude', 'codex'])('falls through after a %s sign-on timeout, includin
     if (!('ok' in result)) throw new Error('held');
     dropReservation(r.trapId); heartbeatTrap(r.trapId, { parked: true });
   } });
-  const options = { adapter, timeoutSecs: 0.03, pollMs: 1 };
+  // No real Codex: the wait for one would outlast this budget, so the first trap wouldn't have launched.
+  const options = { adapter, timeoutSecs: 0.03, pollMs: 1, listHooks: async () => undefined };
   const scheduler = createTrapDispatchScheduler(options);
   enqueue({ id: 'job', repo: 'r', brief: 'work', trapAny: true });
   pass(scheduler); pass(scheduler); // Starts never stall a daemon tick or launch twice.

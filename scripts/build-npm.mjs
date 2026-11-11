@@ -32,7 +32,7 @@ fs.writeFileSync(
       author: 'aequitas labs LLC',
       type: 'module',
       bin: { lobstah: 'dist/main.js' },
-      files: ['dist', 'docs', 'README.md', 'LICENSE'],
+      files: ['dist', 'docs', 'pet', 'README.md', 'LICENSE'],
       engines: { node: '>=20' },
       keywords: ['agents', 'claude-code', 'codex', 'supervisor', 'coding-agents', 'worktree', 'orchestration'],
       repository: { type: 'git', url: 'git+https://github.com/aequitas-labs/lobstah.git' },
@@ -55,5 +55,11 @@ fs.copyFileSync(path.join(root, 'LICENSE'), path.join(out, 'LICENSE'));
 // `lobstah init` points at docs/configuration.md — ship the docs so the
 // reference resolves on an installed copy, not just in the repo.
 fs.cpSync(path.join(root, 'docs'), path.join(out, 'docs'), { recursive: true });
+// `lobstah pet install` builds the desktop pet from these sources, so an
+// installed lobstah gets the pet of its own version. Tests ship too: the
+// manifest names the test target, and SwiftPM refuses a missing target path.
+for (const part of ['Package.swift', 'Sources', 'Tests']) {
+  fs.cpSync(path.join(root, 'apps/pet', part), path.join(out, 'pet', part), { recursive: true });
+}
 fs.chmodSync(path.join(out, 'dist', 'main.js'), 0o755);
 console.log(`built ${out} @ ${version}`);
