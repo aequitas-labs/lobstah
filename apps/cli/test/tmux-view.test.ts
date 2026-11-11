@@ -112,24 +112,55 @@ const hasTmux = (() => {
 
 describe.skipIf(!hasTmux)('views on a real tmux server', () => {
   const socket = `lobstah-view-test-${process.pid}`;
-  const clients: ChildProcess[] = [];
+  /** One control client, including the protocol milestones the fixture waits for. */
+  interface ViewClient {
+    process: ChildProcess;
+    ready: Promise<boolean>;
+    closed: Promise<void>;
+  }
+  const clients: ViewClient[] = [];
+  const readyLine = '__lobstah_view_ready__';
   let socketPath: string | undefined;
-  afterEach(() => {
-    for (const client of clients.splice(0)) client.kill();
+  afterEach(async () => {
+    const closing = clients.splice(0);
+    for (const client of closing) client.process.kill();
     try {
       execFileSync('tmux', ['-L', socket, 'kill-server'], { stdio: 'ignore' });
     } catch {
       // already gone
     }
+    await Promise.all(closing.map((client) => client.closed));
     if (socketPath) fs.rmSync(socketPath, { force: true });
   });
 
-  /** A real client on a view's command: a control-mode client lives until its stdin closes. */
-  const attach = (view: string, windowId: string): ChildProcess => {
+  /**
+   * Wait for the command chain's reply before starting another control client:
+   * tmux 3.4 can send notifications to a peer before its control state exists.
+   * Keep consuming output so the control protocol cannot block on a full pipe.
+   */
+  const attach = (view: string, windowId: string): ViewClient => {
     const [tmux, ...args] = tmuxViewCommand(view, windowId, socket);
-    const client = spawn(tmux!, ['-C', ...args], { stdio: ['pipe', 'ignore', 'ignore'] });
+    const clientProcess = spawn(tmux!, ['-C', ...args, ';', 'display-message', '-p', readyLine], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const ready = new Promise<boolean>((resolve) => {
+      let output = '';
+      clientProcess.stdout!.on('data', (chunk: Buffer) => {
+        output += chunk.toString();
+        if (output.split(/\r?\n/).includes(readyLine)) resolve(true);
+      });
+      clientProcess.once('error', () => resolve(false));
+      clientProcess.once('close', () => resolve(false));
+    });
+    const closed = new Promise<void>((resolve) => clientProcess.once('close', () => resolve()));
+    const client = { process: clientProcess, ready, closed };
     clients.push(client);
     return client;
+  };
+
+  /** A control client closes through its protocol, rather than an abrupt stdin EOF. */
+  const detach = async (client: ViewClient): Promise<void> => {
+    client.process.stdin!.write('detach-client\n');
+    await client.closed;
+    expect(client.process.exitCode).toBe(0);
   };
   const eventually = async <T>(read: () => Promise<T>, expected: T): Promise<void> => {
     let value = await read();
@@ -145,13 +176,15 @@ describe.skipIf(!hasTmux)('views on a real tmux server', () => {
   it('starts no server with no trap session, and makes no empty session beside another', async () => {
     const run = tmuxRunner(socket);
     await expect(openTmuxView(config(REPOS), undefined, { run, socket, platform: 'darwin', env: {}, openWindow: async () => undefined })).rejects.toThrow(/no trap session/);
-    attach('view-a', '@0');
-    await new Promise((r) => setTimeout(r, 300));
+    const absent = attach('view-a', '@0');
+    await absent.closed;
+    expect(await absent.ready).toBe(false);
     await expect(run(['list-sessions'])).rejects.toThrow();
     await run(['new-session', '-d', '-s', 'other', 'sleep 30']);
     socketPath = (await run(['display-message', '-p', '#{socket_path}'])).trim();
-    attach('view-b', '@0');
-    await new Promise((r) => setTimeout(r, 300));
+    const missing = attach('view-b', '@0');
+    await missing.closed;
+    expect(await missing.ready).toBe(false);
     expect(lines(await run(['list-sessions', '-F', '#{session_name}']))).toEqual(['other']);
   }, 30_000);
 
@@ -164,7 +197,9 @@ describe.skipIf(!hasTmux)('views on a real tmux server', () => {
     const ids = Object.fromEntries(lines(await run(['list-windows', '-t', '=lobstah', '-F', '#{window_name} #{window_id}'])).map((l) => l.split(' ')));
 
     const one = attach('view-one', ids.web);
+    expect(await one.ready).toBe(true);
     const two = attach('view-two', ids.api);
+    expect(await two.ready).toBe(true);
     const listed = views(run);
     await eventually(listed, ['lobstah web', 'view-one web', 'view-two api']);
     await run(['select-window', '-t', `=view-one:${ids.api}`]);
@@ -177,9 +212,9 @@ describe.skipIf(!hasTmux)('views on a real tmux server', () => {
     expect(lines(await run(['list-windows', '-t', '=view-two:', '-F', '#{window_name}']))).toEqual(['web', 'api', 'ops']);
     expect((await run(['show-options', '-t', '=lobstah:', 'destroy-unattached'])).trim()).toBe('');
 
-    one.stdin!.end();
+    await detach(one);
     await eventually(listed, ['lobstah web', 'view-two web']);
-    two.stdin!.end();
+    await detach(two);
     await eventually(listed, ['lobstah web']);
     const alive = lines(await run(['list-panes', '-s', '-t', '=lobstah', '-F', '#{pane_id} #{pane_dead}']));
     expect(alive).toHaveLength(3);
