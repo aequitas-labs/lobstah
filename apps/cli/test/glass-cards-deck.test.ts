@@ -85,11 +85,14 @@ describe('the deck', () => {
     for (const row of [unread, read]) {
       expect(row.querySelector('.gchip, .gword, .dstate')).toBeNull();
       expect(row.className).not.toContain('gcard-edge');
-      expect(text(row.querySelector('.dgo'))).toBe('Answer');
+      // One row, the whole of it the button that opens the decision: no separate Answer.
+      expect(row.querySelectorAll('button')).toHaveLength(1);
+      expect(row.querySelector('.dopen .dtitle')).toBeTruthy();
+      expect(row.querySelector('.dopen .dmeta')).toBeTruthy();
     }
   });
 
-  it('shows a run card as a decision with one more line naming its boat', async () => {
+  it('shows a run card as a decision row that names its boat', async () => {
     const d = fleet();
     const at = ago(60_000);
     d.decisions = [
@@ -111,11 +114,11 @@ describe('the deck', () => {
     const g = await page(d, '#deck', 'table');
     const row = g.$('#deck .drow[data-decision="decision:run"]')!;
     expect(text(row.querySelector('.dtitle'))).toBe('Run the migration check');
-    expect(text(row.querySelector('.dgo'))).toBe('Run');
-    expect(text(row.querySelector('.dboat'))).toBe('⛵ studio');
+    expect(row.querySelectorAll('button')).toHaveLength(1);
+    expect(text(row.querySelector('.dopen .dboat'))).toBe('⛵ studio');
   });
 
-  it("puts a run card's run state where Run was once it has run", async () => {
+  it("shows a run card's run state in its row once it has run", async () => {
     const d = fleet();
     const at = ago(60_000);
     const run = { scriptSha256: 'a'.repeat(64), scriptBytes: 10, inputs: [], cwd: '/r', timeoutSecs: 300, output: 'scrubbed', interpreter: '/bin/bash', script: 'echo hi', warnings: [] };
@@ -126,8 +129,8 @@ describe('the deck', () => {
     d.attention = [...d.attention, { kind: 'decision', key: 'decision:run', stateHash: 'h', id: d.dispatches[0]!.id, lane: 'work', verb: 'decision', ageSecs: 60, at, standingSince: at, note: 'run' }] as GlassFullSnapshot['attention'];
     const g = await page(d, '#deck', 'table');
     const row = g.$('#deck .drow[data-decision="decision:run"]')!;
-    expect(row.querySelector('.dgo')).toBeNull();
-    expect(text(row.querySelector('.dsent'))).toBe('Failed · exit 3');
+    expect(row.querySelectorAll('button')).toHaveLength(1);
+    expect(text(row.querySelector('.dopen .dsent'))).toBe('Failed · exit 3');
     expect(row.querySelector('.dsent')!.className).toContain('bad');
     expect(text(row.querySelector('.dboat'))).toBe('⛵ studio');
   });

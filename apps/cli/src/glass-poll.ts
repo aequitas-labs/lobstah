@@ -11,6 +11,7 @@ import type {
   Notice,
 } from '@lobstah/core';
 import { LANDED_WINDOW_MS } from '@lobstah/glass-ui';
+import { briefFirstLine } from '@lobstah/core';
 
 /**
  * What /data sends on each 2s poll, from a full snapshot: dispatch
@@ -32,9 +33,9 @@ export const NOTE_MAX = 280;
 /** A summary's title is the brief's first line, cut to this many characters. */
 export const TITLE_MAX = 120;
 
-/** The brief's first line, trimmed and cut to TITLE_MAX characters. */
+/** The brief's first line (briefFirstLine: no leading heading marker), cut to TITLE_MAX characters. */
 export function briefTitle(brief: string): string {
-  return (brief.split(/\r?\n/, 1)[0] ?? '').trim().slice(0, TITLE_MAX);
+  return briefFirstLine(brief).slice(0, TITLE_MAX);
 }
 
 /** A note cut to NOTE_MAX characters and an ellipsis. */

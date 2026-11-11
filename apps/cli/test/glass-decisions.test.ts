@@ -118,9 +118,9 @@ describe('glass: the decisions list', () => {
     expect(g.$$('#deck .dlist > .drow').map((c) => c.getAttribute('data-decision'))).toEqual([KEY, Q]);
     const r = row(g, KEY)!;
     expect(text(r.querySelector('.dtitle'))).toBe('Which schema should the tray use?');
-    // The row is the question, then its repo and age with Answer; the highlight says unread, no word does.
-    expect(text(r.querySelector('.dmeta'))).toBe('web · 2m ago');
-    expect(text(r.querySelector('.dgo'))).toBe('Answer');
+    // The row is the question, then its repo and age, all one button that opens it; the highlight says unread, no word does.
+    expect(text(r.querySelector('.dopen .dmeta'))).toBe('web · 2m ago');
+    expect(r.querySelectorAll('button')).toHaveLength(1);
     expect(r.querySelector('.dstate')).toBeNull();
     expect(r.className).toContain('unread');
     expect(text(row(g, Q)!.querySelector('.badge'))).toBe('needs-decision');

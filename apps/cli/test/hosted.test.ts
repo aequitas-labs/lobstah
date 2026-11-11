@@ -64,7 +64,7 @@ it('local + two wharves coexist in glass, tend and the pet; unreachable grounds 
   }));
   enqueue({ id: 'local-job', repo: 'local', brief: 'Local task' });
   await refreshHostedViews(loadConfig());
-  const glass = buildGlassSnapshot(); expect(glass.dispatches.map((d) => d.title)).toEqual(expect.arrayContaining(['Local task', '[away@cloud] # Remote task']));
+  const glass = buildGlassSnapshot(); expect(glass.dispatches.map((d) => d.title)).toEqual(expect.arrayContaining(['Local task', '[away@cloud] Remote task']));
   expect(glass.backends?.find((b) => b.grounds === 'dev')?.unavailable).toMatch('unknown');
   const remote = glass.dispatches.find((d) => d.backend); expect(JSON.parse(glassDispatchJson(remote!.id)!)).toMatchObject({ brief: '# Remote task', backend: { grounds: 'away' } });
   const tend = buildTendReport(); expect(renderTend(tend)).toContain('cloud'); expect(renderTend(tend)).toContain('unknown');

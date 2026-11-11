@@ -13,6 +13,7 @@ import type {
   TendAttention,
 } from '@lobstah/core';
 import { LANDED_WINDOW_MS } from '../src/glass-diff.js';
+import { briefFirstLine } from '../../core/src/brief-title.js';
 import { attachCommand } from './wharf-model.js';
 import type { DispatchView, WharfDetail, WharfDocument, WharfFile, WharfGlass, Worker } from './wharf-model.js';
 
@@ -48,7 +49,7 @@ export const wharfFileUrl = (kind: 'documents' | 'dispatches', id: string, file:
 export const documentKey = (doc: Pick<WharfDocument, 'id'>): string => doc.id;
 
 /** The job's one-line title: the first line of its brief. */
-const titleOf = (job: Pick<DispatchView, 'brief' | 'id'>): string => job.brief.split('\n')[0]?.trim() || job.id;
+const titleOf = (job: Pick<DispatchView, 'brief' | 'id'>): string => briefFirstLine(job.brief) || job.id;
 
 /** Wharf states to the glass's buckets. A cancelled job is over, so it is done. */
 const bucketOf = (state: DispatchView['state']): GlassDispatchSummary['bucket'] =>

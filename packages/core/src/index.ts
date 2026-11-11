@@ -7,6 +7,7 @@ export * from './hosted-cache.js';
 export * from './stats.js';
 export * from './attachments.js';
 export * from './reports.js';
+export * from './brief-title.js';
 export * from './todos.js';
 export * from './todo-time.js';
 export * from './todo-fire.js';
