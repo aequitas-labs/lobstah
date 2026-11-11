@@ -63,11 +63,6 @@ async function openRow(g: GlassDom, tab: string, label: string) {
   await g.go(tab);
   await click(g, g.$$(`#${tab.slice(1)} tr.rowhead`).find((tr) => text(tr).includes(label)) ?? null);
 }
-async function settings(g: GlassDom, row: 'view' | 'lobs', choice: string) {
-  await click(g, g.$('#gearbtn'));
-  const rowEl = g.$$('#modalbox .settings .row').find((r) => text(r.querySelector('.lbl')).startsWith(row))!;
-  await click(g, [...rowEl.querySelectorAll('.seg button')].find((b) => text(b) === choice) ?? null);
-}
 const escape = async (g: GlassDom) => {
   g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
   await g.settle();
@@ -829,15 +824,26 @@ describe('glass page: modals', () => {
     expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
   });
 
-  it('⚙ opens settings; the view switch persists in this browser and applies everywhere', async () => {
-    const g = await page(acceptanceFleet(), { hash: '#dispatches' });
+  it('⚙ edits browser display preferences while helm settings stay read-only', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'table', lobs: false } });
     await click(g, g.$('#gearbtn'));
     expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
     expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
-    await click(g, g.$$('#modalbox .seg button').find((b) => text(b) === 'cards')!);
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).view).toBe('cards');
+    const choose = async (setting: string, value: string) => click(g, g.$$(`.settings [aria-label="${setting}"] button`).find(button => text(button) === value) ?? null);
+    await choose('view', 'cards');
     expect(g.$$('#dispatches .card')).toHaveLength(4);
-    expect(g.$$('#modalbox .seg button.on').map(text)).toEqual(['cards', 'on', 'full']);
+    await choose('lobs', 'on');
+    expect(g.$$('#lobs .lob')).toHaveLength(2);
+    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!)).toMatchObject({ view: 'cards', lobs: true });
+    await choose('view', 'table');
+    await choose('lobs', 'off');
+    expect(g.$$('#dispatches tr.rowhead')).toHaveLength(4);
+    expect(g.$$('#lobs .lob')).toHaveLength(0);
+    expect(g.$$('[data-helm-chat] button, [data-helm-chat] input, [data-helm-chat] select')).toEqual([]);
+    expect(g.posts()).toEqual([]);
+    const reloaded = await page(acceptanceFleet(), { hash: '#dispatches', prefs: JSON.parse(g.window.localStorage.getItem('spyglass')!) });
+    expect(reloaded.$$('#dispatches tr.rowhead')).toHaveLength(4);
+    expect(reloaded.$$('#lobs .lob')).toHaveLength(0);
   });
 });
 
@@ -1153,14 +1159,11 @@ describe('glass page: lobs', () => {
     expect(g.$$('#lobs .lob .bub').map(text).join(' ')).toContain('question item 0');
   });
 
-  it('the lobs switch turns them off', async () => {
-    const g = await page(acceptanceFleet(), { prefs: { lobs: false } });
-    expect(g.$$('#lobs .lob')).toHaveLength(0);
-    await settings(g, 'lobs', 'on');
-    expect(g.$$('#lobs .lob')).toHaveLength(2);
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).lobs).toBe(true);
-    await settings(g, 'lobs', 'off');
-    expect(g.$$('#lobs .lob')).toHaveLength(0);
+  it.each([true, false])('honors the stored lobs preference %s', async (lobs) => {
+    const g = await page(acceptanceFleet(), { prefs: { lobs } });
+    expect(g.$$('#lobs .lob')).toHaveLength(lobs ? 2 : 0);
+    await click(g, g.$('#gearbtn'));
+    expect(text(g.$('.settings [aria-label="lobs"] button[aria-pressed="true"]'))).toBe(lobs ? 'on' : 'off');
   });
 });
 
