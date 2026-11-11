@@ -130,6 +130,63 @@ describe('dispatch loop', () => {
     expect(desc.followUp).toBe(round1); // the latest session in the chain, not the implementation
   });
 
+  it('a round paused waiting on review does not hold the feedback it waits for: the next round forks it', async () => {
+    const src = new FakeSource();
+    const impl = '11111111-1111-1111-1111-111111111111';
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it' }, 'work');
+    appendStatus(impl, 'work', 'done');
+    const st = new PickupState();
+    src.items = [{ ...item('fake:pr5@e1', 'review', impl), subject: 'fake:pr5' }];
+    await dispatchLoop(src, st);
+    const round1 = st.get('fake:pr5@e1')!.uuid;
+    // The worker answered the first feedback and parked on the reviewers.
+    appendStatus(round1, 'work', 'paused', 'pushed; waiting for another look', undefined, { waitingOn: 'review', link: 'https://github.com/o/r/pull/5' });
+    // A "request changes" review, then more comments: each is a new round, never held.
+    const logs: string[] = [];
+    src.items = [{ ...item('fake:pr5@e2', 'review', impl), subject: 'fake:pr5' }];
+    await dispatchLoop(src, st, (m) => logs.push(m));
+    expect(logs.some((m) => m.includes('still in flight'))).toBe(false);
+    const round2 = st.get('fake:pr5@e2')!.uuid;
+    expect(JSON.parse(fs.readFileSync(path.join(home, 'queue', `${round2}.json`), 'utf8')).followUp).toBe(round1);
+    // The paused round's run ends at its pause, so feedback after it counts.
+    const pausedAt = JSON.parse(fs.readFileSync(statusPath(round1, 'work'), 'utf8').trim().split('\n').at(-1)!).at;
+    expect(src.lastCtx!.runs('fake:pr5', impl).find((r) => r.end === pausedAt)).toBeDefined();
+  });
+
+  it("an implementation paused waiting on its PR does not hold the PR's first feedback", async () => {
+    const src = new FakeSource();
+    const impl = '11111111-1111-1111-1111-111111111111';
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it' }, 'work');
+    expect(claimNext('work')).toBe(impl);
+    appendStatus(impl, 'work', 'paused', 'PR open', undefined, { waitingOn: 'pr', link: 'https://github.com/o/r/pull/6' });
+    const st = new PickupState();
+    src.items = [{ ...item('fake:pr6@e1', 'review', impl), subject: 'fake:pr6' }];
+    await dispatchLoop(src, st);
+    expect(st.get('fake:pr6@e1')).toBeDefined();
+  });
+
+  it.each([
+    ['working', undefined],
+    ['paused', 'deploy'],
+    ['paused', 'external'],
+    ['paused', 'heavy'],
+  ] as const)('a round that is %s (%s) still holds new feedback', async (verb, waitingOn) => {
+    const src = new FakeSource();
+    const impl = '11111111-1111-1111-1111-111111111111';
+    enqueue({ id: impl, repo: 'demo', brief: 'implement it' }, 'work');
+    appendStatus(impl, 'work', 'done');
+    const st = new PickupState();
+    src.items = [{ ...item('fake:pr7@e1', 'review', impl), subject: 'fake:pr7' }];
+    await dispatchLoop(src, st);
+    const round1 = st.get('fake:pr7@e1')!.uuid;
+    appendStatus(round1, 'work', verb, 'on it', undefined, waitingOn ? { waitingOn } : undefined);
+    const logs: string[] = [];
+    src.items = [{ ...item('fake:pr7@e2', 'review', impl), subject: 'fake:pr7' }];
+    await dispatchLoop(src, st, (m) => logs.push(m));
+    expect(st.get('fake:pr7@e2')).toBeUndefined();
+    expect(logs).toContain('fake:pr7@e2: a prior round is still in flight — holding');
+  });
+
   it('a held-only round is recorded, and the next poll sees every run on the PR', async () => {
     const src = new FakeSource();
     const impl = '11111111-1111-1111-1111-111111111111';

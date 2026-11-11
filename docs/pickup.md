@@ -152,7 +152,9 @@ arrives while the previous one runs buffers until it finishes — and each
 round sets `followUp` to the latest session in the chain (the previous
 round, else the implementation dispatch), so feedback lands on the context
 that made the choices; a fully culled chain starts cold and reads the thread
-like anyone else. A rebase chore starts cold on purpose — the conflict is
+like anyone else. A round or implementation paused waiting on `review` or
+`pr` counts as finished here: it waits for exactly this feedback, so the
+feedback starts the next round. Paused on anything else, it still holds. A rebase chore starts cold on purpose — the conflict is
 about commits the original session never saw.
 
 ### Claiming

@@ -18,17 +18,34 @@ import type { MapEntry, PickupState } from '../state.js';
 import { dispatchLane } from './report.js';
 import { pickupPool } from '../config.js';
 
-function terminal(uuid: string): boolean {
+/**
+ * Waits that hand the PR back to its reviewers. A dispatch or round paused
+ * on one has nothing more to do until someone reviews: it stays paused until
+ * the PR merges or closes, so it must not hold the feedback it waits for. The
+ * merge loop treats a rebase chore paused on review the same way.
+ */
+export const REVIEWER_WAITS: readonly string[] = ['review', 'pr'];
+
+/**
+ * Whether a dispatch on a PR is out of the way of a new review round: done,
+ * failed, culled, or paused waiting on the PR's reviewers. Working, and paused
+ * on anything else (deploy, external, heavy, person), still holds the round:
+ * that worker expects to carry on in the same worktree.
+ */
+function settled(uuid: string): boolean {
   const lane = dispatchLane(uuid);
   if (!lane) return true; // culled — nothing to collide with
-  const verb = reconcile({ log: readStatusLog(uuid, lane), lastEventAt: lastEventAt(uuid, lane) });
-  return verb === 'done' || verb === 'failed';
+  const log = readStatusLog(uuid, lane);
+  const verb = reconcile({ log, lastEventAt: lastEventAt(uuid, lane) });
+  if (verb === 'done' || verb === 'failed') return true;
+  const last = log.at(-1);
+  return verb === 'paused' && last?.verb === 'paused' && REVIEWER_WAITS.includes(last.waitingOn ?? '');
 }
 
-/** When a dispatch worked: from `start` until it finished, or open while it runs. A culled one spans no time. */
+/** When a dispatch worked: from `start` until it finished or paused on the PR's reviewers, or open while it runs. A culled one spans no time. */
 function runOf(uuid: string, start: string, heldOnly?: boolean): PrRun {
   const lane = dispatchLane(uuid);
-  const end = !lane ? start : terminal(uuid) ? (readStatusLog(uuid, lane).at(-1)?.at ?? start) : undefined;
+  const end = !lane ? start : settled(uuid) ? (readStatusLog(uuid, lane).at(-1)?.at ?? start) : undefined;
   return { start, ...(end !== undefined ? { end } : {}), ...(heldOnly ? { heldOnly } : {}) };
 }
 
@@ -78,7 +95,8 @@ function releaseExpiredRounds(state: PickupState, now: number, log: (m: string) 
  * Where a review round forks from, and whether it may start yet. Rounds on
  * one subject share a worktree lineage, so exactly one runs at a time —
  * feedback arriving mid-round buffers behind its key and re-enters next
- * poll. The fork target is the newest prior round still on disk (the latest
+ * poll. A round or implementation paused on the PR's reviewers is not
+ * mid-round (settled): the feedback it waits for starts the next round. The fork target is the newest prior round still on disk (the latest
  * session in the chain), falling back to the implementation dispatch; a
  * fully culled chain starts cold and reads the thread like anyone else.
  */
@@ -90,7 +108,7 @@ function roundPlan(item: WorkItem, state: PickupState): { hold: boolean; followU
         .map(([, e]) => e)
     : [];
   const chain = [...rounds.map((e) => e.uuid), ...(item.followUp ? [item.followUp] : [])];
-  if (chain.some((uuid) => !terminal(uuid))) return { hold: true };
+  if (chain.some((uuid) => !settled(uuid))) return { hold: true };
   const forkable = rounds
     .filter((e) => dispatchLane(e.uuid))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
