@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, latestRound, observeReviewRequest, readReview, reviewRoundDir, writeReview } from '@lobstah/core';
-import { dismissReviewRound, postReview, redraftReviewRound } from '../src/reviews-post.js';
+import { enqueue, claimNext, requestCancel, complete, ensureLayout, latestRound, observeReviewRequest, readReview, reviewRoundDir, writeReview } from '@lobstah/core';
+import { dismissReviewRound, postReview, redraftReviewRound, stageReview } from '../src/reviews-post.js';
 import type { FetchLike } from '../src/reviews-post.js';
-import { reviewsLoop } from '../src/loops/reviews.js';
+import { draftReviews, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -14,6 +14,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-reviews-post-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "auto-review"\n');
 });
 afterEach(() => {
   removeTempDir(home);
@@ -303,4 +304,70 @@ describe('staged reviews', () => {
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'requested' });
     expect(latestRound(readReview(KEY)!)!.staged).toBeUndefined();
   });
+});
+
+describe('post-time review policy', () => {
+  it.each(['notify', 'on-demand', 'auto-draft'])('refuses an in-flight publishing round after switching to %s', async mode => {
+    drafted();
+    const item = readReview(KEY)!; Object.assign(item.rounds[0]!, { publish: true, draftOnly: false }); writeReview(item);
+    fs.writeFileSync(path.join(home, 'config.toml'), `[reviews]\nenabled = true\nmode = "${mode}"\n`);
+    const calls: Call[] = [];
+    expect(await postReview(KEY, { by: 'auto', token: tok, fetch: github(calls) })).toMatchObject({ posted: false });
+    expect(posts(calls)).toEqual([]);
+  });
+
+  it('rechecks policy after the live-head request, before submitting a staged review', async () => {
+    drafted();
+    const item = readReview(KEY)!;
+    Object.assign(item.rounds[0]!, { publish: true, staged: { reviewId: '50', at: new Date().toISOString() } }); writeReview(item);
+    const calls: Call[] = [];
+    const request = github(calls);
+    const fetcher: FetchLike = async (url, init) => {
+      const result = await request(url, init);
+      if (init.method === 'GET' && /\/pulls\/7$/.test(url)) fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "auto-draft"\n');
+      return result;
+    };
+    expect(await postReview(KEY, { by: 'auto', token: tok, fetch: fetcher })).toMatchObject({ posted: false });
+    expect(posts(calls)).toEqual([]);
+    expect(fs.existsSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'posted.json'))).toBe(false);
+  });
+});
+
+it.each(['auto', 'glass'] as const)('refuses %s publishing after cancellation, including a finalized dispatch', async by => {
+  drafted();
+  enqueue({ id: 'd1', repo: 'web', brief: 'review' }, 'chore'); claimNext('chore');
+  requestCancel('d1', 'chore'); complete('d1', 'chore');
+  const calls: Call[] = [];
+  expect(await postReview(KEY, { by, token: tok, fetch: github(calls) })).toMatchObject({ posted: false, why: expect.stringContaining('cancelled') });
+  expect(posts(calls)).toEqual([]);
+  draftReviews('chris');
+  expect(latestRound(readReview(KEY)!)?.state).toBe('failed');
+});
+
+it('refuses cancellation that arrives during the live-head request', async () => {
+  drafted();
+  enqueue({ id: 'd1', repo: 'web', brief: 'review' }, 'chore'); claimNext('chore');
+  const calls: Call[] = [];
+  const request = github(calls);
+  const fetcher: FetchLike = async (url, init) => {
+    const result = await request(url, init);
+    if (init.method === 'GET' && /\/pulls\/7$/.test(url)) requestCancel('d1', 'chore');
+    return result;
+  };
+  expect(await postReview(KEY, { by: 'auto', token: tok, fetch: fetcher })).toMatchObject({ posted: false, why: expect.stringContaining('cancelled') });
+  expect(posts(calls)).toEqual([]);
+});
+
+it('cancellation while checking pending reviews prevents staging a new draft', async () => {
+  drafted();
+  enqueue({ id: 'd1', repo: 'web', brief: 'review' }, 'chore'); claimNext('chore');
+  const calls: Call[] = [];
+  const request = github(calls);
+  const fetcher: FetchLike = async (url, init) => {
+    const result = await request(url, init);
+    if (init.method === 'GET') requestCancel('d1', 'chore');
+    return result;
+  };
+  expect(await stageReview(KEY, { token: tok, fetch: fetcher })).toMatchObject({ staged: false, why: expect.stringContaining('cancelled') });
+  expect(posts(calls)).toEqual([]);
 });

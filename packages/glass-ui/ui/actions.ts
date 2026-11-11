@@ -473,8 +473,7 @@ export type ReviewRequestKind =
   | 'review-comment'
   | 'review-dismiss'
   | 'review-redraft'
-  | 'review-draft'
-  | 'review-mode';
+  | 'review-draft';
 
 /**
  * A Reviews-tab action (Dismiss, Re-draft): one same-origin POST
@@ -507,10 +506,6 @@ export async function dismissReview(key: string): Promise<string | undefined> {
   return glassRequest('review-dismiss', { key });
 }
 
-export async function changeHelmChat(grounds: string, chat: 'full' | 'brief'): Promise<string | undefined> {
-  return glassRequest('helm-chat', { grounds, chat });
-}
-
 async function glassRequest(kind: string, payload: Record<string, unknown>): Promise<string | undefined> {
   const snapshot = getState().snapshot;
   const token = snapshot?.focusToken;
@@ -534,13 +529,6 @@ export function setPrefs(patch: Partial<GlassPrefs>): void {
   savePrefs(prefs);
   setState({ prefs });
 }
-
-export function setView(v: string): void {
-  if (v !== 'table' && v !== 'cards') return;
-  setPrefs({ view: v });
-}
-
-export const setLobs = (v: string): void => setPrefs({ lobs: v === 'on' });
 
 /** Hide a clicked lob in this browser until its state hash changes. Deferred, so a PR lob's link still follows. */
 export function hideLob(key: string, hash: string): void {

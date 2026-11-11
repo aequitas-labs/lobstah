@@ -233,3 +233,20 @@ describe('the reviews loop', () => {
     expect(logs[0]).toContain('reviews: search failed: HTTP 502');
   });
 });
+
+it('files historical requests without jobs on enable and starts only requests after the cutoff', async () => {
+  const now = Date.parse('2026-11-11T12:00:00Z');
+  fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "auto-review"\n[repos.web]\npath = "/w"\norigin = "https://github.com/acme/web.git"\n');
+  const { loadConfig, reviewAutomationCutoff } = await import('@lobstah/core');
+  reviewAutomationCutoff(loadConfig().reviews, undefined, now - 3600000);
+  const prs = [
+    { number: 1, requests: [{ id: 'old', at: '2026-10-15T09:00:00Z', to: ME }] },
+    { number: 2, requests: [{ id: 'new', at: '2026-11-11T11:30:00Z', to: ME }] },
+  ];
+  for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { now: now + i, run: gh(prs, []) });
+  expect(listReviews()).toHaveLength(2);
+  expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'requested', reason: expect.stringContaining('requested before') });
+  expect(latestRound(readReview('review:acme/web#1')!)?.dispatch).toBeUndefined();
+  expect(latestRound(readReview('review:acme/web#2')!)?.state).toBe('drafting');
+  expect(pendingIds('chore')).toHaveLength(1);
+});

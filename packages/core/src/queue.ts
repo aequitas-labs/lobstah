@@ -202,3 +202,8 @@ export function cancelQueued(id: string, lane: Lane): boolean {
 export function cancelRequested(id: string, lane: Lane): boolean {
   return fs.existsSync(path.join(laneDirs(lane).active, id, 'cancel'));
 }
+
+/** Cancellation survives finalization, so a late result cannot revive or publish a cancelled job. */
+export function dispatchWasCancelled(id: string, lane: Lane): boolean {
+  return cancelRequested(id, lane) || fs.existsSync(path.join(laneDirs(lane).done, id, 'cancel'));
+}
