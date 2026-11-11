@@ -215,3 +215,13 @@ it('a signed-out visitor to boat approval signs in first and returns to it', asy
   await g.click('Continue with GitHub');
   expect(g.writes[0]!.body.callbackURL).toBe('https://glass.test/device?user_code=ABCD-EFGH');
 });
+
+it('a refused approval says the code does not work and keeps the person signed in', async () => {
+  const g = await page('/device?user_code=ABCD-EFGH', 200, 200, { session: 'in', read: device(mirrorBoat) });
+  const fetch = (g.window as unknown as { fetch: (p: string, i?: RequestInit) => Promise<Response> }).fetch;
+  (g.window as unknown as { fetch: unknown }).fetch = (path: string, init?: RequestInit) =>
+    path === '/api/auth/wharf/approve' ? Promise.resolve(Response.json({ error: 'access_denied', error_description: 'this approval was already processed' }, { status: 403 })) : fetch(path, init);
+  await g.click('Approve');
+  expect(g.doc.querySelector('#auth-title')?.textContent).toBe("This code doesn't work");
+  expect(g.doc.querySelector('.auth-intro')).toBeNull();
+});

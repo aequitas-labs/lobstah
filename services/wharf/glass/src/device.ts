@@ -61,10 +61,12 @@ export function DeviceConsent({ signedOut }: { signedOut: (status: 401 | 403) =>
   const [error, setError] = useState('');
   const heading = useRef<HTMLHeadingElement>(null);
 
+  // Only a lost session signs out. The wharf refuses a code it won't take (used, expired, another
+  // account's) with a 4xx, 403 included: that code doesn't work, and the person is still signed in.
   const fail = (e: unknown, fallback: Step | undefined) => {
-    if (e instanceof HttpError && (e.status === 401 || e.status === 403)) return signedOut(e.status);
+    if (e instanceof HttpError && e.status === 401) return signedOut(401);
     if (fallback) setStep(fallback);
-    else setError(e instanceof Error ? e.message : 'Something went wrong. Try again');
+    else setError('Something went wrong. Try again');
   };
   const inspect = async (userCode: string) => {
     setError('');
@@ -99,7 +101,7 @@ export function DeviceConsent({ signedOut }: { signedOut: (status: 401 | 403) =>
       else await json('/api/auth/device/deny', { userCode: code.trim() });
       setStep({ kind: approve ? 'approved' : 'denied', name: d.boatName });
     } catch (e) {
-      fail(e, undefined);
+      fail(e, e instanceof HttpError && e.status < 500 ? { kind: 'unusable' } : undefined);
     } finally {
       setBusy(false);
     }
