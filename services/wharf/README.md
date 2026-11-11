@@ -352,8 +352,8 @@ account. There is no cross-account cleanup or automatic timer.
 
 A mirror boat keeps its fleet on its own local grounds and shows it on the
 hosted glass. It enrols with `mirror` and `read` only (the device request's
-`mirror: true`; approval keeps it as asked or refuses it), so it takes no work
-and holds no helm. The boat stays the authority: the wharf keeps a copy of
+`mirror: true`; approval keeps it as asked or refuses it), or with `attention`
+too, which approval may also drop, so it takes no work and holds no helm. The boat stays the authority: the wharf keeps a copy of
 each boat's latest snapshot and calls in transit, never a second record.
 
 - **Snapshots.** `PUT mirror/snapshot` replaces the boat's one R2 object. The
@@ -380,6 +380,19 @@ each boat's latest snapshot and calls in transit, never a second record.
   seconds. The boats hear `{ "type": "mirror-watch", "until": … }` when that
   begins, and `GET mirror/calls` carries `watchedUntil`, so a boat puts often
   only while someone is looking.
+- **Attention lists.** Each mirror boat also puts the items its pet walks,
+  without ages, with `PUT mirror/attention` (`{ attention: [...] }`, at most 500
+  items and 256 KB). An unchanged list keeps its time. A changed one sends
+  `{ "type": "attention" }` to the sockets of the other boats granted
+  `attention`, never to the boat that put it. A boat granted `attention` (asked
+  for with the device request's `attention: true`, beside `mirror: true`) reads
+  every other unrevoked mirror boat's list with `GET mirror/attention`, which
+  takes the same `?known=` as the hosted glass's list. Its read never marks a
+  hosted glass as open. `POST mirror/attention/acks` (`{ boat, key, stateHash }`)
+  queues one `attention-ack` call for the boat that owns the item, as a hosted
+  glass click does; a boat may not use it for its own items. The grant reads
+  only these lists: no snapshot, brief, log, setting or file of another boat.
+  Revoking a boat drops its list.
 - **The hosted glass.** An account with a mirror boat runs the glass on the
   mirror backend (`packages/glass-ui/ui/backends/mirror.ts`): every boat's
   snapshot merged into one fleet, with the wharf's own grounds beside them
