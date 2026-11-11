@@ -1,4 +1,4 @@
-import { decisionDir, decisionViewedAt, listDecisions, readDecisionDetail, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
+import { archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, readDecision, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
 import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, GlassRunCard, LobstahRequest, TendAttention } from '@lobstah/core';
 
 /**
@@ -55,11 +55,12 @@ export function hideFramedQuestions(
  */
 export function glassRunCard(d: DecisionMeta): GlassRunCard | undefined {
   if (!d.run) return undefined;
-  const dir = decisionDir(d.key);
+  const dir = readDecision(d.key) ? decisionDir(d.key) : archivedDecisionDir(d.key);
   const stored = dir ? readStoredRunScript(dir) : undefined;
   const script = stored?.text ?? '';
   return {
     ...d.run,
+    latest: readRunAttempt(d.key),
     script,
     warnings: scriptWarnings(script),
     ...(stored?.sha256 !== d.run.scriptSha256 ? { altered: true } : {}),
@@ -103,6 +104,7 @@ export function decisionEventFields(r: LobstahRequest): Record<string, string> {
     title: p.title,
     option: p.option ?? '',
     text: p.text ?? '',
+    ...(p.run ? { runState: p.run.state, exitCode: String(p.run.exitCode), tail: p.run.tail } : {}),
     attachments: (p.attachments ?? []).map((a) => a.path).join(', '),
     from: r.from,
     at: r.at,

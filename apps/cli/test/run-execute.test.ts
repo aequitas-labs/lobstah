@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { askDecision, decisionDir, ensureLayout, prepareRunCard, readDecisionAnswer, readRunAudit } from '@lobstah/core';
+import { askDecision, decisionDir, ensureLayout, listRequests, prepareRunCard, processStartedAt, readDecision, readDecisionAnswer, readRunAttempt, readRunAudit, readRunOutput, withdrawDecision, writeRunAttempt } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges } from '../src/run-passkey.js';
 import { RunRegistry, runEnvironment } from '../src/run-exec.js';
@@ -92,7 +92,7 @@ async function run(c: { key: string; sha256: string }, inputs: Record<string, st
 
 const answer = async (key: string) => {
   await runs.settled();
-  return readDecisionAnswer(key)?.text ?? '';
+  return listRequests({ kind: 'decision-answer' }).filter((request) => request.payload.key === key).at(-1)?.payload.text as string ?? '';
 };
 
 /** Every file under a directory, read as text. */
@@ -207,6 +207,8 @@ printf '%s' "$S" | base64
     expect(Date.now() - start).toBeLessThan(1_000 + 5_000);
     expect(readRunAudit().entries.at(-1)).toMatchObject({ key: c.key, exitCode: 124, timedOut: true });
     expect(await answer(c.key)).toContain('timed out');
+    expect(readRunAttempt(c.key)).toMatchObject({ state: 'failed', result: { exitCode: 124, timedOut: true } });
+    expect(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run).toMatchObject({ state: 'failed', exitCode: 124 });
   }, 15_000);
 
   it('refuses inputs the card does not declare, a missing one, or one with a newline', async () => {
@@ -224,9 +226,115 @@ printf '%s' "$S" | base64
     const res = await post('run-output', { key: c.key, after: 0 });
     expect(res.json.text).toBe('key is ‹K›\n');
     expect(res.json.result).toMatchObject({ exitCode: 0, timedOut: false, scrubbed: 1 });
-    // The run answered the card: it takes no second Run.
+    // A finished attempt stays available for another passkey-confirmed run.
     const again = await post('run-challenge', c);
-    expect(again.status).toBe(409);
-    expect(again.json.reason).toContain('already answered');
+    expect(again.status).toBe(200);
+    expect(readDecision(c.key)).toBeDefined();
+    expect(readDecisionAnswer(c.key)).toBeUndefined();
+  });
+
+  it('persists a failed attempt and its local output while withholding exit-mode output from the helm', async () => {
+    const c = card('#!/bin/bash\nprintf "local-%s-detail\\n" failure\nexit 3\n', { output: 'exit' });
+    await run(c);
+    await runs.settled();
+    const attempt = readRunAttempt(c.key)!;
+    expect(attempt).toMatchObject({ key: c.key, scriptSha256: c.sha256, state: 'failed', result: { exitCode: 3 } });
+    expect(Date.parse(attempt.finishedAt!)).toBeGreaterThanOrEqual(Date.parse(attempt.startedAt));
+    expect(readRunOutput(attempt)).toContain('local-failure-detail');
+    const reloaded = new RunRegistry().get(c.key)!;
+    expect(reloaded.result?.exitCode).toBe(3);
+    expect(reloaded.output).toContain('local-failure-detail');
+    const event = listRequests({ kind: 'decision-answer' }).at(-1)!;
+    expect(event.payload.run).toMatchObject({ id: attempt.id, state: 'failed', exitCode: 3, tail: '' });
+    expect(JSON.stringify(event)).not.toContain('local-failure-detail');
+    const snapshot = (await call(`localhost:${port}`, '/data')).json;
+    expect(JSON.stringify(snapshot)).not.toContain('local-failure-detail');
+  });
+
+  it('retries the same script as a new attempt, keeps both histories, and dismisses only after it ends', async () => {
+    const c = card('#!/bin/bash\necho hello\n');
+    await run(c);
+    await runs.settled();
+    const first = readRunAttempt(c.key)!;
+    expect(first.state).toBe('succeeded');
+    expect((await run(c)).status).toBe(202);
+    await runs.settled();
+    const second = readRunAttempt(c.key)!;
+    expect(second.id).not.toBe(first.id);
+    expect(second.scriptSha256).toBe(first.scriptSha256);
+    expect(fs.existsSync(path.join(decisionDir(c.key)!, 'run', first.id, 'state.json'))).toBe(true);
+    expect(listRequests({ kind: 'decision-answer' }).filter((event) => event.payload.key === c.key)).toHaveLength(2);
+    expect((await post('run-dismiss', { key: c.key })).status).toBe(200);
+    expect(readDecision(c.key)).toBeUndefined();
+    expect(readRunAttempt(c.key)?.id).toBe(second.id);
+    expect((await post('run-challenge', c)).status).toBe(404);
+  });
+
+  it('stops a running process group, records stopped, and wakes the helm', async () => {
+    const c = card(`#!/bin/bash\nsleep 30 &\necho "$!" > "${outside}/child.pid"\nwait\n`);
+    await run(c);
+    for (let index = 0; index < 100 && !fs.existsSync(path.join(outside, 'child.pid')); index++) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(readRunAttempt(c.key)?.state).toBe('running');
+    expect((await run(c)).status).toBe(409);
+    expect((await post('run-dismiss', { key: c.key })).status).toBe(409);
+    expect((await post('run-stop', { key: c.key })).status).toBe(202);
+    await runs.settled();
+    expect(readRunAttempt(c.key)).toMatchObject({ state: 'stopped', result: { exitCode: 130, stopped: true } });
+    const childPid = Number(fs.readFileSync(path.join(outside, 'child.pid'), 'utf8'));
+    expect(processStartedAt(childPid)).toBeUndefined();
+    expect(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run).toMatchObject({ state: 'stopped', exitCode: 130 });
+  });
+
+  it('records completion and delivers an event even if the helm withdraws the card during the run', async () => {
+    const c = card('#!/bin/bash\nsleep 0.1\necho finished-after-withdrawal\nexit 2\n');
+    await run(c);
+    withdrawDecision(c.key);
+    await runs.settled();
+    expect(readRunAttempt(c.key)).toMatchObject({ state: 'failed', result: { exitCode: 2 } });
+    expect(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run).toMatchObject({ state: 'failed', exitCode: 2, tail: expect.stringContaining('finished-after-withdrawal') });
+  });
+
+  it('delivers long output within the decision-answer size limit', async () => {
+    const c = card('#!/bin/bash\nfor ((i=0;i<30000;i++)); do printf x; done\n');
+    await run(c);
+    await runs.settled();
+    expect((await answer(c.key)).length).toBeLessThan(20000);
+    expect(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run).toMatchObject({ state: 'succeeded', exitCode: 0 });
+  });
+
+  it('recovers a run whose glass owner is gone as a durable failure, once', async () => {
+    const c = card('#!/bin/bash\necho unused\n');
+    writeRunAttempt({ id: '11111111-1111-4111-8111-111111111111', key: c.key, scriptSha256: c.sha256,
+      state: 'running', startedAt: new Date().toISOString(), owner: { pid: process.pid, startedAt: 'previous process at this pid' },
+      processes: [{ pid: process.pid, startedAt: 'previous process at this pid' }] }, 'previous output\n');
+    const registry = new RunRegistry();
+    registry.get(c.key);
+    await registry.settled();
+    expect(readRunAttempt(c.key)).toMatchObject({ state: 'failed', result: { exitCode: 1, interrupted: true } });
+    expect(listRequests({ kind: 'decision-answer' }).filter((event) => event.payload.key === c.key)).toHaveLength(1);
+    expect(new RunRegistry().get(c.key)?.result?.interrupted).toBe(true);
+    expect(listRequests({ kind: 'decision-answer' }).filter((event) => event.payload.key === c.key)).toHaveLength(1);
+  });
+
+  it('records a spawn failure and wakes the helm with the failure state', async () => {
+    const c = card('#!/bin/bash\necho unused\n');
+    fs.rmdirSync(outside);
+    expect((await run(c)).status).toBe(202);
+    await runs.settled();
+    expect(readRunAttempt(c.key)).toMatchObject({ state: 'failed', result: { exitCode: 127 } });
+    expect(await answer(c.key)).toContain('could not start');
+  });
+
+  it('keeps a bounded local tail and restores its stream offset after a reload', async () => {
+    const c = card('#!/bin/bash\nfor ((i=0;i<220;i++)); do printf "line-%s\\n" "$i"; done\n');
+    await run(c);
+    await runs.settled();
+    const attempt = readRunAttempt(c.key)!;
+    const output = readRunOutput(attempt);
+    expect(output).not.toContain('line-0\n');
+    expect(output).toContain('line-219\n');
+    expect(output.trim().split('\n')).toHaveLength(200);
+    const restored = new RunRegistry().get(c.key)!;
+    expect(restored.dropped + restored.output.length).toBe(attempt.outputChars);
   });
 });
