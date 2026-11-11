@@ -42,6 +42,7 @@ the live Worker has no `GITHUB_CLIENT_ID`. Neither prints an id.
 | `AUTH_SECRET` | secret | random, at least 32 characters: Better Auth signing and the encryption of stored GitHub tokens |
 | `TOKEN_SECRET` | secret | random, separate: signs retryable dispatch capabilities. Rotating it stops old claim responses from being rebuilt; issued token hashes stay valid until their leases end |
 | `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app's client secret |
+| `SLACK_BOT_TOKEN` | secret, optional | the private Slack app's bot token (`xoxb-…`). Unset, cards are kept and nothing is sent to Slack |
 | `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
 | `AUTH_DB` | D1 | `lobstah-wharf-auth`, schema in `migrations/`; its id is in the git-ignored `wrangler.local.jsonc` |
 | `FILES` | R2 | `lobstah-wharf-files`, evidence files |
