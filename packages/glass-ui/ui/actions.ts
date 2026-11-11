@@ -17,6 +17,8 @@ import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
 import { setDecisionBadge } from './app-badge.js';
 import { backend, can } from './backend.js';
+import { RUN_SEAL_INFO, runInputsText } from '../../core/src/run-inputs.js';
+import type { RunInputValues, SealedInput } from '../../core/src/run-inputs.js';
 
 /** Everything the page can do: each action updates the store (and localStorage for preferences). */
 
@@ -372,7 +374,7 @@ export async function sendAnswer(key: string): Promise<void> {
     return;
   }
   if (!token) {
-    setDraft(key, { error: 'This page has no answer token; reload it.' });
+    setDraft(key, { error: 'Reload the page to answer.' });
     return;
   }
   setDraft(key, { sending: true, error: undefined });
@@ -389,7 +391,7 @@ export async function sendAnswer(key: string): Promise<void> {
     );
     const result = response.body;
     if (!response.ok || !result.ok) {
-      setDraft(key, { sending: false, error: result.reason ?? `The answer was refused (${response.status}).` });
+      setDraft(key, { sending: false, error: result.reason ?? "Your answer didn't go through. Reload and try again." });
       return;
     }
     const previous = modalOrder();
@@ -636,14 +638,60 @@ export function runPasskeyUrl(hash = ''): string {
   return `http://localhost${location.port ? ':' + location.port : ''}/${hash}`;
 }
 
-/** This page can hold a passkey ceremony: it is the localhost glass, in a browser with WebAuthn. */
-export function passkeysWorkHere(): boolean {
+/**
+ * This page can hold a passkey ceremony: a browser with WebAuthn, at
+ * localhost for the Mac's own passkey, or anywhere for a phone's on the
+ * hosted glass (its passkey is for the hosted glass's own host).
+ */
+export function passkeysWorkHere(hosted = false): boolean {
   return (
-    location.hostname === 'localhost' &&
+    (hosted || location.hostname === 'localhost') &&
     typeof navigator !== 'undefined' &&
     !!navigator.credentials &&
     typeof PublicKeyCredential !== 'undefined'
   );
+}
+
+/**
+ * The page's 15-minute windows, by boat (the local glass's is ''): a P-256
+ * key made at a passkey confirmation, whose private half can't be exported
+ * and lives only in this module's memory. The boat binds the window to its
+ * public half. A reload, another tab or another device has none.
+ */
+const runWindows = new Map<string, { key: CryptoKeyPair; id: string; until: number }>();
+
+/** Minutes left in this page's window for a boat, or 0. */
+export function runWindowMinutes(boat = ''): number {
+  const w = runWindows.get(boat);
+  return w && w.until > Date.now() ? Math.ceil((w.until - Date.now()) / 60_000) : 0;
+}
+
+/** The sha256 of a text, as hex: the script this page shows, or its inputs as sent. */
+async function sha256Text(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Seal one secret to the boat's key: ECDH between a fresh P-256 key and the
+ * boat's, HKDF-SHA256, AES-256-GCM. Only the boat's private key opens it; the
+ * fresh key's private half is dropped here.
+ */
+async function sealInput(value: string, boatKey: string): Promise<SealedInput> {
+  const boat = await crypto.subtle.importKey('spki', fromB64url(boatKey), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const mine = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+  const shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: boat }, mine.privateKey, 256);
+  const hkdf = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  const aes = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode(RUN_SEAL_INFO) },
+    hkdf,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt'],
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aes, new TextEncoder().encode(value));
+  return { epk: b64url(await crypto.subtle.exportKey('spki', mine.publicKey)), iv: b64url(iv.buffer), ct: b64url(ct) };
 }
 
 const b64url = (buf: ArrayBuffer): string => {
@@ -754,18 +802,62 @@ const setRun = (key: string, patch: Partial<import('./store.js').RunView>) => {
  */
 export async function runRunCard(key: string, sha256: string, inputs: Record<string, string>): Promise<void> {
   const token = getState().snapshot?.focusToken;
-  if (!token) return setRun(key, { error: 'This page has no token; reload it.' });
+  if (!token) return setRun(key, { error: 'Reload the page to run this card.' });
   const card = currentCards().find((c) => c.key === key);
   setRun(key, { busy: true, error: undefined, output: '', next: 0, result: undefined, ...(card ? { card } : {}) });
+  const run = card?.kind === 'decision' ? card.run : undefined;
+  const boat = run?.boat ?? '';
   try {
+    // On the hosted glass each secret is sealed to the boat's key here, so the wharf only ever relays sealed values.
+    const sent: RunInputValues = {};
+    for (const input of run?.inputs ?? []) {
+      const value = inputs[input.name];
+      if (value === undefined) continue;
+      if (run?.boat !== undefined && input.secret) {
+        if (!run.sealKey) return setRun(key, { busy: false, error: 'Secret inputs are typed on the Mac for now.' });
+        sent[input.name] = await sealInput(value, run.sealKey);
+      } else sent[input.name] = value;
+    }
+    // The challenge binds the inputs by hash, so the boat runs only with the ones confirmed here.
+    const inputsSha256 = await sha256Text(runInputsText(sent));
+    const open = runWindows.get(boat);
+    const inWindow = open && open.until > Date.now() ? open : undefined;
     const start = (
-      await backend().request<{ ok: boolean; reason?: string; challenge?: string; rpId?: string; credentialIds?: string[] }>(
-        'run-challenge',
-        { key, sha256 },
-        token,
-      )
+      await backend().request<{
+        ok: boolean;
+        reason?: string;
+        challenge?: string;
+        rpId?: string;
+        credentialIds?: string[];
+        sha256?: string;
+        window?: string;
+      }>('run-challenge', { key, sha256, inputsSha256, ...(inWindow ? { window: inWindow.id } : {}) }, token)
     ).body;
     if (!start.ok || !start.challenge) return setRun(key, { busy: false, error: start.reason ?? 'The glass refused the run.' });
+    // The script this page shows must be the one the boat will run: never ask for a passkey over another.
+    if (!run || (await sha256Text(run.script)) !== (start.sha256 ?? sha256) || sha256 !== (start.sha256 ?? sha256))
+      return setRun(key, { busy: false, error: "The script this page shows isn't the card's. Reload the page." });
+    if (start.window && inWindow) {
+      // Inside the window: the page's window key signs the boat's fresh challenge instead of a passkey.
+      const signature = await crypto.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        inWindow.key.privateKey,
+        new TextEncoder().encode(start.challenge),
+      );
+      const started = (
+        await backend().request<{ ok: boolean; reason?: string }>(
+          'run',
+          { key, challenge: start.challenge, window: inWindow.id, windowSignature: b64url(signature), inputs: sent },
+          token,
+        )
+      ).body;
+      if (!started.ok) return setRun(key, { busy: false, error: started.reason ?? 'The run did not start.' });
+      return await followRunCard(key);
+    }
+    runWindows.delete(boat);
+    // A new window key for this confirmation: its private half never leaves this page.
+    const windowKey = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+    const windowPublic = b64url(await crypto.subtle.exportKey('spki', windowKey.publicKey));
     const got = (await navigator.credentials.get({
       publicKey: {
         challenge: fromB64url(start.challenge),
@@ -786,12 +878,14 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
           clientDataJSON: b64url(response.clientDataJSON),
           authenticatorData: b64url(response.authenticatorData),
           signature: b64url(response.signature),
-          inputs,
+          inputs: sent,
+          windowKey: windowPublic,
         },
         token,
       )
-    ).body;
+    ).body as { ok: boolean; reason?: string; window?: string; windowUntil?: number };
     if (!started.ok) return setRun(key, { busy: false, error: started.reason ?? 'The run did not start.' });
+    if (started.window && started.windowUntil) runWindows.set(boat, { key: windowKey, id: started.window, until: started.windowUntil });
     await followRunCard(key);
   } catch (err) {
     setRun(key, { busy: false, error: err instanceof Error ? err.message : 'The run did not start.' });

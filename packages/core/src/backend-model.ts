@@ -128,6 +128,12 @@ export const MIRROR_WRITE_KINDS = [
   'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-dismiss', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
+  // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.
+  'run-pair-challenge', 'run-pair-register',
+  // A Run from the hosted glass: the boat checks a phone's passkey (or that page's window key) and runs only its stored script.
+  'run-challenge', 'run', 'run-output',
+  // Stop and Dismiss need no passkey, as on the Mac: stopping is safe and urgent.
+  'run-stop', 'run-dismiss',
 ] as const;
 export type MirrorWriteKind = (typeof MIRROR_WRITE_KINDS)[number];
 /** Whether a relayed read names a path the hosted glass may read. */

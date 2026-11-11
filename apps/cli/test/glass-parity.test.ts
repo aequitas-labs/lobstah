@@ -148,6 +148,17 @@ describe('the hosted glass renders exactly what the local glass renders', () => 
       const [l, h] = [await local('#' + tab), await hosted('#' + tab)];
       const page = `#page-${tab}`;
       expect(html(l.$(page)).length, 'the view renders').toBeGreaterThan(40);
+      if (tab === 'settings') {
+        // Run cards' passkeys differ on purpose: the Mac registers its own; the hosted glass says how a phone pairs.
+        expect(h.doc.querySelector('.runpasskeys')?.textContent).toContain('lobstah run passkey add --hosted');
+        const without = (el: Element | null | undefined) => {
+          const copy = el?.cloneNode(true) as Element | undefined;
+          copy?.querySelector('.runpasskeys')?.replaceWith('');
+          return html(copy);
+        };
+        expect(without(h.doc.querySelector(page))).toBe(without(l.$(page)));
+        return;
+      }
       expect(html(h.doc.querySelector(page))).toBe(html(l.$(page)));
     });
   }
@@ -177,8 +188,8 @@ describe('the hosted glass holds only its host parts', () => {
   const root = new URL('../../../services/wharf/glass/', import.meta.url);
 
   it('keeps every shared view in packages/glass-ui', () => {
-    // Sign-in, the wake hint, Boats, boat approval, the API helper and the wharf's types: nothing that lists or shows glass items.
-    const host = ['api.ts', 'assets.d.ts', 'auth-screen.ts', 'boats.ts', 'common.ts', 'device.ts', 'main.ts', 'model.ts', 'wake.ts'];
+    // Sign-in, the wake hint, Boats, boat approval, passkey pairing, the API helper and the wharf's types: nothing that lists or shows glass items.
+    const host = ['api.ts', 'assets.d.ts', 'auth-screen.ts', 'boats.ts', 'common.ts', 'device.ts', 'main.ts', 'model.ts', 'pairing.ts', 'wake.ts'];
     const files = fs.readdirSync(new URL('src/', root)).sort();
     expect(files, 'a new view belongs in packages/glass-ui/ui/components, shared by both glasses').toEqual(host);
   });

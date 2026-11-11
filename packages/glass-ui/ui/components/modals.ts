@@ -1,4 +1,4 @@
-import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
+import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
@@ -37,6 +37,9 @@ import {
   trapOpenRoutes,
 } from './common.js';
 import { can, capabilities, fileUrl } from '../backend.js';
+import { getState } from '../store.js';
+import { GrantChip } from './session-grants.js';
+import { reviewModal } from './reviews.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
@@ -166,7 +169,7 @@ function JobControls({ id }: { id: string }) {
   const cancel = async () => {
     const refusal = await cancelJob(id);
     setConfirming(false);
-    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Cancelled; its worker is fenced.' });
+    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Dispatch cancelled.' });
   };
   return [
     can('message-helm') &&
@@ -174,8 +177,8 @@ function JobControls({ id }: { id: string }) {
     can('cancel') &&
       html`<div class="sec">cancel</div>${
         confirming
-          ? html`<div>Cancel this job and fence its worker? <button class="btn" onClick=${cancel}>Confirm cancel</button> <button class="btn" onClick=${() => setConfirming(false)}>Keep job</button></div>`
-          : html`<button class="btn" onClick=${() => setConfirming(true)}>Cancel job…</button>`
+          ? html`<div>Cancel this dispatch? Its agent stops. <button class="btn" onClick=${cancel}>Cancel dispatch</button> <button class="btn" onClick=${() => setConfirming(false)}>Keep dispatch</button></div>`
+          : html`<button class="btn" onClick=${() => setConfirming(true)}>Cancel dispatch…</button>`
       }`,
     result && html`<div class=${result.ok ? 'ok' : 'bad'} role=${result.ok ? 'status' : 'alert'}>${result.text}</div>`,
   ];
@@ -217,6 +220,7 @@ function trapModal(t: GlassTrap) {
             t.repo ?? 'addressed bait only',
             ' · session ',
             t.sessionId ?? '',
+            html`<${GrantChip} session=${t.sessionId} grants=${getState().snapshot?.sessionGrants ?? []} />`,
             ' · signed on ',
             Age(t.signedOnAt),
             ' ago · ',
@@ -224,7 +228,7 @@ function trapModal(t: GlassTrap) {
             ' · heartbeat ',
             r.hb,
           ]
-        : 'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.';
+        : 'signed off · its history is below';
   const lifecycle = t.notices.length
     ? t.notices.map((n) => html`<div key=${n.seq} class="loglines">${Age(n.at)} ago · <b>${n.kind}</b> — ${LinkedText(n.text)}</div>`)
     : html`<div class="empty">none recorded</div>`;
@@ -297,6 +301,7 @@ export function Modal({
   if (!item) return null;
   if (modal.type === 'settings') return settingsModal(item as SettingsItem, prefs);
   if (modal.type === 'pr') return prModal(snapshot, modal.key);
+  if (modal.type === 'review') return [close, reviewModal(item as GlassReview)];
   if (modal.type === 'helm') return helmModal(item as GlassHelm);
   if (modal.type === 'dispatch') {
     const report = dispatchReport(snapshot, item as GlassDispatchSummary);

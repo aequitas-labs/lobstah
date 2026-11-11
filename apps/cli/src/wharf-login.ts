@@ -41,7 +41,7 @@ export function canOpenBrowser(env: NodeJS.ProcessEnv = process.env, platform: N
   return platform === 'darwin' || platform === 'win32' || !!(env.DISPLAY || env.WAYLAND_DISPLAY);
 }
 /** Open a link in the default browser. A failure is quiet: the link is printed as well. */
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
   const [command, args] = process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]] : ['xdg-open', [url]];
   try {
     const child = childProcess.spawn(command, args, { stdio: 'ignore', detached: true });

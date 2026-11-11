@@ -54,6 +54,19 @@ function movedOn(): void {
 
 const head = () => buildGlassSnapshot().dispatches.find((d) => d.id === id)!.prHead;
 
+/** The dispatch's catch in its trap's modal, where its current PR shows. A dispatch card shows no PR. */
+async function catchText(snap: ReturnType<typeof buildGlassSnapshot>): Promise<string> {
+  const g = await loadGlass(GLASS_PAGE, snap, { hash: '#traps', prefs: { view: 'cards' } });
+  try {
+    (g.$('#traps .card') as HTMLElement).click();
+    await g.settle();
+    const c = g.$$('#modalbox .catch').find((x) => (x.textContent ?? '').includes(id.slice(0, 8)))!;
+    return (c.querySelector('.hdr')!.textContent ?? '').replace(/\s+/g, ' ');
+  } finally {
+    await g.close();
+  }
+}
+
 describe("a dispatch card's PR", () => {
   it('drops a merged PR the dispatch has reported past, and shows the next one once it opens', async () => {
     movedOn();
@@ -64,13 +77,7 @@ describe("a dispatch card's PR", () => {
     appendStatus(id, 'work', 'working', 'Building PR 1', at(5));
     expect(head()).toBeUndefined();
     const snap = buildGlassSnapshot();
-    const g = await loadGlass(GLASS_PAGE, snap, { hash: '#dispatches', prefs: { view: 'cards' } });
-    try {
-      const card = g.$$('#dispatches .card').find((c) => (c.textContent ?? '').includes(id.slice(0, 8)))!;
-      expect(card.querySelector('.foot')!.textContent).not.toContain('merged');
-    } finally {
-      await g.close();
-    }
+    expect(await catchText(snap)).not.toContain('merged');
 
     mergeEvidence(id, 'work', { prUrls: [url(10), url(11)] });
     upsertPr(obs(11), id);
@@ -86,13 +93,7 @@ describe("a dispatch card's PR", () => {
     upsertPr(obs(13, { baseRefName: 'branch-12', draft: true }), id);
     expect(head()).toMatchObject({ number: 13, badge: { text: 'draft' }, open: 3 });
 
-    const g = await loadGlass(GLASS_PAGE, buildGlassSnapshot(), { hash: '#dispatches', prefs: { view: 'cards' } });
-    try {
-      const card = g.$$('#dispatches .card').find((c) => (c.textContent ?? '').includes(id.slice(0, 8)))!;
-      expect((card.querySelector('.foot')!.textContent ?? '').replace(/\s+/g, ' ')).toContain('#13 draft +2 open');
-    } finally {
-      await g.close();
-    }
+    expect(await catchText(buildGlassSnapshot())).toContain('#13 draft +2 open');
   });
 
   it('a finished dispatch keeps its merged PR', () => {

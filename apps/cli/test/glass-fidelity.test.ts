@@ -80,7 +80,10 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
+  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar')) el.remove();
+  // The phone's header parts are new (glass-phone-nav.test.ts tests them); the filter row now names its tab for them.
+  const controls = g.$('.controls');
+  if (controls) controls.className = 'controls';
   const bar = g.$('.navbar');
   if (bar) bar.replaceWith(...Array.from(bar.childNodes));
 }
@@ -245,6 +248,10 @@ function capture(g: GlassDom): Record<string, string> {
   // Their new affordance has its own DOM tests; keep comparing all other
   // regions against the frozen pre-action page.
   out.page = tab === 'deck' || tab === 'traps' ? '(trap window action changed)' : canon(foldPrTitles(g.$('#' + tab)!));
+  // Dispatch cards were redrawn on the shared card (components/card.ts); glass-cards-deck tests them. The table is still compared.
+  if (tab === 'dispatches' && g.$('#dispatches .cards')) out.page = '(dispatch cards redrawn)';
+  // So were PR cards (glass-page tests them); the PRs table is still compared.
+  if (tab === 'prs' && g.$('#prs .cards')) out.page = '(PR cards redrawn)';
   if (text(g.$('#modalbox h3')).startsWith('🪤')) out.modalbox = '(trap window action changed)';
   for (const id of CONTROLS) {
     const el = g.$('#' + id) as HTMLElement | null;

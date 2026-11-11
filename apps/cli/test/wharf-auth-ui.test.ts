@@ -176,7 +176,7 @@ it('boat approval is its own page: the boat, its code, what it can and cannot do
   expect(g.doc.querySelector('.auth-consent-code b')?.textContent).toBe('ABCD-EFGH');
   expect(g.doc.querySelector('.auth-consent-access')?.textContent).toBe('Access: Mirror');
   const list = (n: number) => [...g.doc.querySelectorAll(`.auth-consent-lists > div:nth-child(${n}) li`)].map((li) => li.textContent);
-  expect(list(1)).toEqual(['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches']);
+  expect(list(1)).toEqual(['Show its own dispatches on this glass', 'Carry out what you do here for those dispatches', 'Run scripts you confirm with your passkey']);
   expect(list(2)).toEqual(['Take work from this wharf', 'Steer the helm']);
   expect([...g.doc.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Approve', 'Deny']);
   await g.click('Approve');

@@ -3,20 +3,18 @@ import { ackPrAttention } from '../actions.js';
 import type { DeckAttention } from '../../src/glass-diff.js';
 import { Fragment } from 'preact';
 import type { GlassPr, GlassStack } from '@lobstah/core';
-import { prBadgeClass, shownPrAttention } from '../../src/glass-diff.js';
+import { shownPrAttention } from '../../src/glass-diff.js';
 import type { PrsInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import {
   Age,
   Table,
-  badgeLong,
-  badgeTitle,
   opener,
   prChecks,
   prLink,
   prMerge,
-  prName,
   prReview,
+  reviewLink,
   ShowOlder,
   stackNumbers,
   stackTitle,
@@ -25,6 +23,7 @@ import {
 import type { OlderControl } from './common.js';
 import { LinkedText } from './links.js';
 import { can } from '../backend.js';
+import { Card, CardLink, PrIcon } from './card.js';
 
 /**
  * The PRs tab: PRs grouped by stack, then the watches that are not PR
@@ -69,10 +68,32 @@ function prTable(inp: PrsInputs, older: unknown) {
   return [Table(['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'], rows, 'no PR evidence'), older, otherWatches(inp)];
 }
 
+/**
+ * A PR card: its title, PR icon and status word on a colored edge (you act
+ * on PRs); then repo #number, checks and age, with ↗ Open. Merge readiness,
+ * the watch and the gate are in the PR's modal. `quiet` greys an acked one.
+ */
+export function prCard(p: GlassPr, quiet = false) {
+  const at = p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt;
+  const checks = prChecks(p);
+  return html`<${Card}
+    key=${p.key}
+    title=${p.title ? LinkedText(p.title) : '#' + p.number}
+    titleAttr=${p.title || undefined}
+    icon=${PrIcon}
+    state=${{ word: p.badge.text.toLowerCase(), tone: p.badge.tone, mark: 'edge' }}
+    context=${[`${p.repo} #${p.number} · ${checks} · `, Age(at), ' ago']}
+    contextTitle=${`${p.repo} #${p.number} · ${checks}`}
+    action=${html`<${CardLink} href=${reviewLink(p.url)} />`}
+    quiet=${quiet}
+    cls=${quiet ? 'acked' : undefined}
+    onClick=${opener('pr', p.key)}
+  />`;
+}
+
 function prCards(inp: PrsInputs, older: unknown) {
   const groups = prGroups(inp);
-  const card = (p: GlassPr) =>
-    html`<div key=${p.key} class="card" onClick=${opener('pr', p.key)}><div class="top">${prName(p)}<span class=${'badge ' + prBadgeClass(p.badge) + badgeLong(p.badge.text)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span></div><div class="meta" title=${`${p.repo} · ${stateText(p)}`}>${p.repo} · ${stateText(p)} · ${prMerge(p)}</div><div class="foot"><span>${prChecks(p)}</span><span>${watchCell(p.watch)}</span>${p.gate && html`<span>gate ${p.gate}</span>`}</div></div>`;
+  const card = (p: GlassPr) => prCard(p);
   const body = groups.length
     ? groups.map(
         ({ s, prs }) =>
