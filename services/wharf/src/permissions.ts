@@ -1,31 +1,37 @@
 import { requireThat } from './protocol.js';
 
 /**
- * What a boat may do. `work` and `mirror` stand apart from the steering
- * layers: `mirror` puts this boat's glass snapshot on the wharf and carries
- * out the calls the hosted glass relays to it, and nothing else.
+ * What a boat may do. `work`, `mirror` and `attention` stand apart from the
+ * steering layers: `mirror` puts this boat's glass snapshot and walking list
+ * on the wharf and carries out the calls the hosted glass relays to it;
+ * `attention` reads the other mirror boats' walking lists and asks their
+ * boats to acknowledge an item, and nothing else.
  */
-export const permissions = ['read', 'work', 'helm', 'admin', 'mirror'] as const;
+export const permissions = ['read', 'work', 'helm', 'admin', 'mirror', 'attention'] as const;
 export type Permission = typeof permissions[number];
 const steering = ['read', 'helm', 'admin'] as const;
 export const personPermissions: Permission[] = ['admin'];
-/** Work and mirror are independent; only the highest explicitly granted steering layer is stored. */
+/** Work, mirror and attention are independent; only the highest explicitly granted steering layer is stored. */
 export function permits(grants: Permission[], permission: Permission): boolean {
-  if (permission === 'work' || permission === 'mirror') return grants.includes(permission);
+  if (permission === 'work' || permission === 'mirror' || permission === 'attention') return grants.includes(permission);
   return steering.some((layer, index) => grants.includes(layer) && index >= steering.indexOf(permission));
 }
 export function boatPermissions(value: unknown, confirmAdmin: unknown): Permission[] {
   if (value === undefined) return ['work', 'read'];
-  requireThat(Array.isArray(value) && value.length <= permissions.length && value.every((p) => permissions.includes(p)), 400, 'permissions must be a subset of read, work, helm, admin, mirror');
+  requireThat(Array.isArray(value) && value.length <= permissions.length && value.every((p) => permissions.includes(p)), 400, 'permissions must be a subset of read, work, helm, admin, mirror, attention');
+  requireThat(!value.includes('attention') || value.includes('mirror'), 400, 'attention is granted to a mirror boat only');
   const selected = [...new Set(value)] as Permission[];
   requireThat(!selected.includes('admin') || confirmAdmin === true, 400, 'admin grants credential management and account deletion; explicitly confirmAdmin to grant it');
   const layer = [...steering].reverse().find((p) => selected.includes(p));
-  return [...(selected.includes('work') ? ['work'] as const : []), ...(selected.includes('mirror') ? ['mirror'] as const : []), ...(layer ? [layer] : [])];
+  return [...(selected.includes('work') ? ['work'] as const : []), ...(selected.includes('mirror') ? ['mirror'] as const : []),
+    ...(selected.includes('attention') ? ['attention'] as const : []), ...(layer ? [layer] : [])];
 }
 /** Agent capabilities are checked separately against the dispatch and epoch. */
 export function requiredPermission(path: string, method: string): Permission | undefined {
   if (path === 'requests/starts' || path === 'requests/reviews' || /^requests\/[^/]+\/start$/.test(path)) return 'work';
   if (path === '_boat' && method === 'GET') return undefined;
+  if (path === 'mirror/attention' && method === 'PUT') return 'mirror';
+  if (path === 'mirror/attention' && method === 'GET' || path === 'mirror/attention/acks' && method === 'POST') return 'attention';
   if (mirrorBoatRoute(path, method)) return 'mirror';
   if (path === '_issue' || path === 'boats' && method === 'POST' || path.startsWith('boats/') && method !== 'GET' || !path && method === 'DELETE') return 'admin';
   if (path === '_claim' || path === 'claims' || path.startsWith('workers/')) return 'work';

@@ -4,7 +4,8 @@ import type { BackendLocation } from '@lobstah/core';
 /**
  * Optional hint only. No cursor advancement, worker use, or server heartbeat.
  * Which hints wake it is the caller's: the helm's wait hears `wake`; a
- * mirror boat hears `mirror-call` and `mirror-watch`.
+ * mirror boat hears `mirror-call`, `mirror-watch` and `attention`.
+ * `heard(kind)` says once whether that kind arrived since it last asked.
  */
 export class WharfWake {
   private socket?: WebSocket;
@@ -12,6 +13,7 @@ export class WharfWake {
   private pending = false;
   private nextAttempt = 0;
   private finish?: () => void;
+  private received = new Set<string>();
   constructor(private location: BackendLocation, private credential: string, private kinds: readonly string[] = ['wake']) {}
   private connect() {
     if (this.stopped || this.socket || Date.now() < this.nextAttempt) return;
@@ -25,7 +27,10 @@ export class WharfWake {
     socket.on('message', (value) => {
       let kind: unknown;
       try { kind = (JSON.parse(value.toString()) as { type?: unknown }).type; } catch { return; }
-      if (typeof kind === 'string' && this.kinds.includes(kind)) wake();
+      if (typeof kind === 'string' && this.kinds.includes(kind)) {
+        this.received.add(kind);
+        wake();
+      }
     });
     socket.on('error', () => { /* Polling remains the guarantee; no credential logs. */ });
     socket.on('close', () => { if (this.socket === socket) this.socket = undefined; wake(); });
@@ -38,6 +43,12 @@ export class WharfWake {
       const timer = setTimeout(finish, milliseconds);
       this.finish = finish;
     });
+  }
+  /** Whether a hint of this kind arrived since the last ask; asking clears it. */
+  heard(kind: string): boolean {
+    const had = this.received.has(kind);
+    this.received.delete(kind);
+    return had;
   }
   close() { this.stopped = true; this.finish?.(); this.socket?.terminate(); this.socket = undefined; }
 }

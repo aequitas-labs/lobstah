@@ -2296,8 +2296,8 @@ async function mainCli(): Promise<void> {
     case 'attention': {
       const sub = pos[0];
       const report = buildTendReport();
-      // The pet's lobsters: the same list the glass's lobs walk.
-      const walking = walkingAttention(report);
+      // The pet's lobsters: the same list the glass's lobs walk, and every other mirror boat's.
+      const walking = walkingAttention(report, Date.now(), { boats: true });
       if (loadConfig().reviews.enabled) report.attention.push(...reviewAttention(Date.now()));
       pruneStaleAcks(report.attention);
       if (sub === 'ack' || sub === 'unack') {
