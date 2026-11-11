@@ -1,4 +1,4 @@
-import { configuredTrapViews, orderedDispatchPrUrls } from '@lobstah/core';
+import { configuredTrapViews, orderedDispatchPrUrls, reviewAttention } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
@@ -773,6 +773,18 @@ function bucketOf(uuid: string): TendDispatch['bucket'] | undefined {
   if (fs.existsSync(path.join(d.done, uuid))) return 'done';
   if (fs.existsSync(path.join(d.queue, `${uuid}.json`))) return 'queued';
   return undefined;
+}
+
+/**
+ * What the person's lobsters walk: the macOS pet (`lobstah attention --json`)
+ * and the glass's lobs (`/data`) both read this one list, so they show the
+ * same items. It is tend's attention without the questions held on the helm's
+ * turn, plus the completed-review notifications when [reviews] is on (those
+ * never stand in tend: the helm has nothing to do for them).
+ */
+export function walkingAttention(report: TendReport, now: number = Date.now()): TendAttention[] {
+  const reviews = loadConfig().reviews.enabled ? reviewAttention(now) : [];
+  return [...report.attention, ...reviews].filter((a) => !a.held);
 }
 
 /** Fleet state with a one-time refresh for unrecorded multi-PR observations. */

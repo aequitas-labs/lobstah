@@ -63,7 +63,7 @@ export interface GlassPrefs {
   noticeKind: string;
 }
 
-export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'settings';
+export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
 export interface ModalRef {
   type: ModalType;
   key: string;
@@ -88,7 +88,7 @@ export interface SettingsItem {
   helms: GlassHelm[];
 }
 /** A dispatch modal shows the summary until the detail lands, then both. */
-export type ModalItem = GlassHelm | GlassDispatchSummary | GlassDispatch | GlassPr | GlassTrapView | SettingsItem;
+export type ModalItem = GlassHelm | GlassDispatchSummary | GlassDispatch | GlassPr | GlassReview | GlassTrapView | SettingsItem;
 
 /** A trap as the page renders it: its catch ids resolved against the snapshot's dispatches. */
 export type GlassTrapView = Omit<GlassTrap, 'catches'> & { catches: GlassDispatchSummary[] };
@@ -461,6 +461,7 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null, detail?: Dis
     return summary && full ? { ...summary, ...full } : (summary ?? full ?? null);
   }
   if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
+  if (modal.type === 'review') return (d.reviews || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError, helms: d.helms };
   const t = d.traps.find((v) => v.trapId === modal.key);
   return t ? trapView(d, t) : null;

@@ -39,7 +39,7 @@ export interface LobItem {
   hash?: string;
   /** The short kind label shown before the text (draft, review, checks, ready, landed, watch). */
   label?: string;
-  /** For the per-browser hide a click records: the item key and its state hash. */
+  /** What a click acknowledges (and hides in this browser at once): the item key and its state hash. */
   hideKey?: string;
   hideHash?: string;
 }
@@ -105,6 +105,10 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
   }
   const extra = items.length > 4 ? items.length - 4 : 0;
   items = items.slice(0, 4);
-  if (extra) items[3] = { ...items[3]!, text: '…and ' + extra + ' more — see attention', label: '' };
+  // The last lob stands for the rest: a click on it acknowledges none of them.
+  if (extra) {
+    const { hideKey: _key, hideHash: _hash, ...last } = items[3]!;
+    items[3] = { ...last, text: '…and ' + extra + ' more — see attention', label: '' };
+  }
   return items;
 }

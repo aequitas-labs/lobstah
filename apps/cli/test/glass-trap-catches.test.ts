@@ -73,7 +73,7 @@ describe('trap catches by id', () => {
     t.totalCatches = 1;
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
-    expect(text(card.querySelector('.foot'))).toContain('🦞 1');
+    expect(text(card.querySelector('.gfoot'))).toContain('🦞 1');
     await click(g, card);
     const catches = g.$$('#modalbox .catch').map((c) => text(c.querySelector('.hdr')));
     expect(catches).toHaveLength(2);

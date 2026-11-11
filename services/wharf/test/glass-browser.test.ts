@@ -47,15 +47,31 @@ async function job() {
 it('serves the same bundled look on the glass host only, with nonce CSP and no credentials', async () => {
   const page = await SELF.fetch('https://glass.test/'); expect(page.status).toBe(200);
   const content = await page.text(); expect(content).toContain('spyglass'); expect(content).toContain('--lobstah');
-  expect(page.headers.get('content-security-policy')).toContain("connect-src 'self'");
+  // Besides the wharf, only a boat's glass on loopback: the mirror probe and ↗ Open.
+  expect(page.headers.get('content-security-policy')).toContain("connect-src 'self' http://127.0.0.1:*;");
   expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+  // The Reviews tab shows each asker's GitHub avatar; no other remote image loads.
+  expect(page.headers.get('content-security-policy')).toContain("img-src 'self' blob: data: https://avatars.githubusercontent.com;");
   expect(page.headers.get('cache-control')).toBe('no-store'); expect(content).not.toContain(token);
   expect((await SELF.fetch('https://glass.test/device')).status).toBe(200);
   // A report opens on its own page, as in the local glass; the page reads the report through /api/glass.
   const report = await SELF.fetch('https://glass.test/report/r1');
   expect(report.status).toBe(200); expect(report.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
-  for (const path of ['/report/', '/report/a/b', '/report/..%2Fdevice', '/report/' + 'a'.repeat(129)]) expect((await SELF.fetch('https://glass.test' + path)).status, path).toBe(404);
+  // A boat's report key, encoded as the glass links it, opens the same page.
+  expect((await SELF.fetch('https://glass.test/report/' + encodeURIComponent('report:work:0b9a434a-0c53-4131-915b-e8474b5be5c2'))).status).toBe(200);
+  expect((await SELF.fetch('https://glass.test/report/' + encodeURIComponent('report:helm:fleet:ec632297'))).status).toBe(200);
+  for (const path of ['/report/', '/report/a/b', '/report/..%2Fdevice', '/report/a%2Fb', '/report/a%5Cb', '/report/' + 'a'.repeat(301)]) expect((await SELF.fetch('https://glass.test' + path)).status, path).toBe(404);
   expect((await SELF.fetch('https://state.test/')).status).toBe(404);
+});
+it('tells the page whether the visitor is signed in before it renders', async () => {
+  const hint = async (headers: Record<string, string> = {}, path = '/') =>
+    /<meta name="lobstah-session" content="([a-z]+)">/.exec(await (await SELF.fetch('https://glass.test' + path, { headers })).text())?.[1];
+  expect(await hint()).toBe('out');
+  expect(await hint({ Cookie: 'better-auth.session_token=forged' })).toBe('out');
+  expect(await hint({ Cookie: cookie })).toBe('in');
+  expect(await hint({ Cookie: cookie }, '/device?user_code=ABCD')).toBe('in');
+  const page = await (await SELF.fetch('https://glass.test/', { headers: { Cookie: cookie } })).text();
+  expect(page).not.toContain(token);
 });
 it('requires its cookie, not an API bearer, and derives the account rather than trusting a selector', async () => {
   await job();

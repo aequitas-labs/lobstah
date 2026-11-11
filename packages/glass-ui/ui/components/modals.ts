@@ -1,8 +1,8 @@
-import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
+import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
-import { cancelJob, closeModal, setLobs, setView, showModal, changeHelmChat, messageHelm } from '../actions.js';
+import { cancelJob, closeModal, showModal, messageHelm, setPrefs } from '../actions.js';
 import { useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
@@ -25,6 +25,7 @@ import {
   liveLinkNote,
   namedText,
   prCell,
+  prHeadCell,
   prChecks,
   prLink,
   prMerge,
@@ -36,51 +37,23 @@ import {
   trapOpenRoutes,
 } from './common.js';
 import { can, capabilities, fileUrl } from '../backend.js';
+import { getState } from '../store.js';
+import { GrantChip } from './session-grants.js';
+import { reviewModal } from './reviews.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
 const close = html`<span class="x" onClick=${closeModal}>×</span>`;
 
-// Per-browser preferences (localStorage); the kinds line is read-only config.
-const seg = (set: (v: string) => void, opts: Array<[string, string]>, cur: string) =>
-  html`<span class="seg">${opts.map(([v, l]) => html`<button class=${v === cur ? 'on' : ''} onClick=${() => set(v)}>${l}</button>`)}</span>`;
-
-function HelmChatControl({ helm }: { helm: GlassHelm }) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string>();
-  const change = async (chat: 'full' | 'brief') => {
-    setPending(true);
-    setError(await changeHelmChat(helm.grounds, chat));
-    setPending(false);
-  };
-  return html`<div class="row" data-helm-chat=${helm.grounds}>
-    <span class="lbl">helm chat · ${helm.grounds}<span class="hint">this helm · takes effect next turn</span>${error && html`<span class="bad" role="alert">${error}</span>`}</span>
-    <span class="seg" aria-label=${`helm chat ${helm.grounds}`}>${(['full', 'brief'] as const).map((chat) => html`<button class=${chat === (helm.chat ?? 'full') ? 'on' : ''} disabled=${pending} onClick=${() => change(chat)}>${chat}</button>`)}</span>
-  </div>`;
-}
-
+/** Browser display preferences are editable; configuration and helm values stay read-only. */
 function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
-  const view = seg(
-    setView,
-    [
-      ['table', 'table'],
-      ['cards', 'cards'],
-    ],
-    prefs.view,
-  );
-  const lobs = seg(
-    setLobs,
-    [
-      ['on', 'on'],
-      ['off', 'off'],
-    ],
-    prefs.lobs ? 'on' : 'off',
-  );
+  const viewOptions = html`<span class="seg" role="group" aria-label="view">${(['table', 'cards'] as const).map((view) => html`<button type="button" class=${view === prefs.view ? 'on' : ''} aria-pressed=${view === prefs.view} onClick=${() => setPrefs({ view })}>${view}</button>`)}</span>`;
+  const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<button type="button" class=${lobs === prefs.lobs ? 'on' : ''} aria-pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}</button>`)}</span>`;
   const kinds = item.attentionError ? item.attentionError : (item.attentionKinds || []).join(' · ');
   return [
     close,
     html`<h3>⚙ settings</h3>`,
-    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span>${view}</div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span>${lobs}</div>${can('helm-chat') && item.helms.map((helm) => html`<${HelmChatControl} key=${helm.grounds} helm=${helm} />`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
+    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span>${viewOptions}</div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span>${lobOptions}</div>${item.helms.map((helm) => html`<div class="row" data-helm-chat=${helm.grounds}><span class="lbl">helm chat · ${helm.grounds}</span><span>${helm.chat ?? 'full'}</span></div>`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
   ];
 }
 
@@ -196,7 +169,7 @@ function JobControls({ id }: { id: string }) {
   const cancel = async () => {
     const refusal = await cancelJob(id);
     setConfirming(false);
-    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Cancelled; its worker is fenced.' });
+    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Dispatch cancelled.' });
   };
   return [
     can('message-helm') &&
@@ -204,8 +177,8 @@ function JobControls({ id }: { id: string }) {
     can('cancel') &&
       html`<div class="sec">cancel</div>${
         confirming
-          ? html`<div>Cancel this job and fence its worker? <button class="btn" onClick=${cancel}>Confirm cancel</button> <button class="btn" onClick=${() => setConfirming(false)}>Keep job</button></div>`
-          : html`<button class="btn" onClick=${() => setConfirming(true)}>Cancel job…</button>`
+          ? html`<div>Cancel this dispatch? Its agent stops. <button class="btn" onClick=${cancel}>Cancel dispatch</button> <button class="btn" onClick=${() => setConfirming(false)}>Keep dispatch</button></div>`
+          : html`<button class="btn" onClick=${() => setConfirming(true)}>Cancel dispatch…</button>`
       }`,
     result && html`<div class=${result.ok ? 'ok' : 'bad'} role=${result.ok ? 'status' : 'alert'}>${result.text}</div>`,
   ];
@@ -247,6 +220,7 @@ function trapModal(t: GlassTrap) {
             t.repo ?? 'addressed bait only',
             ' · session ',
             t.sessionId ?? '',
+            html`<${GrantChip} session=${t.sessionId} grants=${getState().snapshot?.sessionGrants ?? []} />`,
             ' · signed on ',
             Age(t.signedOnAt),
             ' ago · ',
@@ -254,7 +228,7 @@ function trapModal(t: GlassTrap) {
             ' · heartbeat ',
             r.hb,
           ]
-        : 'signed off — registration gone; the lifecycle, messages, and catches are the surviving record. Re-soaking the same worktree restores this address.';
+        : 'signed off · its history is below';
   const lifecycle = t.notices.length
     ? t.notices.map((n) => html`<div key=${n.seq} class="loglines">${Age(n.at)} ago · <b>${n.kind}</b> — ${LinkedText(n.text)}</div>`)
     : html`<div class="empty">none recorded</div>`;
@@ -269,7 +243,7 @@ function trapModal(t: GlassTrap) {
   const catches = t.catches.length
     ? t.catches.map(
         (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prCell(c)}</div>${
+          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prHeadCell(c)}</div>${
             c.note && html`<div class="loglines">${NamedText(c.note)}</div>`
           }</div>`,
       )
@@ -327,6 +301,7 @@ export function Modal({
   if (!item) return null;
   if (modal.type === 'settings') return settingsModal(item as SettingsItem, prefs);
   if (modal.type === 'pr') return prModal(snapshot, modal.key);
+  if (modal.type === 'review') return [close, reviewModal(item as GlassReview)];
   if (modal.type === 'helm') return helmModal(item as GlassHelm);
   if (modal.type === 'dispatch') {
     const report = dispatchReport(snapshot, item as GlassDispatchSummary);

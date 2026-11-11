@@ -18,6 +18,12 @@ export interface GlassHost {
   boats?: () => Children;
   /** The footer's line, for a source with no version of its own. */
   footer?: string;
+  /** On a phone, the menu's Fleet section: the boats and how old their mirrors are. */
+  fleet?: () => Children;
+  /** On a phone, the menu's Sign out. */
+  signOut?: () => void;
+  /** A mirror boat is asleep: the helm pill's dot turns amber. */
+  asleep?: () => boolean;
 }
 
 let current: GlassHost = {};
