@@ -1,6 +1,7 @@
 import { boundedBody, requireThat } from './protocol.js';
 import { installationToken } from './slack-install.js';
 import type { SlackEnv } from './slack-install.js';
+import { SlackApi } from './slack-api.js';
 
 /** Slack signs each request with its time; one older or newer than five minutes is refused. */
 const SKEW_SECONDS = 300;
@@ -122,6 +123,15 @@ export async function slackIngress(request: Request, env: SlackEnv): Promise<Res
   // Only the linked person, in the DM the app opened with them.
   if (!link || link.channel !== channel) return ok();
   const threadTs = typeof e.thread_ts === 'string' && SLACK_TS.test(e.thread_ts) && e.thread_ts !== ts ? e.thread_ts : undefined;
-  await env.ACCOUNTS.getByName(link.person).slackMessage(link.person, { eventId, team, user, channel, ts, ...(threadTs ? { threadTs } : {}), text: e.text.slice(0, 16000) });
+  const account = env.ACCOUNTS.getByName(link.person);
+  const result = await account.slackMessage(link.person, { eventId, team, user, channel, ts, ...(threadTs ? { threadTs } : {}), text: e.text.slice(0, 16000) });
+  if (result.question) {
+    const token = await installationToken(env, team);
+    if (!token) return new Response('Slack connection unavailable', { status: 503 });
+    const text = `Which grounds should handle this request? Reply in this thread with one of: ${result.question.grounds.join(', ')}`;
+    const outcome = await new SlackApi(token).post(channel, { text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }], unfurl_links: false, unfurl_media: false }, result.question.threadTs);
+    if (outcome.kind !== 'sent') return new Response('Could not send the grounds question', { status: 503 });
+    await account.slackGroundsPrompted(link.person, channel, result.question.threadTs);
+  }
   return ok();
 }

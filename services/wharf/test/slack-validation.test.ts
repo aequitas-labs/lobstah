@@ -56,7 +56,7 @@ beforeEach(async () => {
   const linkedAt = '2026-10-30T00:00:00.000Z';
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 async function boat(name: string, permissions: string[]) {
@@ -69,7 +69,7 @@ async function helm() {
   return b;
 }
 async function decision(b: { token: string }, id: string) {
-  await call('documents', { id, kind: 'decision', title: 'Keep the PR cache?', options: ['Keep the cache', 'Drop the cache'] }, b.token, 'seat');
+  await call('documents', { id, kind: 'decision', grounds: 'away', title: 'Keep the PR cache?', options: ['Keep the cache', 'Drop the cache'] }, b.token, 'seat');
   await call(`documents/${id}/publish`, {}, b.token, 'seat');
 }
 /** The newest message of each card, as Slack last received it, by card id. */
@@ -189,8 +189,86 @@ it('asked while the helm sleeps: the receipt says so; when a helm takes its seat
   expect(receipt().method).toBe('chat.update');
   expect(section(receipt())).toContain('Received · queued for the helm');
   const [request] = await (await call('requests')).json<WharfHumanRequest[]>();
-  expect((await call('dispatches', { id: 'nightly', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Run the nightly cleanup', request: request!.id }, b.token, 'seat')).status).toBe(200);
-  expect((await call('dispatches', { id: 'nightly-2', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'again', request: request!.id }, b.token, 'seat')).status).toBe(409);
+  expect((await call('dispatches', { id: 'nightly', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Run the nightly cleanup', request: request!.id }, b.token, 'seat')).status).toBe(200);
+  expect((await call('dispatches', { id: 'nightly-2', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'again', request: request!.id }, b.token, 'seat')).status).toBe(409);
   await deliver();
   expect(section(receipt())).toContain('Dispatched as nightly');
+});
+
+it('delivers decisions and PR watches only for the link’s chosen grounds', async () => {
+  const b = await helm();
+  for (const grounds of ['away', 'home']) {
+    expect((await call('documents', { id: `${grounds}-decision`, kind: 'decision', grounds, title: `${grounds} decision`, options: ['Yes'] }, b.token, 'seat')).status).toBe(200);
+    await call(`documents/${grounds}-decision/publish`, {}, b.token, 'seat');
+  }
+  const sourceAt = new Date().toISOString();
+  expect((await call('cards', { cards: [
+    { family: 'pr', key: 'away-pr', grounds: 'away', title: 'Allowed PR watch', stateHash: 'open', sourceAt, actions: [{ kind: 'seen' }] },
+    { family: 'pr', key: 'home-pr', grounds: 'home', title: 'Unbound PR watch', stateHash: 'open', sourceAt, actions: [{ kind: 'seen' }] },
+    { family: 'notice', key: 'unknown', title: 'Unassigned notice', stateHash: 'standing', sourceAt },
+  ] }, b.token, 'seat')).status).toBe(200);
+  await deliver();
+  const deliveries = await sql('SELECT c.data FROM slack_deliveries d JOIN cards c ON c.seq=d.card');
+  expect(deliveries.length).toBeGreaterThanOrEqual(2);
+  expect(deliveries.every((row) => JSON.parse(String(row.data)).grounds === 'away')).toBe(true);
+  expect(posted.some((message) => message.body.text.includes('Allowed PR watch'))).toBe(true);
+  expect(posted.some((message) => message.body.text.includes('Unbound PR watch') || message.body.text.includes('home decision') || message.body.text.includes('Unassigned notice'))).toBe(false);
+});
+
+it('keeps a dispatch’s document on its owning grounds', async () => {
+  const b = await helm();
+  await call('dispatches', { id: 'owned-job', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Scoped work' }, b.token, 'seat');
+  expect((await call('documents', { id: 'wrong-ground', kind: 'decision', title: 'Choose', dispatch: 'owned-job', grounds: 'home' }, b.token, 'seat')).status).toBe(400);
+  expect((await call('documents', { id: 'owned-question', kind: 'decision', title: 'Choose', dispatch: 'owned-job' }, b.token, 'seat')).status).toBe(200);
+  expect(await (await call('documents/owned-question')).json()).toMatchObject({ grounds: 'away' });
+});
+
+it('rebinding stops queued deliveries, old buttons and pending boat answers for removed grounds', async () => {
+  const b = await helm();
+  const permission = { family: 'permission', key: 'permission-away', grounds: 'away', title: 'Allow deployment', stateHash: 'ask', sourceAt: new Date().toISOString(), actions: [{ kind: 'allow-once' }] };
+  expect((await call('cards', { cards: [permission] }, b.token, 'seat')).status).toBe(200);
+  await deliver();
+  const handle = (await sql("SELECT handle FROM slack_actions WHERE action=?", JSON.stringify({ kind: 'allow-once' })))[0]!.handle as string;
+  await press(handle);
+  expect(await (await call('cards/answers', undefined, b.token)).json()).toHaveLength(1);
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: new Date().toISOString(), grounds: ['home'] });
+  await press(handle);
+  expect(await (await call('cards/answers', undefined, b.token)).json()).toEqual([]);
+  expect(await sql("SELECT json_extract(data,'$.state') AS state FROM card_answers")).toEqual([{ state: 'refused' }]);
+  const sent = posted.length;
+  await call('cards', { cards: [{ ...permission, stateHash: 'ask-again' }] }, b.token, 'seat');
+  await deliver();
+  expect(posted).toHaveLength(sent);
+  expect(await sql('SELECT * FROM slack_deliveries')).toEqual([]);
+});
+
+it('asks which linked grounds should handle an ambiguous DM before waking or dispatching', async () => {
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: new Date().toISOString(), grounds: ['away', 'home'] });
+  const message = async (ts: string, text: string, threadTs?: string) => send(await signed('/slack/events', JSON.stringify({ type: 'event_callback', team_id: 'T1', event_id: `Ev${ts.replace('.', '')}`, event: {
+    type: 'message', channel_type: 'im', channel: 'D1', user: 'U1', ts, text, ...(threadTs ? { thread_ts: threadTs } : {}),
+  } })));
+  const top = '1700000000.000100';
+  expect((await message(top, 'Investigate the build')).status).toBe(200);
+  expect(await (await call('requests')).json()).toEqual([]);
+  expect(await sql("SELECT kind FROM events WHERE kind='human-request'")).toEqual([]);
+  expect(posted.at(-1)!.body.text).toContain('Which grounds');
+  expect(posted.at(-1)!.body.text).toContain('away, home');
+  const prompts = posted.length;
+  await message(top, 'Investigate the build');
+  expect(posted).toHaveLength(prompts);
+  await message('1700000000.000200', 'private', top);
+  expect(await (await call('requests')).json()).toEqual([]);
+  await message('1700000000.000300', 'home', top);
+  await message('1700000000.000300', 'home', top);
+  const requests = await (await call('requests')).json<WharfHumanRequest[]>();
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ grounds: 'home', text: 'Investigate the build', kind: 'work' });
+  expect(requests[0]!.followUps).toBeUndefined();
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: new Date().toISOString(), grounds: ['away'] });
+  await message('1700000000.000400', 'A follow-up after removing home', top);
+  expect((await (await call('requests')).json<WharfHumanRequest[]>())[0]!.followUps).toBeUndefined();
+  const b = await helm();
+  const dispatch = { id: 'selected-job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Investigate the build', request: requests[0]!.id };
+  expect((await call('dispatches', { ...dispatch, grounds: 'away' }, b.token, 'seat')).status).toBe(400);
+  expect((await call('dispatches', { ...dispatch, grounds: 'home' }, b.token, 'seat')).status).toBe(200);
 });

@@ -19,7 +19,7 @@ afterEach(async () => {
   windows = [];
 });
 
-type Data = { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void>; userAgent?: string; card?: unknown };
+type Data = { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void>; userAgent?: string; card?: unknown; slack?: unknown };
 
 async function page(path = '/', signedOut = false, data: Data = {}) {
   const window = new Window({
@@ -85,6 +85,7 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     if (path === '/api/glass/dispatches') return Response.json(data.jobs ?? jobs);
     if (path === '/api/glass/dispatches/job/detail') return Response.json(data.detail ?? detail);
     if (path === '/api/glass/cards/c42') return Response.json(data.card);
+    if (path === '/api/glass/slack') return Response.json(data.slack ?? { configured: false, grounds: [] });
     if (path.endsWith('/image') || path.endsWith('/worker-image')) return new Response(new Uint8Array([137, 80, 78, 71]));
     if (path.includes('/files/')) return new Response(markdown);
     if (path.startsWith('/api/auth/device?'))
@@ -535,4 +536,23 @@ it('opens a canonical boat card link in the signed-in shared glass', async () =>
   expect(g.reads).toContain('/api/glass/cards/c42');
   expect(g.doc.body.textContent).toContain('Allow the deployment');
   expect(g.doc.body.textContent).toContain('permission · boat');
+});
+
+it('requires an explicit choice when Slack can serve several grounds', async () => {
+  const g = await page('/#boats', false, { slack: { configured: true, grounds: ['home', 'away'] } });
+  const checkboxes = [...g.doc.querySelectorAll<HTMLInputElement>('fieldset input[type=checkbox]')];
+  expect(checkboxes).toHaveLength(2);
+  expect(checkboxes.every((input) => !input.checked)).toBe(true);
+  const connect = g.find('button', 'Connect Slack') as HTMLButtonElement;
+  expect(connect.disabled).toBe(true);
+  checkboxes[0]!.checked = true;
+  checkboxes[0]!.dispatchEvent(new g.window.Event('change', { bubbles: true }));
+  await g.settle();
+  expect(connect.disabled).toBe(false);
+});
+
+it('preselects the sole grounds for a new Slack link', async () => {
+  const g = await page('/#boats', false, { slack: { configured: true, grounds: ['home'] } });
+  expect(g.doc.querySelector<HTMLInputElement>('fieldset input[type=checkbox]')!.checked).toBe(true);
+  expect((g.find('button', 'Connect Slack') as HTMLButtonElement).disabled).toBe(false);
 });

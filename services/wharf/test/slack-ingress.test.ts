@@ -46,7 +46,7 @@ beforeEach(async () => {
   const linkedAt = '2026-10-30T00:00:00.000Z';
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 async function helm() {
@@ -115,7 +115,7 @@ it('the helm answers or dispatches it; the same receipt says so, and a dispatch 
   await deliver();
   expect(receipts().at(-1)).toMatchObject({ method: 'chat.update' });
   expect(section(receipts().at(-1)!)).toContain('The helm replied: Which repo?');
-  const job = { id: 'job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Fix the flaky checkout on Safari', request: id };
+  const job = { id: 'job', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Fix the flaky checkout on Safari', request: id };
   expect((await call('dispatches', job, b.token, 'seat')).status).toBe(200);
   expect((await call('dispatches', { ...job, id: 'job-2' }, b.token, 'seat')).status).toBe(409);
   expect((await requests())[0]).toMatchObject({ state: 'fulfilled', dispatch: 'job', outcome: 'dispatched as job' });

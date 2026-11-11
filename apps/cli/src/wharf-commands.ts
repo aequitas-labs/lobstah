@@ -107,7 +107,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     const attached = opts.values('--attach').map((file) => ({ name: path.basename(file), bytes: readFile(file) }));
     if (attached.length > 32 || new Set(attached.map((f) => f.name)).size !== attached.length) throw new Error('at most 32 attachments, with different basenames');
     const base = key(), id = opts.opt('--id') ?? partKey(base, 'document').slice(0, 32);
-    await backend.request('documents', { id, kind, title, options: kind === 'decision' ? opts.values('--option') : [], ...(kind === 'decision' && pos[0] ? { dispatch: pos[0] } : {}) }, partKey(base, 'create'));
+    await backend.request('documents', { id, kind, title, grounds: scope.grounds, options: kind === 'decision' ? opts.values('--option') : [], ...(kind === 'decision' && pos[0] ? { dispatch: pos[0] } : {}) }, partKey(base, 'create'));
     const detail = contents ? await backend.uploadDocument(id, kind === 'decision' ? 'detail.md' : 'report.md', contents, partKey(base, 'markdown')) : undefined;
     const files: string[] = [];
     for (const [i, file] of attached.entries()) files.push(await backend.uploadDocument(id, file.name, file.bytes, partKey(base, `file-${i}`)));

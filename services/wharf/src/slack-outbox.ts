@@ -14,12 +14,13 @@ import type { SlackOutcome } from './slack-api.js';
  */
 export const slackSchema = `
   CREATE TABLE IF NOT EXISTS slack_links (person TEXT PRIMARY KEY, team TEXT NOT NULL, user TEXT NOT NULL, channel TEXT NOT NULL, linked_at TEXT NOT NULL, revoked_at TEXT);
+  CREATE TABLE IF NOT EXISTS slack_link_grounds (person TEXT NOT NULL, grounds TEXT NOT NULL, PRIMARY KEY(person, grounds));
   CREATE TABLE IF NOT EXISTS slack_deliveries (card INTEGER NOT NULL, person TEXT NOT NULL, want INTEGER NOT NULL, sent INTEGER NOT NULL DEFAULT 0, ts TEXT, sent_hash TEXT,
     attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, error TEXT, PRIMARY KEY(card, person));
   CREATE TABLE IF NOT EXISTS slack_actions (handle TEXT PRIMARY KEY, person TEXT NOT NULL, card INTEGER NOT NULL, revision INTEGER NOT NULL, action TEXT NOT NULL, expires INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS slack_action_card ON slack_actions(person, card, revision);
 `;
-export const slackTables = ['slack_links', 'slack_deliveries', 'slack_actions'];
+export const slackTables = ['slack_links', 'slack_link_grounds', 'slack_deliveries', 'slack_actions'];
 /** A button's handle is good this long: past it, the click asks the person to open the card again. */
 export const ACTION_HANDLE_MS = 86400_000;
 /** At most this many Slack calls per drain; the next command drains the rest. */
@@ -58,6 +59,16 @@ const backoff = (attempts: number) => Math.min(5_000 * 2 ** attempts, 600_000);
 export class SlackOutbox {
   private running?: Promise<void>;
   constructor(private sql: SqlStorage, private deps: OutboxDeps) {}
+  /** Every delivery and action requires an explicit grounds binding on the live link. */
+  serves(person: string, grounds: string | undefined): boolean {
+    return grounds !== undefined && this.sql.exec(`SELECT 1 FROM slack_link_grounds g JOIN slack_links l ON l.person=g.person
+      WHERE g.person=? AND g.grounds=? AND l.revoked_at IS NULL`, person, grounds).toArray().length > 0;
+  }
+  /** The linked grounds a DM may address, in stable display order. */
+  grounds(person: string): string[] {
+    return this.sql.exec<{ grounds: string }>(`SELECT g.grounds FROM slack_link_grounds g JOIN slack_links l ON l.person=g.person
+      WHERE g.person=? AND l.revoked_at IS NULL ORDER BY g.grounds`, person).toArray().map((row) => row.grounds);
+  }
   /**
    * Inside the transaction that changed the cards: each linked person's
    * delivery of each card falls due. A card that ended before it was ever
@@ -67,6 +78,7 @@ export class SlackOutbox {
     const people = this.sql.exec<{ person: string }>('SELECT person FROM slack_links WHERE revoked_at IS NULL').toArray().filter((p) => !only || p.person === only);
     if (!people.length) return;
     for (const card of cards) for (const { person } of people) {
+      if (!this.serves(person, card.grounds)) continue;
       const seq = seqOf(card);
       const updated = this.sql.exec(`UPDATE slack_deliveries SET want=want+1, next_at=CASE WHEN next_at=? THEN next_at ELSE min(next_at,?) END WHERE card=? AND person=?`, NEVER, now, seq, person).rowsWritten;
       if (!updated && !card.terminal) this.sql.exec('INSERT INTO slack_deliveries(card,person,want,next_at) VALUES (?,?,1,?)', seq, person, now);
@@ -77,12 +89,18 @@ export class SlackOutbox {
    * card; one in another conversation starts over there, since the old
    * messages cannot be edited from it. Unlinking stops their deliveries.
    */
-  link(person: string, link: { team: string; slackUser: string; channel: string; linkedAt: string } | null, standing: GlassCard[], now: number) {
+  link(person: string, link: { team: string; slackUser: string; channel: string; linkedAt: string; grounds: string[] } | null, standing: GlassCard[], now: number) {
+    this.sql.exec('DELETE FROM slack_link_grounds WHERE person=?', person);
+    this.sql.exec('DELETE FROM slack_actions WHERE person=?', person);
     if (!link) { this.sql.exec('UPDATE slack_links SET revoked_at=? WHERE person=? AND revoked_at IS NULL', new Date(now).toISOString(), person); return; }
     const before = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', person).toArray()[0];
     if (before && before.channel !== link.channel) this.sql.exec('DELETE FROM slack_deliveries WHERE person=?', person);
     else this.sql.exec('UPDATE slack_deliveries SET next_at=?, error=NULL, attempts=0 WHERE person=?', now, person);
     this.sql.exec('INSERT OR REPLACE INTO slack_links VALUES (?,?,?,?,?,NULL)', person, link.team, link.slackUser, link.channel, link.linkedAt);
+    for (const grounds of new Set(link.grounds)) this.sql.exec('INSERT INTO slack_link_grounds VALUES (?,?)', person, grounds);
+    for (const row of this.sql.exec<{ card: number }>('SELECT card FROM slack_deliveries WHERE person=?', person).toArray()) {
+      if (!this.serves(person, this.deps.card(row.card)?.grounds)) this.sql.exec('DELETE FROM slack_deliveries WHERE person=? AND card=?', person, row.card);
+    }
     this.mark(standing, now, person);
   }
   /**
@@ -114,11 +132,13 @@ export class SlackOutbox {
     const row = this.sql.exec<{ person: string; card: number; revision: number; action: string; expires: number }>('SELECT * FROM slack_actions WHERE handle=?', handle).toArray()[0];
     if (!row || row.person !== person || row.expires <= now) return { refused: 'expired' };
     const card = this.deps.card(row.card);
+    if (!this.serves(person, card?.grounds)) return { refused: 'expired' };
     if (!card || card.revision !== row.revision || card.terminal) return { refused: 'stale', ...(card ? { card } : {}) };
     return { card, action: JSON.parse(row.action) };
   }
   /** Show a person's card again, whatever their message of it last said. */
   refresh(person: string, card: GlassCard, now: number) {
+    if (!this.serves(person, card.grounds)) return;
     this.sql.exec('UPDATE slack_deliveries SET want=want+1, next_at=min(next_at,?) WHERE card=? AND person=? AND next_at<>?', now, seqOf(card), person, NEVER);
   }
   /** Whether a drain has anything to do now. */
@@ -139,6 +159,7 @@ export class SlackOutbox {
       const card = this.deps.card(job.card);
       if (!card) { this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person); continue; }
       if (!link || link.revoked_at) { this.settle(job, { next_at: NEVER, error: 'unlinked' }); continue; }
+      if (!this.serves(job.person, card.grounds)) { this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person); continue; }
       // Not posted yet and already ended: there is nothing left to show or close.
       if (!job.ts && card.terminal) { this.settle(job, { sent: job.want, error: null }); continue; }
       const token = await this.deps.token(link.team);
@@ -148,6 +169,12 @@ export class SlackOutbox {
       if (job.ts && hash === job.sent_hash) { this.settle(job, { sent: job.want, error: null }); continue; }
       const wait = (last.get(link.channel) ?? 0) + CONVERSATION_SPACING_MS - Date.now();
       if (wait > 0) await (this.deps.pause ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(wait);
+      // Rebinding may happen while fetching the installation or waiting for Slack's rate limit.
+      if (!this.serves(job.person, card.grounds)) continue;
+      const currentLink = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', job.person).toArray()[0];
+      if (!currentLink || currentLink.channel !== link.channel || currentLink.team !== link.team || currentLink.user !== link.user) continue;
+      const currentCard = this.deps.card(job.card);
+      if (!currentCard || currentCard.grounds !== card.grounds) continue;
       const api = new SlackApi(token);
       const outcome = job.ts ? await api.update(link.channel, job.ts, message) : await api.post(link.channel, message, this.deps.thread?.(card, link.channel));
       calls++; last.set(link.channel, Date.now());
