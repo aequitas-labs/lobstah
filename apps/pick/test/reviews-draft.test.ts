@@ -100,17 +100,57 @@ describe('starting a review job', () => {
     expect(pendingIds('chore')).toHaveLength(1);
   });
 
-  it('manual redrafts respect the daily cap, including prior starts of the same round', async () => {
+  it('a review asked for by hand runs past the daily cap, and still counts toward it', async () => {
+    config('maxPerDay = 1');
+    request({ number: 3 });
+    request({ number: 4 });
+    // One automatic start reaches the cap; the second automatic one waits.
+    draftReviews('chris', () => {}, NOW);
+    expect([round('review:acme/web#3'), round('review:acme/web#4')].filter((r) => r.state === 'drafting')).toHaveLength(1);
+    const waiting = [3, 4].map((n) => `review:acme/web#${n}`).find((k) => round(k).state === 'requested')!;
+    // A Draft click on it runs anyway.
+    expect(await draftReviewOnDemand(waiting, NOW)).toBeUndefined();
+    expect(round(waiting).state).toBe('drafting');
+    expect(pendingIds('chore')).toHaveLength(2);
+    // Both count: another automatic review the same day is still capped.
+    request({ number: 5 });
+    draftReviews('chris', () => {}, NOW);
+    expect(round('review:acme/web#5')).toMatchObject({ state: 'requested', reason: expect.stringContaining('daily cap on automatic reviews') });
+  });
+
+  it('a manual start counts toward the day, so an automatic review after it is capped', async () => {
+    config('mode = "on-demand"', 'maxPerDay = 1');
+    request();
+    expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    config('maxPerDay = 1');
+    request({ number: 8 });
+    draftReviews('chris', () => {}, NOW);
+    expect(round('review:acme/web#8')).toMatchObject({ state: 'requested', reason: expect.stringContaining('daily cap') });
+  });
+
+  it('a redraft past the cap runs, whether started at once or by the next pick cycle, and counts every start', async () => {
     config('mode = "on-demand"', 'maxPerDay = 1');
     request();
     expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
     const item = readReview(KEY)!;
     item.rounds[0]!.state = 'failed';
     writeReview(item);
-    expect(await draftReviewOnDemand(KEY, NOW)).toContain('daily cap');
-    expect(pendingIds('chore')).toHaveLength(1);
-    expect(await draftReviewOnDemand(KEY, NOW + 24 * 3600_000)).toBeUndefined();
+    // The glass's Draft on a failed round redrafts it and starts it at once, past the cap.
+    expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    expect(round()).toMatchObject({ state: 'drafting', onDemand: true });
     expect(round().draftStarts).toHaveLength(2);
+    // `lobstah reviews redraft` leaves it to the next cycle, which starts it too.
+    const again = readReview(KEY)!;
+    again.rounds[0]!.state = 'failed';
+    writeReview(again);
+    const { redraftReviewRound } = await import('../src/reviews-post.js');
+    expect(await redraftReviewRound(KEY, { now: NOW })).toBeUndefined();
+    expect(round().byHand).toBe(true);
+    // In on-demand mode, where nothing starts on its own, the next cycle still starts it.
+    draftReviews('chris', () => {}, NOW);
+    expect(round()).toMatchObject({ state: 'drafting', onDemand: true });
+    expect(round().byHand).toBeUndefined();
+    expect(round().draftStarts).toHaveLength(3);
   });
   it('work = trap: a read-only chore for a free trap of the repo, with the cost bounds and the trap wait', () => {
     config('maxBudgetUsd = 3');
@@ -159,7 +199,9 @@ describe('starting a review job', () => {
     expect(round('review:acme/web#2').reason).toContain('not a configured repo');
     const states = [round('review:acme/web#3'), round('review:acme/web#4')];
     expect(states.filter((r) => r.state === 'drafting')).toHaveLength(1);
-    expect(states.find((r) => r.state === 'requested')!.reason).toBe('no job: the daily cap ([reviews].maxPerDay = 1) is reached');
+    expect(states.find((r) => r.state === 'requested')!.reason).toBe(
+      "no job: the daily cap on automatic reviews ([reviews].maxPerDay = 1) is reached, so this one wasn't started. Start it by hand with Draft on the glass's Reviews tab.",
+    );
     expect(pendingIds('chore')).toHaveLength(1);
   });
 });

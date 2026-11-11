@@ -232,7 +232,7 @@ describe('drafts', () => {
     item.pr.headSha = 'bbbbbbb2';
     writeReview(item);
     redraftReview('review:acme/web#7', T0);
-    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested', draftStarts: ['x'] });
+    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
     expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
   });
 });

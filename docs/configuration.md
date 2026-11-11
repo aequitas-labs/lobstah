@@ -527,7 +527,7 @@ as that identity, with its token source, independently of `[pickup.github]`. Ide
 | `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
-| `maxPerDay` | `20` | Review jobs started per day. Past it, items file with no job. |
+| `maxPerDay` | `20` | Review jobs lobstah starts on its own per day (UTC). Past it, automatic rounds file with no job and say how to start one by hand. A review you ask for (Draft on the glass, or a redraft) always runs, and counts toward the day's total. |
 | `requestedAfter` | `"enabled"` | Requests before reviews were enabled or the repo switched to automatic mode stay in Reviews without a job. Set a quoted ISO timestamp to choose a different cutoff; repo overrides are supported. |
 | `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
 
