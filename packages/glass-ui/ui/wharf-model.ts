@@ -55,6 +55,7 @@ export function attachCommand(worker: Worker): string | undefined {
   return `ssh ${worker.boatName} -t tmux -L lobstah attach -r -t ${worker.tmuxPane}`;
 }
 export function requestState(r: WharfHumanRequest): string {
+  if (r.kind === 'work' && r.response && (r.state === 'queued' || r.state === 'received')) return 'The helm replied: ' + r.response;
   if (r.kind.startsWith('review-'))
     return r.state === 'authorized'
       ? 'sent to the boat that drafted it · expires ' + r.expiresAt

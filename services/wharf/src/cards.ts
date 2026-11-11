@@ -122,6 +122,7 @@ export function landedCard(v: DispatchView): ProjectedCard | undefined {
 }
 /** A person's request of the fleet: its receipt and outcome. It ends fulfilled or expired. */
 export function requestCard(r: WharfHumanRequest): ProjectedCard {
+  if (r.kind === 'work') return workRequestCard(r);
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   const waiting = r.state === 'queued' && r.waitingForHelm;
   return {
@@ -129,6 +130,30 @@ export function requestCard(r: WharfHumanRequest): ProjectedCard {
     title: r.kind === 'message' ? 'Message to the helm' : r.kind === 'trap-request' ? 'Trap request' : 'Review dismissal',
     summary: [r.text ? firstLine(r.text, 300) : r.repo, waiting ? 'waiting for helm' : r.state, r.outcome].filter(Boolean).join(' · '),
     ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : {}), quiet: true,
+    ...(ended ? { terminal: { state: r.state as 'fulfilled' | 'expired', at: r.state === 'expired' ? r.expiresAt : '', ...(r.outcome ? { outcome: r.outcome } : {}) } } : {}),
+  };
+}
+/**
+ * A person's request for work, as its receipt: what was asked, and where it
+ * stands, in canned words. Received is not running: only a dispatch is, and
+ * the card then opens it. A reply from the helm asks the person, so it is
+ * the one state that stands for attention.
+ */
+export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
+  const waiting = r.state === 'queued' && r.waitingForHelm;
+  const stands = r.state === 'fulfilled' ? `Dispatched as ${r.dispatch}`
+    : r.state === 'expired' ? 'Expired before the helm took it'
+    : r.response ? `The helm replied: ${r.response}\nReply in this thread, or in the glass`
+    : r.state === 'received' ? 'Received · the helm has it'
+    : waiting ? 'Received · waiting for the helm' : 'Received · queued for the helm';
+  const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
+  const ended = r.state === 'fulfilled' || r.state === 'expired';
+  return {
+    family: 'request', key: r.id, sourceAt: r.at,
+    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.response ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}`,
+    title: firstLine(r.text ?? '', 150) || 'Work request', summary: [stands, notes].filter(Boolean).join('\n'),
+    ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : {}),
+    quiet: !r.response || ended,
     ...(ended ? { terminal: { state: r.state as 'fulfilled' | 'expired', at: r.state === 'expired' ? r.expiresAt : '', ...(r.outcome ? { outcome: r.outcome } : {}) } } : {}),
   };
 }

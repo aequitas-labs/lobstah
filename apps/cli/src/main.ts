@@ -1278,6 +1278,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'dispatch': {
+      if (opt('--request') !== undefined) throw new UsageError('--request names a person\'s work request on a wharf: dispatch it on that wharf\'s grounds');
       const configuredAddress = opt('--for');
       if (configuredAddress?.startsWith('trap:')) {
         const cfg = loadConfig(), name = configuredAddress.slice(5), profile = cfg.traps?.[name];
