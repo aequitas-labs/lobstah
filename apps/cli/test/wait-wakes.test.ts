@@ -21,3 +21,8 @@ it('a repeated digest carries only actionable identities and matches direct stat
   expect(digestWakeKeys(digest)).toEqual(helmWakeKeys({ events: [{ id: 'work', lane: 'work', entry: { verb: 'done', at } }] }));
   expect(digestWakeKeys({ ...digest, landed: [] })).toEqual([]);
 });
+
+it('a due todo is news, keyed by its grounds, id and firing', () => {
+  const todo = { grounds: 'fleet', id: 7, text: 'x', firedAt: '2026-11-05T15:00:00.000Z', firedBy: 'due' };
+  expect(helmWakeKeys({ todos: [todo] })).toEqual([JSON.stringify(['todo', 'fleet', 7, '2026-11-05T15:00:00.000Z'])]);
+});

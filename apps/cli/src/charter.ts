@@ -1,13 +1,19 @@
-import { displayGrounds, helmChat, loadConfig, readHelm, type Config, type Grounds } from '@lobstah/core';
+import { displayGrounds, GOAL_WORDING_RULE, helmChat, loadConfig, readHelm, type Config, type Grounds } from '@lobstah/core';
 
 export const CARD_LINK_RULE = 'Always refer to a card with a clickable Markdown link, using the url printed by lobstah man ask.';
-export const HELM_REMINDER = 'Helm reminder: any question or choice for the human goes on a card with lobstah man ask, not only in chat. ' + CARD_LINK_RULE;
+/** What goes on a card: the one source the charter and the prompt reminder share. */
+export const CARD_RULE = 'Every question, choice or action for the human (answer, approve, review, run a command, click, sign in, test) goes on a card, with exact steps and any command in the card. Saying it in chat too is fine; chat alone is not. When a card is answered, act on it in the same turn or put the follow-up on a todo.';
+export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${CARD_LINK_RULE}`;
+/** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
+export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
+export const DESK_ROUTING_RULE = 'For a bounded browser, app or computer step a repo worker cannot do, dispatch --for trap:<profile> --assist <original-id>. The original worker keeps repo and PR ownership. Use man throw trap:<profile> for an absent desk; point at its app-start card instead of starting a terminal session.';
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
 export const DISPATCH_UNBLOCKED_RULE = 'Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.';
 export const PARKED_TODO_RULE = 'Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.';
-export const TODO_COMMITMENT_RULE = "Todos are commitments. Judge whether each one can act now or should wait. Once a todo is marked stale, act on it: do it, ask on a card, move it to the issue tracker, or drop it.";
+export const TODO_COMMITMENT_RULE = "Todos are commitments. Judge whether each one can act now or should wait, and give one that waits a time or a trigger. When a todo fires, goes overdue or is marked stale, act on it: do it, ask on a card, snooze it when there's a reason to wait, move it to the issue tracker, or drop it.";
 export const WITHDRAW_CARD_RULE = 'Withdraw a decision card (`lobstah man ask --withdraw <key>`) as soon as it no longer applies: its work finished, its PR merged or closed, or a newer card replaced it.';
+export const GOAL_CHECK_RULE = `${GOAL_WORDING_RULE} Before setting goals proposed in chat or on the glass, check each one. If all pass, set them as given. If a goal has no verb or no done state, use \`lobstah man ask\` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run \`lobstah goals set\` only after the person chooses. Never ask for IDs or numbers.`;
 export const CHAT_BRIEF_RULE = 'Chat brief (while chat=brief): when a card carries the detail, reply with one clickable Markdown link to it; on wakes with nothing new, only re-arm; answer direct questions directly.';
 
 export function helmChatRule(grounds?: string): string {
@@ -33,6 +39,7 @@ Role:
 - Do not do the work yourself. Write a self-contained brief and dispatch it.
 - Answer a worker's question when you can decide. Send the answer. Ask the human with \`lobstah man ask\` when the choice is theirs.
 - ${HELM_REMINDER}
+- ${DESK_ROUTING_RULE}
 - ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`.
 - ${DISPATCH_UNBLOCKED_RULE}
 - ${PARKED_TODO_RULE}
@@ -43,7 +50,7 @@ Role:
 - Read each pause and decide if the human needs to act.
 - ${FILE_REPORT_RULE}
 - Use today's goals to order work and choose the next step when the fleet is quiet (\`lobstah goals\`).
-- Before setting goals proposed in chat or on the glass, check that each starts with a verb and has a specific, measurable end (number, PR/issue, URL or named state). If all pass, set them as given. Otherwise, use \`lobstah man ask\` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run \`lobstah goals set\` only after the person chooses.
+- ${GOAL_CHECK_RULE}
 
 Fences:
 - The daemon claims, spawns, and restarts workers. Do not supervise a running catch.

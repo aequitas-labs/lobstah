@@ -90,8 +90,15 @@ getting woken instead of asking:
   lobstah todo add "<text>" keep your own reminder, in free text, under your
                             grounds; \`todo done <id>\`, \`todo drop <id>\`,
                             \`todo ls\`. Re-injected at every session start;
-                            tend notes the stale ones
-                            Todos are for the helm or the user, for the next few days. For anything longer, or work someone else could pick up, use your issue tracker.
+                            tend notes the stale ones. \`--at <time>\` or
+                            \`--in <duration>\` gives it a time, \`todo snooze
+                            <id> --until <time>\` moves it; at its time man wait
+                            wakes you with a todo-due event. \`--every <schedule>\`
+                            repeats it: \`todo done\` moves it on, \`todo skip
+                            <id>\` passes one, \`todo drop\` ends it. \`--when
+                            <trigger>\` (any) or \`--when-all\` (all) wakes you on
+                            card:, dispatch:, pr: or trap:
+                            Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.
   lobstah man ask           put a question the helm cannot decide to the human:
                             [<dispatch-id>] --title, --detail <f.md>,
                             --option (0-6), --attach. The glass shows it as a

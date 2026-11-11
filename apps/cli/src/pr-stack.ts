@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parsePrRef } from '@lobstah/core';
-import type { PrRef } from '@lobstah/core';
+import { dispatchPrUrls, mergeEvidence, parsePrRef, readEvidence, recordPrDispatch, derivePrStacks, readPrs } from '@lobstah/core';
+import type { DispatchPrPosition, Lane, PrRef } from '@lobstah/core';
+import { autoRegisterPrWatch } from './pr-watch.js';
 
 /** One subprocess run; tests swap in a fake `git` and `gh`. */
 export type StackRun = (cmd: string, args: string[], cwd: string) => { status: number | null; stdout: string };
@@ -12,16 +13,13 @@ const defaultRun: StackRun = (cmd, args, cwd) => {
   return { status: res.error ? null : res.status, stdout: res.stdout ?? '' };
 };
 
-/** The most branches the base-chain walk asks `gh` about. */
-const MAX_CHAIN_BRANCHES = 12;
-
 /** gh-stack's local state (`<git dir>/gh-stack`, schema 1): the stacks this checkout tracks. */
 interface GhStackFile {
   stacks?: Array<{ branches?: Array<{ branch?: string; pullRequest?: { url?: string } }> }>;
 }
 
 /** The PRs of the gh stack that holds one of `keys`, bottom to top. Empty when none does. */
-function ghStackPrs(cwd: string, keys: Set<string>, run: StackRun): PrRef[] {
+function ghStackPrs(cwd: string, keys: Set<string>, run: StackRun): PrRef[][] {
   for (const which of ['--git-dir', '--git-common-dir']) {
     const res = run('git', ['rev-parse', which], cwd);
     if (res.status !== 0 || !res.stdout.trim()) continue;
@@ -31,10 +29,12 @@ function ghStackPrs(cwd: string, keys: Set<string>, run: StackRun): PrRef[] {
     } catch {
       continue;
     }
+    const groups: PrRef[][] = [];
     for (const stack of state.stacks ?? []) {
       const refs = (stack.branches ?? []).map((b) => (b.pullRequest?.url ? parsePrRef(b.pullRequest.url) : undefined)).filter((r): r is PrRef => !!r);
-      if (refs.some((r) => keys.has(r.key))) return refs;
+      if (refs.some((r) => keys.has(r.key))) groups.push(refs);
     }
+    if (groups.length) return groups;
   }
   return [];
 }
@@ -45,73 +45,97 @@ interface ChainPr {
   base: string;
 }
 
-/**
- * The PRs linked to a reported PR by base branches, where each PR's head is
- * one of the dispatch's branches: `gh pr view <branch>` for each of them.
- * A dispatch with fewer than two branches asks nothing.
- */
-function baseChainPrs(reported: PrRef[], branches: readonly string[], cwd: string, run: StackRun): PrRef[] {
+/** Read the PRs of branches the dispatch pushed, scoped to the reported repository. */
+function branchPrs(reported: PrRef[], branches: readonly string[], cwd: string, run: StackRun): ChainPr[] {
   if (branches.length < 2 || reported.length === 0) return [];
   const repo = `${reported[0]!.owner}/${reported[0]!.repo}`;
   const byHead = new Map<string, ChainPr>();
-  for (const branch of branches.slice(0, MAX_CHAIN_BRANCHES)) {
+  for (const branch of branches) {
     const res = run('gh', ['pr', 'view', branch, '--repo', repo, '--json', 'url,headRefName,baseRefName'], cwd);
     if (res.status !== 0) continue;
     try {
       const view = JSON.parse(res.stdout) as { url?: string; headRefName?: string; baseRefName?: string };
       const ref = view.url ? parsePrRef(view.url) : undefined;
-      if (ref && view.headRefName === branch && view.baseRefName) byHead.set(branch, { ref, head: branch, base: view.baseRefName });
+      if (ref && `${ref.owner}/${ref.repo}`.toLowerCase() === repo.toLowerCase() && view.headRefName === branch && view.baseRefName) byHead.set(branch, { ref, head: branch, base: view.baseRefName });
     } catch {
       // Not JSON: no PR for this branch.
     }
   }
-  const keys = new Set(reported.map((r) => r.key));
-  const seen = new Set<string>();
-  const todo = [...byHead.values()].filter((n) => keys.has(n.ref.key));
-  const out: ChainPr[] = [];
-  while (todo.length > 0) {
-    const n = todo.pop()!;
-    if (seen.has(n.head)) continue;
-    seen.add(n.head);
-    out.push(n);
-    const below = byHead.get(n.base);
-    if (below) todo.push(below);
-    for (const above of byHead.values()) if (above.base === n.head) todo.push(above);
-  }
-  // Bottom to top: a PR whose base is another's head comes after it.
-  const heads = new Set(out.map((n) => n.head));
-  const ordered: ChainPr[] = [];
-  let next = out.find((n) => !heads.has(n.base));
-  while (next && !ordered.includes(next)) {
-    ordered.push(next);
-    const head = next.head;
-    next = out.find((n) => n.base === head);
-  }
-  for (const n of out) if (!ordered.includes(n)) ordered.push(n);
-  return ordered.map((n) => n.ref);
+  return [...byHead.values()];
 }
 
-/**
- * The PRs a `report --pr` records: the reported PRs first, then the other
- * PRs of the gh stack that holds one of them (read from the checkout's
- * gh-stack state), then the other PRs of a base chain of the dispatch's
- * branches. One per PR, canonical URLs. Never throws.
- */
-export function stackPrUrls(reported: readonly string[], opts: { cwd: string; branches?: readonly string[]; run?: StackRun }): string[] {
+/** Infer only linear chains. A branch with several children is not a stack. */
+function branchStacks(prs: readonly ChainPr[]): PrRef[][] {
+  const parent = new Map(prs.map((pr) => [pr.head, pr]));
+  const children = (pr: ChainPr): ChainPr[] => prs.filter((child) => child.base === pr.head);
+  return prs.filter((pr) => !parent.has(pr.base) || children(parent.get(pr.base)!).length > 1).flatMap((root) => {
+    const members = [root];
+    for (;;) {
+      const next = children(members.at(-1)!);
+      if (next.length !== 1 || members.includes(next[0]!)) break;
+      members.push(next[0]!);
+    }
+    return members.length > 1 ? [members.map((member) => member.ref)] : [];
+  });
+}
+
+/** Discover explicitly reported PRs, tracked gh stacks and every pushed branch with a PR. */
+export function dispatchPrDiscovery(reported: readonly string[], opts: { cwd: string; branches?: readonly string[]; run?: StackRun }): {
+  urls: string[];
+  positions: Record<string, DispatchPrPosition>;
+} {
   const run = opts.run ?? defaultRun;
-  const refs = reported.map((u) => parsePrRef(u)).filter((r): r is PrRef => !!r);
-  const out = new Map<string, string>();
-  const add = (r: PrRef) => {
-    if (!out.has(r.key)) out.set(r.key, r.url);
+  const refs = reported.map((url) => parsePrRef(url)).filter((ref): ref is PrRef => !!ref);
+  const urls = new Map(refs.map((ref) => [ref.key, ref.url]));
+  const positions: Record<string, DispatchPrPosition> = {};
+  const add = (ref: PrRef): void => { urls.set(ref.key, ref.url); };
+  const record = (members: PrRef[]): void => {
+    if (members.length < 2) return;
+    members.forEach((member, index) => {
+      add(member);
+      positions[member.url] ??= { bottom: members[0]!.url, position: index + 1, size: members.length };
+    });
   };
-  refs.forEach(add);
-  if (refs.length === 0) return [];
-  try {
-    const keys = new Set(refs.map((r) => r.key));
-    ghStackPrs(opts.cwd, keys, run).forEach(add);
-    baseChainPrs(refs, opts.branches ?? [], opts.cwd, run).forEach(add);
-  } catch {
-    // A stack that cannot be read adds nothing.
+  if (refs.length) {
+    const observed = readPrs();
+    const authors = new Set(observed.filter((pr) => urls.has(pr.key)).map((pr) => pr.author).filter(Boolean));
+    for (const stack of derivePrStacks(observed)) {
+      if (stack.members.some((member) => urls.has(parsePrRef(member.url)!.key)) &&
+          stack.members.every((member) => !!member.author && authors.has(member.author))) {
+        record(stack.members.map((member) => parsePrRef(member.url)!));
+      }
+    }
+    try { ghStackPrs(opts.cwd, new Set(urls.keys()), run).forEach(record); } catch { /* Reported URLs still count. */ }
+    try {
+      const pushed = branchPrs(refs, opts.branches ?? [], opts.cwd, run);
+      branchStacks(pushed).forEach(record);
+      pushed.forEach(({ ref }) => add(ref));
+    } catch { /* Keep URLs already known when the forge is unavailable. */ }
   }
-  return [...out.values()];
+  return { urls: [...urls.values()], positions };
+}
+
+/** Save all of a dispatch's PRs without losing its previous members or stack positions. */
+export function recordDispatchPrs(id: string, lane: Lane, discovery: ReturnType<typeof dispatchPrDiscovery>, watch: boolean): string[] {
+  const evidence = readEvidence(id, lane);
+  const urls = dispatchPrUrls({ prUrl: evidence.prUrl, prUrls: [...discovery.urls, ...dispatchPrUrls(evidence)] });
+  if (!urls.length) return [];
+  const positions = { ...evidence.prPositions };
+  for (const [url, position] of Object.entries(discovery.positions)) {
+    const old = positions[url];
+    if (!old || (old.bottom === position.bottom && position.size >= old.size)) positions[url] = position;
+  }
+  if (JSON.stringify(urls) !== JSON.stringify(dispatchPrUrls(evidence)) ||
+      JSON.stringify(positions) !== JSON.stringify(evidence.prPositions ?? {}) || !evidence.prUrl) {
+    mergeEvidence(id, lane, { prUrl: urls[0], ...(urls.length > 1 ? { prUrls: urls } : {}), ...(Object.keys(positions).length ? { prPositions: positions } : {}) });
+  }
+  for (const url of urls) {
+    try { recordPrDispatch(parsePrRef(url)!.key, id); } catch { /* A busy observation must not refuse the report. */ }
+  }
+  return watch ? urls.flatMap((url) => autoRegisterPrWatch(id, url)?.key ?? []) : [];
+}
+
+/** The canonical URLs discovered for a report, in report order. */
+export function stackPrUrls(reported: readonly string[], opts: { cwd: string; branches?: readonly string[]; run?: StackRun }): string[] {
+  return dispatchPrDiscovery(reported, opts).urls;
 }

@@ -20,13 +20,18 @@ function invited(env: Env, githubId: unknown): boolean {
   const ids: unknown = JSON.parse(env.GITHUB_ALLOWLIST);
   return Array.isArray(ids) && ids.every((id) => typeof id === 'string' && /^[1-9][0-9]{0,19}$/.test(id)) && ids.includes(githubId);
 }
+/** The GitHub OAuth app's public client id: a variable set once on the deployed Worker, not in wrangler.jsonc. */
+function githubClientId(env: Env): string {
+  if (!env.GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID is not set on this Worker; set it once in the dashboard or with `wrangler secret put GITHUB_CLIENT_ID`.');
+  return env.GITHUB_CLIENT_ID;
+}
 export function wharfAuth(env: Env) {
   const { glass } = authOrigins(env);
   return betterAuth({
     database: env.AUTH_DB, baseURL: glass, secret: env.AUTH_SECRET,
     trustedOrigins: [glass],
     socialProviders: { github: {
-      clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET,
+      clientId: githubClientId(env), clientSecret: env.GITHUB_CLIENT_SECRET,
     } },
     user: {
       validateUserInfo: ({ source }) => {

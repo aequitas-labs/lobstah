@@ -12,7 +12,7 @@ export function DeviceApproval({ notify }: { notify: (message: string, error?: b
     try {
       const d = await json<Device>(`/api/auth/device?user_code=${encodeURIComponent(code.trim())}`);
       setDevice(d);
-      setSteering(d.requestedPermissions.includes('helm') ? 'helm' : d.requestedPermissions.includes('read') ? 'read' : 'none');
+      setSteering(d.requestedPermissions.includes('mirror') ? 'mirror' : d.requestedPermissions.includes('helm') ? 'helm' : d.requestedPermissions.includes('read') ? 'read' : 'none');
     } catch (e) {
       notify((e as Error).message, true);
     }
@@ -29,7 +29,8 @@ export function DeviceApproval({ notify }: { notify: (message: string, error?: b
               userCode: code.trim(),
               name: device.boatName,
               requestedPermissions: device.requestedPermissions,
-              permissions: steering === 'none' ? ['work'] : ['work', steering],
+              // A mirror boat is approved as it asked, or refused: there is nothing lower to keep.
+              permissions: steering === 'mirror' ? ['mirror', 'read'] : steering === 'none' ? ['work'] : ['work', steering],
             },
       );
       setDevice(undefined);
@@ -45,5 +46,5 @@ export function DeviceApproval({ notify }: { notify: (message: string, error?: b
   ) => {
     setCode(value(e));
     setDevice(undefined);
-  }} /></label><button class="btn">inspect request</button></form>${device && html`<div class="card"><div class="top"><b>${device.boatName}</b></div><div class="note">${device.previousBoatName && 'previously ' + device.previousBoatName + ' · '}${device.description}</div><label>approved access <select aria-label="approved boat access" value=${steering} onChange=${(e: Event) => setSteering(value(e))}><option value="none">work only</option>${device.requestedPermissions.includes('read') || device.requestedPermissions.includes('helm') ? html`<option value="read">work + read</option>` : null}${device.requestedPermissions.includes('helm') && html`<option value="helm">work + helm</option>`}</select></label><div class="foot"><button class="btn" disabled=${pending} onClick=${() => approve()}>approve ${device.boatName}</button><button class="btn" disabled=${pending} onClick=${() => approve(true)}>refuse</button></div></div>`}`;
+  }} /></label><button class="btn">inspect request</button></form>${device && html`<div class="card"><div class="top"><b>${device.boatName}</b></div><div class="note">${device.previousBoatName && 'previously ' + device.previousBoatName + ' · '}${device.description}</div><label>approved access <select aria-label="approved boat access" value=${steering} onChange=${(e: Event) => setSteering(value(e))}>${device.requestedPermissions.includes('mirror') ? html`<option value="mirror">mirror + read</option>` : html`<option value="none">work only</option>`}${!device.requestedPermissions.includes('mirror') && (device.requestedPermissions.includes('read') || device.requestedPermissions.includes('helm')) ? html`<option value="read">work + read</option>` : null}${device.requestedPermissions.includes('helm') && html`<option value="helm">work + helm</option>`}</select></label><div class="foot"><button class="btn" disabled=${pending} onClick=${() => approve()}>approve ${device.boatName}</button><button class="btn" disabled=${pending} onClick=${() => approve(true)}>refuse</button></div></div>`}`;
 }

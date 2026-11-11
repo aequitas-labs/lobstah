@@ -45,7 +45,7 @@ node scripts/build-site.mjs --serve --wharf --port 4951 --out /tmp/lobstah-site-
 | `art/cut.py`   | the cutter that made `assets/` (a maintainer tool; the build never runs it)                         |
 
 `scripts/build-site.mjs` reads the design tokens and the card, badge, button
-and lobster rules from `apps/cli/glass/glass.css`, so the page wears the
+and lobster rules from `packages/glass-ui/ui/glass.css`, so the page wears the
 glass's theme and cannot drift from it. The lobsters are the glass's own
 sprite and star from `docs/assets`.
 | `llms.txt` | the page for agents, in the llms.txt shape: what lobstah is and where its guides are; `{{site}}` stands before each address on this site |

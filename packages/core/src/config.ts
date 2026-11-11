@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { parseConfiguredTraps, type ConfiguredTrapProfile } from './configured-traps.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
@@ -277,6 +278,29 @@ export interface LimitsConfig {
   releaseOnMerge: boolean;
 }
 
+/** The machine's heavy-check line (`lobstah heavy`). */
+export interface HeavyConfig {
+  /** Commands that run at once, across all repos. auto: 1 below 14 cores, otherwise 2. */
+  slots: number | 'auto';
+  /** Test workers per run. auto: a third of the cores, at least 2. */
+  workers: number | 'auto';
+  /** Active minutes a command keeps its slot. Past this it keeps running without one. */
+  holdLimitMins: number;
+  /** How long the oldest waiter waits before a quiet notice. */
+  lineNoticeMins: number;
+  /** Pushes a repo's hook handles cheaply, which take no slot. */
+  repos: Record<string, HeavyRepoConfig>;
+}
+
+export interface HeavyRepoConfig {
+  /** Remote refs whose pushes are light, such as `refs/heads/pr-evidence`. */
+  lightRefs: string[];
+  /** Path prefixes: a push changing only files under these is light. */
+  lightPaths: string[];
+  /** This repo's own heavy commands, which get the reminder: `pnpm test:e2e`. */
+  reminders: string[];
+}
+
 export interface SoakConfig {
   /** Sign-on and first-park window for Codex throws; --timeout overrides it. */
   codexStartSecs: number;
@@ -319,6 +343,11 @@ export interface SoakConfig {
   tmuxPages: TmuxPages;
   /** Panes per window when `tmuxPages = "fixed"`. */
   tmuxPageSize: number;
+  /**
+   * Start every Codex trap on Codex's shared app-server, as `man throw
+   * --remote-control` does for one: scheduled and batch throws too.
+   */
+  codexRemoteControl: boolean;
 }
 
 /** How lobstah's tmux server groups trap panes into windows. */
@@ -346,8 +375,10 @@ export interface HelmConfig {
   park?: 'arm' | 'block';
   /** Arm mode: seconds the Stop hook polls for a watcher that is still starting before it blocks. */
   armGraceSecs: number;
-  /** Open helm to-dos older than this many days earn a short note in `man tend`; 0 disables. */
+  /** Open helm todos older than this many days are stale and require a pass; 0 disables staleness. */
   todoStaleDays: number;
+  /** Maximum seconds between delivered todo/goals passes; 0 disables the interval, not daily or stale passes. */
+  passIntervalSecs: number;
   /** Maximum open todos listed in the session-start brief; 0 lists only the remainder count. */
   briefTodoLimit: number;
   /** Minimum seconds between quiet-timeout goals reminders per helm session; 0 disables. */
@@ -394,6 +425,12 @@ export interface WatchConfig {
 
 export interface GlassConfig {
   port: number;
+  /**
+   * A wharf in `[wharves]` that shows this machine's glass on its hosted
+   * glass: the daemon puts the glass snapshot there and carries out what a
+   * person does there. Omitted, the glass stays on this machine.
+   */
+  mirror?: string;
 }
 
 export type PetOpen = 'tab' | 'app' | 'helm';
@@ -409,10 +446,13 @@ export interface GroundsConfig {
 }
 
 export interface Config {
+  /** Named repo-less profiles; absent leaves repo traps unchanged. */
+  traps?: Record<string, ConfiguredTrapProfile>;
   repos: Record<string, RepoConfig>;
   harness: HarnessDefaults;
   limits: LimitsConfig;
   soak: SoakConfig;
+  heavy: HeavyConfig;
   helm: HelmConfig;
   wait: WaitConfig;
   glass: GlassConfig;
@@ -522,6 +562,7 @@ function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
   if (!Number.isInteger(soak.codexStartSecs) || soak.codexStartSecs < 1) throw new Error('soak.codexStartSecs must be a positive whole number');
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
+  if (typeof soak.codexRemoteControl !== 'boolean') throw new Error('soak.codexRemoteControl must be true or false');
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm' && soak.terminal !== 'tmux') {
     throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal", "iterm" or "tmux"`);
   }
@@ -530,6 +571,30 @@ function parseSoak(raw: unknown): SoakConfig {
   }
   if (!Number.isInteger(soak.tmuxPageSize) || soak.tmuxPageSize < 1) throw new Error('soak.tmuxPageSize must be a positive whole number');
   return soak;
+}
+
+export const DEFAULT_HEAVY: HeavyConfig = { slots: 'auto', workers: 'auto', holdLimitMins: 45, lineNoticeMins: 30, repos: {} };
+
+function parseHeavy(raw: unknown): HeavyConfig {
+  if (raw !== undefined && (!raw || typeof raw !== 'object' || Array.isArray(raw))) throw new Error(`[heavy] must be a table in ${configPath()}`);
+  const heavy: HeavyConfig = { ...DEFAULT_HEAVY, ...((raw as Partial<HeavyConfig>) ?? {}) };
+  for (const key of ['slots', 'workers'] as const) {
+    if (heavy[key] !== 'auto' && (!Number.isInteger(heavy[key]) || (heavy[key] as number) < 1)) throw new Error(`[heavy].${key} must be "auto" or a positive integer in ${configPath()}`);
+  }
+  for (const key of ['holdLimitMins', 'lineNoticeMins'] as const) {
+    if (typeof heavy[key] !== 'number' || !Number.isFinite(heavy[key]) || heavy[key] <= 0) throw new Error(`[heavy].${key} must be a positive number in ${configPath()}`);
+  }
+  const strings = (v: unknown, where: string): string[] => {
+    if (v === undefined) return [];
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new Error(`${where} must be a list of strings in ${configPath()}`);
+    return v as string[];
+  };
+  const repos: Record<string, HeavyRepoConfig> = {};
+  for (const [key, r] of Object.entries((heavy.repos ?? {}) as Record<string, Partial<HeavyRepoConfig>>)) {
+    repos[key] = { lightRefs: strings(r?.lightRefs, `[heavy.repos.${key}].lightRefs`), lightPaths: strings(r?.lightPaths, `[heavy.repos.${key}].lightPaths`), reminders: strings(r?.reminders, `[heavy.repos.${key}].reminders`) };
+  }
+  heavy.repos = repos;
+  return heavy;
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
@@ -543,6 +608,7 @@ export const DEFAULT_SOAK: SoakConfig = {
   signOffGraceSecs: 600,
   tmuxPages: 'repo',
   tmuxPageSize: 6,
+  codexRemoteControl: false,
 };
 
 export const DEFAULT_HELM: HelmConfig = {
@@ -554,11 +620,21 @@ export const DEFAULT_HELM: HelmConfig = {
   reportSecs: 900,
   armGraceSecs: 5,
   todoStaleDays: 3,
+  passIntervalSecs: 7200,
   briefTodoLimit: 5,
   goalsNudgeSecs: 7200,
 };
 
 export const DEFAULT_GLASS: GlassConfig = { port: 4949 };
+
+/** `[glass]`: its port, and the wharf it mirrors to, which must be one in `[wharves]`. */
+function glassConfig(raw: unknown, wharves: Record<string, unknown>): GlassConfig {
+  const glass: GlassConfig = { ...DEFAULT_GLASS, ...((raw as Partial<GlassConfig>) ?? {}) };
+  if (glass.mirror !== undefined && (typeof glass.mirror !== 'string' || !Object.hasOwn(wharves, glass.mirror))) {
+    throw new Error(`[glass] mirror must name a wharf in [wharves]; ${JSON.stringify(glass.mirror)} is not one`);
+  }
+  return glass;
+}
 export const DEFAULT_WAIT: WaitConfig = { baseTimeoutSecs: 900, baseRepeats: 3, maxTimeoutSecs: 14400 };
 
 export const DEFAULT_WATCH: WatchConfig = { maxForksPerCycle: 3, autoRepair: true, conflicts: true, checks: true, maxRepairsPerPr: 2, maxRepairsWithoutProgress: 2, repairSettleSecs: 600, repairCooldownSecs: 0, repairTrapWaitSecs: 600 };
@@ -611,7 +687,7 @@ export function loadConfig(): Config {
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
   if (helm.chat !== 'full' && helm.chat !== 'brief') throw new Error('[helm].chat must be "full" or "brief"');
-  for (const key of ['briefTodoLimit', 'goalsNudgeSecs'] as const) {
+  for (const key of ['briefTodoLimit', 'goalsNudgeSecs', 'passIntervalSecs'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isSafeInteger(helm[key]) || helm[key] < 0)
       throw new Error(`[helm].${key} must be a non-negative whole number in ${configPath()}`);
   }
@@ -685,14 +761,16 @@ export function loadConfig(): Config {
     harness: parseHarness(raw.harness, '[harness]') ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
     soak: parseSoak(raw.soak),
+    heavy: parseHeavy(raw.heavy),
     helm,
     wait,
-    glass: { ...DEFAULT_GLASS, ...((raw.glass as Partial<GlassConfig>) ?? {}) },
+    glass: glassConfig(raw.glass, wharves),
     pet: { open: petOpen },
     watch,
     grounds,
     wharves,
     pools: parsePools(raw.pools, repos),
+    traps: parseConfiguredTraps(raw.traps, grounds),
     hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
@@ -713,6 +791,7 @@ export interface ResolvedDispatch {
 
 /** Precedence chain: descriptor > repo config > global config > adapter default. */
 export function resolveDispatch(d: Descriptor, cfg: Config): ResolvedDispatch {
+  if (d.target || !d.repo) throw new Error('configured trap work cannot launch headless');
   const repo = cfg.repos[d.repo];
   if (!repo) throw new Error(`unknown repo key "${d.repo}" — add it to ${configPath()}`);
   const rh = repo.harness ?? {};

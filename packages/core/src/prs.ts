@@ -159,6 +159,15 @@ export function withPrLock<T>(key: string, action: () => T): T {
   });
 }
 
+/** Associate an already observed PR without manufacturing a new observation. */
+export function recordPrDispatch(key: string, dispatchId: string): void {
+  if (!readPr(key)) return;
+  withPrLock(key, () => {
+    const record = readPr(key);
+    if (record && !(record.dispatches ?? []).includes(dispatchId)) writePr({ ...record, dispatches: [...(record.dispatches ?? []), dispatchId] });
+  });
+}
+
 /**
  * Write one observation. Fields come from the new observation (an absent
  * optional field keeps the previous value; a new title replaces the old one);

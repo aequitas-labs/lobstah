@@ -96,6 +96,37 @@ final class ClickRoutingTests: XCTestCase {
       XCTAssertEqual(item.prUrl, "https://github.com/acme/web/pull/42")
     }
   }
+  func testStackPetShowsItsHeadlineAndOpensTheLinearApp() throws {
+    let data = Data(#"{"attention":[{"id":"a","verb":"stack-ready","kind":"stack-ready","note":"stack ready to merge: Heavy-check queue (#326 → #329, 4 PRs, all green)","headline":"Heavy-check queue (4 PRs, all green)","prUrl":"https://github.com/base-research-ai/homebase/pull/329","reviewUrl":"linear://review/base-research-ai/homebase/pull/329"}]}"#.utf8)
+    let item = try XCTUnwrap(JSONDecoder().decode(AttentionReport.self, from: data).attention.first)
+    XCTAssertEqual(item.bubbleText, "stack ready · Heavy-check queue (4 PRs, all green)")
+    XCTAssertEqual(item.prLink?.absoluteString, "linear://review/base-research-ai/homebase/pull/329")
+    var opened: URL?
+    clickAttentionItem(item, glass: URL(string: "http://127.0.0.1:63169")!,
+      open: { opened = $0 }, focusHelm: { _ in XCTFail("PRs never focus helm") },
+      showApp: { _, _ in XCTFail("PRs never open the glass app") }, acknowledge: { _ in })
+    XCTAssertEqual(opened?.absoluteString, "linear://review/base-research-ai/homebase/pull/329")
+  }
+  func testPrPetWithNoReviewToolOpensGitHub() throws {
+    let data = Data(##"{"attention":[{"id":"a","verb":"pr:ready","kind":"pr:ready","note":"#7 Put job photos first · ready to merge","prUrl":"https://github.com/acme/web/pull/7","reviewUrl":"https://github.com/acme/web/pull/7"}]}"##.utf8)
+    let item = try XCTUnwrap(JSONDecoder().decode(AttentionReport.self, from: data).attention.first)
+    XCTAssertEqual(item.bubbleText, "ready · #7 Put job photos first · ready to merge")
+    XCTAssertEqual(item.prLink?.absoluteString, "https://github.com/acme/web/pull/7")
+  }
+  func testAPetStandingForMoreKeepsItsTargetAndHeadline() throws {
+    let data = Data(#"{"attention":[{"id":"a","verb":"stack-ready","kind":"stack-ready","note":"the long line","headline":"Heavy-check queue (4 PRs, all green)","prUrl":"https://github.com/acme/web/pull/9","reviewUrl":"linear://review/acme/web/pull/9"}]}"#.utf8)
+    let item = try XCTUnwrap(JSONDecoder().decode(AttentionReport.self, from: data).attention.first)
+    let standing = item.standingFor(extra: 2)
+    XCTAssertEqual(standing.bubbleText, "stack ready · Heavy-check queue (4 PRs, all green) (+2 more)")
+    XCTAssertEqual(standing.prLink?.absoluteString, "linear://review/acme/web/pull/9")
+  }
+  func testALongBubbleIsCutToFit() {
+    var item = AttentionItem(id: "a", verb: "pr:ready", note: String(repeating: "x", count: 200), kind: "pr:ready")
+    XCTAssertEqual(item.bubbleLine.count, 80)
+    XCTAssertTrue(item.bubbleLine.hasSuffix("…"))
+    item.headline = "short"
+    XCTAssertEqual(item.bubbleLine, "ready · short")
+  }
   func testConfiguredRoutesForReportsAndDecisions() {
     let glass = URL(string: "http://127.0.0.1:63169")!
     for kind in ["report", "decision"] {

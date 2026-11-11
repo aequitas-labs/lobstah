@@ -1,8 +1,10 @@
+import { stageAssistance } from './assistance.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Descriptor, Lane } from './types.js';
+import { dispatchTarget, type Descriptor, type Lane } from './types.js';
 import { uniqueTempPath, atomicRenameSync, laneDirs, readDirIfPresent } from './paths.js';
 import { appendStatus } from './status.js';
+import { dropHeavyTickets } from './heavy.js';
 import { observeLocalCatch } from './catch-context.js';
 
 function atomicWrite(file: string, content: string): void {
@@ -12,9 +14,11 @@ function atomicWrite(file: string, content: string): void {
 }
 
 export function enqueue(d: Descriptor, lane: Lane = 'work'): void {
-  if (!d.id || !d.repo || !d.brief) {
+  dispatchTarget(d);
+  if (!d.id || !d.brief) {
     throw new Error('descriptor requires id, repo, and brief');
   }
+  stageAssistance(d, lane);
   // Every descriptor-producing path (CLI, node, pickup, watch continuation)
   // inherits origin references unless it already chose an attachment list.
   const inherited = d.followUp && d.attachments === undefined
@@ -163,6 +167,11 @@ export function complete(id: string, lane: Lane): void {
 
 export function requestCancel(id: string, lane: Lane): void {
   fs.writeFileSync(path.join(laneDirs(lane).active, id, 'cancel'), new Date().toISOString());
+  try {
+    dropHeavyTickets({ dispatch: id }, 'its dispatch was cancelled');
+  } catch {
+    /* the tickets clear once their processes end */
+  }
 }
 
 /**

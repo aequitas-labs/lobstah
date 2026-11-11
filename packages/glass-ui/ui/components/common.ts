@@ -1,0 +1,843 @@
+import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
+import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
+import { useState } from 'preact/hooks';
+import { desktopSession, isImageName, prBadgeClass, resumeCommand, watchState } from '../../src/glass-diff.js';
+import type { ResumeSession } from '../../src/glass-diff.js';
+import type { DispatchDetail, ModalType } from '../../src/glass-diff.js';
+import { copyText, loadOlder, openLightbox, openTrapWindow, READ_ONLY_REASON, requestTrap, showModal } from '../actions.js';
+import { getState } from '../store.js';
+import { prReviewUrl } from '../../../core/src/pr-review.js';
+import { html } from '../html.js';
+import type { Children } from '../html.js';
+import { linkParts } from '../../src/glass-links.js';
+import { LinkedText, UrlLink } from './links.js';
+import { HarnessIcon, harnessLabel } from './harness-icon.js';
+import { workerMetadata } from '../../../core/src/worker-metadata.js';
+import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
+import { can, fileUrl } from '../backend.js';
+
+/** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
+
+export const ageText = (iso: string | undefined | null): string => {
+  if (!iso) return '';
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (s < 90) return Math.round(s) + 's';
+  if (s < 5400) return Math.round(s / 60) + 'm';
+  if (s < 172800) return (s / 3600).toFixed(1) + 'h';
+  return Math.round(s / 86400) + 'd';
+};
+
+/** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
+export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
+
+/** The same pass age beside goals and todos, recomputed when the glass refreshes. */
+export function lastPassText(at: string | undefined): string {
+  return at ? `last pass ${Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 60000))} min ago` : 'No pass recorded';
+}
+
+type WorkerInfo = { harness?: string | null; model?: string | null; config?: WorkerConfig; observedAt?: string };
+
+/** Only the existing harness indicator at rest; model/effort on hover or focus. */
+export function Harness({
+  worker,
+  label,
+  cls = 'badge',
+  compact = false,
+}: {
+  worker: WorkerInfo;
+  label?: Children;
+  cls?: string;
+  compact?: boolean;
+}): Children {
+  const w = workerMetadata(worker);
+  const text = [w.model ?? 'model unknown', w.config.effort].filter(Boolean).join(' · ');
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const show = (e: Event) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 280)), top: r.bottom + 6 });
+  };
+  return html`<span class=${cls + ' worker-harness' + (compact ? ' worker-compact' : '')} tabindex="0" aria-label=${compact ? harnessLabel(w.harness) + ' · ' + text : text} title=${compact ? harnessLabel(w.harness) + ' · ' + text : undefined}
+    onMouseEnter=${show} onFocus=${show} onBlur=${() => setPos(null)}
+    onMouseLeave=${(e: Event) => {
+      if (document.activeElement !== e.currentTarget) setPos(null);
+    }}
+    onKeyDown=${(e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPos(null);
+    }}>
+    ${compact ? html`<${HarnessIcon} harness=${w.harness} />` : (label ?? w.harness ?? 'unknown harness')}${pos && !getState().modal && html`<span class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
+  </span>`;
+}
+export const WorkerIndicator = (x: Pick<GlassDispatchSummary, 'worker'>) => x.worker && html`<${Harness} worker=${x.worker} />`;
+
+/** One details section in the modal, including headless launch observations. */
+export function WorkerDetails({ worker, headless = false }: { worker: WorkerInfo | WorkerMetadata; headless?: boolean }) {
+  const w = workerMetadata(worker);
+  return html`<section class="worker-details"><div class="sec">${headless ? 'headless worker · launch / observation' : 'worker observation'}</div><dl>
+    <dt>harness</dt><dd>${w.harness ?? 'unknown'}</dd>
+    <dt>model</dt><dd>${w.model ?? 'model unknown'}</dd>
+    <dt>effort</dt><dd>${w.config.effort ?? 'unknown'}</dd>
+    <dt>permission mode</dt><dd>${w.config.permissionMode ?? 'unknown'}</dd>
+    <dt>observed</dt><dd>${w.observedAt ?? 'unknown'}</dd>
+  </dl></section>`;
+}
+
+/** The activity line under a dispatch's verb and note: what it is doing now, and how long ago. Stale shows dim. */
+export const ActivityLine = (x: Pick<GlassDispatchSummary, 'activity'>) =>
+  x.activity &&
+  html`<div class=${'activity' + (x.activity.stale ? ' stale' : '')} title=${x.activity.stale ? 'no activity past the wedge threshold' : x.activity.kind}>${x.activity.stale ? 'stale · ' : ''}${LinkedText(x.activity.summary)} · ${Age(x.activity.at)} ago</div>`;
+
+/** An http(s) link, or undefined: the page never renders any other scheme as a link. */
+const safeHref = (u: string | undefined): string | undefined => (u && /^https?:\/\//i.test(u) ? u : undefined);
+
+/** `paused: waiting on review · 12m · <link>`: what the worker waits on outside lobstah, and for how long. */
+export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>) => {
+  const w = x.waiting;
+  if (!w) return undefined;
+  const href = safeHref(w.link);
+  let label = href;
+  try {
+    if (href) label = new URL(href).host + new URL(href).pathname.replace(/\/$/, '');
+  } catch {
+    label = href;
+  }
+  return html`<div class="waiting">${x.verb}: waiting on ${w.on} · ${Age(w.since)}${
+    href && [' · ', html`<a href=${href} target="_blank" rel="noopener noreferrer" onClick=${stop}>${label}</a>`]
+  }</div>`;
+};
+
+/**
+ * A card badge of up to this many characters always shows whole. A longer one
+ * carries the `long` class, may truncate with an ellipsis once the title has
+ * reached its minimum, and keeps its full text in its title attribute.
+ */
+export const BADGE_WHOLE_CHARS = 12;
+const longBadge = (text: string | undefined): boolean => text !== undefined && text.length > BADGE_WHOLE_CHARS;
+export const badgeTitle = (text: string | undefined): string | undefined => (longBadge(text) ? text : undefined);
+/** ' long' for a badge that may truncate, else ''. */
+export const badgeLong = (text: string | undefined): string => (longBadge(text) ? ' long' : '');
+
+/** A click handler that opens a modal (and never bubbles to a row that opens another). */
+export const opener = (type: ModalType, key: string) => () => showModal(type, key);
+export const stop = (e: Event) => e.stopPropagation();
+
+/** This device can use a copied command. A phone can't, and off the machine an unknown device isn't assumed to. */
+export function viewerHasTerminal(): boolean {
+  const viewer = getState().snapshot?.viewer;
+  return !!viewer && (viewer.onMachine ? viewer.device !== 'phone' : viewer.device === 'desktop');
+}
+
+/** Session links open an app on the trap's machine, so they only work for a viewer there. */
+export function sessionLinkOpens(): boolean {
+  const viewer = getState().snapshot?.viewer;
+  return !!viewer?.onMachine && viewer.device !== 'phone';
+}
+
+/** The configured app-start action, sized and spaced like the other decision controls. */
+export function DesktopStartAction({ url, decision = false }: { url: string; decision?: boolean }): Children {
+  return html`<div class="desktop-start" onClick=${stop}>
+    ${
+      sessionLinkOpens()
+        ? html`<a class="btn dopt open" href=${url}>Open Claude Code</a>`
+        : html`<div class="dim">${decision ? 'Open this start card on the Mac to open Claude Code' : 'Open Claude Code on the Mac to sign on'}</div>`
+    }
+    ${decision && html`<div class="dim">The card clears after the configured session signs on and parks.</div>`}
+  </div>`;
+}
+
+/** The notice for a page whose actions the server refuses: off the machine, with no way to write. A hosted glass writes from anywhere. */
+export function readOnlyNotice(): Children {
+  const snapshot = getState().snapshot;
+  return snapshot?.viewer?.onMachine === false && !snapshot.focusToken && html`<div class="dim">${READ_ONLY_REASON}</div>`;
+}
+
+/** What the live link does, said once in the modal: which client takes it depends on the device. */
+export function liveLinkNote(t: GlassTrap): Children {
+  if (t.live && t.sessionWriters)
+    return html`<div class="bad">Processes ${t.sessionWriters.join(' and ')} both hold this session, so its live link is hidden. End one to get it back</div>`;
+  return (
+    t.live &&
+    t.liveLink &&
+    html`<div class="dim">Opens in the Claude app or a browser, signed in to the same account. The trap keeps running on its machine</div>`
+  );
+}
+
+/**
+ * One way to open a trap from this page, best first. A row shows only the
+ * first as its one ↗ Open; the trap modal lists them all, each under its own
+ * label.
+ */
+export interface TrapRoute {
+  kind: 'raise' | 'live' | 'link';
+  /** The modal's button text. */
+  name: string;
+  /** Where it works, beside the modal's button. */
+  where: string;
+  /** The control, with the text it carries. */
+  control: (text: string) => Children;
+}
+
+/**
+ * The ways this page can open a trap, best first: raise its window on this
+ * Mac, open it live in Claude (any device), or its session link (an app on
+ * this Mac). A desktop session's own link is the modal's session row, so it
+ * isn't repeated here. Presentation only: the server refuses what a page
+ * may not do.
+ */
+export function trapRoutes(t: GlassTrap): TrapRoute[] {
+  if (t.requested || t.starting || !t.live) return [];
+  const viewer = getState().snapshot?.viewer;
+  const here = onThisMachine(t);
+  const routes: TrapRoute[] = [];
+  if (here && can('focus') && (viewer!.windowFocus || t.link)) {
+    const clicked = (e: Event) => {
+      stop(e);
+      void openTrapWindow(t.trapId);
+    };
+    routes.push({
+      kind: 'raise',
+      name: 'Raise window',
+      where: 'on this Mac',
+      control: (text) => html`<button class="btn open" title="Raise this trap's window on this Mac" onClick=${clicked}>${text}</button>`,
+    });
+  }
+  if (t.liveLink) {
+    const href = t.liveLink;
+    routes.push({
+      kind: 'live',
+      name: 'Open live in Claude',
+      where: 'any device',
+      control: (text) =>
+        html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" onClick=${stop}>${text}</a>`,
+    });
+  }
+  if (t.link && !desktopSession(t) && here && sessionLinkOpens()) {
+    const href = t.link;
+    routes.push({
+      kind: 'link',
+      name: 'Session link',
+      where: 'opens its app on this Mac',
+      control: (text) => html`<a class="btn open" href=${href} title="Open this session's link in its app" onClick=${stop}>${text}</a>`,
+    });
+  }
+  return routes;
+}
+
+/**
+ * Whether this page runs on the trap's machine. A trap that names a boat
+ * runs elsewhere, even when the page is on a machine of the fleet (the
+ * hosted glass on one of several mirror boats).
+ */
+const onThisMachine = (t: GlassTrap): boolean => !!getState().snapshot?.viewer?.onMachine && !t.boat;
+
+/** Where a live trap runs, for a page off its machine. */
+const runningOn = (t: GlassTrap): string => `Running on ${t.boat ?? getState().snapshot?.viewer?.machine ?? 'its machine'}`;
+
+/**
+ * A live trap seen from a page that isn't on its machine and has no route to
+ * it: where it runs, instead of a button that can't help.
+ */
+function offMachineNote(t: GlassTrap): Children {
+  // Same machine by another name. The server can't accept actions at this address, but the page can point at the one it does.
+  if (location.hostname === 'localhost') {
+    const address = `127.0.0.1${location.port ? ':' + location.port : ''}`;
+    return html`<span class="winaction"><span class="dim">Open controls need</span> <a href=${'http://' + address} onClick=${stop}>${address}</a></span>`;
+  }
+  return html`<span class="dim offmachine">${t.attachCommand && viewerHasTerminal() ? runningOn(t) : `${runningOn(t)}, only reachable from there`}</span>`;
+}
+
+/** What a live trap with no route to it says, or nothing. */
+function noRouteNote(t: GlassTrap): Children {
+  const viewer = getState().snapshot?.viewer;
+  if (!onThisMachine(t)) return offMachineNote(t);
+  return can('focus') && !viewer!.windowFocus && !t.link ? html`<span class="dim">Window focus is not supported here</span>` : null;
+}
+
+/** The answer to the last raise of this trap's window. */
+const focusResult = (t: GlassTrap): Children => {
+  const result = getState().focusResults[t.trapId];
+  return result && [' ', html`<span class="dim">${result}</span>`];
+};
+
+/**
+ * The one ↗ Open wherever a trap is a row (table, card, deck), or a state
+ * note, or nothing. It takes the trap's best route: its window on this Mac,
+ * else its live link, else its session link. Every route, and the resume
+ * and attach commands, are in the trap modal.
+ */
+export function windowAction(t: GlassTrap): Children {
+  if (t.requested) return html`<span class="dim">Requested — no window yet</span>`;
+  if (t.starting) return html`<span class="dim">${t.starting.failedAt ? 'Did not start' : 'Starting — no window yet'}</span>`;
+  if (!t.live) {
+    if (!(desktopSession(t) && t.link) || !sessionLinkOpens()) return null;
+    // The server focuses live traps only; a signed-off app session opens its stored link.
+    return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
+  }
+  const [best] = trapRoutes(t);
+  if (!best) return noRouteNote(t);
+  const where = !onThisMachine(t) && html`<span class="dim">${runningOn(t)}</span> `;
+  return html`<span class=${'winaction' + (where ? ' offmachine' : '')}>${where}${best.control('↗ Open')}${focusResult(t)}</span>`;
+}
+
+/** The trap modal's open section: every route under its label, or the row's note when there is none. */
+export function trapOpenRoutes(t: GlassTrap): Children {
+  const routes = trapRoutes(t);
+  if (!routes.length) return windowAction(t) ?? html`<span class="dim">Signed off — no window</span>`;
+  return [
+    !onThisMachine(t) && html`<div class="dim offmachine">${runningOn(t)}</div>`,
+    html`<div class="routes">${routes.map(
+      (r) =>
+        html`<div key=${r.kind} class="route">${r.control(r.name)} <span class="dim">${r.where}</span>${r.kind === 'raise' && focusResult(t)}</div>`,
+    )}</div>`,
+  ];
+}
+
+export function Table(headers: readonly string[], rows: Children[], empty: string) {
+  if (!rows.length) return html`<div class="empty">${empty}</div>`;
+  return html`<div class="wrap"><table><tbody><tr>${headers.map((h) => html`<th>${h}</th>`)}</tr>${rows}</tbody></table></div>`;
+}
+
+/** Paging in history /data leaves out: how many are left, and whether a page is on its way. */
+export interface OlderControl {
+  left: number;
+  loading: boolean;
+  error?: string;
+}
+
+/** `show 50 older (of 212)` under a list whose history pages in; nothing when none is left. */
+export function ShowOlder({ kind, more }: { kind: GlassOlderKind; more: OlderControl }) {
+  if (!can('older') || (!more.left && !more.error)) return null;
+  return html`<div class="older">${
+    more.left > 0 &&
+    html`<button class="btn" disabled=${more.loading} onClick=${() => void loadOlder(kind)}>${
+      more.loading ? 'loading…' : `show ${Math.min(more.left, 50)} older (of ${more.left})`
+    }</button>`
+  }${more.error && html` <span class="bad">${more.error}</span>`}</div>`;
+}
+
+/** A command the reader copies (the glass never runs anything): click the text or ⧉. */
+function CmdRow({ text, label, href }: { text: string; label?: string; href?: string }) {
+  const [copied, setCopied] = useState<'code' | 'button' | null>(null);
+  const copy = (which: 'code' | 'button') => async (e: Event) => {
+    stop(e);
+    if (!(await copyText(text))) return;
+    setCopied(which);
+    setTimeout(() => setCopied(null), 1000);
+  };
+  const content = [
+    label && html`<span class="dim">${label}</span>`,
+    href
+      ? html`<code><a href=${href} onClick=${stop}>${text}</a></code>`
+      : html`<code class=${copied === 'code' ? 'copied' : undefined} title="click to copy" onClick=${copy('code')}>${text}</code>`,
+    html`<button title="copy" onClick=${copy('button')}>${copied === 'button' ? '✓' : '⧉'}</button>`,
+  ];
+  return label ? html`<span class="cmd inline">${content}</span>` : html`<div class="cmd">${content}</div>`;
+}
+export const cmdRow = (text: string, key?: string, label?: string, href?: string) =>
+  html`<${CmdRow} key=${key} text=${text} label=${label} href=${href} />`;
+
+/**
+ * How the modal offers a trap's session. A live trap never offers resume,
+ * which would start a second process on a session still in use: it offers its
+ * attach command or its desktop link, or nothing when neither exists or works
+ * on this device.
+ */
+export const trapSessionRow = (t: GlassTrap): Children => {
+  if (t.live && !desktopSession(t)) return t.attachCommand && viewerHasTerminal() ? cmdRow(t.attachCommand, undefined, 'attach:') : null;
+  return t.sessionId || (t.link && desktopSession(t)) ? resumeRow(t, 'resume:') : null;
+};
+
+/** A session's resume row; `label` names it where it sits among other routes (the trap modal). */
+export const resumeRow = (session: ResumeSession, label?: string): Children => {
+  if (desktopSession(session)) {
+    if (!sessionLinkOpens()) return null;
+    return session.link
+      ? cmdRow(session.link, undefined, 'desktop thread:', session.link)
+      : html`<span class="dim">desktop thread — open in the app</span>`;
+  }
+  if (!viewerHasTerminal()) return null;
+  const command = resumeCommand(session);
+  return command ? cmdRow(command, undefined, label) : html`<span class="dim">Resume command unavailable</span>`;
+};
+
+/** A clickable image that opens in the in-page overlay. */
+export const ImageThumb = (src: string, name: string, cls = 'thumb') =>
+  html`<button
+    type="button"
+    class=${cls}
+    title=${'view ' + name}
+    onClick=${(e: Event) => {
+      stop(e);
+      openLightbox(src, name);
+    }}
+  >
+    <img src=${src} alt=${name} loading="lazy" />
+  </button>`;
+
+/**
+ * Attachment rows: name, type, size, and the path to copy. With `fileUrl`
+ * (where the glass serves this list's files), an image also shows a thumb
+ * that opens in the overlay.
+ */
+export const attachmentRows = (items: readonly Attachment[], fileUrl?: (name: string) => string) =>
+  items.map((a) => [
+    html`<div class="sub">${a.name} · ${a.type} · ${a.bytes} bytes</div>`,
+    fileUrl && isImageName(a.name) && ImageThumb(fileUrl(a.name), a.name),
+    cmdRow(a.path),
+  ]);
+
+/** A `wt:<id>` address in free text. */
+const TRAP_ADDRESS = /\bwt:([a-z0-9][a-z0-9-]*)/g;
+
+/** The trap's name from the snapshot (the live registration's, else the name registry's), if known. */
+const knownTrapName = (trapId: string): string | undefined => getState().snapshot?.trapNames?.[trapId];
+
+/** Text with each `wt:<id>` shown by the trap's name; `wt:<id>` stays where no name is known. */
+export const namedText = (text: string): string =>
+  text.replace(TRAP_ADDRESS, (whole: string, id: string, at: number) => {
+    const name = knownTrapName(id);
+    return name && !labelled(text, at, whole.length, name) ? name : whole;
+  });
+
+/** The address at `at` already sits in its label, `<name> (wt:<id>)`: the name is shown. */
+const labelled = (text: string, at: number, length: number, name: string): boolean =>
+  text.slice(Math.max(0, at - name.length - 2), at) === `${name} (` && text[at + length] === ')';
+
+/** The trap's own name leads glass labels; its address is the fallback when no name is known. */
+export function trapDisplayName(trap: Pick<GlassTrap, 'trapId' | 'name' | 'label'>): string {
+  return trap.name ?? knownTrapName(trap.trapId) ?? trap.label?.replace(/\s*\(wt:[^)]+\)$/, '') ?? `wt:${trap.trapId}`;
+}
+
+/** The repo or configured profile belongs below the trap name, never in its title. */
+export function trapScope(trap: Pick<GlassTrap, 'repo' | 'configured'>): string {
+  return trap.configured ? `trap:${trap.configured.profile} · ${trap.configured.grounds}` : (trap.repo ?? '');
+}
+
+/** A trap shown by name, its full `wt:<id>` in the title. A click opens the trap's modal. */
+export function TrapName(trapId: string): Children {
+  const address = 'wt:' + trapId;
+  const name = knownTrapName(trapId) ?? address;
+  if (!getState().snapshot?.traps.some((t) => t.trapId === trapId)) return html`<span class="trapname" title=${address}>${name}</span>`;
+  const open = (e: Event) => {
+    e.preventDefault();
+    stop(e);
+    showModal('trap', trapId);
+  };
+  return html`<a class="trapname" href="#traps" title=${address} onClick=${open}>${name}</a>`;
+}
+
+/** A worker address: a `wt:<id>` shows as TrapName; any other address shows as it is. */
+export const WorkerAddress = (address: string): Children => {
+  const m = /^wt:([a-z0-9][a-z0-9-]*)$/.exec(address);
+  return m ? TrapName(m[1]!) : address;
+};
+
+/**
+ * Free text with each `wt:<id>` shown as TrapName and each bare http(s) URL
+ * as a link (LinkedText's rules). Past `max` shown characters it is cut with
+ * an ellipsis, counting names as shown; a cut URL still links to all of it.
+ */
+export function NamedText(text: string, max = Infinity): Children[] {
+  const parts: Array<{ text: string; trapId?: string; url?: string }> = [];
+  for (const seg of linkParts(text)) {
+    if (typeof seg !== 'string') {
+      parts.push({ text: seg.url, url: seg.url });
+      continue;
+    }
+    let last = 0;
+    for (const m of seg.matchAll(TRAP_ADDRESS)) {
+      if (m.index! > last) parts.push({ text: seg.slice(last, m.index) });
+      const name = knownTrapName(m[1]!);
+      parts.push(name && labelled(seg, m.index!, m[0].length, name) ? { text: m[0] } : { text: name ?? m[0], trapId: m[1] });
+      last = m.index! + m[0].length;
+    }
+    if (last < seg.length) parts.push({ text: seg.slice(last) });
+  }
+  const total = parts.reduce((n, p) => n + p.text.length, 0);
+  let budget = total > max ? max - 1 : Infinity;
+  const out: Children[] = [];
+  for (const p of parts) {
+    if (budget <= 0) break;
+    const whole = p.text.length <= budget;
+    const shown = whole ? p.text : p.text.slice(0, budget);
+    if (p.url) out.push(UrlLink(p.url, shown));
+    else out.push(whole && p.trapId ? TrapName(p.trapId) : shown);
+    budget -= p.text.length;
+  }
+  if (total > max) out.push('…');
+  return out;
+}
+
+/** A dispatch's status log, one line per entry, each trap shown by name that opens its modal. */
+export const LogLines = (x: Pick<GlassDispatch, 'log'>): Children[] =>
+  x.log.flatMap((e, i) => [i ? '\n' : '', e.at + '  ' + e.verb, ...(e.note ? ['  ', ...NamedText(e.note)] : [])]);
+
+/** Whether a dispatch modal's item has its detail: the brief, log, and full evidence. */
+export const hasDetail = (x: GlassDispatchSummary | GlassDispatch): x is GlassDispatch => 'brief' in x;
+
+export function detailBody(x: GlassDispatchSummary | GlassDispatch, detail?: DispatchDetail | null) {
+  const progress = [
+    x.elapsed && `elapsed: ${x.elapsed}`,
+    x.attempt && `attempt: ${x.attempt}`,
+    x.branch && `branch: ${x.branch}`,
+    x.lastCommit && `last commit: ${x.lastCommit}`,
+    x.aheadTrunk && `commits: ${x.aheadTrunk}`,
+    x.draftPr && `draft PR: ${x.draftPr}`,
+    x.updated && `updated: ${x.updated}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const head = html`${x.waiting && [html`<div class="sec">waiting</div>`, WaitingLine(x)]}${x.activity && [html`<div class="sec">activity</div>`, ActivityLine(x)]}${progress && [html`<div class="sec">progress</div>`, html`<pre>${LinkedText(progress)}</pre>`]}`;
+  // The brief, log, inbox, and evidence come with the detail, fetched when the modal opens.
+  // Worker fields have a single labeled section above; don't repeat them in
+  // the raw evidence dump. Leave all other evidence intact.
+  const evidence: Record<string, unknown> | undefined = x.evidence && { ...x.evidence };
+  if (evidence?.worker) {
+    delete evidence.worker;
+    delete evidence.harness;
+  }
+  if (!hasDetail(x))
+    return html`${head}<div class="sec">brief</div><div class=${detail?.error ? 'bad' : 'dim'}>${detail?.error ?? 'loading…'}</div>${
+      x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${LinkedText(x.followUp)}</pre>`]
+    }${x.note && [html`<div class="sec">last note</div>`, html`<div class="loglines">${NamedText(x.note)}</div>`]}`;
+  return html`${head}<div class="sec">brief</div><pre>${LinkedText(x.brief)}</pre>${
+    x.attachments.length > 0 && [
+      html`<div class="sec">attachments (${x.attachments.length})</div>`,
+      attachmentRows(x.attachments, (name) => fileUrl({ kind: 'dispatch', lane: x.lane, id: x.id }, name)),
+    ]
+  }${
+    x.messageAttachments.length > 0 && [
+      html`<div class="sec">message attachments (${x.messageAttachments.length})</div>`,
+      attachmentRows(x.messageAttachments, (name) => fileUrl({ kind: 'dispatch', lane: x.lane, id: x.id }, name)),
+    ]
+  }${x.followUp && [html`<div class="sec">forks</div>`, html`<pre>${LinkedText(x.followUp)}</pre>`]}<div class="sec">log</div><div class="loglines">${
+    x.log.length ? LogLines(x) : 'no entries yet'
+  }</div>${x.inbox.length > 0 && [html`<div class="sec">inbox</div>`, html`<div class="loglines">${LinkedText(x.inbox.join('\n---\n'))}</div>`]}${
+    x.awaitingReply && [
+      html`<div class="sec">awaiting reply</div>`,
+      html`<div>${LinkedText(x.awaitingReply.line)} · from ${x.awaitingReply.from} · ${Age(x.awaitingReply.sentAt)} ago</div>`,
+    ]
+  }${evidence && [html`<div class="sec">evidence</div>`, html`<div class="loglines">${LinkedText(JSON.stringify(evidence))}</div>`]}`;
+}
+
+export function addrCell(x: GlassDispatchSummary) {
+  if (x.for)
+    return [
+      WorkerAddress(x.for),
+      x.evidence && x.evidence.deliveredTo
+        ? [' ', html`<span class="ok">✓delivered</span>`]
+        : [' ', html`<span class="warn">waiting</span>`],
+    ];
+  return x.claimedBy ? WorkerAddress(x.claimedBy) : '';
+}
+
+/**
+ * The PR a dispatch leads with (prHead): the current work's PR and how many
+ * more are open. None while it builds a new PR after an earlier one ended;
+ * its modal keeps the whole PR list.
+ */
+export function prHeadCell(x: GlassDispatchSummary) {
+  const h = x.prHead;
+  if (!h) return '';
+  return [
+    html`<a href=${reviewLink(h.url)} target="_blank" rel="noopener" onClick=${stop}>${h.several ? `#${h.number}` : 'PR'}</a>`,
+    h.badge && [
+      ' ',
+      html`<span class=${'badge ' + prBadgeClass(h.badge)} title=${'observed ' + h.badge.observedAt}>${h.badge.text}</span>`,
+    ],
+    h.open > 1 && [' ', html`<span class="dim" title=${`${h.open} open PRs`}>+${h.open - 1} open</span>`],
+    x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
+  ];
+}
+
+export function prCell(x: GlassDispatchSummary) {
+  // Several PRs: each in stack order with its own state; one not yet observed shows none.
+  if (x.prList && x.prList.length > 1) {
+    return [
+      x.prList.map((p, i) => [
+        i ? ' → ' : '',
+        p.position && p.size ? `${p.position}/${p.size} ` : '',
+        html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" title=${p.title} onClick=${stop}>#${p.number}</a>`,
+        p.badge && [' ', html`<span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>`],
+      ]),
+      x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
+    ];
+  }
+  const url = x.evidence && (x.evidence.prUrl || (x.evidence.pr && x.evidence.pr.url));
+  if (!url) return '';
+  const b = x.prBadge;
+  const many = x.evidence && x.evidence.prUrls && x.evidence.prUrls.length > 1 ? x.evidence.prUrls : undefined;
+  return [
+    many
+      ? many.map((u, i) => [
+          i ? ' ' : '',
+          html`<a href=${reviewLink(u)} target="_blank" rel="noopener" onClick=${stop}>#${u.split('/').pop()}</a>`,
+        ])
+      : html`<a href=${reviewLink(url)} target="_blank" rel="noopener" onClick=${stop}>PR</a>`,
+    b && [' ', html`<span class=${'badge ' + prBadgeClass(b)} title=${'observed ' + b.observedAt}>${b.text}</span>`],
+    x.prGate && [' ', html`<span class="badge dim" title="merge gate (pick)">${x.prGate}</span>`],
+  ];
+}
+
+// Attention kinds (tend's contract): the short label shown in lobs, the pet, and the table.
+export const KIND_LABEL: Record<string, string> = {
+  'pr:draft': 'draft',
+  'pr:review': 'review',
+  'pr:checks': 'checks',
+  'pr:conflict': 'conflicts',
+  'pr:ready': 'ready',
+  'stack-ready': 'stack ready',
+  review: 'review request',
+  landed: 'landed',
+  watch: 'watch',
+};
+export const KIND_TONE: Record<string, string> = {
+  'pr:review': 'bad',
+  'pr:checks': 'bad',
+  'pr:conflict': 'pr-conflicts',
+  'pr:ready': 'ok',
+  'stack-ready': 'ok',
+  'pr:draft': 'dim',
+  watch: 'warn',
+};
+export const kindLabel = (k: string): string => KIND_LABEL[k] || '';
+
+export function kindCell(x: Pick<TendAttention, 'kind' | 'verb'>) {
+  if (x.kind === 'question') return html`<span class=${'v-' + x.verb}>${x.verb}</span>`;
+  const tone = x.kind === 'landed' ? (x.verb === 'failed' ? 'bad' : 'ok') : KIND_TONE[x.kind] || 'dim';
+  return [
+    html`<span class=${'badge ' + tone}>${kindLabel(x.kind) || x.kind}</span>`,
+    x.kind === 'landed' && [' ', html`<span class="dim">${x.verb}</span>`],
+  ];
+}
+
+export const prLink = (p: Pick<GlassPr, 'url' | 'number'>) =>
+  html`<a href=${reviewLink(p.url)} target="_blank" rel="noopener" onClick=${stop}>#${p.number}</a>`;
+
+export const reviewLink = (url: string) => prReviewUrl(url, getState().snapshot?.reviewTools);
+
+/** A PR card's name: the number bold, then the title; the number alone when there is no title. */
+export const prName = (p: Pick<GlassPr, 'number' | 'title'>) =>
+  html`<span class="prname" title=${p.title || undefined}><b>#${p.number}</b>${p.title && [' ', LinkedText(p.title)]}</span>`;
+
+/** What a stack is about, as its heading's lead; nothing when it has no title. */
+export const stackTitle = (s: GlassStack) => s.title && [html`<b class="stacktitle">${LinkedText(s.title)}</b>`, ' '];
+
+/** A stack's numbers, `#98 → #101`, each carrying its PR's title as a title attribute. `bold` marks one number. */
+export function stackNumbers(numbers: number[], titles: Map<number, string | undefined>, bold?: number) {
+  return numbers.flatMap((n, i) => {
+    const t = titles.get(n) || undefined;
+    const num = n === bold ? html`<b title=${t}>#${n}</b>` : html`<span title=${t}>#${n}</span>`;
+    return i ? [' → ', num] : [num];
+  });
+}
+
+export function prChecks(p: Pick<GlassPr, 'checks'>): string {
+  const c = p.checks;
+  return (
+    c.passed +
+    '/' +
+    c.total +
+    ' passed' +
+    (c.failed ? ' · ' + c.failed + ' failed' : '') +
+    (c.pending ? ' · ' + c.pending + ' pending' : '')
+  );
+}
+
+export function prReview(p: Pick<GlassPr, 'review' | 'reviewDecision'>): string {
+  const r: Partial<NonNullable<GlassPr['review']>> = p.review || {};
+  return (
+    (p.reviewDecision || '') +
+    (r.unresolvedThreads ? ' · ' + r.unresolvedThreads + ' unresolved' : '') +
+    (r.changesRequested ? ' · changes requested' : '')
+  );
+}
+
+export function prMerge(p: Pick<GlassPr, 'mergeStateStatus' | 'nextMergeable' | 'blockedBy'>) {
+  return [
+    p.mergeStateStatus,
+    p.nextMergeable ? [' · ', html`<span class="ok">next mergeable</span>`] : p.blockedBy ? ' · blocked by #' + p.blockedBy : '',
+  ];
+}
+
+export function watchCell(w: GlassPr['watch']) {
+  const ws = watchState(w);
+  return w ? [ws.text, ' · ', ws.at ? [Age(ws.at), ' ago'] : 'never checked'] : html`<span class="dim">${ws.text}</span>`;
+}
+
+export interface TrapRowView {
+  stale: boolean;
+  listen: Children;
+  hb: Children;
+}
+
+export function trapRow(t: GlassTrap): TrapRowView {
+  if (t.requested)
+    return {
+      stale: false,
+      listen: [html`<span class="dot"></span>`, html`<span class="dim">requested</span>`],
+      hb: html`<span class="dim">—</span>`,
+    };
+  if (t.starting)
+    return {
+      stale: false,
+      listen: t.starting.failedAt
+        ? [html`<span class="dot bad"></span>`, html`<span class="bad">start failed</span>`]
+        : [html`<span class="dot warn"></span>`, 'starting'],
+      hb: html`<span class="dim">—</span>`,
+    };
+  if (!t.live)
+    return {
+      stale: false,
+      listen: [html`<span class="dot"></span>`, html`<span class="dim">signed off</span>`],
+      hb: html`<span class="dim">—</span>`,
+    };
+  const stale = Date.now() - Date.parse(t.heartbeatAt!) > 1800000;
+  const listening = t.listening ?? (!!t.firstParkedAt && !stale);
+  return {
+    stale,
+    listen: listening ? [html`<span class="dot ok"></span>`, 'listening'] : [html`<span class="dot warn"></span>`, 'not listening'],
+    hb: html`<span class=${stale ? 'bad' : 'ok'}>${stale && 'stale '}${Age(t.heartbeatAt)} ago</span>`,
+  };
+}
+
+/** A trap's state: starting, start failed, signed off, idle (listening or not), parked on a wait, or working a catch. */
+type TrapState =
+  | { kind: 'requested'; helmOn: boolean }
+  | { kind: 'starting'; deadline: string }
+  | { kind: 'start failed'; reason: string }
+  | { kind: 'signed off' }
+  | { kind: 'idle'; listening: boolean }
+  | { kind: 'parked'; current: GlassDispatchSummary }
+  | { kind: 'working'; current: GlassDispatchSummary };
+
+function trapState(t: GlassTrap): TrapState {
+  if (t.requested) return { kind: 'requested', helmOn: !!getState().snapshot?.helmOn };
+  if (t.starting)
+    return t.starting.failedAt
+      ? { kind: 'start failed', reason: t.starting.reason ?? 'no session signed on in time' }
+      : { kind: 'starting', deadline: t.starting.deadline };
+  if (!t.live) return { kind: 'signed off' };
+  const current = t.claimed ? t.catches.find((c) => c.id === t.claimed && c.bucket === 'active') : undefined;
+  if (!current)
+    return { kind: 'idle', listening: t.listening ?? (!!t.firstParkedAt && Date.now() - Date.parse(t.heartbeatAt ?? '') <= 1800000) };
+  if (current.waiting || current.verb === 'paused') return { kind: 'parked', current };
+  return { kind: 'working', current };
+}
+
+/** The state dot's tone: green working or listening, amber parked or starting, red start failed, grey not listening or signed off. */
+export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
+  const s = trapState(t);
+  if (s.kind === 'working' || (s.kind === 'idle' && s.listening)) return 'ok';
+  if (s.kind === 'start failed') return 'bad';
+  // Waiting for a slot is routine: nothing here needs a person.
+  if (s.kind === 'parked' && s.current.waiting?.on === 'heavy') return 'ok';
+  return s.kind === 'parked' || s.kind === 'starting' ? 'warn' : 'dim';
+}
+
+/** A trap's or worker's place in the heavy line: `in line, 1st`, `running, 6m`, `over limit`. */
+export function heavyPlace(match: { trap?: string; dispatch?: string }): string | undefined {
+  const tickets = getState().snapshot?.heavy?.tickets ?? [];
+  const t = tickets.find((x) => (match.dispatch && x.dispatch === match.dispatch) || (match.trap && x.trap === match.trap));
+  if (!t) return undefined;
+  if (t.state === 'over') return `${t.command} · over limit`;
+  if (t.state === 'running') return `${t.command} · running, ${minutesSince(t.since)}m`;
+  return `${t.command} · in line, ${ordinal(t.position ?? 1)}`;
+}
+
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
+const minutesSince = (iso?: string) => (iso ? Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60_000)) : 0);
+
+const parkedText = (c: GlassDispatchSummary) => (c.waiting ? `waiting on ${c.waiting.on}` : c.note || 'waiting');
+const workTitle = (c: GlassDispatchSummary) => c.title.slice(0, 40) || '(no title)';
+
+/** One current activity line for deck and traps tab, from the shared snapshot, led by the state dot. */
+export function trapNow(t: GlassTrap): Children {
+  const s = trapState(t);
+  const dot = html`<span class=${'dot trapdot ' + trapDotTone(t)}></span>`;
+  if (s.kind === 'requested') return [dot, html`<span class="dim">${requestedText(t, s.helmOn)}</span>`];
+  if (s.kind === 'starting') return [dot, 'starting · waiting for its session to sign on'];
+  if (s.kind === 'start failed') return [dot, html`<span class="bad">start failed</span>`, ' · ', LinkedText(s.reason)];
+  if (s.kind === 'signed off') return [dot, html`<span class="dim">signed off</span>`];
+  if (s.kind === 'idle') return [dot, 'idle · ', s.listening ? 'listening' : 'not listening'];
+  const current = s.current;
+  const place = heavyPlace({ trap: t.trapId, dispatch: current.id });
+  if (place) return [dot, place];
+  if (s.kind === 'parked') return [dot, 'parked · ', NamedText(parkedText(current))];
+  const openDispatch = (event: MouseEvent) => {
+    event.preventDefault();
+    stop(event);
+    showModal('dispatch', `${current.lane}:${current.id}`);
+  };
+  return [
+    dot,
+    'working · ',
+    html`<a href="#dispatches" onClick=${openDispatch}>${current.id.slice(0, 8)}</a>`,
+    ' · ',
+    current.title ? LinkedText(current.title, 40) : workTitle(current),
+    current.activity && [' · ', LinkedText(current.activity.summary), ' ', Age(current.activity.at), ' ago'],
+  ];
+}
+
+const requestedText = (t: GlassTrap, helmOn: boolean): string =>
+  `requested · ${t.repo ?? ''} · ${t.harness ?? ''} · ${helmOn ? 'waiting for the helm' : 'waiting for a helm'}`;
+
+/** A reserved trap's start commands, each copyable: the way to start it by hand. Only a starting card has them. */
+export function startCommands(t: GlassTrap): Children {
+  const commands = t.starting?.commands;
+  if (!commands?.length) return null;
+  return html`<div class="startcmds" onClick=${stop}><div class="dim">start it: run one in a terminal</div>${commands.map((c) => cmdRow(c.command, c.harness))}</div>`;
+}
+
+/** The New trap button and its form: a repo and a harness, filed as a request for the helm. */
+export function NewTrap() {
+  // Constant for the page's life, so the hooks below always run in the same order.
+  if (!can('trap-request')) return null;
+  const d = getState().snapshot;
+  const repos = d?.repoKeys ?? [];
+  const [open, setOpen] = useState(false);
+  const [repo, setRepo] = useState('');
+  const [harness, setHarness] = useState('claude');
+  const [result, setResult] = useState<string | null>(null);
+  const chosen = repo || repos[0] || '';
+  const submit = async (e: Event) => {
+    e.preventDefault();
+    const error = await requestTrap(chosen, harness);
+    setResult(error ?? null);
+    if (!error) setOpen(false);
+  };
+  if (!open)
+    return html`<span class="newtrap"><button class="btn" onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap</button></span>`;
+  return html`<form class="newtrap" onClick=${stop} onSubmit=${submit}>
+    <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
+    <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+    <button class="btn" type="submit" disabled=${!chosen}>Request</button>
+    <button class="btn" type="button" onClick=${() => setOpen(false)}>Cancel</button>
+    ${result && html`<span class="bad">${result}</span>`}
+  </form>`;
+}
+
+/** trapNow as plain text: the hover title of a clamped meta line. */
+export function trapNowText(t: GlassTrap): string {
+  const s = trapState(t);
+  if (s.kind === 'requested') return requestedText(t, s.helmOn);
+  if (s.kind === 'starting') return `starting · sign-on due by ${s.deadline}`;
+  if (s.kind === 'start failed') return `start failed · ${s.reason}`;
+  if (s.kind === 'signed off') return 'signed off';
+  if (s.kind === 'idle') return `idle · ${s.listening ? 'listening' : 'not listening'}`;
+  if (s.kind === 'parked' && s.current.waiting?.on === 'heavy')
+    return heavyPlace({ trap: t.trapId, dispatch: s.current.id }) ?? 'waiting in the heavy line';
+  if (s.kind === 'parked') return `parked · ${parkedText(s.current)}`;
+  const current = s.current;
+  return [
+    `working · ${current.id.slice(0, 8)} · ${workTitle(current)}`,
+    current.activity && `${current.activity.summary} ${ageText(current.activity.at)} ago`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** A trap's mail count, or null when it has none. */
+export function mailCell(t: GlassTrap) {
+  const p = t.messages.filter((m) => m.state === 'pending').length;
+  return t.messages.length ? ['✉ ' + t.messages.length, p > 0 && [' ', html`<span class="warn">(${p} pending)</span>`]] : null;
+}

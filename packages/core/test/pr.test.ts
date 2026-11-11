@@ -78,6 +78,13 @@ describe('PR stack branch evidence', () => {
 });
 
 describe('derivePrEvents', () => {
+  it('names the PR by its title in a watch event, and by its key without one', () => {
+    const before = derivePrEvents(ref, open, '0').cursor;
+    const untitled = derivePrEvents(ref, { ...merged, title: undefined }, before);
+    expect(untitled.events[0]?.summary).toMatch(/^pr:acme\/web#26 merged at /);
+    const titled = derivePrEvents(ref, { ...merged, title: 'Put job photos first' }, before);
+    expect(titled.events[0]?.summary).toMatch(/^pr:acme\/web#26 Put job photos first: merged at /);
+  });
   it('first observation of an open PR is the baseline: no check events; merge state and draft are baseline too', () => {
     const r = derivePrEvents(ref, open, '0');
     expect(r.events).toEqual([]);

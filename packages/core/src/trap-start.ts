@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, soakingDir } from './paths.js';
+import type { WindowRef } from './window.js';
 import { withDirLock } from './dir-lock.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
@@ -45,6 +46,12 @@ export interface TrapReservation {
   batch?: string;
   /** The permission mode the throw started the session in (`auto`, `bypassPermissions`, ...). */
   startMode?: string;
+  /** Set when this trap starts with Claude's `--remote-control`: the time before which a URL can't be this run's. */
+  remoteControlSince?: string;
+  /** This Codex trap attaches to the shared app-server, so a paired phone can drive it. */
+  codexServer?: true;
+  /** Its window, recorded from inside the pane: on the shared server, a tool's environment is the server's. */
+  window?: WindowRef;
 }
 
 /** `<trapId>-<32 hex>`: the id prefix finds the reservation, the rest proves it. */
@@ -76,17 +83,19 @@ export function readReservationTicket(trapId: string): string | undefined {
 
 /** A value as a POSIX shell word, for a command printed for a person to run. */
 export function shellQuote(value: string): string {
-  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+  // A leading `=` is quoted: zsh reads an unquoted `=word` as that command's path.
+  return /^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./:@%+=,-]*$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
  * The commands that start a reserved trap's session in the repo's primary
  * checkout, per harness: all harnesses, or only the reserved one.
  */
-export function trapStartCommands(repoPath: string, ticket: string, harness?: string): Array<{ harness: 'claude' | 'codex'; command: string }> {
+export function trapStartCommands(repoPath: string, ticket: string, harness?: string, remoteControl?: string): Array<{ harness: 'claude' | 'codex'; command: string }> {
   const cd = `cd ${shellQuote(repoPath)} && `;
+  const remote = remoteControl ? `--remote-control ${shellQuote(remoteControl)} ` : '';
   const all: Array<{ harness: 'claude' | 'codex'; command: string }> = [
-    { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "/lobstah:trap soak --ticket ${ticket}"` },
+    { harness: 'claude', command: `${cd}CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude ${remote}"/lobstah:trap soak --ticket ${ticket}"` },
     { harness: 'codex', command: `${cd}codex -c 'tui.terminal_title=[]' '$lobstah:trap soak --ticket ${ticket}'` },
   ];
   return harness === 'claude' || harness === 'codex' ? all.filter((c) => c.harness === harness) : all;
@@ -153,6 +162,10 @@ export function reserveTrap(opts: {
   creationReason?: string;
   batch?: string;
   startMode?: string;
+  /** The trap starts with Claude's `--remote-control`. */
+  remoteControl?: boolean;
+  /** The Codex trap attaches to the shared app-server. */
+  codexServer?: boolean;
   /** A new throw enforces its configured repo cap under a cross-process reservation lock. */
   maxTraps?: number;
   now?: number;
@@ -216,6 +229,8 @@ export function reserveTrap(opts: {
     ...(opts.request ? { request: opts.request } : {}),
     ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
     ...(opts.startMode ? { startMode: opts.startMode } : {}),
+    ...(opts.remoteControl ? { remoteControlSince: new Date(now).toISOString() } : {}),
+    ...(opts.codexServer ? { codexServer: true as const } : {}),
     ...(opts.returning ? { worktree: opts.returning.worktree } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   };
@@ -231,6 +246,14 @@ export function reserveTrap(opts: {
     by: opts.by,
   });
   return { reservation, ticket };
+}
+
+/** Record the window of a reserved trap's pane, from inside that pane. False for a ticket that redeems nothing. */
+export function rememberReservationWindow(ticket: string, window: WindowRef | undefined): boolean {
+  const reservation = reservationForTicket(ticket);
+  if (!reservation) return false;
+  if (window) writeReservation({ ...reservation, window });
+  return true;
 }
 
 /** The reservation a ticket proves, or undefined for a malformed, unknown, or wrong ticket. */

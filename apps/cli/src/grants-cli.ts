@@ -1,19 +1,29 @@
+import type { GrantIntent, IntentPattern } from '@lobstah/core';
 import {
+  firstHeavyReminder,
   GrantError,
+  hasOpenCatch,
+  heavyCommandPattern,
+  heavyReminderText,
   listTraps,
+  lockIsLive,
+  readWorktreeLock,
+  storedDescriptor,
   trapDisplayName,
   withTrapRepo,
   listHelms,
   sessionGuarded,
   toolHosts,
   validateSessionGrant,
-  PERMISSION_OPTIONS,
+  INTENT_ALWAYS_OPTION,
+  INTENT_HOUR_OPTION,
   addGrant,
   alwaysScope,
   commandGrantScope,
   askDecision,
   checkoutRoots,
   grantCovers,
+  intentPatternText,
   listGrants,
   loadConfig,
   parseUntil,
@@ -21,14 +31,16 @@ import {
   readSessionClaim,
   rosterByAddress,
   setRosterProfile,
-  sendMessage,
+  sendPermissionAnswer,
   standingDecisions,
   trapBySession,
   toonKV,
   toonTable,
   useGrant,
+  answeredInGlass,
 } from '@lobstah/core';
 import type {
+  AnswerSource,
   CheckoutRoot,
   DecisionAnswer,
   DecisionMeta,
@@ -38,10 +50,12 @@ import type {
   GrantRequest,
   Lane,
   PermissionAsk,
+  TrapRegistration,
 } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { isTrapReportCommand } from './permission-context.js';
 
 /**
  * Grants from the command line and the hooks: a person grants, revokes and
@@ -129,7 +143,8 @@ function harnessOf(v: string | undefined): GrantHarness {
   return v;
 }
 
-function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo' | 'tools' | 'session'>): string {
+function what(g: Pick<Grant, 'command' | 'match' | 'path' | 'repo' | 'tools' | 'session' | 'intent'>): string {
+  if (g.intent) return g.intent.text;
   if (g.tools) return `${g.tools}${g.command ? ` (${g.command} …)` : ''} ${g.session ? `for session ${g.session}` : 'in every trap'}`;
   if (g.path !== undefined) return g.repo !== undefined ? `write ${g.path} in any ${g.repo} checkout` : `write ${g.path}`;
   return g.match === 'prefix' ? `${g.command} …` : g.command!;
@@ -249,20 +264,25 @@ export function grantsCommand(opts: { all: boolean; json: boolean }): void {
         by: g.by,
         at: g.at,
         uses: g.uses,
+        lastUsed: g.lastUsedAt ?? '',
+        patterns: g.intent?.patterns.map(intentPatternText).join(' | ') ?? '',
+        scope: g.trap ?? (g.mode === 'intent' ? `repo ${g.repo}` : ''),
         expires: g.expiresAt ?? '',
         ...(opts.all ? { revoked: g.revokedAt ?? '' } : {}),
       })),
       [
         'id',
+        'scope',
         'what',
+        'patterns',
         'mode',
         'harness',
-        'trap',
         'session',
         'hosts',
         'by',
         'at',
         'uses',
+        'lastUsed',
         'expires',
         'audit',
         ...(opts.all ? ['revoked'] : []),
@@ -271,7 +291,7 @@ export function grantsCommand(opts: { all: boolean; json: boolean }): void {
   );
 }
 
-/** `lobstah revoke <id>`: anyone may take a permission away. */
+/** `lobstah grant revoke <id>`, also `lobstah revoke <id>`: anyone may take a permission away. */
 export function revokeCommand(id: string): void {
   const g = revokeGrant(id, AGENT_ENV.some((k) => process.env[k] !== undefined) ? 'agent' : localPerson());
   console.log(toonKV({ revoked: g.id, what: what(g), at: g.revokedAt! }));
@@ -284,6 +304,8 @@ interface CallInput {
   input: Record<string, unknown>;
   session?: string;
   callId?: string;
+  /** Codex's turn: both its hooks name it, though only PreToolUse names the call. */
+  turn?: string;
 }
 
 /** The files an `apply_patch` call touches, from its patch text. */
@@ -315,8 +337,9 @@ export function callRequests(call: CallInput, trap: string | undefined, cwd: str
 }
 
 /**
- * Is this call covered by grants? Only a signed-on trap's calls are: a
- * grant is for traps, never for the helm or a person's own session. Every
+ * Is this call covered by grants? A session grant or a session command grant
+ * covers its own session, the helm's too. Every other grant is for a
+ * signed-on trap's calls, never for the helm or a person's own session. Every
  * request the call makes must be covered; each covering grant's use is
  * recorded. Returns the grant ids that covered it, or nothing.
  */
@@ -338,12 +361,15 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
     const grant = paths.some((p) => sessionGuarded({ ...req, ...p }))
       ? undefined
       : useGrant(req, { session: call.session, callId: call.callId });
-    if (grant?.mode === 'session') return [grant.id];
+    if (grant?.mode === 'session' || (grant?.mode === 'once' && grant.session === call.session)) return [grant.id];
   }
-  if (sessionOnly || !trap) return undefined;
+  if (!trap) return undefined;
   // The trap's own harness, as it signed on: the hook entry is shared by both plugins.
   const harness = trap.harness === 'codex' ? 'codex' : trap.harness === 'claude' ? 'claude' : call.harness;
   const requests = callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd);
+  const intentIds = intentGrantIds(requests, { harness, tool: call.tool, input: call.input, cwd, trap: trap.name ?? trap.trapId, ...(trap.repo ? { repo: trap.repo } : {}) }, call);
+  if (intentIds) return intentIds;
+  if (sessionOnly) return undefined;
   if (requests.length === 0) {
     // A connector or other tool names no command or file: a standing tool grant covers it in every trap.
     const g = useGrant(
@@ -363,6 +389,30 @@ export function checkCall(call: CallInput, cwd: string, sessionOnly = false): st
     ids.push(g.id);
   }
   return ids;
+}
+
+/**
+ * The intent grants allowing a trap's call straight through, or nothing. Every
+ * request the call makes must match; only then is each use recorded. Honoured
+ * wherever the hook runs, so a grant means the same on Claude Code and Codex,
+ * from the moment it's made.
+ */
+function intentGrantIds(requests: GrantRequest[], base: GrantRequest, call: CallInput): string[] | undefined {
+  const scoped = (requests.length ? requests : [{}]).map((request) => ({ ...base, ...request }));
+  const { grants, intact } = listGrants();
+  const intents = grants.filter((grant) => grant.mode === 'intent');
+  if (!intact || intents.length === 0) return undefined;
+  const roots = checkoutRoots();
+  if (!scoped.every((request) => intents.some((grant) => grantCovers(grant, request, roots)))) return undefined;
+  const ids: string[] = [];
+  for (const request of scoped) {
+    // Codex fires PreToolUse and then PermissionRequest for one call, and only the first names it: the turn and the command do both.
+    const callId = call.turn ? `${call.turn}:${request.command ?? request.path ?? request.tool}` : call.callId;
+    const used = useGrant(request, { only: 'intent', ...(call.session ? { session: call.session } : {}), ...(callId ? { callId } : {}) });
+    if (!used) return undefined;
+    ids.push(used.id);
+  }
+  return [...new Set(ids)];
 }
 
 /** Read a hook's JSON from stdin; undefined when there is none. */
@@ -417,6 +467,39 @@ function defersCodexConnectorApproval(call: CallInput, harness: string | undefin
  * the normal approval flow goes on. Uncovered Codex connector calls defer
  * without a card; other uncovered calls keep their existing card behavior.
  */
+/**
+ * A trap or worker on a dispatch ran a heavy command outside the line. Adds
+ * one line of context, with no permission decision: it approves nothing,
+ * blocks nothing and changes nothing. Never fails the hook.
+ */
+function heavyReminder(call: CallInput, cwd: string): void {
+  try {
+    const command = call.tool === 'Bash' ? call.input.command : undefined;
+    if (typeof command !== 'string') return;
+    const who = heavyDispatchOf(call.session, cwd);
+    if (!who) return;
+    const pattern = heavyCommandPattern(command, loadConfig().heavy.repos[who.repo ?? '']?.reminders);
+    if (!pattern || !firstHeavyReminder(who.dispatch, pattern)) return;
+    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: heavyReminderText(command) } }));
+  } catch {
+    /* a reminder is never worth a failed hook */
+  }
+}
+
+/** The dispatch this session's trap holds, or the one whose runner holds this worktree. */
+function heavyDispatchOf(session: string | undefined, cwd: string): { dispatch: string; repo?: string } | undefined {
+  const trap = session ? trapBySession(session) : undefined;
+  if (trap?.claimed && hasOpenCatch(trap)) return { dispatch: trap.claimed, ...(trap.repo ? { repo: trap.repo } : {}) };
+  for (let at = path.resolve(cwd); ; at = path.dirname(at)) {
+    if (fs.existsSync(path.join(at, '.git'))) {
+      const lock = readWorktreeLock(at);
+      if (!lock || lock.kind === 'warm' || !lockIsLive(lock)) return undefined;
+      return { dispatch: lock.id, ...(storedDescriptor(lock.id, lock.lane)?.repo ? { repo: storedDescriptor(lock.id, lock.lane)!.repo } : {}) };
+    }
+    if (path.dirname(at) === at) return undefined;
+  }
+}
+
 export function permissionRequestHook(preToolUse = false, preHarness: 'claude' | 'codex' = 'claude'): void {
   try {
     const h = readStdinJson();
@@ -425,23 +508,34 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       harness: preToolUse ? (typeof h.turn_id === 'string' ? 'codex' : preHarness) : 'codex',
       tool: h.tool_name,
       ...(typeof h.tool_use_id === 'string' ? { callId: h.tool_use_id } : {}),
+      ...(typeof h.turn_id === 'string' ? { turn: h.turn_id } : {}),
       input: h.tool_input as Record<string, unknown>,
       ...(typeof h.session_id === 'string' ? { session: h.session_id } : {}),
     };
     const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
-    const ids = checkCall(call, cwd, preToolUse);
-    if (ids) {
+    const trap = call.session ? trapBySession(call.session) : undefined;
+    const command = call.input.command ?? call.input.cmd;
+    const report = !!trap && ['Bash', 'shell', 'exec_command'].includes(call.tool.split('.').at(-1)!)
+      && typeof command === 'string' && isTrapReportCommand(command);
+    // Auto mode's classifier decides before any PermissionRequest, so there a trap's card grants are honoured in PreToolUse.
+    const autoMode = call.harness === 'claude' && h.permission_mode === 'auto';
+    const ids = report ? undefined : checkCall(call, cwd, preToolUse && !autoMode);
+    if (report || ids) {
       console.log(
         JSON.stringify({
           hookSpecificOutput: preToolUse
-            ? { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: `lobstah grant ${ids.join(', ')}` }
+            ? { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: report ? 'Trap reports reach the helm without a permission card.' : `lobstah grant ${ids!.join(', ')}` }
             : { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
         }),
       );
       return;
     }
-    const trap = call.session ? trapBySession(call.session) : undefined;
-    if (preToolUse) return;
+    // Configured desks keep the harness reviewer as the only approval flow; existing grants above still reduce friction.
+    if (trap?.configured) return;
+    if (preToolUse) {
+      heavyReminder(call, cwd);
+      return;
+    }
     const registeredHarness = trap?.harness
       ?? listHelms().find((helm) => helm.sessionId === call.session)?.harness
       ?? (typeof h.turn_id === 'string' ? 'codex' : undefined);
@@ -466,60 +560,183 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
       }
       return;
     }
-    const lane = (['work', 'chore'] as const).find((lane) => readSessionClaim(trap.claimed!, lane)?.by === `wt:${trap.trapId}`);
-    if (!lane) return;
-    const harness = trap.harness === 'claude' ? 'claude' : 'codex';
-    if (!callRequests(call, trap.name, cwd).length && call.session) {
-      const tools = toolFamily(call.tool);
-      if (
-        !standingDecisions().some(
-          (d) => d.permission?.sessionGrant?.session === call.session && d.permission?.sessionGrant?.tools === tools,
-        )
-      )
-        requestSessionGrant({
-          session: call.session,
-          tools,
-          hosts: toolHosts(call.input).hosts,
-          reason: 'This tool call needs permission',
-        });
-      return;
-    }
-    for (const request of callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd)) {
-      if (listGrants().grants.some((g) => grantCovers(g, request))) continue;
-      const duplicate = standingDecisions().some(
-        (d) =>
-          d.dispatch === trap.claimed &&
-          d.permission?.harness === harness &&
-          d.permission.command === request.command &&
-          d.permission.path === request.path,
-      );
-      if (!duplicate)
-        askPermission({
-          dispatch: trap.claimed,
-          lane,
-          repo: trap.repo,
-          ask: {
-            ...(request.command !== undefined ? { command: request.command } : { path: request.path! }),
-            harness,
-            session: call.session,
-            tool: call.tool,
-            trap: trap.name ?? trap.trapId,
-          },
-        });
-    }
+    askTrapPermission(call, trap, trap.claimed, cwd);
   } catch {
     /* no decision: the normal approval flow */
   }
 }
 
-/** File a trap's permission request as a card with Allow once, Allow always and No. */
-export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string }): DecisionMeta {
+/**
+ * File a claimed trap's permission cards for a call no grant covers: a
+ * command or write card per request, or a session card for a tool that names
+ * neither. One open card per request.
+ */
+function askTrapPermission(call: CallInput, trap: TrapRegistration, dispatch: string, cwd: string): void {
+  const lane = (['work', 'chore'] as const).find((lane) => readSessionClaim(dispatch, lane)?.by === `wt:${trap.trapId}`);
+  if (!lane) return;
+  const harness = trap.harness === 'claude' ? 'claude' : 'codex';
+  if (!callRequests(call, trap.name, cwd).length && call.session) {
+    const tools = toolFamily(call.tool);
+    if (
+      !standingDecisions().some(
+        (d) => d.permission?.sessionGrant?.session === call.session && d.permission?.sessionGrant?.tools === tools,
+      )
+    )
+      requestSessionGrant({
+        session: call.session,
+        tools,
+        hosts: toolHosts(call.input).hosts,
+        reason: 'This tool call needs permission',
+      });
+    return;
+  }
+  for (const request of callRequests({ ...call, harness }, trap.name ?? trap.trapId, cwd)) {
+    if (listGrants().grants.some((g) => grantCovers(g, request))) continue;
+    const duplicate = standingDecisions().some(
+      (d) =>
+        d.dispatch === dispatch &&
+        d.permission?.harness === harness &&
+        d.permission.command === request.command &&
+        d.permission.path === request.path,
+    );
+    if (!duplicate)
+      askPermission({
+        dispatch,
+        lane,
+        repo: trap.repo,
+        ...(typeof call.input.description === 'string' ? { description: call.input.description } : {}),
+        ask: {
+          ...(request.command !== undefined ? { command: request.command } : { path: request.path! }),
+          harness,
+          session: call.session,
+          tool: call.tool,
+          trap: trap.name ?? trap.trapId,
+        },
+      });
+  }
+}
+
+/**
+ * `lobstah hook permission-denied`: Claude Code's PermissionDenied hook, run
+ * when auto mode refuses a call. A claimed trap's refused call gets the same
+ * permission card a PermissionRequest would file; the helm's refused shell
+ * command gets a helm command card. Either way the block reaches Chris
+ * without the session noticing it. It never changes the denial. Never fails:
+ * an error files nothing.
+ */
+export function permissionDeniedHook(): void {
+  try {
+    const h = readStdinJson();
+    if (!h || typeof h.session_id !== 'string' || typeof h.tool_name !== 'string') return;
+    const input = typeof h.tool_input === 'object' && h.tool_input !== null ? (h.tool_input as Record<string, unknown>) : {};
+    const cwd = typeof h.cwd === 'string' ? h.cwd : process.cwd();
+    const trap = trapBySession(h.session_id);
+    if (trap) {
+      // A configured desk keeps its harness's reviewer as the only approval flow, as on PermissionRequest.
+      if (trap.claimed && !trap.configured) askTrapPermission({ harness: 'claude', tool: h.tool_name, input, session: h.session_id }, trap, trap.claimed, cwd);
+      return;
+    }
+    const command = input.command;
+    if (!SHELL_TOOL_NAMES.includes(h.tool_name) || typeof command !== 'string' || !command.trim()) return;
+    if (!listHelms().some((helm) => helm.sessionId === h.session_id)) return;
+    askHelmCommand({
+      session: h.session_id,
+      command,
+      ...(typeof h.reason === 'string' && h.reason.trim() ? { reason: h.reason.trim() } : {}),
+      ...(typeof input.description === 'string' && input.description.trim() ? { description: input.description.trim() } : {}),
+      cwd,
+    });
+  } catch {
+    /* no card: the denial stands as it is */
+  }
+}
+
+/** The shell tools whose refused command can become a helm card. */
+const SHELL_TOOL_NAMES = ['Bash'];
+
+/** The one way a helm command card allows: this exact command, once. */
+export const HELM_COMMAND_OPTION = 'Allow once';
+
+/** What the harness refused: the helm's session and the exact command, with what it said and where. */
+export interface HelmCommandAsk {
+  session: string;
+  command: string;
+  /** The reviewer's reason, such as `[Merge Without Review]`. */
+  reason?: string;
+  /** The helm's own description of the command. */
+  description?: string;
+  cwd?: string;
+}
+
+/**
+ * File a card for a helm command its harness's reviewer refused. Allow once
+ * mints a one-use grant for exactly this command in this helm session, which
+ * lobstah's PreToolUse hook honours when the helm runs it again. Asking writes
+ * a decision, never a grant. One open card per session and command; a
+ * command a grant could never cover (one touching grants or settings) gets none.
+ */
+export function askHelmCommand(ask: HelmCommandAsk): DecisionMeta | undefined {
+  const helm = listHelms().find((h) => h.sessionId === ask.session);
+  if (!helm) return undefined;
+  const command = ask.command.trim();
+  if (sessionGuarded({ harness: 'claude', tool: 'Bash', session: ask.session, command, ...(ask.cwd ? { cwd: ask.cwd } : {}) })) return undefined;
+  const open = standingDecisions().some((d) => d.permission?.helm && d.permission.session === ask.session && d.permission.command === command);
+  if (open) return undefined;
+  const titleStart = 'The helm wants to run: `';
+  const compact = command.replace(/\s+/g, ' ');
+  const budget = 199 - titleStart.length;
+  const detail = [
+    `Claude Code's auto mode refused this helm command${ask.reason ? ` (${ask.reason})` : ''}:`,
+    '',
+    '```',
+    command,
+    '```',
+    '',
+    ...(ask.description ? [`**Helm's description:** ${ask.description}`, ''] : []),
+    ...(ask.cwd ? [`**In:** \`${ask.cwd}\``, ''] : []),
+    `- **${HELM_COMMAND_OPTION}**: this helm session may run exactly this command once, within the hour.`,
+    '- **No**: the helm is told not to.',
+  ].join('\n');
+  return askDecision({
+    title: `${titleStart}${compact.length > budget - 1 ? `${compact.slice(0, budget - 2)}…` : compact}\``,
+    detailText: detail,
+    options: [HELM_COMMAND_OPTION, 'No'],
+    askedBy: 'helm',
+    grounds: helm.grounds,
+    permission: { harness: 'claude', session: ask.session, tool: 'Bash', command, helm: true },
+    maxBytes: loadConfig().limits.attachmentMaxBytes,
+  }).meta;
+}
+
+/** What a card's "this kind" buttons approve, as the person reads it before choosing. */
+function intentCardText(intent: GrantIntent): string[] {
+  return [
+    '**This kind of action:**',
+    '',
+    `> ${intent.text}`,
+    '',
+    '**Runs without asking:**',
+    '',
+    ...intent.patterns.map((item: IntentPattern) => `- \`${intentPatternText(item)}\``),
+    '',
+    "Only these patterns are allowed. Anything else goes to the harness's reviewer, as it would without a grant.",
+    '',
+  ];
+}
+
+/**
+ * File a trap's permission request as a card with Allow once, Allow always and No.
+ * When the trap proposes a kind of action, the card offers Allow once, the two
+ * kind options and No instead: three ways to allow.
+ */
+export function askPermission(opts: { dispatch: string; lane: Lane; repo?: string; ask: PermissionAsk; note?: string; description?: string }): DecisionMeta {
   const session = opts.ask.session ?? listTraps().find((t) => t.name === opts.ask.trap || t.trapId === opts.ask.trap)?.sessionId;
   if (session) opts.ask = { ...opts.ask, session, tool: opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write') };
   const target = opts.ask.command !== undefined ? opts.ask.command : opts.ask.path!;
   const kind = opts.ask.command !== undefined ? 'run' : 'write to';
   const scope = permissionScopeText(opts.ask);
-  let family = !!session;
+  const intent = !!opts.ask.intent;
+  let family = !!session && !intent;
   if (family && opts.ask.command) {
     try {
       validateSessionGrant({
@@ -534,18 +751,30 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
       family = false;
     }
   }
-  const title =
-    opts.ask.command !== undefined ? `Allow: ${commandGrantScope(target).command}` : `Allow ${kind}: ${target.replace(/\s+/g, ' ')}`;
+  const commandTitle = `${opts.ask.trap ?? 'The trap'} wants to run: \``;
+  const compactTarget = target.replace(/\s+/g, ' ').trim();
+  const commandBudget = Math.max(1, 199 - commandTitle.length);
+  const title = opts.ask.command !== undefined
+    ? `${commandTitle}${compactTarget.length > commandBudget ? `${compactTarget.slice(0, commandBudget - 1)}…` : compactTarget}\``
+    : `Allow ${kind}: ${compactTarget}`;
   const detail = [
-    opts.note ? `${opts.note}\n` : '',
     `${opts.ask.trap ? withTrapRepo(opts.repo, opts.ask.trap) : 'The trap'} asks to ${kind} exactly this${opts.ask.harness === 'any' ? '' : ` (${opts.ask.harness === 'claude' ? 'Claude Code' : 'Codex'})`}:`,
     '',
     '```',
     target,
     '```',
     '',
+    ...(opts.description ? [`**Trap's description:** ${opts.description}`, ''] : []),
+    ...(opts.note ? [opts.note, ''] : []),
+    ...(opts.ask.intent ? intentCardText(opts.ask.intent) : []),
     `- **Allow once**: this trap may ${kind} it once, within the hour.`,
-    `- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`,
+    ...(opts.ask.intent
+      ? [
+          `- **${INTENT_HOUR_OPTION}**: these patterns, for this trap only, for an hour.`,
+          `- **${INTENT_ALWAYS_OPTION}**: these patterns, for every trap in ${opts.repo ?? 'this repo'}, until you revoke it on the Grants tab.`,
+        ]
+      : []),
+    ...(intent ? [] : [`- **Allow always**: ${scope.long}; without asking, until you revoke it (\`lobstah revoke <id>\`; \`lobstah grants\` lists them).`]),
     ...(family
       ? [
           `- **${TOOL_FAMILY_OPTION}**: tool \`${toolFamily(opts.ask.tool ?? (opts.ask.command ? 'Bash' : 'Write'))}\` for session \`${session}\` only, with the shown command prefix when applicable; expires automatically.`,
@@ -556,8 +785,10 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
   return askDecision({
     title: title.length > 200 ? `${title.slice(0, 199)}…` : title,
     detailText: detail,
-    options: [...PERMISSION_OPTIONS.slice(0, 2), ...(family ? [TOOL_FAMILY_OPTION] : []), 'No'],
-    optionNotes: { 'Allow always': scope.short },
+    options: intent
+      ? ['Allow once', INTENT_HOUR_OPTION, INTENT_ALWAYS_OPTION, 'No']
+      : ['Allow once', 'Allow always', ...(family ? [TOOL_FAMILY_OPTION] : []), 'No'],
+    ...(intent ? {} : { optionNotes: { 'Allow always': scope.short } }),
     dispatch: opts.dispatch,
     lane: opts.lane,
     ...(opts.repo ? { repo: opts.repo } : {}),
@@ -572,9 +803,9 @@ export function askPermission(opts: { dispatch: string; lane: Lane; repo?: strin
  * from the command line (`man answer`, which the helm runs) may say No but
  * never grants.
  */
-export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: 'glass' | 'cli'): void {
-  if (!decision.permission || by === 'glass') return;
-  if (option?.startsWith('Allow')) {
+export function permissionAnswerAllowed(decision: DecisionMeta, option: string | undefined, by: AnswerSource): void {
+  if (!decision.permission || answeredInGlass(by)) return;
+  if (option !== undefined && option !== 'No') {
     throw new GrantError(
       'a permission is granted in the glass, or by a person with `lobstah grant` at a terminal; `man answer` can only say No',
     );
@@ -589,11 +820,15 @@ export function permissionAnswerAllowed(decision: DecisionMeta, option: string |
 export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAnswer): Grant | undefined {
   const ask = decision.permission;
   if (!ask) return undefined;
-  if (answer.by === 'glass' && ask.sessionGrant && !ask.sessionGrant.command && answer.option === STANDING_TOOL_OPTION) {
+  if (ask.helm) {
+    if (!answeredInGlass(answer.by) || answer.option !== HELM_COMMAND_OPTION || !ask.session || ask.command === undefined) return undefined;
+    return addGrant({ mode: 'once', session: ask.session, command: ask.command, match: 'exact', harness: ask.harness, by: 'glass' });
+  }
+  if (answeredInGlass(answer.by) && ask.sessionGrant && !ask.sessionGrant.command && answer.option === STANDING_TOOL_OPTION) {
     const r = ask.sessionGrant;
     return addGrant({ mode: 'always', tools: r.tools, hosts: r.hosts, reason: r.reason, by: 'glass' });
   }
-  if (answer.by === 'glass' && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
+  if (answeredInGlass(answer.by) && ask.sessionGrant && answer.option?.startsWith('Allow for')) {
     const r = ask.sessionGrant;
     const duration = answer.option === 'Allow for 1h' ? 3600_000 : r.durationMs;
     return addGrant({
@@ -607,7 +842,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       expiresAt: new Date(Date.now() + duration).toISOString(),
     });
   }
-  if (answer.by === 'glass' && answer.option === TOOL_FAMILY_OPTION && ask.session) {
+  if (answeredInGlass(answer.by) && answer.option === TOOL_FAMILY_OPTION && ask.session) {
     const grant = addGrant({
       mode: 'session',
       session: ask.session,
@@ -618,24 +853,50 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       reason: 'Allowed this tool family on the permission card',
     });
     if (decision.dispatch)
-      sendMessage(
+      sendPermissionAnswer(
         decision.dispatch,
         decision.lane ?? 'work',
         `Chris allowed this tool family for 15 minutes: grant ${grant.id}. Retry the call; lobstah grants shows its scope and expiry.`,
-        'glass',
+        decision.key,
       );
+    return grant;
+  }
+  if (answeredInGlass(answer.by) && ask.intent && (answer.option === INTENT_HOUR_OPTION || answer.option === INTENT_ALWAYS_OPTION)) {
+    const hour = answer.option === INTENT_HOUR_OPTION;
+    // For an hour, this trap only. Always, every trap in the repo. Each falls back to the other's scope when a card has only that.
+    const scope = hour ? (ask.trap ? { trap: ask.trap } : { repo: decision.repo }) : decision.repo ? { repo: decision.repo } : { trap: ask.trap };
+    const grant = addGrant({
+      mode: 'intent',
+      intent: ask.intent,
+      // The patterns mean the same under either harness: lobstah's own hook matches them.
+      harness: 'any',
+      by: 'glass',
+      ...scope,
+      ...(decision.dispatch ? { dispatch: decision.dispatch } : {}),
+      ...(hour ? { expiresAt: new Date(Date.now() + INTENT_HOUR_MS).toISOString() } : {}),
+    });
+    if (decision.dispatch) {
+      sendPermissionAnswer(
+        decision.dispatch,
+        decision.lane ?? 'work',
+        `Chris allowed this kind of action ${hour ? 'for this trap, for an hour' : `for every trap in ${grant.repo ?? 'this repo'}, until revoked`}: grant ${grant.id}. ` +
+          `Commands matching ${grant.intent!.patterns.map((item) => `\`${intentPatternText(item)}\``).join(', ')} now run without asking. ` +
+          "Anything else goes to your harness's reviewer as usual.",
+        decision.key,
+      );
+    }
     return grant;
   }
   if (!decision.dispatch) return undefined;
   const lane: Lane = decision.lane ?? 'work';
   const target = ask.command !== undefined ? `\`${ask.command}\`` : `writes to ${ask.path}`;
-  if (answer.by !== 'glass' || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
+  if (!answeredInGlass(answer.by) || (answer.option !== 'Allow once' && answer.option !== 'Allow always')) {
     if (answer.option === 'No')
-      sendMessage(
+      sendPermissionAnswer(
         decision.dispatch,
         lane,
         `Chris answered No to ${target}. Do not run it. Carry on without it, or report what you need instead.`,
-        'glass',
+        decision.key,
       );
     return undefined;
   }
@@ -652,7 +913,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
     dispatch: decision.dispatch,
     ...(once && ask.trap ? { trap: ask.trap } : {}),
   });
-  sendMessage(
+  sendPermissionAnswer(
     decision.dispatch,
     lane,
     `Chris allowed ${target} ${once ? 'once' : `always (${what(g)})`} in the glass: grant ${g.id}. ` +
@@ -660,7 +921,7 @@ export function applyPermissionAnswer(decision: DecisionMeta, answer: DecisionAn
       (ask.command !== undefined
         ? `Run the command again exactly as shown, with nothing added before or after it: ${ask.command}`
         : `Make the write to ${ask.path} again.`),
-    'glass',
+    decision.key,
   );
   return g;
 }
@@ -723,6 +984,8 @@ export function bypassCommand(address: string, on: boolean, yes = false): void {
 }
 
 export const TOOL_FAMILY_OPTION = 'Allow this tool family for 15 min';
+/** How long the card's "for 1h" kind of grant lasts. */
+const INTENT_HOUR_MS = 3_600_000;
 export const toolFamily = (tool: string): string =>
   tool.startsWith('mcp__') && tool.lastIndexOf('__') > 4 ? `${tool.slice(0, tool.lastIndexOf('__'))}__*` : tool;
 

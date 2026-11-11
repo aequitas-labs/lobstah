@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { appendStatus, claimNext, enqueue, ensureLayout, expireReservations, laneDirs, mergeEvidence, postNotice, reserveTrap, takeHelm, writeActivity } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
-import { trapView } from '../src/glass-diff.js';
+import { trapView } from '../../../packages/glass-ui/src/glass-diff.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;

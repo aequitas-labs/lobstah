@@ -56,7 +56,7 @@ export async function refreshHostedViews(config: Config): Promise<void> {
   };
   const usageRows = await Promise.all(backendScopes(config).filter((s) => s.kind === 'wharf').map(async (s) => ({ grounds: s.grounds, value: await usage(s) })));
   const rows = await eachBackend(backendScopes(config).filter((s) => s.kind === 'wharf'), async (s) => {
-    const wharf = wharfFor(s); const listed = await wharf.list(); const dispatches = listed.filter((d) => s.repos.includes(d.repo));
+    const wharf = wharfFor(s); const listed = await wharf.list(); const dispatches = listed.filter((d) => (d.target ? d.target.grounds === s.grounds : !!d.repo && s.repos.includes(d.repo)));
     const readAt = Date.parse(known.find((v) => v.grounds === s.grounds)?.documentsAt ?? '');
     if (Date.now() - readAt < DOCUMENTS_EVERY_MS) return { dispatches, glass: wharf.glass };
     let documents: WharfDocumentSummary[];

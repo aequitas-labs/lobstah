@@ -1,3 +1,4 @@
+import { configuredTrapViews, orderedDispatchPrUrls } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
@@ -38,7 +39,11 @@ import {
   prReviewUrl,
   parsePrRef,
   pendingIds,
+  cutPrTitle,
   prBadge,
+  prKeyLabel,
+  prLabel,
+  prNote,
   prNewestFirst,
   prStandingKinds,
   queuedDescriptor,
@@ -48,6 +53,7 @@ import {
   readPrs,
   readSessionClaim,
   readTrap,
+  questionEntry,
   readStatusLog,
   queuedAt,
   readWatch,
@@ -69,6 +75,8 @@ import {
   repoKey as forgeRepoKey,
   poolViews,
   poolWaits,
+  formatHeavyView,
+  heavyView,
 } from '@lobstah/core';
 import type {
   AttentionKind,
@@ -84,6 +92,7 @@ import type {
   TendAttention,
   TendAttentionKind,
   PoolView,
+  HeavyView,
 } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
@@ -98,10 +107,11 @@ import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import type { RepairChore } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
-import { todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
+import { todoOverdueLine, todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
-const HEARTBEAT_STALE_MS = 90_000;
+/** A daemon heartbeat older than this means the daemon isn't running. */
+export const HEARTBEAT_STALE_MS = 90_000;
 /** A queued item this old with capacity free means claiming is broken. */
 const CLAIM_STALE_MS = 120_000;
 const DAY_MS = 24 * 3600_000;
@@ -121,6 +131,7 @@ export interface TendDispatch {
   prUrl?: string;
   /** Every PR of a dispatch that has more than one, `prUrl` first. */
   prUrls?: string[];
+  prPositions?: import('@lobstah/core').Evidence['prPositions'];
   /** PR state as last observed by the chain's pr: watch. */
   pr?: PrEvidence;
   /** The checkout it ran in (the origin's, for a follow-up that reused it). */
@@ -176,6 +187,7 @@ export interface TendWatch {
 export interface TendRepairWaiting {
   key: string;
   url: string;
+  title?: string;
   kind: string;
   heldBy: string;
   reason: string;
@@ -256,18 +268,31 @@ export function onTheHook(
 export const prKinds = prStandingKinds;
 
 const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
-  'pr:draft': (pr) => `#${pr.number} draft`,
+  'pr:draft': (pr) => prNote(pr, 'draft'),
   'pr:review': (pr) =>
-    `#${pr.number} review: ${[
+    prNote(pr, `review: ${[
       pr.review?.unresolvedThreads ? `${pr.review.unresolvedThreads} unresolved` : '',
       pr.review?.changesRequested ? 'changes requested' : '',
     ]
       .filter(Boolean)
-      .join(', ')}`,
-  'pr:checks': (pr) => `#${pr.number} checks ${pr.checks.failed}/${pr.checks.total} failed`,
-  'pr:conflict': (pr) => `#${pr.number} conflicts with ${pr.baseRefName ?? 'its base'}`,
-  'pr:ready': (pr) => `#${pr.number} ready to merge`,
+      .join(', ')}`),
+  'pr:checks': (pr) => prNote(pr, `checks ${pr.checks.failed}/${pr.checks.total} failed`),
+  'pr:conflict': (pr) => prNote(pr, `conflicts with ${pr.baseRefName ?? 'its base'}`),
+  'pr:ready': (pr) => prNote(pr, 'ready to merge'),
 };
+
+/** How long a stack's title runs in its headline: the count and state must still fit a pet's bubble. */
+const STACK_HEADLINE_TITLE_MAX = 40;
+
+/** The merge view with each PR's title from its record: pickup's own state keeps none. */
+function mergeViewWithTitles(view: MergeView, records: readonly PrEvidence[]): MergeView {
+  const titles = new Map(records.map((pr) => [pr.url, pr.title]));
+  const titled = <T extends { url: string }>(p: T): T => {
+    const title = titles.get(p.url);
+    return title ? { ...p, title } : p;
+  };
+  return { ...view, open: view.open.map(titled), recent: view.recent.map(titled) };
+}
 
 /** Hide a repairable problem only after a live repairer has claimed safe work. */
 export function humanPrAttention(
@@ -439,8 +464,8 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
   for (const s of stacks) {
     const members = s.members.map((pr) => {
       const items = out.filter((a) => a.prUrl === pr.url);
-      return { key: parsePrRef(pr.url)!.key, url: pr.url, number: pr.number,
-        note: items.map((a) => a.note).join('; ') || `#${pr.number} ${prBadge(pr).text}`,
+      return { key: parsePrRef(pr.url)!.key, url: pr.url, number: pr.number, ...(pr.title ? { title: pr.title } : {}),
+        note: items.map((a) => a.note).join('; ') || prNote(pr, prBadge(pr).text),
         kinds: items.map((a) => a.kind) };
     });
     // Member readiness lives only in the stack item. A member's own problem
@@ -452,10 +477,11 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
       stateHash: stackStateHash(s, epochs[s.id]?.epoch),
       id: source.id, lane: source.lane, verb: 'stack-ready', at, standingSince: at,
       ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)), note: s.text,
+      ...(s.title ? { headline: `${cutPrTitle(s.title, STACK_HEADLINE_TITLE_MAX)} (${s.allReady ? `${members.length} PRs, all green` : `${s.ready} of ${members.length} ready`})` } : {}),
       // Only an all-ready stack (every member past its settle window) walks;
       // a partly ready one is a quiet standing row in tend and the glass.
       quiet: !s.allReady || !!epochs[s.id]?.silent || !!s.legacy,
-      stack: { ready: s.ready, total: members.length, allReady: s.allReady, members },
+      stack: { ...(s.title ? { title: s.title } : {}), ready: s.ready, total: members.length, allReady: s.allReady, members },
       repo: forgeRepoKey(cfg, s.repo), prUrl: top.url });
   }
   return out;
@@ -571,9 +597,12 @@ export function poolRows(pools: PoolView[]): Array<Record<string, string | numbe
 export const POOL_COLUMNS = ['pool', 'repo', 'size', 'free', 'overflow', 'claimed', 'out', 'warming'];
 
 export interface TendReport {
+  configuredTraps?: ReturnType<typeof configuredTrapViews>;
   goals?: ReturnType<typeof visibleGoals>;
   backends?: ReturnType<typeof backendViews>;
   verdict: 'daemon-down' | 'stalled' | 'needs-attention' | 'working' | 'idle';
+  /** The machine's heavy line, when anything is in it. */
+  heavy?: HeavyView;
   daemon: { up: boolean; lastHeartbeat?: string };
   counts: {
     queued: number;
@@ -654,7 +683,13 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
       ? 'queued'
       : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: false, claimedAt });
   const evidence = readEvidence(id, lane);
-  const answered = last && (last.verb === 'needs-decision' || last.verb === 'blocked') ? answeredAt(id, lane, last.at) : undefined;
+  // The row's answered mark follows its question; a lone permission request is marked by its card's answer.
+  const asked = questionEntry(log);
+  const answered = asked
+    ? answeredAt(id, lane, asked.at)
+    : last?.permissionRequest && last.verb === 'needs-decision'
+      ? answeredAt(id, lane, last.at, { permissionAnswers: true })
+      : undefined;
   return {
     id,
     lane,
@@ -668,6 +703,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     ...(answered ? { answeredAt: answered } : {}),
     prUrl: evidence.prUrl,
     ...(evidence.prUrls && evidence.prUrls.length > 1 ? { prUrls: evidence.prUrls } : {}),
+    prPositions: evidence.prPositions,
     pr: evidence.pr,
     ...(bucket === 'queued' ? {} : worktreeView(id, lane)),
     ...(bucket === 'queued' ? {} : livenessView(id, lane)),
@@ -687,10 +723,13 @@ function prsOf(chain: TendDispatch[]): string[] | undefined {
   const urls = [...new Set(chain.flatMap((d) => d.prUrls ?? []))]
     .filter((url) => readPr(parsePrRef(url)?.key ?? url)?.state !== 'CLOSED');
   if (urls.length < 2) return undefined;
-  return urls.map((u) => {
+  const positions = Object.assign({}, ...chain.map((dispatch) => dispatch.prPositions ?? {})) as NonNullable<import('@lobstah/core').Evidence['prPositions']>;
+  const ordered = orderedDispatchPrUrls({ prUrls: urls, prPositions: positions });
+  return ordered.map((u) => {
     const ref = parsePrRef(u);
     const record = ref ? readPr(ref.key) : undefined;
-    return record ? `${prBadge(record).text} ${u}` : u;
+    const prefix = positions[u] ? `${positions[u]!.position}/${positions[u]!.size} ` : '';
+    return prefix + (record ? `${prBadge(record).text} ${u}` : u);
   });
 }
 
@@ -771,8 +810,9 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const attention: TendReport['attention'] = [];
   for (const lane of ['work', 'chore'] as Lane[]) {
     for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
-      const last = readStatusLog(id, lane).at(-1);
-      if (!last || (last.verb !== 'needs-decision' && last.verb !== 'blocked')) continue;
+      // A permission request filed after the question has its own card; the question stands.
+      const last = questionEntry(readStatusLog(id, lane));
+      if (!last) continue;
       // Answered (a message newer than the question) is not standing, even
       // before the worker reads it and reports; the dispatch row carries
       // the marker instead.
@@ -1012,7 +1052,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   } catch {
     // an unreadable to-do file never fails tend
   }
-  const todoNote = todoStaleLine(todos);
+  const todoNote = [todoOverdueLine(todos), todoStaleLine(todos)].filter(Boolean).join('\n') || undefined;
   const helms = listHelms().map((h) => ({
     chat: helmChat(h, cfg),
     grounds: displayGrounds(h.grounds, cfg),
@@ -1022,8 +1062,16 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     heartbeatAgeSecs: Math.max(0, Math.round((now - (Date.parse(h.heartbeatAt) || 0)) / 1000)),
   }));
 
+  const heavy = (() => {
+    try {
+      return heavyView(now, cfg);
+    } catch {
+      return undefined; // the line is never worth a failed tend
+    }
+  })();
   return {
     verdict,
+    ...(heavy && heavy.running.length + heavy.over.length + heavy.waiting.length > 0 ? { heavy } : {}),
     goals: visibleGoals(cfg, new Date(now)),
     backends: backendViews(cfg),
     daemon: { up: daemonUp, lastHeartbeat: heartbeat },
@@ -1044,10 +1092,11 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     watches,
     traps,
     repoTraps: repoTrapRows(cfg),
+    configuredTraps: configuredTrapViews(cfg),
     awaiting,
     notices,
     helms,
-    merge,
+    ...(merge ? { merge: mergeViewWithTitles(merge, records) } : {}),
     stacks,
     parked: parked.map((p) => ({
       id: p.id,
@@ -1061,6 +1110,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     repairsWaiting: waitingRepairs(records).map((pr) => ({
       key: pr.key,
       url: pr.url,
+      ...(pr.title ? { title: pr.title } : {}),
       kind: pr.repair!.kind,
       heldBy: pr.repair!.heldBy ?? '',
       reason: pr.repair!.reason ?? '',
@@ -1093,10 +1143,11 @@ export function renderTend(r: TendReport): string {
       ...(r.hold ? { diskHold: `${r.hold.reason} on ${r.hold.dir} (since ${r.hold.since})` } : {}),
     }),
   );
+  if (r.heavy) lines.push(formatHeavyView(r.heavy));
   if (r.queueWait) lines.push(r.queueWait);
   if (r.todoNote) lines.push(r.todoNote);
   for (const stack of r.stacks) {
-    lines.push(`stack ${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
+    lines.push(`stack ${stack.title ? `${stack.title} · ` : ''}${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
     if (stack.readiness) lines.push(`${stack.readiness.text} ${stack.readiness.url}`);
     const item = r.attention.find((a) => a.key === `stack:${stack.readiness?.id}`);
     if (item?.stack) for (const member of item.stack.members) lines.push(`  ${member.note} ${member.url}`);
@@ -1182,7 +1233,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'repairs waiting',
-        r.repairsWaiting.map((w) => ({ pr: w.key, kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
+        r.repairsWaiting.map((w) => ({ pr: prKeyLabel(w.key, w.title), kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
         ['pr', 'kind', 'heldBy', 'reason', 'until'],
       ),
     );
@@ -1190,7 +1241,7 @@ export function renderTend(r: TendReport): string {
   if (r.repairChores?.length) {
     lines.push('');
     lines.push(toonTable('repair chores', r.repairChores.map((c) => ({
-      id: c.id.slice(0, 8), pr: c.pr, lane: c.lane, state: c.state,
+      id: c.id.slice(0, 8), pr: prKeyLabel(c.pr, c.title), lane: c.lane, state: c.state,
       worker: named(c.worker), waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
     })), ['id', 'pr', 'lane', 'state', 'worker', 'waitingForTrap']));
   }
@@ -1198,6 +1249,7 @@ export function renderTend(r: TendReport): string {
     lines.push('');
     lines.push(toonTable('pools', poolRows(r.pools), POOL_COLUMNS));
   }
+  if (r.configuredTraps?.length) lines.push('', toonTable('configured-traps', r.configuredTraps.map((profile) => ({ ...profile })), ['profile', 'grounds', 'surface', 'harness', 'capacity', 'state', 'cwd']));
   if (r.repoTraps?.length) {
     lines.push('', toonTable('repo-traps', r.repoTraps, ['repo', 'traps']));
   }
@@ -1275,8 +1327,8 @@ export function renderTend(r: TendReport): string {
       toonTable(
         `prs (${r.merge.repo}, observed ${r.merge.updatedAt})`,
         [
-          ...r.merge.open.map((p) => ({ pr: `#${p.number}`, state: p.mergeableState, gate: p.gate, url: p.url })),
-          ...r.merge.recent.map((p) => ({ pr: `#${p.number}`, state: p.disposition, gate: '', url: p.url })),
+          ...r.merge.open.map((p) => ({ pr: prLabel(p), state: p.mergeableState, gate: p.gate, url: p.url })),
+          ...r.merge.recent.map((p) => ({ pr: prLabel(p), state: p.disposition, gate: '', url: p.url })),
         ],
         ['pr', 'state', 'gate', 'url'],
       ),

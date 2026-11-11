@@ -95,7 +95,7 @@ export function resolveSessionHarness(id: string, cfg?: Config, laneHint?: Lane)
   const byId = harnessFromSessionId(sessionId);
   if (byId) return out(byId, 'session-id');
   const d = storedDescriptor(id, lane);
-  const repo = d && cfg?.repos[d.repo];
+  const repo = d?.repo ? cfg?.repos[d.repo] : undefined;
   const fromDescriptor = d?.harness ?? repo?.harness?.default ?? cfg?.harness.default;
   if (fromDescriptor) return out(fromDescriptor, 'descriptor');
   return { sessionId, lane };

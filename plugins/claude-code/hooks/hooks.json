@@ -1,5 +1,5 @@
 {
-  "description": "Lobstah lifecycle and grant hooks. Session grants match one helm or trap session and a time-limited tool scope. Legacy command/path grants remain trap-only. PreToolUse and PermissionRequest consult the ledger; Claude Code also loads the tool.check mod. Expired or revoked grants do not match. Harness deny rules and organization limits still apply.",
+  "description": "Lobstah lifecycle and grant hooks. Session grants match one helm or trap session and a time-limited tool scope. Legacy command/path grants remain trap-only. PreToolUse and PermissionRequest consult the ledger; PermissionDenied files a helm command auto mode refused as a glass card; Claude Code also loads the tool.check mod. Expired or revoked grants do not match. Harness deny rules and organization limits still apply.",
   "modules": [
     "./grants.mjs"
   ],
@@ -65,6 +65,17 @@
           {
             "type": "command",
             "command": "lobstah hook session-end",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lobstah hook permission-denied",
             "timeout": 10
           }
         ]

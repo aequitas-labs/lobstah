@@ -904,3 +904,22 @@ describe('merge view — the persisted forge observation', () => {
 function readChore(id: string) {
   return JSON.parse(fs.readFileSync(path.join(home, 'chores', 'queue', `${id}.json`), 'utf8'));
 }
+
+it('reports newly discovered stack PRs when the dispatch verb stays done', async () => {
+  const src = new FakeSource();
+  src.items = [item('fake:stack-reports')];
+  const state = new PickupState();
+  await dispatchLoop(src, state);
+  const id = state.get('fake:stack-reports')!.uuid;
+  claimNext('work'); appendStatus(id, 'work', 'done');
+  const top = 'https://github.com/o/r/pull/3';
+  const bottom = 'https://github.com/o/r/pull/2';
+  mergeEvidence(id, 'work', { prUrl: top });
+  await reportLoop(src, state, () => {}, () => {}, false);
+  expect(src.reports).toHaveLength(1);
+  mergeEvidence(id, 'work', { prUrls: [top, bottom] });
+  await reportLoop(src, new PickupState(), () => {}, () => {}, false);
+  expect(src.reports).toHaveLength(2);
+  await reportLoop(src, new PickupState(), () => {}, () => {}, false);
+  expect(src.reports).toHaveLength(2);
+});

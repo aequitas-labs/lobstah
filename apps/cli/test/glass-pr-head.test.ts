@@ -101,4 +101,15 @@ describe("a dispatch card's PR", () => {
     expect(pick('done')).toMatchObject({ number: 10, badge: { text: 'merged' }, several: false });
     expect(pick('active')).toBeUndefined();
   });
+
+  it('keeps the saved top PR when stack branches have been retargeted', () => {
+    movedOn();
+    appendStatus(id, 'work', 'working', 'retargeted stack', at(5));
+    mergeEvidence(id, 'work', {
+      prUrls: [url(13), url(11), url(12)],
+      prPositions: Object.fromEntries([11, 12, 13].map((number, index) => [url(number), { bottom: url(11), position: index + 1, size: 3 }])),
+    });
+    for (const number of [11, 12, 13]) upsertPr(obs(number), id);
+    expect(head()).toMatchObject({ number: 13, open: 3 });
+  });
 });
