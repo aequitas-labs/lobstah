@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import type { GlassSnapshot, GlassTrap } from '@lobstah/core';
 import { trapView } from '../../../packages/glass-ui/src/glass-diff.js';
+import { isExternalHref } from '../../../packages/glass-ui/src/glass-links.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
@@ -128,9 +129,12 @@ function canon(node: Node, skeletonOnly = false): string {
     const el = c as Element;
     if (el.tagName === 'SCRIPT') continue;
     if (el.tagName === 'BUTTON' && el.classList.contains('thumb')) continue;
+    // Where a link out of the glass opens, and its ↗ mark, are html.ts's rule now; glass-links tests them.
+    const external = el.tagName === 'A' && isExternalHref(el.getAttribute('href') ?? '', el.ownerDocument.location.origin);
     const attrs = [...el.attributes]
       .filter((a) => !a.name.startsWith('on') && a.name !== 'selected' && a.name !== 'title')
-      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )long(?= |$)/, '').trim() : a.value] as const)
+      .filter((a) => !(external && (a.name === 'target' || a.name === 'rel')))
+      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )(long|extlink)(?= |$)/g, '').trim() : a.value] as const)
       .filter(([n, v]) => !((n === 'class' || n === 'style') && v === ''))
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([n, v]) => `${n}=${JSON.stringify(v)}`);
@@ -389,7 +393,9 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
             const props = Array.from({ length: cs.length }, (_, k) => cs.item(k)).filter((p) => p !== 'color-scheme').sort();
-            out.push(`${label} ${i} ${el.tagName}.${el.className} ` + props.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'));
+            // extlink only draws the ↗ after a link out of the glass (see canon); the link's own style is compared.
+            const cls = el.className.replace(/(^| )extlink(?= |$)/, '').trim();
+            out.push(`${label} ${i} ${el.tagName}.${cls} ` + props.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'));
           });
       };
       try {
