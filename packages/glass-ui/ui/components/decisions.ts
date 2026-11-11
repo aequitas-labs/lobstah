@@ -21,7 +21,7 @@ import {
 import { html } from '../html.js';
 import type { DecisionDraft } from '../store.js';
 import { getState } from '../store.js';
-import { Age, ImageThumb, NamedText, opener } from './common.js';
+import { Age, ImageThumb, NamedText, RepoName, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
@@ -160,7 +160,7 @@ function source(c: DecisionCard) {
         e.stopPropagation();
         opener('dispatch', lane + ':' + dispatch)();
       }}>${dispatch.slice(0, 8)}</a>`,
-    c.repo,
+    c.repo && RepoName(c.repo),
   ].filter(Boolean);
   return parts.flatMap((m, i) => (i ? [' · ', m] : [m]));
 }
@@ -190,7 +190,7 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   // The hosted glass names the card's boat; the local glass is on it.
   const boat = run ? (run.boat ?? getState().snapshot?.viewer?.machine) : undefined;
   const runTone = runState === 'failed' ? 'bad' : runState === 'succeeded' ? 'ok' : 'dim';
-  const meta = [c.repo, [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
+  const meta = [c.repo && RepoName(c.repo), [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
   const status = run?.latest
     ? html`<span class=${'dsent ' + runTone}>${runLabel}</span>`
     : state === 'answered' && html`<span class="dsent ok">sent</span>`;

@@ -794,6 +794,19 @@ tr.rowhead:hover {
 .gcontext {
   min-height: 28px;
 }
+/* The repo icon (components/card.ts) sits on the text's baseline, a little apart from the name. */
+.repoicon {
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+/* Under the title: the older glass's subtitle gray, one type step below body. Links keep their color. */
+.gcontext .gtext,
+.gnow .gtext,
+.gfoot .gtext,
+.gfoot .gright {
+  color: var(--dim);
+  font-size: 12px;
+}
 .gtitle,
 .gtext {
   min-width: 0;

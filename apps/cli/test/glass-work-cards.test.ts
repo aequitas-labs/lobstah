@@ -52,16 +52,18 @@ function review(n: number, over: Partial<GlassReview> = {}): GlassReview {
 }
 
 describe('a PR card', () => {
-  it('shows its title and status on line 1, its repo, number, checks and age on line 2 with ↗ Open, and no third line', async () => {
+  it('shows its title, then its status on a line of its own, then its repo, number, checks and age with ↗ Open, and nothing more', async () => {
     const d = acceptanceFleet();
     const p = d.prs.find((x) => x.number === 41)!;
     const g = await page(d, '#prs');
     const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#41'))!;
     expect(card.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
     expect(card.querySelector('.gtop .pricon')).toBeTruthy();
-    expect(text(card.querySelector('.gtop .gword'))).toBe(p.badge.text.toLowerCase());
+    expect(card.querySelector('.gtop .gword')).toBeNull();
+    expect(text(card.querySelector('.gtop + .gstate .gword'))).toBe(p.badge.text.toLowerCase());
     expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^web #41 · 4\/4 passed · \d+\w ago$/);
-    expect(card.querySelectorAll(':scope > .gline')).toHaveLength(2);
+    expect(card.querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
+    expect(card.querySelectorAll(':scope > .gline')).toHaveLength(3);
     // The gate moved to the modal.
     expect(text(card)).not.toContain('gate');
     // ↗ Open leaves the card alone; the card opens the PR's modal, gate and all.

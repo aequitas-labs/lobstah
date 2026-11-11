@@ -44,6 +44,8 @@ export interface CardProps {
   extra?: Children;
   /** Greyed: signed off, read, done. */
   quiet?: boolean;
+  /** The state word gets its own line under the title instead of ending line 1, leaving the title the whole first line. */
+  stateBelow?: boolean;
   onClick?: () => void;
   /** More classes for the card itself. */
   cls?: string;
@@ -61,6 +63,9 @@ export const CardLink = ({ href, label = '↗ Open', onOpen }: { href: string; l
     onOpen?.();
   }}>${label}</a>`;
 
+/** A repo, as a small line icon in the text's color: GitHub's Octicon "repo" (repo-16, @primer/octicons, MIT), sized to a 12px subtitle. */
+export const RepoIcon = html`<svg class="repoicon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z" /></svg>`;
+
 export function Card(p: CardProps) {
   const mark = p.state?.mark;
   const cls = ['card gcard', mark === 'edge' && `gcard-edge gedge-${p.state!.tone}`, p.quiet && 'dim quiet', p.cls]
@@ -72,7 +77,8 @@ export function Card(p: CardProps) {
     p.state &&
     html`<span class=${(mark === 'chip' ? 'gchip ' : 'gword ') + p.state.tone + (long ? ' long' : '')} title=${long ? p.state.word : undefined}>${p.state.word}</span>`;
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
-    <div class="gline gtop"><b class="gtitle" title=${p.titleAttr}>${p.title}</b>${p.icon && html`<span class="gicon">${p.icon}</span>`}<span class="gfill"></span>${state}</div>
+    <div class="gline gtop"><b class="gtitle" title=${p.titleAttr}>${p.title}</b>${p.icon && html`<span class="gicon">${p.icon}</span>`}<span class="gfill"></span>${!p.stateBelow && state}</div>
+    ${p.stateBelow && state && html`<div class="gline gstate">${state}</div>`}
     ${(p.context || p.action) && html`<div class="gline gcontext"><span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
     ${p.now && html`<div class="gline gnow dim"><span class="gtext" title=${p.nowTitle}>${p.now}</span></div>`}
     ${p.foot && html`<div class="gline gfoot dim"><span class="gtext">${p.foot.left}</span>${p.foot.right && html`<span class="gright">${p.foot.right}</span>`}</div>`}
