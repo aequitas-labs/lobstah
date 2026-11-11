@@ -49,6 +49,8 @@ interface Hosted {
   focused: string[];
   /** Every call the page made off the wharf's own origin. */
   offOrigin: string[];
+  /** Run the page's poll timer once, as its 2 s interval would. */
+  tick: () => Promise<void>;
 }
 
 const windows: Window[] = [];
@@ -58,7 +60,7 @@ afterEach(async () => {
 });
 
 /** The hosted glass on two mirror boats; `onBoat` is the boat whose glass answers the loopback probe, if any. */
-async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: number; boats?: Array<[typeof NORTH, 'n' | 's']> } = {}): Promise<Hosted> {
+async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: number; boats?: Array<[typeof NORTH, 'n' | 's']>; relay?: (call: Hosted['relayed'][number]) => Response | Promise<Response> | undefined } = {}): Promise<Hosted> {
   const window = new Window({
     url: 'https://glass.test/' + hash,
     width: 1280,
@@ -69,7 +71,8 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
   const w = window as unknown as Record<string, unknown> & { Date: DateConstructor };
   w.Date.now = () => NOW;
   w.WebSocket = class { close() {} };
-  w.setInterval = () => 0;
+  const timers: Array<() => unknown> = [];
+  w.setInterval = (fn: () => unknown) => (timers.push(fn), timers.length);
   w.clearInterval = () => {};
   const relayed: Hosted['relayed'] = [];
   const focused: string[] = [];
@@ -94,6 +97,8 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
     if (path === '/api/glass/mirror/relay') {
       const call = JSON.parse(String(init.body)) as Hosted['relayed'][number];
       relayed.push(call);
+      const custom = opts.relay?.(call);
+      if (custom) return custom;
       if (call.read?.startsWith('/data/dispatch/')) {
         const id = decodeURIComponent(call.read.slice('/data/dispatch/'.length));
         const [, tag] = boats.find(([b]) => b.boat === call.boat)!;
@@ -120,7 +125,11 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
   };
   window.document.write(`<!doctype html><html><head><style>${GLASS_CSS}</style></head><body><script>${GLASS_SCRIPT}</script></body></html>`);
   await settle();
-  return { doc: window.document as unknown as Document, settle, relayed, focused, offOrigin };
+  const tick = async () => {
+    for (const fn of timers) fn();
+    await settle();
+  };
+  return { doc: window.document as unknown as Document, settle, relayed, focused, offOrigin, tick };
 }
 
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -170,6 +179,39 @@ describe('two mirror boats in one fleet', () => {
     expect(h.doc.querySelectorAll('#lobs .lob')).toHaveLength(0);
     expect(h.doc.querySelector('.settings')?.querySelector('input, select, textarea')).toBeNull();
     expect(h.relayed.filter(c => c.write?.kind === 'review-mode' || c.write?.kind === 'helm-chat')).toEqual([]);
+  });
+
+  it("reads an open job's detail from its boat once while the boat's snapshot is unchanged, not on every poll", async () => {
+    const h = await hosted('#dispatches');
+    const southRow = Array.from(h.doc.querySelectorAll('#dispatches tr.rowhead')).find((r) => text(r).startsWith('s'))!;
+    (southRow as unknown as HTMLElement).click();
+    await h.settle();
+    for (let i = 0; i < 5; i++) await h.tick();
+    expect(h.relayed.filter((c) => c.read?.startsWith('/data/dispatch/'))).toHaveLength(1);
+  });
+
+  it('never stacks detail reads of a slow boat, and says it is busy instead of showing a raw 429', async () => {
+    let answer: (r: Response) => void = () => {};
+    let busy = false;
+    const h = await hosted('#dispatches', {
+      relay: (call) => {
+        if (!call.read?.startsWith('/data/dispatch/')) return undefined;
+        if (busy) return Response.json({ error: 'mirror rate limit' }, { status: 429 });
+        return new Promise<Response>((resolve) => (answer = resolve));
+      },
+    });
+    const southRow = Array.from(h.doc.querySelectorAll('#dispatches tr.rowhead')).find((r) => text(r).startsWith('s'))!;
+    (southRow as unknown as HTMLElement).click();
+    await h.settle();
+    // The boat has not answered: polls come and go, and no second read is sent.
+    for (let i = 0; i < 5; i++) await h.tick();
+    expect(h.relayed.filter((c) => c.read?.startsWith('/data/dispatch/'))).toHaveLength(1);
+    busy = true;
+    answer(Response.json({ error: 'mirror rate limit' }, { status: 429 }));
+    await h.settle();
+    const modal = text(h.doc.querySelector('.modal, #overlay'));
+    expect(modal).toContain('Busy right now. Retrying…');
+    expect(modal).not.toContain('429');
   });
 
   it('opens a row’s detail from its own boat, and sends a card’s answer to its own boat only', async () => {

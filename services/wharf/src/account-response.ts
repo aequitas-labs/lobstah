@@ -113,8 +113,13 @@ async function mirrorResponse(request: Request, env: Env, c: Command): Promise<R
 
 /** How long the relay waits for a boat before it answers 202 and leaves the page to poll the call. */
 const MIRROR_RELAY_WAIT_MS = 20_000;
-/** How often it looks. */
+/**
+ * How often it looks: soon at first, then less often, up to every 2 s. Each
+ * look counts against the account's mirror budget, so a slow boat costs a
+ * dozen looks over the 20 s, not 50.
+ */
 const MIRROR_RELAY_POLL_MS = 400;
+const MIRROR_RELAY_POLL_MAX_MS = 2_000;
 
 /**
  * Post one call and wait for its boat's answer, then answer with it: the
@@ -128,10 +133,10 @@ async function relayAndWait(request: Request, env: Env, c: Command, call: unknow
   const id = typeof (call as { id?: unknown })?.id === 'string' ? (call as { id: string }).id : '';
   if (created.status !== 200 && !(created.status === 409 && id)) return Response.json(created.value, { status: Number(created.status), headers: noStore });
   const deadline = Date.now() + MIRROR_RELAY_WAIT_MS;
-  for (;;) {
+  for (let wait = MIRROR_RELAY_POLL_MS; ; wait = Math.min(wait * 1.5, MIRROR_RELAY_POLL_MAX_MS)) {
     const answer = await mirrorResponse(request, env, { ...c, method: 'GET', path: `mirror/calls/${id}`, body: {} });
     if (answer.status !== 202 || Date.now() >= deadline) return answer;
     await answer.body?.cancel();
-    await new Promise((resolve) => setTimeout(resolve, MIRROR_RELAY_POLL_MS));
+    await new Promise((resolve) => setTimeout(resolve, Math.min(wait, Math.max(0, deadline - Date.now()))));
   }
 }

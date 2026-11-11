@@ -177,7 +177,14 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
   const missing = <T>(): GlassRead<T> => ({ ok: false, status: 404 });
 
   /** One relayed call, waited for: the boat's own answer, or the page's refusal when no boat answers. */
-  async function relay(boat: string, body: Record<string, unknown>): Promise<Response> {
+  /**
+   * One call to a boat through the wharf's relay, which waits up to 20 s for
+   * the answer. A write, which must not be lost, then keeps polling the call
+   * up to WRITE_WAIT_MS. A read does not (`waitMs` 0): the next poll asks
+   * again, and stacked polls of a slow boat are what ran into the wharf's
+   * limits (429).
+   */
+  async function relay(boat: string, body: Record<string, unknown>, waitMs: number = WRITE_WAIT_MS): Promise<Response> {
     const id = crypto.randomUUID();
     const send = () =>
       call('/api/glass/mirror/relay', {
@@ -186,7 +193,7 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
         body: JSON.stringify({ id, boat, ...body }),
       });
     let response = await send();
-    const deadline = now() + WRITE_WAIT_MS;
+    const deadline = now() + waitMs;
     // The relay waits; a boat slower than that is polled until it answers or the call expires.
     while (response.status === 202 && response.headers.get('X-Lobstah-Mirror-Call') !== 'answered' && now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -196,18 +203,37 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
   }
 
   async function relayRead<T>(boat: string, path: string, as: 'json' | 'text' = 'json'): Promise<GlassRead<T>> {
-    const r = await relay(boat, { read: path });
+    const r = await relay(boat, { read: path }, 0);
     if (!r.ok || r.status === 202) return { ok: false, status: r.status === 202 ? 504 : r.status };
     return { ok: true, status: r.status, data: (as === 'json' ? await r.json() : await r.text()) as T };
   }
 
-  /** A read of one row's record, from the boat that row came from. */
-  async function readFor<T>(key: string, path: (id: string) => string, wharfRead: () => Promise<GlassRead<T>>): Promise<GlassRead<T>> {
+  /**
+   * Reads kept per boat and path, with the ETag of the boat's snapshot they
+   * were read at. An open job modal asks for its detail after every poll; while
+   * that boat's snapshot is unchanged, the detail is the one already read, and
+   * no call reaches the boat.
+   */
+  const kept = new Map<string, { etag: string; read: GlassRead<unknown> }>();
+
+  /** A read of one row's record, from the boat that row came from; `keep` reuses it while the boat's snapshot is unchanged. */
+  async function readFor<T>(
+    key: string,
+    path: (id: string) => string,
+    wharfRead: () => Promise<GlassRead<T>>,
+    keep = false,
+  ): Promise<GlassRead<T>> {
     if (!merged) await load();
     const r = route(key);
     if (!r.boat) return missing();
     if (r.boat === WHARF_SOURCE) return wharfRead();
-    return relayRead<T>(r.boat, path(r.value));
+    const at = path(r.value);
+    const etag = sources.get(r.boat)?.etag;
+    const held = keep ? kept.get(`${r.boat}\n${at}`) : undefined;
+    if (held && etag !== undefined && held.etag === etag) return held.read as GlassRead<T>;
+    const read = await relayRead<T>(r.boat, at);
+    if (keep && read.ok && etag !== undefined) kept.set(`${r.boat}\n${at}`, { etag, read });
+    return read;
   }
 
   /** Files a person attached, sent to the wharf for their boat to fetch with the call. */
@@ -252,6 +278,7 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
         id,
         (local) => `/data/dispatch/${encodeURIComponent(local)}`,
         () => options.wharf.dispatch(id),
+        true,
       ),
     decision: (key) =>
       readFor<GlassDecision>(
@@ -329,6 +356,8 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
       const response = await relay(r.boat, { write: { kind, payload: value }, ...(files ? { files } : {}) });
       if (response.status === 202)
         return { ok: false, status: 504, body: { ok: false, reason: `${name(r.boat)} did not answer; it may be asleep.` } as T };
+      if (response.status === 429)
+        return { ok: false, status: 429, body: { ok: false, reason: 'Busy right now. Try again in a moment.' } as T };
       let body: T;
       try {
         body = (await response.json()) as T;
