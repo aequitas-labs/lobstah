@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { askDecision, ensureLayout, prepareRunCard, readDecisionAnswer } from '@lobstah/core';
+import { askDecision, ensureLayout, listRequests, prepareRunCard, processStartedAt, readRunAttempt } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges } from '../src/run-passkey.js';
 import { RunRegistry } from '../src/run-exec.js';
@@ -97,7 +97,7 @@ async function run(c: { key: string; sha256: string }, inputs: Record<string, st
 
 const answer = async (key: string) => {
   await runs.settled();
-  return readDecisionAnswer(key)?.text ?? '';
+  return listRequests({ kind: 'decision-answer' }).filter((request) => request.payload.key === key).at(-1)?.payload.text as string ?? '';
 };
 
 /** Wait until the card's live output holds `text`. */
@@ -195,6 +195,18 @@ describe.skipIf(process.platform === 'win32' || !fs.existsSync('/usr/bin/expect'
     expect(await answer(c.key)).toContain('eof');
     expect((await line(c.key, 'two')).status).toBe(409);
   });
+
+  it('stops the terminal script and its background child as one run', async () => {
+    const childFile = path.join(outside, 'interactive-child.pid');
+    const c = card(`#!/bin/bash\nsleep 30 &\necho "$!" > "${childFile}"\nread -r -p "Waiting: " value\nwait\n`, { interactive: true });
+    await run(c);
+    await waitFor(c.key, 'Waiting:');
+    const childPid = Number(fs.readFileSync(childFile, 'utf8'));
+    expect((await post('run-stop', { key: c.key })).status).toBe(202);
+    await runs.settled();
+    expect(readRunAttempt(c.key)).toMatchObject({ state: 'stopped', result: { exitCode: 130 } });
+    expect(processStartedAt(childPid)).toBeUndefined();
+  }, 15000);
 });
 
 /**
@@ -209,6 +221,7 @@ describe('the eye on a secret line', () => {
 
   async function console_() {
     let sent = false;
+    let stopped = false;
     const fleet = runCardFleet(glassRun('#!/bin/bash\nread -r -s -p "Token: " t\n', { inputs: [], interactive: true }));
     fleet.runPasskeys = { count: 1 };
     const g = await loadGlass(GLASS_PAGE, fleet, {
@@ -231,8 +244,12 @@ describe('the eye on a secret line', () => {
           sent = true;
           return { status: 200, body: { ok: true } };
         }
+        if (kind === 'run-stop') {
+          stopped = true;
+          return { status: 202, body: { ok: true } };
+        }
         if (kind === 'run-output')
-          return { status: 200, body: { ok: true, text: '', next: 0, ...(sent ? { result: { exitCode: 0, timedOut: false, durationMs: 900, scrubbed: 1 } } : {}) } };
+          return { status: 200, body: { ok: true, text: '', next: 0, ...(sent || stopped ? { result: { exitCode: stopped ? 130 : 0, stopped, timedOut: false, durationMs: 900, scrubbed: 1 } } : {}) } };
         return { status: 404, body: { ok: false } };
       },
     });
@@ -247,6 +264,20 @@ describe('the eye on a secret line', () => {
     }
     throw new Error('timed out');
   }
+
+  it('shows Stop while running, then Run again and Dismiss after stopping', async () => {
+    const glass = await console_();
+    try {
+      (glass.$('#doverlay .runbtn') as HTMLButtonElement).click();
+      const stop = await until(() => glass.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Stop') as HTMLButtonElement | undefined);
+      stop.click();
+      await until(() => glass.$('#doverlay .runstate')?.textContent?.includes('Stopped'));
+      expect(glass.$('#doverlay .runbtn')?.textContent).toBe('Run again');
+      expect(glass.$$('#doverlay .runfoot button').some((button) => button.textContent === 'Dismiss')).toBe(true);
+    } finally {
+      await glass.close();
+    }
+  });
 
   it('shows the typed secret and each sent one only on asking, and keeps it nowhere', async () => {
     const g = await console_();

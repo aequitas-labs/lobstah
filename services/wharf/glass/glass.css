@@ -181,3 +181,102 @@ body:has(.auth-shell) {
 #auth-title:focus {
   outline: none;
 }
+/* Boat approval: one card, centered, in the sign-in palette. */
+.auth-consent-main {
+  grid-template-columns: minmax(0, 520px);
+  justify-content: center;
+}
+.auth-consent-code,
+.auth-consent-access {
+  display: block;
+  color: var(--fg);
+  line-height: 1.8;
+  margin: 0 0 20px;
+}
+/* The code is the one thing to compare with the terminal: centered, large and spaced, in its own box. */
+.auth-consent-code {
+  text-align: center;
+}
+.auth-consent-code p {
+  margin: 0 0 8px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.auth-consent-code b {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 34px;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
+  padding: 10px 16px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+}
+/* On the way to approve a boat, the sign-in card stands alone. */
+.auth-main.auth-device {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+.auth-consent-access select,
+.auth-consent-form input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.auth-consent-form input {
+  margin-bottom: 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 1px;
+}
+.auth-consent-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  margin-bottom: 28px;
+}
+.auth-consent-lists h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--dim);
+  text-transform: none;
+}
+.auth-consent-lists ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+.auth-consent-actions {
+  display: grid;
+  gap: 12px;
+}
+.auth-consent-secondary {
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.auth-consent-secondary:hover:not(:disabled) {
+  background: var(--card);
+}
+.auth-consent-link {
+  color: var(--link);
+}
+@media (max-width: 700px) {
+  .auth-consent-lists {
+    grid-template-columns: 1fr;
+  }
+}

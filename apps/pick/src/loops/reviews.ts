@@ -4,6 +4,9 @@ import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
   classifyGhError,
+  reviewAutomationCutoff,
+  reviewCanPublish,
+  dispatchWasCancelled,
   backendScopes,
   enqueue,
   firstMeaningfulLine,
@@ -122,6 +125,7 @@ export async function reviewsLoop(
   opts: { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions; notify?: (event: { key: string; text: string; kind: string; url: string }) => void } = {},
 ): Promise<void> {
   const cfg = loadConfig();
+  reviewAutomationCutoff(cfg.reviews, undefined, opts.now ?? Date.now());
   if (!cfg.reviews.enabled) return;
   const now = opts.now ?? Date.now();
   const gh = { token, ...(opts.fetch ? { fetch: opts.fetch } : {}), now };
@@ -181,13 +185,12 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
   for (const item of listReviews()) {
     const r = latestRound(item);
     if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
-    const settings = reviewSettings(loadConfig().reviews, item.pr.repoKey);
     const draft = readRoundDraft(item.key, r.id);
     if ('error' in draft) continue;
     if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking)) {
       r.verdict = draft.verdict; r.blocking = draft.blocking; writeReview(item);
     }
-    const publish = draft.verdict !== 'approve' && settings.mode !== 'notify' && settings.publish && (r.publish ?? !r.draftOnly);
+    const publish = draft.verdict !== 'approve' && reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
       log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
@@ -325,7 +328,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
 
     // A withdrawn or dismissed round (the request went, a re-request superseded it, or the person dropped it) has its job cancelled, then its checkout removed once the job ends.
     for (const old of item.rounds) {
-      if ((old.state !== 'withdrawn' && old.state !== 'dismissed') || !old.dispatch) continue;
+      if ((old.state !== 'withdrawn' && old.state !== 'dismissed' && !(old.state === 'failed' && old.reason === 'the review job was cancelled')) || !old.dispatch) continue;
       const oldJob = verbOf(old.dispatch);
       if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
         try {
@@ -340,7 +343,9 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if (r.state === 'requested' && !r.dispatch) {
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
       if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
-      const why = settings.work === 'off' ? undefined : noJob(item, r, started);
+      const cutoff = reviewAutomationCutoff(cfg.reviews, item.pr.repoKey, now);
+      const oldRequest = !manualKey && settings.work !== 'off' && Date.parse(r.requestedAt) < Date.parse(cutoff);
+      const why = oldRequest ? `no job: requested before ${cutoff}; start a draft from Reviews` : settings.work === 'off' ? undefined : noJob(item, r, started);
       if (settings.work === 'off' || why) {
         if (why && r.reason !== why) {
           r.reason = why;
@@ -370,6 +375,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       const at = new Date(now).toISOString();
       r.draftStarts = [...(r.draftStarts ?? (r.dispatchedAt ? [r.dispatchedAt] : [])), at];
       Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: at });
+      r.onDemand = manualKey !== undefined;
       r.publish = settings.publish;
       r.draftOnly = !settings.publish;
       delete r.reason;
@@ -379,8 +385,15 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       continue;
     }
 
+    const job = r.dispatch ? verbOf(r.dispatch) : undefined;
+    if (r.dispatch && ['drafting', 'drafted', 'stale'].includes(r.state) && job && dispatchWasCancelled(r.dispatch, job.lane)) {
+      Object.assign(r, { state: 'failed', reason: 'the review job was cancelled' });
+      save();
+      // The claimant may still be winding down; keep its checkout until the job ends.
+      if (job.verb === 'done' || job.verb === 'failed') removeReviewCheckout(item, r, log);
+      continue;
+    }
     if (!r.dispatch || r.state !== 'drafting') continue;
-    const job = verbOf(r.dispatch);
     const ended = job?.verb === 'done' || job?.verb === 'failed';
     if (!job) {
       Object.assign(r, { state: 'failed', reason: 'the review job is gone (culled before it finished)' });

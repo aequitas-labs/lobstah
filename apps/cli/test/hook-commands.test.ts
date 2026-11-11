@@ -109,6 +109,7 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(fs.readdirSync(path.join(home, 'wait-backoff')).sort()).toEqual(before);
   });
   for (const role of ['helm', 'trap'] as const) {
+    // Seven CLI runs: more than vitest's default 5s on a slow CI runner.
     it(`a finished background task keeps the ${role}'s backoff; quiet cycles double; a person's prompt resets`, () => {
       takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000 });
       trap('quiet-trap');
@@ -131,7 +132,7 @@ describe('lobstah hook user-prompt-submit', () => {
       expect(new IdleWait(session, DEFAULT_WAIT).timeoutSecs).toBe(7200);
       expect(hook(['hook', 'user-prompt-submit'], { session_id: session, prompt: 'what is the fleet doing?' }).status).toBe(0);
       expect(new IdleWait(session, DEFAULT_WAIT).timeoutSecs).toBe(900);
-    });
+    }, 30_000);
   }
 
   for (const harness of ['claude', 'codex'] as const) {
@@ -408,7 +409,11 @@ describe('lobstah hook', () => {
         Stop: 'lobstah hook stop',
         SessionEnd: 'lobstah hook session-end',
         // Claude Code alone reports an auto-mode refusal.
-        ...(plugin === 'claude-code' ? { PermissionDenied: 'lobstah hook permission-denied' } : {}),
+        ...(plugin === 'claude-code' ? {
+          PermissionDenied: 'lobstah hook permission-denied',
+          PostToolUseFailure: 'lobstah hook post-tool-use',
+          PostToolBatch: 'lobstah hook post-tool-use',
+        } : {}),
       });
     }
   });

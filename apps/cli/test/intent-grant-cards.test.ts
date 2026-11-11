@@ -210,6 +210,10 @@ describe('the Grants tab', () => {
   it('lists an intent grant with its scope, patterns, expiry and use', async () => {
     const g = await open([standing({ expiresAt: new Date(NOW + 30 * 60_000).toISOString() })]);
     try {
+      expect(g.$('.standing-grant')!.textContent).not.toContain('g-1a2b3c4d');
+      // The harness, patterns, uses, last use and id show once the card is tapped open.
+      (g.$('.standing-grant') as unknown as HTMLElement).click();
+      await g.settle();
       const card = g.$('.standing-grant')!;
       expect(card.textContent).toContain(INTENT.text);
       expect(card.textContent).toContain('Trap pearl-gull');

@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { RepoConfig } from '@lobstah/core';
-import { observeSessionWorker, trapBySession, helmOf } from '@lobstah/core';
+import { observeSessionWorker, trapBySession, helmOf, settlePermissionCards } from '@lobstah/core';
 import { detectHarness } from './harness-detect.js';
 import { recordHookRun } from './hook-runs.js';
 
@@ -72,6 +72,7 @@ export function readHookStdin(): HookInput | undefined {
     if (!raw.trim()) return undefined;
     const parsed = JSON.parse(raw) as HookInput;
     if (typeof parsed !== 'object' || parsed === null) return undefined;
+    settlePermissionCards(parsed);
     // Every lobstah hook reads its input here: stamp the run for `lobstah doctor`.
     const prior = parsed.session_id ? trapBySession(parsed.session_id)?.harness ?? helmOf(parsed.session_id)?.harness : undefined;
     const harness = detectHarness({ flag: prior, sessionId: parsed.session_id }).harness;

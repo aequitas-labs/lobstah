@@ -51,9 +51,14 @@ describe('worker metadata in the glass', () => {
       await close();
       await g.go('#dispatches');
       expect(g.$('#dispatches')?.textContent).not.toContain('gpt-5.4');
-      expect(g.$('#dispatches .worker-harness')?.getAttribute('aria-label')).toBe('gpt-5.4 · high');
-      expect(g.$('#dispatches .worker-harness')?.textContent).toBe('codex');
-      expect(g.$('#dispatches .worker-harness .harness-icon')).toBeNull();
+      if (view === 'table') {
+        expect(g.$('#dispatches .worker-harness')?.getAttribute('aria-label')).toBe('gpt-5.4 · high');
+        expect(g.$('#dispatches .worker-harness')?.textContent).toBe('codex');
+        expect(g.$('#dispatches .worker-harness .harness-icon')).toBeNull();
+      } else {
+        // A dispatch card names no harness; its modal does.
+        expect(g.$('#dispatches .worker-harness')).toBeNull();
+      }
       (g.$(`#dispatches ${view === 'cards' ? '.card' : '.rowhead'}`) as HTMLElement).click(); await g.settle();
       details(['codex', 'gpt-5.4', 'high', 'unknown', observedAt]);
       expect(g.$('#modalbox')?.textContent?.match(/gpt-5\.4/g)).toHaveLength(1);

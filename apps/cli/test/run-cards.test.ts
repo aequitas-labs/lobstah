@@ -130,14 +130,16 @@ describe('a run card in the glass', () => {
     expect(card.textContent).toContain('/bin/bash');
     expect(card.textContent).toContain('/Users/me/base/homebase');
     expect(card.textContent).toContain('time limit 5m');
-    expect(card.textContent).toContain('the exit code and scrubbed output');
+    expect(card.textContent).toContain('the agent sees the exit code and output, with secrets removed');
     const input = card.querySelector('.runinput input') as HTMLInputElement;
     expect(input.getAttribute('type')).toBe('password');
     const run = card.querySelector('.runbtn') as HTMLButtonElement;
     expect(run.disabled).toBe(true);
     expect(card.textContent).toContain('Set up a passkey in Settings');
     expect(g.$$('#doverlay .dopt').map((b) => b.textContent?.trim())).toEqual(['1Decline']);
-    expect(g.$('#doverlay textarea')).toBeNull();
+    // A run card also takes a reply, sent with Send; Decline sends at once.
+    expect(g.$('#doverlay .ddock textarea')).toBeTruthy();
+    expect(g.$('#doverlay .ddock .dsend')).toBeTruthy();
   });
 
   it('marks and names a zero-width or bidi character by its code point', async () => {
@@ -166,9 +168,70 @@ describe('a run card in the glass', () => {
     expect(g.$('#doverlay .runmeta')!.textContent).toContain('the exit code only');
   });
 
+  it('reloads a failed run with its output, retry and Dismiss controls', async () => {
+    const run = glassRun(undefined, { inputs: [], latest: {
+      id: '11111111-1111-4111-8111-111111111111', key: RUN_KEY, scriptSha256: glassRun().scriptSha256,
+      state: 'failed', startedAt: new Date(NOW - 2000).toISOString(), finishedAt: new Date(NOW - 1000).toISOString(),
+      result: { exitCode: 3, timedOut: false, durationMs: 1000, outputBytes: 12, scrubbed: 0 },
+    } });
+    const fleet = runCardFleet(run);
+    fleet.runPasskeys = { count: 1 };
+    const requests: string[] = [];
+    const g = await loadGlass(GLASS_PAGE, fleet, {
+      now: NOW, host: 'localhost:7777', hash: `#decision/${encodeURIComponent(RUN_KEY)}`,
+      prepare: (window) => {
+        Object.defineProperty(window, 'PublicKeyCredential', { value: class {}, configurable: true });
+        Object.defineProperty(window.navigator, 'credentials', { value: {}, configurable: true });
+      },
+      post: (_url, request) => {
+        const { kind } = JSON.parse(request.body) as { kind: string };
+        requests.push(kind);
+        if (kind === 'run-output') return { status: 200, body: { ok: true, ...run.latest, text: 'command failed', next: 14 } };
+        if (kind === 'run-dismiss') return { status: 200, body: { ok: true } };
+        return { status: 404, body: { ok: false } };
+      },
+    });
+    open.push(g);
+    expect(g.$('#doverlay .runstate')?.textContent).toContain('Failed · exit 3');
+    expect(g.$('#doverlay .runlog')?.textContent).toContain('command failed');
+    expect(g.$('#doverlay .runbtn')?.textContent).toBe('Run again');
+    expect(g.$$('#doverlay .dopt')).toHaveLength(0);
+    const dismiss = g.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Dismiss') as HTMLButtonElement;
+    dismiss.click();
+    await g.settle();
+    expect(requests).toContain('run-dismiss');
+  });
+
+  it.each([false, true])('keeps Stop available after an output failure for a running card (read-only %s)', async (readOnly) => {
+    const run = glassRun(undefined, { inputs: [], latest: {
+      id: '11111111-1111-4111-8111-111111111111', key: RUN_KEY, scriptSha256: glassRun().scriptSha256,
+      state: 'running', startedAt: new Date(NOW - 2000).toISOString(),
+    } });
+    const requests: string[] = [];
+    const fleet = runCardFleet(run);
+    fleet.decisions[0]!.readOnly = readOnly;
+    const g = await loadGlass(GLASS_PAGE, fleet, {
+      now: NOW, hash: `#decision/${encodeURIComponent(RUN_KEY)}`,
+      post: (_url, request) => {
+        const { kind } = JSON.parse(request.body) as { kind: string };
+        requests.push(kind);
+        if (kind === 'run-stop') return { status: 202, body: { ok: true } };
+        return { status: 500, body: { ok: false, reason: 'Output unavailable' } };
+      },
+    });
+    open.push(g);
+    const stop = g.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Stop') as HTMLButtonElement;
+    expect(stop).toBeDefined();
+    expect(g.$('#doverlay .runstate')?.textContent).toContain('Running');
+    expect(g.$('#doverlay .runbtn')).toBeNull();
+    stop.click();
+    await g.settle();
+    expect(requests).toContain('run-stop');
+  });
+
   it("says a card whose stored copy changed won't run", async () => {
     const g = await modal(glassRun(undefined, { altered: true }));
-    expect(g.$('#doverlay .runcard')!.textContent).toContain("no longer matches the card's hash");
+    expect(g.$('#doverlay .runcard')!.textContent).toContain("This script changed after it was proposed, so it can't run.");
   });
 
   it('wraps a long path, hash or name at phone width, and lets each row of the card shrink', () => {
