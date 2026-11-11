@@ -68,7 +68,7 @@ export function runnableCard(key: unknown): { meta: DecisionMeta & { run: NonNul
   if (!meta?.run) return refuse(404, `No run card ${key}.`);
   if (readDecisionAnswer(key)) return refuse(409, `Run card ${key} is already answered.`);
   const stored = readStoredRunScript(decisionDir(key)!);
-  if (stored?.sha256 !== meta.run.scriptSha256) return refuse(409, "The stored script no longer matches the card's hash, so it won't run.");
+  if (stored?.sha256 !== meta.run.scriptSha256) return refuse(409, "This script changed after it was proposed, so it can't run.");
   return { meta: meta as DecisionMeta & { run: NonNullable<DecisionMeta['run']> } };
 }
 
