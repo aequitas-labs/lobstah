@@ -26,6 +26,7 @@ function boatFleet(tag: 'n' | 's'): GlassFullSnapshot {
   d.attention = d.attention.map((a) => ({ ...a, id: swap(a.id), key: a.key.replace(a.id, swap(a.id)) }));
   d.decisions = [{ key: `decision:${tag}0000000`, dispatch: d.dispatches[0]!.id, lane: 'work', title: `${tag} base?`, detail: '', options: ['main', 'feature'], attachments: [], askedBy: 'helm', askedAt: new Date(NOW - 60_000).toISOString(), stateHash: tag }];
   d.attention.push({ kind: 'decision', key: `decision:${tag}0000000`, stateHash: tag, id: d.dispatches[0]!.id, lane: 'work', verb: 'decision', ageSecs: 60, at: new Date(NOW - 60_000).toISOString(), standingSince: new Date(NOW - 60_000).toISOString(), note: `${tag} base?` });
+  d.reviewSetup = { enabled: true, mode: 'notify', publish: false, running: true, identity: 'reviewer', perRepo: { web: { mode: 'on-demand', publish: true, overridden: true } } };
   d.viewer = { onMachine: false, windowFocus: false, machine: '', device: 'desktop' };
   return d;
 }
@@ -123,6 +124,26 @@ describe('two mirror boats in one fleet', () => {
     const chips = Array.from(h.doc.querySelectorAll('.chip')).map(text);
     expect(chips.some((c) => c.startsWith('north · mirrored'))).toBe(true);
     expect(chips.some((c) => c.startsWith('south · mirrored'))).toBe(true);
+  });
+
+  it('shows review settings and repo scope as text, and helm chat without inputs', async () => {
+    const h = await hosted('#reviews', { boats: [[NORTH, 'n']] });
+    const controls = () => h.doc.querySelector('#reviews .rv-controls');
+    expect(text(controls())).toContain('Review mode · default: Notify');
+    expect(text(controls())).toContain('Publish: off');
+    expect(controls()?.querySelector('select, input, button')).toBeNull();
+    const repo = h.doc.querySelector('#f-repo') as HTMLSelectElement;
+    repo.value = 'web';
+    repo.dispatchEvent(new h.doc.defaultView!.Event('change', { bubbles: true }));
+    await h.settle();
+    expect(text(controls())).toContain('Review mode · web: On-demand');
+    expect(text(controls())).toContain('Publish: on');
+    (h.doc.querySelector('#gearbtn') as HTMLElement).click();
+    await h.settle();
+    const chat = h.doc.querySelector('[data-helm-chat]');
+    expect(text(chat)).toContain('full');
+    expect(chat?.querySelector('button, input, select')).toBeNull();
+    expect(h.relayed.filter(c => c.write?.kind === 'review-mode' || c.write?.kind === 'helm-chat')).toEqual([]);
   });
 
   it('opens a row’s detail from its own boat, and sends a card’s answer to its own boat only', async () => {

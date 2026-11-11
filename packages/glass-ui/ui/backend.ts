@@ -89,6 +89,8 @@ export const GLASS_ACTIONS = [
   'pr-ack',
   /** Ask for, see or dismiss a review round. */
   'review-request',
+  /** Change review mode and publishing settings for the current repo scope. */
+  'review-settings',
   /** Attach files to a decision's answer. */
   'answer-files',
   /** Page in history older than the snapshot. */

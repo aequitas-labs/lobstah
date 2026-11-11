@@ -82,7 +82,7 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(narrow.$('#traps .newtrap')).toBeNull();
   });
 
-  it('leaves helm chat out of settings without that action', async () => {
+  it('shows helm chat as a value without controls when the source cannot change it', async () => {
     const { local, narrow } = await both('#deck');
     for (const g of [local, narrow]) {
       (g.$('#gearbtn') as HTMLElement).click();
@@ -90,7 +90,9 @@ describe('a glass shows only what its source can fill and do', () => {
     }
     expect(local.$('[data-helm-chat]')).not.toBeNull();
     expect(narrow.$('.settings')).not.toBeNull();
-    expect(narrow.$('[data-helm-chat]')).toBeNull();
+    expect(narrow.$('[data-helm-chat]')?.textContent).toContain('full');
+    expect(narrow.$('[data-helm-chat] button')).toBeNull();
+    expect(narrow.$('[data-helm-chat] input')).toBeNull();
   });
   it('shows a run card with no Run button where its source runs nothing, as the wharf does', async () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
@@ -101,6 +103,14 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(local.$('#doverlay .runbtn')).not.toBeNull();
     expect(narrow.$('#doverlay .runscript')).not.toBeNull();
     expect(narrow.$('#doverlay .runbtn')).toBeNull();
+  });
+  it('keeps review settings and helm chat local while leaving hosted review actions available', () => {
+    for (const action of ['review-settings', 'helm-chat'] as const) {
+      expect(MIRROR_CAPABILITIES.actions.has(action)).toBe(false);
+      expect(WHARF_CAPABILITIES.actions.has(action)).toBe(false);
+    }
+    expect(MIRROR_CAPABILITIES.actions.has('review-request')).toBe(true);
+    for (const kind of ['review-mode', 'helm-chat']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
   });
   it('runs a card only from the local glass: neither hosted glass offers Run, and a mirror boat relays no run request', () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);

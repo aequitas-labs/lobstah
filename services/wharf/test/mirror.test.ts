@@ -190,6 +190,18 @@ describe('relayed calls', () => {
     }
   });
 
+  it.each(['review-mode', 'helm-chat'])('refuses %s from hosted glass and mirror/read boat credentials', async (kind) => {
+    const north = await enrol('north', ['mirror', 'read']);
+    const write = { kind, payload: kind === 'review-mode' ? { mode: 'auto-review', publish: true } : { grounds: 'home', chat: 'brief' } };
+    for (const path of ['mirror/calls', 'mirror/relay']) {
+      const body = { id: `settings-${++sequence}`, boat: north.id, write };
+      expect((await browser(path, { body })).status).toBe(403);
+      expect((await boatCall(north, path, { body: JSON.stringify(body) })).status).toBe(403);
+    }
+    expect(await sql('SELECT count(*) AS n FROM mirror_calls')).toEqual([{ n: 0 }]);
+    expect((await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls).toEqual([]);
+  });
+
   it('carries a file the person attached to a relayed answer to its boat', async () => {
     const north = await enrol('north', ['mirror', 'read']);
     const uploaded = await browser('mirror/files', { raw: 'tray sketch', headers: { 'X-File-Name': 'tray.txt', 'X-Mirror-Boat': north.id } });
