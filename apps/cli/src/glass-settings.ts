@@ -157,7 +157,8 @@ function repoSettings(cfg: Config, repo: string, file: unknown): SettingsRepo {
   const heavy = cfg.heavy.repos?.[repo];
   if (heavy) rows.push(...settingRows(heavy, ['heavy', 'repos', repo], file, 2).map((row) => ({ ...row, key: row.key.replace(`${repo}.`, 'heavy.') })));
   const count = repoTrapCount(cfg, repo);
-  return { key: repo, traps: { used: count.used, ...(count.limit !== undefined ? { limit: count.limit } : {}) }, rows };
+  const idle = count.stowed + count.ghosted;
+  return { key: repo, traps: { used: count.used, ...(count.limit !== undefined ? { limit: count.limit } : {}), ...(idle ? { idle } : {}), ...(count.held.length ? { held: count.held } : {}) }, rows };
 }
 
 function settingSections(cfg: Config, file: unknown): SettingsSection[] {

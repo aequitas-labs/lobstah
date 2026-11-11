@@ -63,7 +63,7 @@ export function configPermissionMode(cfg: Pick<Config, 'repos' | 'harness'>, rep
 
 export interface RepoConfig {
   path: string;
-  /** Maximum rostered traps for this repo (live, stowed and ghosted); absent means unlimited. */
+  /** Maximum traps in use for this repo (signed on, free or busy, or starting); stowed and ghosted don't count. Absent means unlimited. */
   traps?: number;
   /** PR click destination (`reviewTool`): a preset or HTTPS template. */
   reviewTool?: string;

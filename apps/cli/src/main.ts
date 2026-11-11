@@ -291,7 +291,7 @@ import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
 import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, onCodexServer, startMode, throwBatch, throwTrap } from './throw.js';
-import { trapSummary } from './trap-list.js';
+import { repoTrapRows, trapSummary } from './trap-list.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle, trapTabTitle } from './terminal-title.js';
@@ -2502,8 +2502,10 @@ async function mainCli(): Promise<void> {
       const groundsName = opt('--grounds') ?? (caller?.id !== undefined ? helmOf(caller.id)?.grounds : undefined);
       const grounds = groundsName !== undefined ? resolveGrounds(cfg, groundsName) : undefined;
       const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos });
+      // Each repo's traps in use against its cap: a resume past the cap waits like a new trap.
+      const capacity = repoTrapRows(cfg, [...new Set(rows.flatMap((r) => (r.repo && cfg.repos[r.repo] ? [r.repo] : [])))].sort());
       if (has('--json')) {
-        console.log(JSON.stringify({ plan: 'dry-run', grounds: grounds ? displayGrounds(grounds.name, cfg) : 'all', traps: rows }, null, 2));
+        console.log(JSON.stringify({ plan: 'dry-run', grounds: grounds ? displayGrounds(grounds.name, cfg) : 'all', traps: rows, capacity }, null, 2));
         break;
       }
       const count = (action: string) => rows.filter((r) => r.action === action).length;
@@ -2517,6 +2519,7 @@ async function mainCli(): Promise<void> {
           unresolved: count('unresolved'),
         }),
       );
+      if (capacity.length) console.log(toonTable('repo-traps', capacity, ['repo', 'traps']));
       console.log(
         toonTable(
           'throw',

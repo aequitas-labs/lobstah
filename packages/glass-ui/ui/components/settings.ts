@@ -4,10 +4,21 @@ import { can, capabilities } from '../backend.js';
 import { passkeysWorkHere, registerRunPasskey, runPasskeyUrl } from '../actions.js';
 import type { GlassState } from '../store.js';
 
-/** A repo's trap count beside its cap, `3 of 5 traps`; a count past its cap says so. */
-export function trapCountText(traps: { used: number; limit?: number }): string {
-  if (traps.limit === undefined) return `${traps.used} ${traps.used === 1 ? 'trap' : 'traps'}, no cap`;
-  return `${traps.used} of ${traps.limit} traps${traps.used > traps.limit ? ', over the cap' : ''}`;
+/**
+ * A repo's traps in use beside its cap, `3 of 5 traps in use`, then the stowed
+ * and ghosted ones the cap doesn't count, and any ghosted trap whose session
+ * is still open. A count past its cap says so.
+ */
+export function trapCountText(traps: { used: number; limit?: number; idle?: number; held?: string[] }): string {
+  const used =
+    traps.limit === undefined
+      ? `${traps.used} ${traps.used === 1 ? 'trap' : 'traps'} in use, no cap`
+      : `${traps.used} of ${traps.limit} traps in use${traps.used > traps.limit ? ', over the cap' : ''}`;
+  const idle = traps.idle ? ` · +${traps.idle} stowed or ghosted` : '';
+  const held = traps.held?.length
+    ? ` · ${traps.held.join(', ')} still ${traps.held.length === 1 ? 'has its session' : 'have their sessions'} open`
+    : '';
+  return used + idle + held;
 }
 
 const rowsOf = (rows: SettingRow[]) =>
