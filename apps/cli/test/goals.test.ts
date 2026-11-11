@@ -29,6 +29,7 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 const run = (...args: string[]) => spawnSync(process.execPath, ['--require', path.join(home, 'clock.cjs'), cli, ...args], { env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8', timeout: 15000 });
 
+// Thirteen CLI runs: more than vitest's default 5s on a slow CI runner.
 it('CLI reads/writes goals and past recaps, and refuses a different session writing the helm grounds', () => {
   takeHelm({ sessionId: 'helm', grounds: { name: 'day', repos: ['r'] }, ttlMs: 60000 });
   const command = (...args: string[]) => run('goals', ...args, '--grounds', 'day', '--session', 'helm');
@@ -48,7 +49,7 @@ it('CLI reads/writes goals and past recaps, and refuses a different session writ
   const recap = path.join(home, 'recap.md'); fs.writeFileSync(recap, 'Done: reviewed.');
   expect(command('recap', '2026-10-14', '--file', recap).status).toBe(0);
   expect(command('2026-10-14').stdout).toContain('## Recap\n\nDone: reviewed.');
-});
+}, 30_000);
 
 it('prompt reminder crosses 04:00 once per grounds/day, across sessions and configured zones', () => {
   const cfg = loadConfig();
