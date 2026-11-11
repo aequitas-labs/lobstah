@@ -2,7 +2,7 @@ import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, Glass
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
-import { cancelJob, closeModal, showModal, messageHelm } from '../actions.js';
+import { cancelJob, closeModal, showModal, messageHelm, setPrefs } from '../actions.js';
 import { useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
@@ -42,13 +42,15 @@ import { can, capabilities, fileUrl } from '../backend.js';
 
 const close = html`<span class="x" onClick=${closeModal}>×</span>`;
 
-/** The browser and helm settings, shown as values on every glass. */
+/** Browser display preferences are editable; configuration and helm values stay read-only. */
 function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
+  const viewOptions = html`<span class="seg" role="group" aria-label="view">${(['table', 'cards'] as const).map((view) => html`<button type="button" class=${view === prefs.view ? 'on' : ''} aria-pressed=${view === prefs.view} onClick=${() => setPrefs({ view })}>${view}</button>`)}</span>`;
+  const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<button type="button" class=${lobs === prefs.lobs ? 'on' : ''} aria-pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}</button>`)}</span>`;
   const kinds = item.attentionError ? item.attentionError : (item.attentionKinds || []).join(' · ');
   return [
     close,
     html`<h3>⚙ settings</h3>`,
-    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span><span>${prefs.view}</span></div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span><span>${prefs.lobs ? 'on' : 'off'}</span></div>${item.helms.map((helm) => html`<div class="row" data-helm-chat=${helm.grounds}><span class="lbl">helm chat · ${helm.grounds}</span><span>${helm.chat ?? 'full'}</span></div>`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
+    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span>${viewOptions}</div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span>${lobOptions}</div>${item.helms.map((helm) => html`<div class="row" data-helm-chat=${helm.grounds}><span class="lbl">helm chat · ${helm.grounds}</span><span>${helm.chat ?? 'full'}</span></div>`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
   ];
 }
 

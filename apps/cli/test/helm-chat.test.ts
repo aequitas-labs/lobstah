@@ -194,7 +194,8 @@ it('glass shows helm chat as text and refuses settings writes with a valid page 
   page = await loadGlass(GLASS_PAGE, initial, { now: Date.now() });
   (page.$('#gearbtn') as HTMLElement).click(); await page.settle();
   expect(page.$('[data-helm-chat="home"]')?.textContent).toContain('brief');
-  expect(page.$$('.settings input, .settings select, .settings button')).toEqual([]);
+  expect(page.$$('[data-helm-chat] input, [data-helm-chat] select, [data-helm-chat] button')).toEqual([]);
+  expect(page.$$('.settings .seg button')).toHaveLength(4);
   expect(page.posts()).toEqual([]);
   const before = readHelm('fleet');
   for (const chat of ['full', 'brief', 'quiet']) {

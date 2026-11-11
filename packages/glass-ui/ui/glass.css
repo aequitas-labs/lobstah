@@ -463,6 +463,24 @@ a.deckline > .dim {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.seg button {
+  background: var(--card);
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--seg-on);
+  color: var(--fg);
+}
 .wrap {
   overflow-x: auto;
 }

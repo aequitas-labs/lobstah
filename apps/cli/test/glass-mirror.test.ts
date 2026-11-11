@@ -159,7 +159,16 @@ describe('two mirror boats in one fleet', () => {
     const chat = h.doc.querySelector('[data-helm-chat]');
     expect(text(chat)).toContain('full');
     expect(chat?.querySelector('button, input, select')).toBeNull();
-    expect(h.doc.querySelector('.settings')?.querySelector('button, input, select, textarea')).toBeNull();
+    const choose = async (setting: string, value: string) => {
+      const button = Array.from(h.doc.querySelectorAll(`.settings [aria-label="${setting}"] button`)).find(button => text(button) === value)!;
+      (button as HTMLElement).click();
+      await h.settle();
+    };
+    await choose('view', 'cards');
+    await choose('lobs', 'off');
+    expect(JSON.parse(h.doc.defaultView!.localStorage.getItem('spyglass')!)).toMatchObject({ view: 'cards', lobs: false });
+    expect(h.doc.querySelectorAll('#lobs .lob')).toHaveLength(0);
+    expect(h.doc.querySelector('.settings')?.querySelector('input, select, textarea')).toBeNull();
     expect(h.relayed.filter(c => c.write?.kind === 'review-mode' || c.write?.kind === 'helm-chat')).toEqual([]);
   });
 

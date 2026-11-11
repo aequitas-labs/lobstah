@@ -94,7 +94,10 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(narrow.$('[data-helm-chat]')?.textContent).toContain('full');
     expect(narrow.$('[data-helm-chat] button')).toBeNull();
     expect(narrow.$('[data-helm-chat] input')).toBeNull();
-    for (const g of [local, narrow]) expect(g.$$('.settings input, .settings button, .settings select')).toEqual([]);
+    for (const g of [local, narrow]) {
+      expect(g.$$('.settings .seg button')).toHaveLength(4);
+      expect(g.$$('[data-helm-chat] input, [data-helm-chat] button, [data-helm-chat] select')).toEqual([]);
+    }
   });
   it('shows a run card with no Run button where its source runs nothing, as the wharf does', async () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);

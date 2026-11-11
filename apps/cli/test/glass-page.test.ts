@@ -792,17 +792,26 @@ describe('glass page: modals', () => {
     expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
   });
 
-  it('⚙ shows settings as text without changing browser preferences', async () => {
-    const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'cards', lobs: false } });
-    const before = g.window.localStorage.getItem('spyglass');
+  it('⚙ edits browser display preferences while helm settings stay read-only', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'table', lobs: false } });
     await click(g, g.$('#gearbtn'));
     expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
     expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
-    const values = g.$$('#modalbox .settings .row').map(row => text(row.lastElementChild));
-    expect(values.slice(0, 3)).toEqual(['cards', 'off', 'full']);
-    expect(g.$$('#modalbox .settings button, #modalbox .settings input, #modalbox .settings select')).toEqual([]);
-    expect(g.window.localStorage.getItem('spyglass')).toBe(before);
+    const choose = async (setting: string, value: string) => click(g, g.$$(`.settings [aria-label="${setting}"] button`).find(button => text(button) === value) ?? null);
+    await choose('view', 'cards');
     expect(g.$$('#dispatches .card')).toHaveLength(4);
+    await choose('lobs', 'on');
+    expect(g.$$('#lobs .lob')).toHaveLength(2);
+    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!)).toMatchObject({ view: 'cards', lobs: true });
+    await choose('view', 'table');
+    await choose('lobs', 'off');
+    expect(g.$$('#dispatches tr.rowhead')).toHaveLength(4);
+    expect(g.$$('#lobs .lob')).toHaveLength(0);
+    expect(g.$$('[data-helm-chat] button, [data-helm-chat] input, [data-helm-chat] select')).toEqual([]);
+    expect(g.posts()).toEqual([]);
+    const reloaded = await page(acceptanceFleet(), { hash: '#dispatches', prefs: JSON.parse(g.window.localStorage.getItem('spyglass')!) });
+    expect(reloaded.$$('#dispatches tr.rowhead')).toHaveLength(4);
+    expect(reloaded.$$('#lobs .lob')).toHaveLength(0);
   });
 });
 
@@ -1112,7 +1121,7 @@ describe('glass page: lobs', () => {
     const g = await page(acceptanceFleet(), { prefs: { lobs } });
     expect(g.$$('#lobs .lob')).toHaveLength(lobs ? 2 : 0);
     await click(g, g.$('#gearbtn'));
-    expect(text(g.$$('#modalbox .settings .row')[1]?.lastElementChild ?? null)).toBe(lobs ? 'on' : 'off');
+    expect(text(g.$('.settings [aria-label="lobs"] button[aria-pressed="true"]'))).toBe(lobs ? 'on' : 'off');
   });
 });
 
