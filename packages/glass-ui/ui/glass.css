@@ -561,13 +561,13 @@ tr.rowhead:hover {
 .gcard-edge {
   border-left-width: 4px;
 }
-.gcard-edge.ok {
+.gedge-ok {
   border-left-color: var(--ok);
 }
-.gcard-edge.warn {
+.gedge-warn {
   border-left-color: var(--warn);
 }
-.gcard-edge.bad {
+.gedge-bad {
   border-left-color: var(--bad);
 }
 .gline {
@@ -603,6 +603,10 @@ tr.rowhead:hover {
 .gfill {
   flex: 1 1 auto;
 }
+.gicon {
+  display: inline-flex;
+  color: var(--dim);
+}
 .gfoot {
   margin-top: auto;
   border-top: 1px solid var(--line);
@@ -615,18 +619,22 @@ tr.rowhead:hover {
 .gword {
   flex: 0 0 auto;
   white-space: nowrap;
-}
-.gchip {
   max-width: min(26ch, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.gword {
+  font-size: 12px;
+}
+.gchip {
   border: 1px solid currentColor;
   border-radius: 999px;
   padding: 0 8px;
   font-size: 12px;
 }
 /* A status word over 12 characters (class long, full word in its title) may shrink, never below 12. */
-.gchip.long {
+.gchip.long,
+.gword.long {
   flex: 0 1 auto;
   min-width: min(12ch, 100%);
 }

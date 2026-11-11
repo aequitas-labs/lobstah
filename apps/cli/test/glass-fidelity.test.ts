@@ -249,6 +249,8 @@ function capture(g: GlassDom): Record<string, string> {
   out.page = tab === 'deck' || tab === 'traps' ? '(trap window action changed)' : canon(foldPrTitles(g.$('#' + tab)!));
   // Dispatch cards were redrawn on the shared card (components/card.ts); glass-cards-deck tests them. The table is still compared.
   if (tab === 'dispatches' && g.$('#dispatches .cards')) out.page = '(dispatch cards redrawn)';
+  // So were PR cards (glass-page tests them); the PRs table is still compared.
+  if (tab === 'prs' && g.$('#prs .cards')) out.page = '(PR cards redrawn)';
   if (text(g.$('#modalbox h3')).startsWith('🪤')) out.modalbox = '(trap window action changed)';
   for (const id of CONTROLS) {
     const el = g.$('#' + id) as HTMLElement | null;

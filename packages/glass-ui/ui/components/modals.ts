@@ -1,4 +1,4 @@
-import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassSnapshot } from '@lobstah/core';
+import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
@@ -38,6 +38,7 @@ import {
 import { can, capabilities, fileUrl } from '../backend.js';
 import { getState } from '../store.js';
 import { GrantChip } from './session-grants.js';
+import { reviewModal } from './reviews.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
@@ -330,6 +331,7 @@ export function Modal({
   if (!item) return null;
   if (modal.type === 'settings') return settingsModal(item as SettingsItem, prefs);
   if (modal.type === 'pr') return prModal(snapshot, modal.key);
+  if (modal.type === 'review') return [close, reviewModal(item as GlassReview)];
   if (modal.type === 'helm') return helmModal(item as GlassHelm);
   if (modal.type === 'dispatch') {
     const report = dispatchReport(snapshot, item as GlassDispatchSummary);

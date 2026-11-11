@@ -84,14 +84,19 @@ describe('glass: the deck reports block', () => {
       const rows = [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
       expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
       expect(reportsSection(g).querySelectorAll('.badge')).toHaveLength(0);
-      const metas = rows.map((r) => text(view === 'cards' ? r.querySelector('.meta') : r.querySelector('.dim')));
-      expect(metas).toEqual([
-        (view === 'cards' ? '' : '· ') + '60s ago · acked',
-        view === 'cards' ? '5m ago' : '· 5m ago',
-        (view === 'cards' ? '' : '· ') + 'kind-crab · 20m ago',
-        (view === 'cards' ? '' : '· ') + 'aaaaaaaa · 40m ago',
-      ]);
+      const metas = rows.map((r) => text(view === 'cards' ? r.querySelector('.gcontext .gtext') : r.querySelector('.dim')));
+      // A card says no "acked": it is greyed instead.
+      expect(metas).toEqual(
+        view === 'cards'
+          ? ['60s ago', '5m ago', 'web · kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']
+          : ['· 60s ago · acked', '· 5m ago', '· kind-crab · 20m ago', '· aaaaaaaa · 40m ago'],
+      );
       expect(rows[0]!.className).toContain('acked');
+      if (view === 'cards') {
+        expect(rows[0]!.className).toContain('quiet');
+        expect(rows[1]!.className).not.toContain('quiet');
+        expect(rows.map((r) => text(r.querySelector('.gaction')))).toEqual(Array(4).fill('↗ Open'));
+      }
     }
   });
 
@@ -252,9 +257,9 @@ describe('glass: a report page', () => {
     const tray = lines.find((l) => text(l).includes('Tray findings'))!;
     expect([tray.getAttribute('href'), tray.getAttribute('target'), tray.getAttribute('rel')]).toEqual([pagePath(TRAP_KEY), '_blank', 'noopener']);
     const cards = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
-    const card = [...reportsSection(cards).querySelectorAll('a.card')].find((c) => text(c).includes('Fleet notes'))!;
-    expect(card.getAttribute('href')).toBe(pagePath(HELM_KEY));
-    expect(card.getAttribute('target')).toBe('_blank');
+    const card = [...reportsSection(cards).querySelectorAll('.card')].find((c) => text(c).includes('Fleet notes'))!;
+    const open = card.querySelector('.gaction a')!;
+    expect([open.getAttribute('href'), open.getAttribute('target')]).toEqual([pagePath(HELM_KEY), '_blank']);
   });
 });
 
@@ -271,7 +276,8 @@ describe('glass: the Reports tab', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
-    expect(cards.$$('#reports .card .meta').map(text)).toEqual(['60s ago · acked', '5m ago', 'kind-crab · 20m ago', 'aaaaaaaa · 40m ago']);
+    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual(['60s ago', '5m ago', 'web · kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']);
+    expect(cards.$$('#reports .card').map((c) => c.className.includes('quiet'))).toEqual([true, false, false, false]);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
 
@@ -293,8 +299,11 @@ describe('glass: the Reports tab', () => {
     const title = g.$$('#reports tr.rowhead td a').find((a) => text(a) === 'Fleet notes')!;
     expect([title.getAttribute('href'), title.getAttribute('target'), title.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(HELM_KEY)}`, '_blank', 'noopener']);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
-    const card = cards.$$('#reports a.card').find((c) => text(c).includes('Tray findings'))!;
-    expect([card.getAttribute('href'), card.getAttribute('target'), card.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']);
+    const card = cards.$$('#reports .card').find((c) => text(c).includes('Tray findings'))!;
+    const open = card.querySelector('.gaction a')!;
+    expect([open.getAttribute('href'), open.getAttribute('target'), open.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']);
+    await click(cards, card);
+    expect(cards.opened()).toEqual([[`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']]);
   });
 });
 
@@ -336,26 +345,22 @@ describe('glass: cards keep their text inside', () => {
 });
 
 describe('glass: a PR card with a long badge', () => {
-  it('keeps the whole PR number: the title holds room for #99999, the badge truncates', async () => {
+  it('keeps the whole PR number on line 2; the title gives way first, then the status word truncates', async () => {
     const d = everyAttentionFleet();
     const p = d.prs.find((x) => x.state === 'OPEN')!;
     p.number = 1826;
     p.badge = { ...p.badge, text: 'repairing: checks (attempt 1 of 2)' };
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
-    const card = g.$$('#prs .card').find((c) => text(c.querySelector('.prname')).startsWith('#1826'))!;
-    const title = card.querySelector('.top > .prname')!;
-    expect(text(title.querySelector('b'))).toBe('#1826');
-    const badge = card.querySelector('.top .badge')!;
-    expect(badge.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
+    const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#1826'))!;
+    const title = card.querySelector('.gtop > .gtitle')!;
+    const word = card.querySelector('.gtop .gword')!;
+    expect(word.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
     const style = (el: Element) => g.window.getComputedStyle(el as never);
-    expect(style(title).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(10ch,100%)');
-    // '#99999' and an 8-character id are at most eight characters: 10ch holds either and the ellipsis after it.
-    expect('dddddddd'.length + 1).toBeLessThanOrEqual(10 - 1);
-    // The title shrinks first (1000000 to the badge's 1); the long badge then truncates, never below 12ch.
+    // The title shrinks first (1000000 to the word's 1); the long word then truncates, never below 12ch.
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
-    expect(badge.className).toContain('long');
-    expect(style(badge).getPropertyValue('flex-shrink')).toBe('1');
-    expect(style(badge).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
+    expect(word.className).toContain('long');
+    expect(style(word).getPropertyValue('flex-shrink')).toBe('1');
+    expect(style(word).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');
   });
 });
 

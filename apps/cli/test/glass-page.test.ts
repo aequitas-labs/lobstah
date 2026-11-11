@@ -841,19 +841,23 @@ describe('glass page: modals', () => {
   });
 });
 
+/** A PR card's number, from its second line: `web #41 · …`. */
+const cardNumber = (c: Element) => /#\d+/.exec(text(c.querySelector('.gcontext')))?.[0] ?? '';
+
 describe('glass page: PRs', () => {
-  it('colors every PR badge with its GitHub state class', async () => {
-    const g = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
-    const badges = Object.fromEntries(g.$$('#prs .card').map((c) => [text(c.querySelector('b')).split(' ')[0], c.querySelector('.badge')!.className]));
-    expect(badges).toEqual({
-      '#41': 'badge pr-open',
-      '#42': 'badge warn',
-      '#43': 'badge pr-draft',
-      '#50': 'badge pr-conflicts',
-      '#60': 'badge bad long',
-      '#61': 'badge pr-behind',
-      '#30': 'badge pr-merged',
-    });
+  it("edges every PR card with its badge's tone and says its status in lowercase", async () => {
+    const d = everyAttentionFleet();
+    const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
+    const cards = g.$$('#prs .card');
+    expect(cards.map(cardNumber).sort()).toEqual(d.prs.map((p) => '#' + p.number).sort());
+    for (const c of cards) {
+      const p = d.prs.find((x) => '#' + x.number === cardNumber(c))!;
+      expect(c.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
+      expect(text(c.querySelector('.gtop .gword'))).toBe(p.badge.text.toLowerCase());
+      expect(text(c.querySelector('.gaction'))).toBe('↗ Open');
+      // Two lines, nothing more: merge readiness, the watch and the gate are in the modal.
+      expect(c.querySelectorAll(':scope > .gline')).toHaveLength(2);
+    }
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#41 → #42 → #43 · floor main');
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#30 · floor main · history');
   });
@@ -883,7 +887,7 @@ describe('glass page: PRs', () => {
     g.serve(d);
     await g.poll();
     const after = g.$$('#prs .card');
-    expect(text(after[0]!.querySelector('.prname'))).toBe('#99 fresh');
+    expect(text(after[0]!.querySelector('.gtitle'))).toBe('fresh');
     expect(after.slice(1)).toEqual(cards);
     expect(g.$$('#prs h2').slice(1)).toEqual(heads);
   });
@@ -913,14 +917,13 @@ describe('glass page: PRs', () => {
     ]);
   });
 
-  it('titles: a PR card shows the number bold and the title after it; no title shows the number alone', async () => {
+  it('titles: a PR card leads with its title and puts the number on line 2; no title shows the number alone', async () => {
     for (const hash of ['#deck', '#prs']) {
       const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
-      const names = g.$$(`${hash} .card .prname`);
-      const byNumber = Object.fromEntries(names.map((n) => [text(n.querySelector('b')), n]));
-      expect(text(byNumber['#41'])).toBe(`#41 ${PR_TITLES[41]}`);
+      const cards = g.$$(`${hash} .card`).filter((c) => c.querySelector('.pricon'));
+      const byNumber = Object.fromEntries(cards.map((c) => [cardNumber(c), c.querySelector('.gtitle')!]));
+      expect(text(byNumber['#41'])).toBe(PR_TITLES[41]);
       expect(byNumber['#41']!.getAttribute('title')).toBe(PR_TITLES[41]);
-      expect(byNumber['#41']!.querySelectorAll('b')).toHaveLength(1);
       expect(text(byNumber['#43'])).toBe('#43');
       expect(byNumber['#43']!.hasAttribute('title')).toBe(false);
     }
@@ -1070,8 +1073,10 @@ describe('glass page: On deck', () => {
     const g = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
     const prs = g.$$('#deck section')[5]!;
     const cards = [...prs.querySelectorAll('.card')];
-    expect(cards.map((c) => [text(c.querySelector('b')).split(' ')[0], c.className])).toContainEqual(['#42', 'card acked']);
-    expect(text(prs.querySelector('.card .badge.pr-conflicts'))).toBe('conflicts');
+    const acked = cards.filter((c) => c.className.includes('acked')).map(cardNumber);
+    expect(acked).toEqual(['#42']);
+    expect(cards.find((c) => cardNumber(c) === '#42')!.className).toContain('quiet');
+    expect(cards.map((c) => text(c.querySelector('.gword')))).toContain('conflicts');
   });
 
   it('an empty fleet: every section says none, the daemon is down', async () => {
