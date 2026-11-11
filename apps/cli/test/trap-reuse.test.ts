@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimBait, enqueue, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, listReservations, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
+import { recordHelmPass, appendStatus, claimBait, enqueue, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, listReservations, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { charter, TRAP_REUSE_RULE } from '../src/charter.js';
 import { trapForRepo } from '../src/throw.js';
@@ -23,6 +23,7 @@ beforeEach(() => {
   ensureLayout();
   fs.mkdirSync(path.join(home, 'repo'));
   fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = '${path.join(home, 'repo')}'\ntraps = 2\n[helm]\narmGraceSecs = 0\n`);
+  recordHelmPass('fleet', loadConfig().helm);
   takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['r'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
 });
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });

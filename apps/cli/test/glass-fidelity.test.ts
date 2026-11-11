@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import type { GlassSnapshot, GlassTrap } from '@lobstah/core';
-import { trapView } from '../src/glass-diff.js';
+import { trapView } from '../../../packages/glass-ui/src/glass-diff.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
@@ -75,16 +75,17 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  */
 /**
  * Take what the old page never had out of a live page, so the page compares
- * with the old one: the Reports and Stats tabs, and the decision modal, the
+ * with the old one: the Reports, Stats and Settings tabs, and the decision modal, the
  * new-decision alert, and the unread badge on the deck tab
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
-  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
+  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge')) el.remove();
   const bar = g.$('.navbar');
   if (bar) bar.replaceWith(...Array.from(bar.childNodes));
 }
-const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [] });
+/** The old page knew no viewer: it always offered what a page on the machine offers. */
+const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [], viewer: { onMachine: true, windowFocus: false, machine: 'studio', device: 'desktop' } });
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */
 const legacyWire = (d: GlassSnapshot): GlassSnapshot => {
   const shaped = legacyShape(d);
@@ -154,6 +155,15 @@ function foldPrTitles(el: Element): Node {
   }
   for (const n of copy.querySelectorAll('.chip.click .dim')) n.textContent = (n.textContent ?? '').replace(/ · chat (full|brief)$/, '');
   for (const n of copy.querySelectorAll('.prack')) n.remove();
+  // Product icons replace text intentionally. Restore only their legacy representation;
+  // the worker metadata tests check the real accessible names and selection behavior.
+  for (const icon of copy.querySelectorAll('.harness-icon')) {
+    if (icon.parentElement?.classList.contains('worker-harness') && icon.parentElement.querySelector('b')) {
+      const gap = icon.nextSibling;
+      if (gap?.nodeType === 3 && !gap.textContent?.trim()) gap.remove();
+      icon.remove();
+    } else icon.replaceWith(doc.createTextNode((icon.getAttribute('aria-label') ?? '').toLowerCase()));
+  }
   // Intentional worker UI additions have functional coverage separately.
   // Keep comparing the unrelated UI against the frozen pre-metadata page.
   for (const n of copy.querySelectorAll('.worker-details')) {

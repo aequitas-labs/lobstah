@@ -1,3 +1,5 @@
+import type { ConfiguredTrapLocation } from './configured-traps.js';
+import { forgetConfiguredTrapSlot } from './configured-trap-slots.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
@@ -22,7 +24,7 @@ import { releaseTrapName, trapIdForName } from './trap-names.js';
 export const ROSTER_VERSION = 1;
 
 /** Terminal apps a thrown trap can open in. */
-export const TERMINAL_APPS = ['terminal', 'iterm'] as const;
+export const TERMINAL_APPS = ['terminal', 'iterm', 'tmux'] as const;
 export type TerminalApp = (typeof TERMINAL_APPS)[number];
 
 /**
@@ -42,6 +44,8 @@ export interface TrapProfile {
 export type RosterState = 'live' | 'stowed' | 'ghosted';
 
 export interface RosterEntry {
+  /** Named plain-folder instance; never a repository checkout. */
+  configured?: ConfiguredTrapLocation;
   version: typeof ROSTER_VERSION;
   trapId: string;
   /** The trap's canonical name. A returning trap signs on under it. */
@@ -63,13 +67,14 @@ export interface RosterEntry {
   revisionAt?: string;
   /** What the trap last signed on with: the harness, its session, and the registration's model and config. */
   harness: string;
+  /** Empty once another trap signed on with this session: it's that trap's now. */
   sessionId: string;
   model?: string;
   config?: Record<string, string>;
   /** Navigation hints from the last sign-on. Never liveness evidence. */
   window?: WindowRef;
   link?: string;
-  /** The harness process of the last sign-on: a throw does not resume a Codex thread it still holds. */
+  /** The harness process of the last sign-on: a throw does not resume a session it still holds. */
   harnessProcess?: HarnessProcess;
   firstSignedOnAt: string;
   signedOnAt: string;
@@ -145,6 +150,7 @@ export function listRoster(): RosterEntry[] {
 
 /** Resolve a bare name, wt:name, bare id, or wt:id to a roster record. */
 export function rosterByAddress(address: string): RosterEntry | undefined {
+  if (address.startsWith('trap:')) return listRoster().find((entry) => entry.configured?.profile === address.slice(5));
   const value = address.startsWith('wt:') ? address.slice(3) : address;
   if (!/^[a-z0-9-]+$/.test(value)) return undefined;
   return readRoster(trapIdForName(value) ?? value) ?? listRoster().find((e) => e.name === value);
@@ -178,6 +184,7 @@ function withRevision(entry: RosterEntry, revision: TrapRevision | undefined): R
 export function forgetRoster(trapId: string): RosterEntry | undefined {
   const entry = readRoster(trapId);
   if (!entry) return undefined;
+  if (entry.configured) forgetConfiguredTrapSlot(trapId);
   fs.rmSync(rosterPath(trapId), { force: true });
   if (trapIdForName(entry.name) === trapId) releaseTrapName(entry.name);
   return entry;
@@ -211,6 +218,7 @@ export function recordRosterSignOn(
     ...(opts.creationReason ? { creationReason: opts.creationReason } : {}),
   };
   setOrDrop(entry, 'repo', reg.repo);
+  setOrDrop(entry, 'configured', reg.configured);
   setOrDrop(entry, 'createdWorktree', reg.createdWorktree || undefined);
   setOrDrop(entry, 'window', reg.window);
   setOrDrop(entry, 'link', reg.link);
@@ -220,7 +228,21 @@ export function recordRosterSignOn(
   setOrDrop(entry, 'model', seen.model);
   setOrDrop(entry, 'config', seen.config);
   if (opts.soakBranch ?? prior?.soakBranch) entry.soakBranch = opts.soakBranch ?? prior?.soakBranch;
+  releaseSessionFromOtherTraps(reg.sessionId, reg.trapId, at);
   return writeEntry(withRevision(entry, opts.revision));
+}
+
+/**
+ * A session belongs to the trap that last signed on with it, so an older
+ * record's claim is stale: left in place, a throw of that trap would resume
+ * this one's session. The older trap's next throw starts cold.
+ */
+function releaseSessionFromOtherTraps(sessionId: string, trapId: string, at: string): void {
+  for (const other of listRoster()) {
+    if (other.sessionId !== sessionId || other.trapId === trapId) continue;
+    const { harnessProcess: _gone, ...kept } = other;
+    writeEntry({ ...kept, sessionId: '', updatedAt: at });
+  }
 }
 
 function setOrDrop<K extends keyof RosterEntry>(entry: RosterEntry, key: K, value: RosterEntry[K] | undefined): void {
@@ -300,12 +322,12 @@ export function setRosterProfile(trapId: string, patch: ProfilePatch, now = Date
   return writeEntry(next);
 }
 
-/** Whether a value names a terminal app (`terminal`, `iterm`). */
+/** Whether a value names a terminal app (`terminal`, `iterm`, `tmux`). */
 export function isTerminalApp(value: unknown): value is TerminalApp {
   return typeof value === 'string' && (TERMINAL_APPS as readonly string[]).includes(value);
 }
 
 /** The display name of a terminal app. */
 export function terminalAppName(app: TerminalApp): string {
-  return app === 'iterm' ? 'iTerm2' : 'Terminal.app';
+  return app === 'iterm' ? 'iTerm2' : app === 'tmux' ? 'tmux' : 'Terminal.app';
 }

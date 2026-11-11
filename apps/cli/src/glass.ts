@@ -1,10 +1,14 @@
+import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
+import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus } from '@lobstah/core';
+import { configuredTrapViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
+import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as http from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   awaitingReply,
@@ -34,14 +38,23 @@ import {
   listRequests,
   liveHelms,
   readReservationTicket,
+  listRoster,
   readRoster,
+  sessionClaimedElsewhere,
   trapRequestError,
   trapStartCommands,
   writeRequest,
   trapLastSeen,
+  claudeTranscriptFile,
+  processRemoteLink,
+  readClaudeProcesses,
+  transcriptRemoteLink,
+  validRemoteLink,
   validSessionLink,
+  viewerDevice,
   linkMismatch,
   trapLabel,
+  trapRepoLabel,
   trapNamer,
   trapIdForName,
   TRAP_ADDRESS_RE,
@@ -70,13 +83,18 @@ import {
   ANSWER_EXTENSIONS,
   ANSWER_FILES_MAX,
   ANSWER_TEXT_MAX,
-  prStackTrunk,
+  formatTodoTime,
+  parseTodoUntil,
+  snoozeTodo,
+  TodoError,
+  heavyGlassView,
 } from '@lobstah/core';
-import type { Attachment, Descriptor, GlassDispatch, GlassFullSnapshot, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { currentAck, writeAck } from './acks.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
+import { helmPassViews } from './helm-pass.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
@@ -84,7 +102,7 @@ import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, red
 import { glassReviews } from './reviews.js';
 import { reviewSetupView, writeReviewMode } from './reviews-setup.js';
 import { buildTendReport, landedCatches } from './tend.js';
-import { todoStaleLine, todoViews } from './todo.js';
+import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrList } from './glass-prs.js';
@@ -95,10 +113,13 @@ import { startSnapshotThread } from './glass-snapshot-thread.js';
 import { briefTitle, olderPage, pollBody } from './glass-poll.js';
 import { GlassPresence, PAGE_ID_RE, showSecretMatches, validShowHash } from './glass-presence.js';
 import type { PollBody } from './glass-poll.js';
-import { focusRegistration, liveTrap } from './focus.js';
+import { focusRegistration, liveTrap, machineName, tmuxAttachCommand } from './focus.js';
 import type { FocusResult } from './focus.js';
 import type { TrapRegistration } from '@lobstah/core';
 import { backendViews, hostedDispatches } from './hosted-view.js';
+import { handleRunRequest, isRunRequestKind } from './run-routes.js';
+import { RunChallenges, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
+import { RunRegistry } from './run-exec.js';
 
 /**
  * The spyglass: a localhost dashboard over ~/.lobstah — the same
@@ -137,7 +158,9 @@ export function requestBodyCap(): number {
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['helm-chat', 1024],
+  ['todo-schedule', 1024],
   ['decision-viewed', 1024],
+  ['checklist-tick', 1024],
   ['permissions-proposal-preview', 8192],
   ['permissions-proposal-answer', 8192],
   ['report-viewed', 1024],
@@ -189,6 +212,31 @@ function assetPath(name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * A live Claude trap's link, found per trap: its own running process, in
+ * Claude's record of it, shows whether Remote Control is connected right now.
+ * Two processes on the session would take a phone's message to two writers,
+ * so the page says so instead of offering the link. No process means nothing
+ * can open. Only a Claude that keeps no such records falls back on the URL it
+ * wrote to the transcript of a run started with --remote-control.
+ */
+function trapLiveView(t: GlassTrap, processes: ClaudeProcess[] | undefined): Pick<GlassTrap, 'liveLink' | 'sessionWriters'> {
+  if (!t.sessionId) return {};
+  const manual = validRemoteLink(t.remoteLink) ? t.remoteLink : undefined;
+  if (processes) {
+    const mine = processes.filter((p) => p.sessionId === t.sessionId);
+    if (mine.length > 1) return { sessionWriters: mine.map((p) => p.pid) };
+    const link = mine[0] ? (processRemoteLink(mine[0]) ?? manual) : undefined;
+    return link ? { liveLink: link } : {};
+  }
+  if (manual) return { liveLink: manual };
+  const since = t.remoteControlSince ? Date.parse(t.remoteControlSince) : NaN;
+  if (!Number.isFinite(since)) return {};
+  const file = claudeTranscriptFile(t.sessionId, [t.cwd, t.worktree].filter((c): c is string => !!c));
+  const liveLink = file ? transcriptRemoteLink(file, since) : undefined;
+  return liveLink ? { liveLink } : {};
 }
 
 /** Claude Code transcript: the cwd munged to '-' under ~/.claude/projects. */
@@ -303,6 +351,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     lane: r.lane,
     bucket: r.bucket,
     repo: r.d.repo,
+    target: r.d.target,
     for: r.d.for,
     followUp: r.d.followUp,
     title: briefTitle(r.d.brief),
@@ -596,12 +645,12 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     dispatches.map((d) => ({ id: d.id, followUp: d.followUp, repoKey: d.repo, pr: d.evidence?.pr, prGate: d.prGate })),
     watches,
     prRecords,
-    { readySettleSecs: cfg.readySettleSecs, now: Date.now(), trunk: (r) => prStackTrunk(cfg, r) },
+    { readySettleSecs: cfg.readySettleSecs, now: Date.now() },
   );
   // A dispatch with several PRs lists each, in stack order, with its state.
   for (const d of dispatches as GlassDispatch[]) {
     const urls = d.evidence?.prUrls;
-    if (urls && urls.length > 1) d.prList = dispatchPrList(urls.filter((url) => recordsByUrl.get(url)?.state !== 'CLOSED'), prs);
+    if (urls && urls.length > 1) d.prList = dispatchPrList(urls.filter((url) => recordsByUrl.get(url)?.state !== 'CLOSED'), prs, d.evidence?.prPositions);
   }
   const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
@@ -631,6 +680,10 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     if (id) seenIds.add(id);
   }
   const catches = new Map(stats.perTrap.map((t) => [t.name, t.catches]));
+  // Read once per snapshot, and only if a live Claude trap needs it.
+  let claudeRead: { processes: ClaudeProcess[] | undefined } | undefined;
+  const claudeProcesses = () => (claudeRead ??= { processes: readClaudeProcesses() }).processes;
+  const rosterEntries = listRoster();
   const attach = (t: GlassTrap, registered: boolean, listening = false): GlassTrap => {
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
@@ -638,17 +691,23 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const name = t.name ?? names(t.trapId);
     const window = t.window ?? (!registered ? roster?.window : undefined);
     const link = t.link ?? (!registered ? roster?.link : undefined);
-    const sessionId = t.sessionId ?? roster?.sessionId ?? signed?.by;
+    const savedSession = t.sessionId ?? roster?.sessionId ?? signed?.by;
+    // A trap that isn't live offers its session to resume, unless the session is another trap's.
+    const sessionId = !registered && savedSession && sessionClaimedElsewhere(savedSession, t.trapId, { traps: live, roster: rosterEntries }) ? undefined : savedSession;
     const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
+      ...(roster?.configured ? { configured: roster.configured, cwd: roster.worktree } : {}),
       name,
       totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
+      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo: t.repo }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       window,
+      attachCommand: registered ? tmuxAttachCommand(window, { onMachine: !!options.local, machine: machineName() }) : undefined,
       link: validSessionLink(link) && linkMismatch(link, window) === undefined ? link : undefined,
+      ...(registered && harness === 'claude' ? trapLiveView(t, claudeProcesses()) : {}),
       sessionId,
       harness,
       desktopThread: (harness === 'codex' && !!sessionId && !!codexDesktopThread(sessionId)) || undefined,
@@ -676,7 +735,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
             ...(() => {
               const ticket = options.local ? readReservationTicket(r.trapId) : undefined;
               const repoPath = cfg.repos[r.repo]?.path;
-              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness) } : {};
+              return ticket && repoPath ? { commands: trapStartCommands(repoPath, ticket, r.harness, r.remoteControlSince ? r.name : undefined) } : {};
             })(),
             ...(r.failedAt || Date.now() > (Date.parse(r.deadline) || 0)
               ? { failedAt: r.failedAt ?? r.deadline, reason: r.reason ?? `no session signed on by ${r.deadline}` }
@@ -693,14 +752,23 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   return {
     now: new Date().toISOString(),
     goals: visibleGoals(cfg),
+    helmPasses: helmPassViews(cfg),
     version: lobstahVersion(),
     backends: backendViews(cfg),
     repoUrl: REPO_URL,
     reviewTools: reviewTools(cfg),
     daemon: executor ? { version: executor.version, heartbeat: executor.heartbeat } : undefined,
     slots: { headless: workSlots.headless, limit: loadConfig().limits.maxConcurrent, traps: workSlots.traps, parked: workSlots.parked },
+    heavy: (() => {
+      try {
+        return heavyGlassView(Date.now(), cfg);
+      } catch {
+        return undefined;
+      }
+    })(),
     helms,
     traps,
+    configuredTraps: configuredTrapViews(loadConfig()),
     stats: { catchesToday: stats.catchesToday, totalCatches: stats.totalCatches },
     trapNames: trapNamesShown(traps, dispatches, attention, names),
     notices: allNotices.slice().reverse(),
@@ -715,9 +783,11 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     reviews: glassReviews(reviewTools(cfg)),
     reviewSetup: reviewSetupView(),
     sessionGrants: listGrants().grants.filter(g => g.mode === 'session').map(({ callIds: _ids, ...g }) => g),
+    standingGrants: listGrants().grants.filter(g => g.mode !== 'session').map(({ callIds: _ids, ...g }) => g),
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
+    runPasskeys: runPasskeyStatus(),
     answerLimits: {
       maxBytes: attachmentLimit(),
       maxFiles: ANSWER_FILES_MAX,
@@ -781,11 +851,37 @@ function decisionAnswerRequest(raw: unknown): { key: string; option?: string; te
 }
 
 /**
- * The page itself: built from apps/cli/glass (index.html, glass.css, and the
- * TypeScript under src/) by scripts/build-glass.mjs into one self-contained
+ * The page itself: built from apps/cli/glass (index.html and the TypeScript
+ * under src/) and the shared packages/glass-ui (glass.css and the components
+ * both glasses use) by scripts/build-glass.mjs into one self-contained
  * HTML string — CSS and JS inlined, nothing else to serve.
  */
 const PAGE = GLASS_PAGE;
+
+/**
+ * The page's Content-Security-Policy. Its one inline script runs by hash;
+ * its inline stylesheet and style attributes are allowed. Images load from
+ * the glass, data and blob URLs (pasted files), and https (a card's remote
+ * images). Fetches and the manifest stay on the glass itself.
+ */
+export function glassPageCsp(page: string): string {
+  const script = /<script>([\s\S]*?)<\/script>/.exec(page)?.[1] ?? '';
+  const hash = createHash('sha256').update(script, 'utf8').digest('base64');
+  return [
+    "default-src 'none'",
+    `script-src 'sha256-${hash}'`,
+    "style-src 'unsafe-inline'",
+    "img-src 'self' https: data: blob:",
+    "connect-src 'self'",
+    "manifest-src 'self'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join('; ');
+}
+
+/** The headers the page is served with. */
+const PAGE_HEADERS = { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': glassPageCsp(PAGE) };
 
 /** Serve the glass on 127.0.0.1. Returns the listening server. */
 export function serveGlass(
@@ -794,8 +890,19 @@ export function serveGlass(
     focus?: (reg: TrapRegistration) => Promise<FocusResult>;
     snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
     presence?: GlassPresence;
+    /** Run-card challenges this server issued (tests share one to sign them). */
+    runChallenges?: RunChallenges;
+    /** Chris's go-ahead to store a run passkey, asked outside the browser; resolves to a refusal reason. */
+    confirmPasskeyRegistration?: () => Promise<string | undefined>;
+    /** Where run passkeys are kept (tests). */
+    passkeysFile?: string;
+    /** The runs this server starts (tests read them). */
+    runs?: RunRegistry;
   } = {},
 ): http.Server {
+  const runChallenges = options.runChallenges ?? new RunChallenges();
+  const runs = options.runs ?? new RunRegistry();
+  const confirmWithMacPassword = macPasswordGate();
   const presence = options.presence ?? new GlassPresence();
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   // A caller's own snapshot function runs here; the default builds on the snapshot thread.
@@ -811,20 +918,84 @@ export function serveGlass(
   // A compiled binary carries no asset files; the favicon degrades to the
   // emoji mark instead of a broken tab icon.
   const fallbackIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F99E}</text></svg>`;
-  /** Same host, same origin, and this server's page token: the only writes the glass accepts. */
-  const ownHost = () => {
+  /** The port this server listens on. */
+  const ownPort = () => {
     const address = server.address();
-    return `127.0.0.1:${typeof address === 'object' && address ? address.port : port}`;
+    return typeof address === 'object' && address ? address.port : port;
   };
+  /** This server's canonical address. */
+  const ownHost = () => `127.0.0.1:${ownPort()}`;
+  /**
+   * A Host header naming this server: 127.0.0.1 or localhost on its own port.
+   * localhost is the WebAuthn relying party a run card's passkey needs (an IP
+   * can't be one); any other name, a rebound domain included, is refused.
+   */
+  const isOwnHost = (host: string | undefined): host is string => host === ownHost() || host === `localhost:${ownPort()}`;
+  /** Same host, same origin, and this server's page token: the only writes the glass accepts. */
   const authorized = (req: http.IncomingMessage, header: string): boolean => {
     const supplied = req.headers[header];
     const token = typeof supplied === 'string' ? supplied : '';
     return (
-      req.headers.host === ownHost() &&
-      req.headers.origin === `http://${ownHost()}` &&
+      isOwnHost(req.headers.host) &&
+      req.headers.origin === `http://${req.headers.host}` &&
       token.length === focusToken.length &&
       timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
     );
+  };
+  /** Raise one live trap's window: the local page's ↗ Open, and the hosted glass's when it runs on this machine. */
+  const focusTrap = (trapId: string, reply: (status: number, result: unknown) => void): void => {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id' });
+    const reg = liveTrap(trapId);
+    if (!reg) return reply(409, { focused: false, reason: 'Trap is not live' });
+    void (options.focus ?? ((trap: TrapRegistration) => focusRegistration(trap, { openTerminal: true })))(reg)
+      .then((result) => reply(result.focused ? 200 : 409, result))
+      .catch(() => reply(500, { focused: false, reason: 'Window focus failed' }));
+  };
+  /**
+   * The hosted glass's two loopback calls, for its one origin only (the one
+   * the wharf named to this machine's mirror): the probe, which answers this
+   * mirror's id and a focus-only token, and focus with that token. The token
+   * opens nothing else: every other write here needs this page's own origin.
+   */
+  const mirrorFocusToken = randomBytes(32).toString('hex');
+  const mirrorFocus = (req: http.IncomingMessage, res: http.ServerResponse): void => {
+    res.setHeader('cache-control', 'no-store');
+    res.setHeader('vary', 'Origin');
+    const status = readMirrorStatus();
+    let named: string | undefined;
+    try { named = loadConfig().glass.mirror; } catch { named = undefined; } // a broken config mirrors nothing
+    const mirrored = status && named === status.wharf ? status : undefined;
+    const origin = req.headers.origin;
+    if (!mirrored?.glass || !mirrored.id || origin !== mirrored.glass || req.headers.host !== ownHost()) {
+      req.resume();
+      res.writeHead(403, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, reason: 'Not this machine’s hosted glass.' }));
+      return;
+    }
+    // A public page reaching a loopback address: the browser asks first (CORS and private network access).
+    res.setHeader('access-control-allow-origin', origin);
+    res.setHeader('access-control-allow-headers', 'x-lobstah-focus-token');
+    res.setHeader('access-control-allow-methods', 'GET, POST');
+    res.setHeader('access-control-allow-private-network', 'true');
+    res.setHeader('access-control-max-age', '600');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    const reply = (code: number, result: unknown) => {
+      res.writeHead(code, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(result));
+    };
+    if (req.url === '/api/mirror/probe') {
+      if (req.method !== 'GET') return reply(405, { ok: false, reason: 'GET required' });
+      return reply(200, { ok: true, mirror: mirrored.id, token: mirrorFocusToken, windowFocus: process.platform === 'darwin' });
+    }
+    if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required' });
+    const supplied = req.headers['x-lobstah-focus-token'];
+    const token = typeof supplied === 'string' ? supplied : '';
+    if (token.length !== mirrorFocusToken.length || !timingSafeEqual(Buffer.from(token), Buffer.from(mirrorFocusToken)) ||
+        (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') || req.headers['transfer-encoding'] !== undefined) {
+      req.resume();
+      return reply(403, { focused: false, reason: 'Focus request was not authorized' });
+    }
+    return focusTrap(req.url!.slice('/api/mirror/focus/'.length), reply);
   };
   const handle = (req: http.IncomingMessage, res: http.ServerResponse): void => {
     res.setHeader('Server', `lobstah-glass/${lobstahVersion()}`);
@@ -869,6 +1040,9 @@ export function serveGlass(
           return reply(400, { ok: false, reason: 'Invalid JSON.' });
         }
         const kindMax = typeof body?.kind === 'string' ? REQUEST_KIND_MAX_BYTES.get(body.kind) : undefined;
+        // A mirror boat's daemon carries out on this glass what a person did on the hosted glass, and says so.
+        // The header counts only on a request this glass already authorized with its own page token.
+        const source: AnswerSource = req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass';
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
@@ -888,10 +1062,35 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The helm chat setting could not be stored.' });
             }
           }
+          case 'todo-schedule': {
+            // Set or move a todo's time from its row. No helm gate, the same as answering a card.
+            const { grounds, id, until } = (body.payload ?? {}) as { grounds?: unknown; id?: unknown; until?: unknown };
+            if (typeof grounds !== 'string' || grounds.length > 200 || !Number.isInteger(id) || (id as number) < 1 || typeof until !== 'string' || until.length > 200) {
+              return reply(400, { ok: false, reason: 'A todo and a time are required.' });
+            }
+            try {
+              const now = Date.now();
+              const timezone = helmTimezone();
+              const todo = snoozeTodo(grounds, id as number, parseTodoUntil(until, now, timezone), now);
+              return reply(200, { ok: true, id: todo.id, dueAt: todo.dueAt, due: formatTodoTime(todo.dueAt!, timezone) });
+            } catch (err) {
+              if (err instanceof TodoError) return reply(400, { ok: false, reason: err.message });
+              return reply(500, { ok: false, reason: 'The time could not be stored.' });
+            }
+          }
+          case 'checklist-tick': {
+            const payload = body.payload as { key?: unknown; item?: unknown; checked?: unknown } | undefined;
+            if (!payload || typeof payload.key !== 'string' || payload.key.length > 200 || typeof payload.item !== 'string' || payload.item.length > 80 || typeof payload.checked !== 'boolean')
+              return reply(400, { ok: false, reason: 'A document key, task identity and checked state are required.' });
+            try { return reply(200, { ok: true, ...setChecklistTick(payload.key, payload.item, payload.checked) }); }
+            catch (error) {
+              return reply(error instanceof ChecklistError ? error.status : 500, { ok: false, reason: error instanceof ChecklistError ? error.message : 'The checklist could not be stored.' });
+            }
+          }
           case 'decision-answer': {
             try {
               const { key, ...answer } = decisionAnswerRequest(body.payload);
-              const { decision, answer: stored } = answerKey(key, { ...answer, by: 'glass' });
+              const { decision, answer: stored } = answerKey(key, { ...answer, by: source });
               return reply(201, { ok: true, id: stored.request, key: decision.key });
             } catch (err) {
               if (err instanceof DecisionError) return reply(err.status, { ok: false, reason: err.message });
@@ -999,6 +1198,26 @@ export function serveGlass(
               return reply(500, { ok: false, reason: 'The acknowledgments could not be stored.' });
             }
           }
+          case 'run-passkey-challenge':
+          case 'run-passkey-register':
+          case 'run-challenge':
+          case 'run':
+          case 'run-output':
+          case 'run-line': {
+            if (!isRunRequestKind(body.kind)) return reply(400, { ok: false, reason: 'Unknown run request.' });
+            void handleRunRequest(body.kind, body.payload, {
+              origin: `http://${req.headers.host}`,
+              challenges: runChallenges,
+              confirmRegistration: options.confirmPasskeyRegistration ?? confirmWithMacPassword,
+              ...(options.passkeysFile ? { passkeysFile: options.passkeysFile } : {}),
+              runs,
+              maxBytes: attachmentLimit(),
+            }).then(
+              (r) => reply(r.status, r.body),
+              () => reply(500, { ok: false, reason: 'The run request failed.' }),
+            );
+            return;
+          }
           case 'trap-request': {
             const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
             if (error) return reply(400, { ok: false, reason: `Invalid trap request: ${error}.` });
@@ -1024,7 +1243,7 @@ export function serveGlass(
         res.end(JSON.stringify(result));
       };
       if (req.method !== 'POST') return reply(405, { ok: false, reason: 'POST required.' });
-      if (req.headers.host !== ownHost() || req.headers.origin !== `http://${ownHost()}`) {
+      if (!isOwnHost(req.headers.host) || req.headers.origin !== `http://${req.headers.host}`) {
         return reply(403, { ok: false, reason: 'Presence was not authorized.' });
       }
       const q = new URL(req.url, 'http://glass').searchParams;
@@ -1054,6 +1273,7 @@ export function serveGlass(
         return reply(405, { delivered: false, reason: 'POST required.' });
       }
       if (
+        // Not a page's route: the pet and the CLI call 127.0.0.1, so localhost is refused here.
         req.headers.host !== ownHost() ||
         req.headers.origin !== undefined ||
         !showSecretMatches(req.headers['x-lobstah-show-secret']) ||
@@ -1092,21 +1312,37 @@ export function serveGlass(
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(result));
       };
-      if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required.' });
+      if (req.method !== 'POST') return reply(405, { focused: false, reason: 'POST required' });
       if (
         !authorized(req, 'x-lobstah-focus-token') ||
         (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0') ||
         req.headers['transfer-encoding'] !== undefined
       ) {
-        return reply(403, { focused: false, reason: 'Focus request was not authorized.' });
+        return reply(403, { focused: false, reason: 'Focus request was not authorized' });
       }
-      const trapId = req.url.slice('/api/focus/'.length);
-      if (!/^[A-Za-z0-9-]{1,64}$/.test(trapId)) return reply(400, { focused: false, reason: 'Invalid trap id.' });
-      const reg = liveTrap(trapId);
-      if (!reg) return reply(409, { focused: false, reason: 'Trap is not live.' });
-      void (options.focus ?? focusRegistration)(reg)
-        .then((result) => reply(result.focused ? 200 : 409, result))
-        .catch(() => reply(500, { focused: false, reason: 'Window focus failed.' }));
+      return focusTrap(req.url.slice('/api/focus/'.length), reply);
+    }
+    // The hosted glass, open in a browser on this machine, asks whether it runs here, and raises a trap's window from here.
+    if (req.url === '/api/mirror/probe' || req.url?.startsWith('/api/mirror/focus/')) return mirrorFocus(req, res);
+    if (req.method === 'GET' && (req.url?.startsWith('/api/checklist?') || req.url?.startsWith('/data/decision/'))) {
+      if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
+      try {
+        let value: unknown;
+        if (req.url.startsWith('/api/checklist?')) {
+          const key = new URL(req.url, 'http://localhost').searchParams.get('key') ?? '';
+          value = readChecklist(key);
+        } else {
+          const key = decodeURIComponent(req.url.slice('/data/decision/'.length));
+          const meta = readDecision(key) ?? readArchivedDecision(key);
+          if (!meta) throw new ChecklistError('Card not found.', 404);
+          value = { ...glassDecisions([meta])[0], readOnly: !readDecision(key) || !!readDecisionAnswer(key) };
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(value));
+      } catch (error) {
+        res.writeHead(error instanceof ChecklistError ? error.status : 400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ reason: error instanceof Error ? error.message : 'Invalid document.' }));
+      }
       return;
     }
     if (req.url === '/api/version' && req.method === 'GET') {
@@ -1150,7 +1386,7 @@ export function serveGlass(
       // address gets them: a rebound name is refused. Fetching them acks
       // nothing: the page acks through /requests (report-viewed) once it has
       // shown the report, with the page token the row carries in a header.
-      if (req.headers.host !== ownHost()) {
+      if (!isOwnHost(req.headers.host)) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
         res.end('Not this glass.');
         return;
@@ -1173,7 +1409,7 @@ export function serveGlass(
         res.end(JSON.stringify(row ?? { error: 'report not found' }));
         return;
       }
-      res.writeHead(row ? 200 : 404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.writeHead(row ? 200 : 404, { ...PAGE_HEADERS, 'cache-control': 'no-store' });
       res.end(PAGE);
     } else if ((req.url?.startsWith('/report/') || req.url?.startsWith('/decision/')) && req.method === 'GET' && serveReport(req.url, res)) {
       return;
@@ -1182,13 +1418,14 @@ export function serveGlass(
     } else if (req.url === '/data') {
       // Start commands carry a ticket: only a same-host request (this
       // machine's own page, not a rebound name) gets them.
-      const local = req.headers.host === ownHost();
-      const page = `"focusToken":${JSON.stringify(focusToken)},"focusSupported":${process.platform === 'darwin'}`;
+      const local = isOwnHost(req.headers.host);
+      const viewer: GlassViewer = { onMachine: local, windowFocus: local && process.platform === 'darwin', machine: machineName(), device: viewerDevice(req.headers['user-agent'], req.headers['sec-ch-ua-mobile']) };
+      const page = `"viewer":${JSON.stringify(viewer)}${local ? `,"focusToken":${JSON.stringify(focusToken)}` : ''}`;
       const send = (p: PollBody) => {
         // The ETag covers what a person reads, not the beats: a poll where
         // only heartbeats and ages moved answers 304, and the beats header
         // carries them either way.
-        const etag = `W/"${p.hash}.${instance}.${local ? 'l' : 'r'}"`;
+        const etag = `W/"${p.hash}.${instance}.${local ? 'l' : 'r'}.${viewer.device}"`;
         const headers = {
           'content-type': 'application/json',
           'cache-control': 'no-store',
@@ -1218,6 +1455,11 @@ export function serveGlass(
       const ok = req.method === 'GET';
       res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(ok ? readStatsPage() : { error: 'GET required' }));
+    } else if (req.url === '/data/settings') {
+      // The Settings tab: read-only, with secrets masked before they leave this function.
+      const ok = req.method === 'GET';
+      res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(ok ? glassSettings() : { error: 'GET required' }));
     } else if (req.url?.startsWith('/data/')) {
       // History the poll leaves out, and one dispatch's detail: built on the
       // snapshot thread when there is one. Nothing else lives under /data/.
@@ -1254,7 +1496,7 @@ export function serveGlass(
         }
       });
     } else {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.writeHead(200, PAGE_HEADERS);
       res.end(PAGE);
     }
   };

@@ -8,14 +8,17 @@ import {
   DecisionError,
   addGrant,
   claimBait,
+  commandGrantScope,
   enqueue,
   ensureLayout,
   listGrants,
   revokeGrant,
   readDecision,
   readDecisionDetail,
+  readStatusLog,
   signOnTrap,
   standingDecisions,
+  takeHelm,
   trapBySession,
   unhandled,
 } from '@lobstah/core';
@@ -77,7 +80,7 @@ describe('lobstah hook permission-request', () => {
     });
 
   it('files a Codex cmd request as a permission card, and its always grant covers different arguments', () => {
-    trap('codex-trap', 'codex');
+    const registered = trap('codex-trap', 'codex');
     enqueue({ id: 'd-codex', repo: 'web', brief: 'push the plan' });
     expect(claimBait(trapBySession('codex-trap')!)?.id).toBe('d-codex');
     const command = 'ume push .temp/plan.html --session f6cc416c --project p --gate plan --title "Plan"';
@@ -87,7 +90,7 @@ describe('lobstah hook permission-request', () => {
     const cards = standingDecisions();
     expect(cards).toHaveLength(1);
     const c = cards[0]!;
-    expect(c.title).toBe('Allow: ume push');
+    expect(c.title).toBe(`${registered.name} wants to run: \`${command}\``);
     expect(c.optionNotes?.['Allow always']).toBe('`ume push …` (any arguments) for Codex traps');
     expect(readDecisionDetail(c.key)).toContain(command);
     answerKey(c.key, { option: 'Allow always', by: 'glass' });
@@ -98,6 +101,58 @@ describe('lobstah hook permission-request', () => {
     });
     expect(JSON.parse(next.stdout)).toEqual(ALLOW);
     expect(standingDecisions()).toHaveLength(0);
+  });
+
+  it.each(['claude', 'codex'] as const)('lets a held %s report reach the helm without an Allow card', (harness) => {
+    const session = `${harness}-report`;
+    trap(session, harness);
+    enqueue({ id: 'held-report', repo: 'web', brief: 'Choose the next step' });
+    claimBait(trapBySession(session)!);
+    const note = 'Pick B option 1, 2 or 3;\nthen confirm the read-only check.';
+    const command = `lobstah report held-report needs-decision "${note}"`;
+    const result = run(['hook', 'permission-request'], {
+      session_id: session,
+      tool_name: harness === 'claude' ? 'Bash' : 'functions.exec_command',
+      tool_input: { command, description: 'Pick B option 1, 2 or 3' },
+    });
+    expect(JSON.parse(result.stdout)).toEqual(ALLOW);
+    const delivered = run(['report', 'held-report', 'needs-decision', note], undefined);
+    expect(delivered.status, delivered.stderr).toBe(0);
+    expect(readStatusLog('held-report', 'work').at(-1)).toMatchObject({ verb: 'needs-decision', note });
+    expect(standingDecisions()).toEqual([]);
+  });
+
+  it('does not treat a compound command or substitution as only a report', () => {
+    trap('report-trap', 'claude');
+    enqueue({ id: 'compound-report', repo: 'web', brief: 'Choose the next step' });
+    claimBait(trapBySession('report-trap')!);
+    for (const command of [
+      'lobstah report compound-report working ok; npm publish',
+      'lobstah report compound-report working "$(npm publish)"',
+      'lobstah report compound-report working ok\nnpm publish',
+      'lobstah report compound-report working ok # comment\\\nnpm publish',
+    ]) {
+      expect(ask('report-trap', command).stdout).toBe('');
+    }
+    expect(standingDecisions()).toHaveLength(4);
+  });
+
+  it('titles an Allow card with the command and labels the description separately', () => {
+    const registered = trap('description-trap', 'claude');
+    enqueue({ id: 'description-report', repo: 'web', brief: 'Inspect the build' });
+    claimBait(trapBySession('description-trap')!);
+    const command = 'ps -p 1842 -o pid,etime,command';
+    const description = 'Pick B option 1, 2 or 3';
+    run(['hook', 'permission-request'], {
+      session_id: 'description-trap', tool_name: 'Bash', tool_input: { command, description },
+    });
+    const [card] = standingDecisions();
+    expect(card!.title).toBe(`${registered.name} wants to run: \`${command}\``);
+    expect(card!.title).not.toContain(description);
+    expect(card!.permission?.command).toBe(command);
+    const detail = readDecisionDetail(card!.key);
+    expect(detail).toContain(`\`\`\`\n${command}\n\`\`\``);
+    expect(detail).toContain(`**Trap's description:** ${description}`);
   });
 
   it("allows a trap's granted command, and nothing else", () => {
@@ -135,6 +190,74 @@ describe('lobstah hook permission-request', () => {
     });
     expect(res.status).toBe(0);
     expect(res.stdout).toBe('');
+  });
+
+  it('defers an uncovered Codex-shaped Linear request without a card; a later explicit request can ask a person', () => {
+    const t = trap('linear-trap', 'codex');
+    enqueue({ id: 'linear-job', repo: 'web', brief: 'Read the assigned issue' });
+    claimBait(trapBySession('linear-trap')!);
+    const input = {
+      session_id: 'linear-trap', turn_id: 'codex-turn', hook_event_name: 'PermissionRequest',
+      cwd: t.worktree, transcript_path: null, model: 'fixture-model', permission_mode: 'default',
+      tool_name: 'mcp__codex_apps__linear__get_issue', tool_input: { id: 'fixture-issue' },
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = run(['hook', 'permission-request'], input);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(standingDecisions()).toEqual([]);
+      expect(listGrants().grants).toEqual([]);
+    }
+    const request = run(['grant', 'request', '--session', 'linear-trap', '--tools', 'mcp__codex_apps__linear__*',
+      '--reason', 'Codex refused the requested call; a person must decide'], undefined, { CODEX_THREAD_ID: 'linear-trap' });
+    expect(request.status, request.stderr).toBe(0);
+    expect(standingDecisions()[0]?.permission?.sessionGrant?.session).toBe('linear-trap');
+    expect(listGrants().grants).toEqual([]);
+  });
+
+  it.each(['codex', 'claude', undefined] as const)('preserves %s helm connector behavior using its registered harness', (harness) => {
+    takeHelm({ sessionId: 'connector-helm', grounds: { name: 'home', repos: [] }, ttlMs: 60_000, identity: { harness } });
+    const result = run(['hook', 'permission-request'], {
+      session_id: 'connector-helm', tool_name: 'mcp__codex_apps__linear__get_issue', tool_input: { id: 'fixture-issue' },
+      ...(harness === 'codex' ? { turn_id: 'codex-turn' } : {}), cwd: home,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(standingDecisions()).toHaveLength(harness === 'codex' ? 0 : 1);
+  });
+
+  it('honors an existing Codex connector grant before deferring, and defers again after revocation', () => {
+    const t = trap('granted-linear-trap', 'codex');
+    enqueue({ id: 'granted-linear-job', repo: 'web', brief: 'Read the assigned issue' });
+    claimBait(trapBySession('granted-linear-trap')!);
+    const grant = addGrant({ mode: 'session', session: 'granted-linear-trap', tools: 'mcp__codex_apps__linear__*', by: 'glass' });
+    const input = {
+      session_id: 'granted-linear-trap', turn_id: 'codex-turn', hook_event_name: 'PermissionRequest',
+      cwd: t.worktree, transcript_path: null, model: 'fixture-model', permission_mode: 'default',
+      tool_name: 'mcp__codex_apps__linear__get_issue', tool_input: { id: 'fixture-issue' },
+    };
+    const allowed = run(['hook', 'permission-request'], input);
+    expect(allowed.status, allowed.stderr).toBe(0);
+    expect(JSON.parse(allowed.stdout)).toEqual(ALLOW);
+    expect(listGrants().grants[0]?.uses).toBe(1);
+    revokeGrant(grant.id, 'glass');
+    const uncovered = run(['hook', 'permission-request'], input);
+    expect(uncovered.status, uncovered.stderr).toBe(0);
+    expect(uncovered.stdout).toBe('');
+    expect(standingDecisions()).toEqual([]);
+  });
+
+  it('still files a file permission card for a Codex MCP call with a file target', () => {
+    const t = trap('file-trap', 'codex');
+    enqueue({ id: 'file-job', repo: 'web', brief: 'Write the file' });
+    claimBait(trapBySession('file-trap')!);
+    const file = path.join(t.worktree, 'fixture.txt');
+    const result = run(['hook', 'permission-request'], {
+      session_id: 'file-trap', turn_id: 'codex-turn', tool_name: 'mcp__files__write_file', tool_input: { file_path: file }, cwd: t.worktree,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(standingDecisions()[0]?.permission).toMatchObject({ path: file, harness: 'codex' });
   });
 });
 
@@ -176,6 +299,20 @@ describe('the Claude Code mod', () => {
 });
 
 describe('the calls a grant is checked against', () => {
+  it('preserves native absolute file, notebook and patch targets without adding the working directory', () => {
+    const file = path.join(home, 'src', 'fixture.ts');
+    const calls = [
+      { tool: 'Write', input: { file_path: file } },
+      { tool: 'NotebookEdit', input: { notebook_path: file } },
+      { tool: 'apply_patch', input: { command: `*** Begin Patch\n*** Update File: ${file}\n@@\n-x\n+y\n*** End Patch` } },
+      { tool: 'apply_patch', input: { command: `*** Begin Patch\n*** Update File: src/old.ts\n*** Move to: ${file}\n*** End Patch` } },
+    ];
+    for (const call of calls) {
+      const requests = callRequests({ harness: 'codex', ...call }, 'kind-crab', home);
+      expect(requests.at(-1)?.path).toBe(file);
+    }
+  });
+
   it('reads the files of an apply_patch, and refuses a patch unless every file is covered', () => {
     const patch = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: .temp/b.txt\n+z\n*** End Patch';
     expect(patchPaths(patch)).toEqual(['src/a.ts', '.temp/b.txt']);
@@ -200,8 +337,16 @@ describe('a permission card', () => {
   it('offers Allow once, Allow always and No, and shows the exact command', () => {
     const c = card();
     expect(c.options).toEqual(['Allow once', 'Allow always', 'Allow this tool family for 15 min', 'No']);
-    expect(c.title).toBe('Allow: wrangler deploy');
+    expect(c.title).toMatch(/ wants to run: `wrangler deploy`$/);
     expect(readDecision(c.key)?.permission).toMatchObject({ command: 'wrangler deploy', harness: 'codex' });
+  });
+
+  it('truncates the command title while preserving the full command in the detail', () => {
+    const command = `git diff -- ${'long-file-name/'.repeat(30)}file.ts`;
+    const c = askPermission({ dispatch: 'long-command', lane: 'work', ask: { command, harness: 'codex', trap: 'early-cove' } });
+    expect(c.title).toHaveLength(200);
+    expect(c.title).toMatch(/^early-cove wants to run: `git diff -- .*…`$/);
+    expect(readDecisionDetail(c.key)).toContain(command);
   });
 
   it('Allow once in the glass grants it to the asking trap, once, and tells the trap to retry exactly', () => {
@@ -264,6 +409,81 @@ describe('a permission card', () => {
     answerKey(c.key, { option: 'No', by: 'cli' });
     expect(listGrants().grants).toEqual([]);
     expect(unhandled('d-1', 'work')[0]!.text).toContain('Do not run it');
+  });
+});
+
+describe('a helm command auto mode refused', () => {
+  const MERGE = 'gh pr merge 2681 --squash';
+  const denied = (session: string, command: string, tool = 'Bash') =>
+    run(['hook', 'permission-denied'], {
+      session_id: session,
+      hook_event_name: 'PermissionDenied',
+      permission_mode: 'auto',
+      tool_name: tool,
+      tool_input: { command, description: 'Merge the glass sync PR' },
+      tool_use_id: 'denied-call',
+      reason: '[Merge Without Review]',
+      cwd: home,
+    });
+  const preToolUse = (session: string, command: string) =>
+    run(['hook', 'pre-tool-use'], { session_id: session, tool_name: 'Bash', tool_input: { command }, tool_use_id: `call-${command.length}`, cwd: home });
+
+  it('becomes one glass card; Allow once mints a one-use grant for exactly that command in that helm session', () => {
+    takeHelm({ sessionId: 'helm-session', grounds: { name: 'home', repos: [] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+    expect(denied('helm-session', MERGE)).toMatchObject({ status: 0, stdout: '' });
+    denied('helm-session', MERGE);
+    expect(standingDecisions()).toHaveLength(1);
+    const card = standingDecisions()[0]!;
+    expect(card.options).toEqual(['Allow once', 'No']);
+    expect(card.permission).toMatchObject({ helm: true, session: 'helm-session', command: MERGE });
+    expect(readDecisionDetail(card.key)).toContain('[Merge Without Review]');
+    expect(preToolUse('helm-session', MERGE).stdout).toBe('');
+    expect(() => answerKey(card.key, { option: 'Allow once', by: 'cli' })).toThrow('person');
+    answerKey(card.key, { option: 'Allow once', by: 'glass' });
+    expect(listGrants().grants).toMatchObject([{ mode: 'once', session: 'helm-session', command: MERGE, match: 'exact', by: 'glass' }]);
+    expect(preToolUse('other-session', MERGE).stdout).toBe('');
+    expect(preToolUse('helm-session', `${MERGE} --admin`).stdout).toBe('');
+    expect(JSON.parse(preToolUse('helm-session', MERGE).stdout).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'allow' });
+    expect(preToolUse('helm-session', MERGE).stdout).toBe('');
+    expect(listGrants({ all: true }).grants[0]?.uses).toBe(1);
+  });
+
+  it("files nothing for a trap or another session, another tool, or a command no grant may cover; No grants nothing", () => {
+    takeHelm({ sessionId: 'helm-session', grounds: { name: 'home', repos: [] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+    trap('denied-trap', 'claude');
+    denied('denied-trap', MERGE);
+    denied('stranger', MERGE);
+    denied('helm-session', MERGE, 'Write');
+    denied('helm-session', `printf 'x' >> ${path.join(home, 'config.toml')}`);
+    expect(standingDecisions()).toEqual([]);
+    denied('helm-session', MERGE);
+    answerKey(standingDecisions()[0]!.key, { option: 'No', by: 'glass' });
+    expect(listGrants().grants).toEqual([]);
+  });
+
+  it("in a claimed trap becomes the trap's card; its Allow once and Allow always pass the trap's PreToolUse in auto mode", () => {
+    const t = trap('auto-trap', 'claude');
+    enqueue({ id: 'auto-job', repo: 'web', brief: 'Land the PR' });
+    claimBait(trapBySession('auto-trap')!);
+    denied('auto-trap', MERGE);
+    denied('auto-trap', MERGE);
+    expect(standingDecisions()).toHaveLength(1);
+    const card = standingDecisions()[0]!;
+    expect(card).toMatchObject({ dispatch: 'auto-job', options: ['Allow once', 'Allow always', 'Allow this tool family for 15 min', 'No'] });
+    expect(card.permission).toMatchObject({ command: MERGE, trap: t.name, session: 'auto-trap' });
+    answerKey(card.key, { option: 'Allow once', by: 'glass' });
+    const call = (mode: string) =>
+      run(['hook', 'pre-tool-use'], { session_id: 'auto-trap', permission_mode: mode, tool_name: 'Bash', tool_input: { command: MERGE }, tool_use_id: `call-${mode}`, cwd: t.worktree });
+    expect(call('default').stdout).toBe('');
+    expect(JSON.parse(call('auto').stdout).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'allow' });
+    expect(call('auto').stdout).toBe('');
+    addGrant({ ...commandGrantScope(MERGE), mode: 'always', harness: 'claude', by: 'glass' });
+    expect(JSON.parse(call('auto').stdout).hookSpecificOutput).toMatchObject({ permissionDecision: 'allow' });
+  });
+
+  it('a session command grant names one exact command, once', () => {
+    expect(() => addGrant({ mode: 'once', session: 'helm-session', command: 'gh pr merge', match: 'prefix', by: 'glass' })).toThrow('exact');
+    expect(() => addGrant({ mode: 'always', session: 'helm-session', command: MERGE, by: 'glass' })).toThrow('exact');
   });
 });
 
@@ -400,12 +620,53 @@ describe('session grants', () => {
     expect(run(['hook', 'permission-request'], { ...h, tool_input: { url: 'https://evil.example/' } }).stdout).toBe('');
     expect(run(['grant', '--session', 'helm-session', '--tools', 'WebFetch', '--yes'], undefined, { CLAUDECODE: '1' }).status).not.toBe(0);
   });
-  it('a denied browser call from an assigned trap files a session request with host pins', () => {
-    const t = trap('browser-trap', 'codex');
+  it('an uncovered Claude browser call still files a session request with host pins', () => {
+    const t = trap('browser-trap', 'claude');
     enqueue({ id: 'browser-job', repo: 'web', brief: 'Read the page' }); claimBait(trapBySession('browser-trap')!);
     run(['hook', 'permission-request'], { session_id: 'browser-trap', tool_name: 'mcp__browser__navigate', tool_input: { url: 'https://example.com/private' }, cwd: t.worktree });
     expect(standingDecisions()[0]?.permission?.sessionGrant).toMatchObject({ session: 'browser-trap', tools: 'mcp__browser__*', hosts: ['example.com'] });
+    expect(standingDecisions()[0]?.repo).toBe('web');
+    expect(readDecisionDetail(standingDecisions()[0]!.key)).toContain(`Trap: web · ${t.name}`);
   });
+  it("Allow always on a trap's requested tool card covers that tool in every trap and later session, with no new card", () => {
+    const claimed = (session: string): { name: string; worktree: string } => {
+      const t = trap(session, 'codex');
+      enqueue({ id: `${session}-job`, repo: 'web', brief: 'Read the issue' });
+      claimBait(trapBySession(session)!);
+      return t;
+    };
+    const linear = (session: string, cwd: string, tool = 'mcp__codex_apps__linear__get_issue') =>
+      run(['hook', 'permission-request'], { session_id: session, tool_name: tool, tool_input: { id: 'BAS-1' }, cwd });
+    const first = claimed('linear-trap');
+    expect(linear('linear-trap', first.worktree).stdout).toBe('');
+    expect(standingDecisions()).toEqual([]);
+    const requested = run(['grant', 'request', '--session', 'linear-trap', '--tools', 'mcp__codex_apps__linear__*', '--reason', 'Allow the requested connector family']);
+    expect(requested.status, requested.stderr).toBe(0);
+    const c = standingDecisions().find((d) => d.permission?.sessionGrant?.tools === 'mcp__codex_apps__linear__*')!;
+    expect(c.options).toEqual(['Allow for 15m', 'Allow for 1h', 'Allow always', 'Deny']);
+    expect(() => answerKey(c.key, { option: 'Allow always', by: 'cli' })).toThrow('person');
+    expect(listGrants().grants).toEqual([]);
+    answerKey(c.key, { option: 'Allow always', by: 'glass' });
+    const [g] = listGrants().grants;
+    expect(g).toMatchObject({ mode: 'always', tools: 'mcp__codex_apps__linear__*', by: 'glass' });
+    expect(g?.session).toBeUndefined();
+    expect(g?.expiresAt).toBeUndefined();
+    const later = claimed('later-trap');
+    const cards = standingDecisions().length;
+    expect(JSON.parse(linear('later-trap', later.worktree, 'mcp__codex_apps__linear__list_issues').stdout)).toEqual(ALLOW);
+    expect(JSON.parse(linear('linear-trap', first.worktree).stdout)).toEqual(ALLOW);
+    expect(standingDecisions()).toHaveLength(cards);
+    expect(listGrants().grants[0]?.uses).toBe(2);
+    expect(linear('later-trap', later.worktree, 'mcp__codex_apps__github__get_pr').stdout).toBe('');
+    expect(linear('not-a-trap', home).stdout).toBe('');
+  });
+
+  it('a standing tool grant never names a shell or file tool', () => {
+    for (const tools of ['Bash', 'exec_command', 'Write', 'apply_patch', '*', 'mcp__*__Bash'])
+      expect(() => addGrant({ mode: 'always', tools, by: 'glass' })).toThrow(/command or path|tool glob/);
+    expect(addGrant({ mode: 'always', tools: 'mcp__codex_apps__linear__*', by: 'glass' })).toMatchObject({ mode: 'always', harness: 'any' });
+  });
+
   it('custom Claude and Codex settings locations remain protected by session grants', () => {
     addGrant({ mode: 'session', session: 'settings-session', tools: 'Write', by: 'glass' });
     for (const [variable, name] of [['CLAUDE_CONFIG_DIR', 'settings.json'], ['CODEX_HOME', 'config.toml']]) {

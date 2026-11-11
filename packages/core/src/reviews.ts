@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
+import { prLabel } from './pr.js';
 import type { DispatchLimits } from './types.js';
 import type { TendAttention } from './glass.js';
 
@@ -605,7 +606,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
     const verdict = (r.verdict ?? 'comment').replace('_', ' ');
     const kind = r.state === 'posted' ? 'published' : needsYou ? 'needs-you' : 'draft-ready';
     const label = kind === 'published' ? 'Published' : needsYou ? 'Draft ready (needs you)' : 'Draft ready';
-    r.notification = { kind, at: new Date(now).toISOString(), text: `${label}: #${item.pr.number} · ${verdict} · ${r.blocking?.length ?? 0} blocking` };
+    r.notification = { kind, at: new Date(now).toISOString(), text: `${label}: ${prLabel(item.pr)} · ${verdict} · ${r.blocking?.length ?? 0} blocking` };
     writeReview({ ...item, updatedAt: r.notification.at });
     events.push({ key: item.key, notification: r.notification, hash: reviewHash(item.key) });
   }

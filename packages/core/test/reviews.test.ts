@@ -158,7 +158,7 @@ describe('review notifications', () => {
     const item = readReview(key)!;
     Object.assign(item.rounds[0]!, { state: 'drafted', verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 4, body: 'race' }], draftedAt: new Date(T0).toISOString() });
     writeReview(item);
-    expect(refreshReviewNotifications(T0 + 1)[0]).toMatchObject({ hash: '#review-review%3Aacme%2Fweb%237', notification: { kind: 'draft-ready', text: 'Draft ready: #7 · request changes · 1 blocking' } });
+    expect(refreshReviewNotifications(T0 + 1)[0]).toMatchObject({ hash: '#review-review%3Aacme%2Fweb%237', notification: { kind: 'draft-ready', text: 'Draft ready: #7 Add the thing · request changes · 1 blocking' } });
     expect(refreshReviewNotifications(T0 + 2)).toEqual([]);
     markReviewSeen(key, T0 + 3);
     expect(latestRound(readReview(key)!)).toMatchObject({ seenAt: new Date(T0 + 3).toISOString(), notification: { kind: 'draft-ready' } });
@@ -185,7 +185,7 @@ describe('review notifications', () => {
     const item = observeReviewRequest(seen(), T0).item;
     Object.assign(item.rounds[0]!, { state: 'posted', by: 'auto', postedAt: new Date(T0).toISOString(), verdict: 'comment' });
     writeReview(item);
-    expect(refreshReviewNotifications(T0 + 1)[0]?.notification).toMatchObject({ kind: 'published', text: 'Published: #7 · comment · 0 blocking' });
+    expect(refreshReviewNotifications(T0 + 1)[0]?.notification).toMatchObject({ kind: 'published', text: 'Published: #7 Add the thing · comment · 0 blocking' });
     item.rounds[0]!.by = 'glass'; writeReview(item);
     expect(refreshReviewNotifications(T0 + 2)).toEqual([]);
   });

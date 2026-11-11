@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { consumeHelmChatChange, ensureLayout, helmChat, heartbeatHelm, loadConfig, readHelm, readSessionWatcher, setHelmChat, takeHelm, enqueue } from '@lobstah/core';
+import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { charter, CHAT_BRIEF_RULE, CARD_LINK_RULE } from '../src/charter.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
@@ -30,6 +31,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-helm-chat-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  recordHelmPass('fleet', DEFAULT_HELM);
   fs.mkdirSync(path.join(home, 'web'));
   fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = ${JSON.stringify(path.join(home, 'web'))}\ntrunk = "main"\n`);
 });

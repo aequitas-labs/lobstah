@@ -1,10 +1,4 @@
 /* Native buttons keep the existing glass card typography, not UA defaults. */
-button.card {
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-}
-
 /* Auth always uses the glass dark palette, including on light system themes. */
 body:has(.auth-shell) {
   color-scheme: dark;

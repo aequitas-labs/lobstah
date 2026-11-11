@@ -1,4 +1,4 @@
-import { laneDirs, lastEventAt, readEvidence, readStatusLog, reconcile } from '@lobstah/core';
+import { dispatchPrLines, dispatchPrUrls, laneDirs, lastEventAt, readEvidence, readStatusLog, reconcile } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Lane, Verb } from '@lobstah/core';
@@ -35,6 +35,7 @@ export interface ReportNotification {
   verb: Verb | 'watch';
   note?: string;
   prUrl?: string;
+  prUrls?: string[];
 }
 
 export async function reportLoop(
@@ -60,6 +61,8 @@ export async function reportLoop(
       if (verb !== 'unknown') {
         const changed = verb !== entry.lastReported;
         const evidence = readEvidence(entry.uuid, lane);
+        const prFingerprint = dispatchPrLines(evidence).join('\n');
+        const prsChanged = !!prFingerprint && prFingerprint !== entry.reportedPrs;
         let editing = liveComment && !entry.liveCommentUnavailable && !!source.createLiveComment && !!source.editLiveComment;
         if (editing) {
           const now = Date.now();
@@ -83,13 +86,13 @@ export async function reportLoop(
             }
           }
         }
-        if (changed) {
+        if (changed || prsChanged) {
           // Edits do not notify people. A question or terminal result still
           // posts a new comment, and Linear applies its state transition there.
           if (!editing || ['needs-decision', 'blocked', 'failed', 'done'].includes(verb)) {
             await source.report(key, verb as Verb, { ...evidence, uuid: entry.uuid });
           }
-          state.update(key, { lastReported: verb as Verb });
+          state.update(key, { lastReported: verb as Verb, reportedPrs: prFingerprint });
           log(`${key}: reported ${verb}`);
           notify({
             key,
@@ -97,6 +100,7 @@ export async function reportLoop(
             verb: verb as Verb,
             note: readStatusLog(entry.uuid, lane).at(-1)?.note,
             prUrl: evidence.prUrl,
+            prUrls: dispatchPrUrls(evidence),
           });
         }
       }

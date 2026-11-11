@@ -2,7 +2,6 @@ import { env, SELF, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, expect, it } from 'vitest';
 import type { Account } from '../src/account.js';
 import { glassTables } from '../src/glass-state.js';
-import { parseRoute } from '../glass/src/route.js';
 import { authFixtures } from './auth-fixture.js';
 import type { GlassCard } from '../../../packages/core/src/backend-model.js';
 
@@ -107,9 +106,4 @@ it('cards move inside the command that changed their records and are gone with t
   expect(await sql("SELECT family,key FROM cards WHERE source='wharf' AND family='decision'")).toEqual([{ family: 'decision', key: 'pick' }]);
   expect((await call('cards/c999999')).status).toBe(404);
   expect((await call('cards/not-a-card')).status).toBe(404);
-});
-
-it('names any card in the glass as #card/<id>', () => {
-  expect(parseRoute('#card/c42')).toEqual({ tab: 'deck', item: { kind: 'card', id: 'c42' } });
-  expect(parseRoute('#card/../x')).toEqual({ tab: 'deck' });
 });

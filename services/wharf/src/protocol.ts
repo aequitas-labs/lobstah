@@ -1,3 +1,4 @@
+import type { ConfiguredTrapTarget } from '../../../packages/core/src/configured-trap-model.js';
 import type { DispatchInput, ReportInput } from '../../../packages/core/src/backend-model.js';
 import { validateRepoIdentity } from '../../../packages/core/src/repo-identity.js';
 
@@ -18,6 +19,12 @@ export function text(value: unknown, max = 1024): string {
 export function identifier(value: unknown): string {
   const s = text(value, 128); requireThat(/^[A-Za-z0-9_-]+$/.test(s), 400, 'invalid identifier'); return s;
 }
+/** How long a worker's sign-on or renewal holds. */
+export const LEASE_MS = 90_000;
+/** A tmux pane id as a boat reports it, such as `%12`. */
+export function tmuxPane(value: unknown): string {
+  const s = text(value, 16); requireThat(/^%(0|[1-9][0-9]*)$/.test(s), 400, 'invalid tmux pane'); return s;
+}
 export function repoIdentity(value: unknown): string {
   try { return validateRepoIdentity(value); } catch { throw new ApiError(400, 'canonical repoRemote required'); }
 }
@@ -29,13 +36,23 @@ export function boatName(value: unknown): string {
 function keys(b: Record<string, unknown>, allowed: string[]) {
   requireThat(Object.keys(b).every((k) => allowed.includes(k)), 400, 'unexpected field');
 }
+/** A hosted configured target carries routing identity only, never a local folder or repo substitute. */
+export function configuredTarget(value: unknown): ConfiguredTrapTarget {
+  const target = object(value); keys(target, ['kind', 'profile', 'grounds', 'surface', 'parentDispatch']);
+  requireThat(target.kind === 'configured-trap' && ['terminal', 'claude-desktop'].includes(String(target.surface)), 400, 'invalid configured target');
+  return { kind: 'configured-trap', profile: identifier(target.profile), grounds: identifier(target.grounds), surface: target.surface as ConfiguredTrapTarget['surface'], ...(target.parentDispatch === undefined ? {} : { parentDispatch: identifier(target.parentDispatch) }) };
+}
+
 export function dispatchInput(value: unknown): DispatchInput {
   const b = object(value);
-  keys(b, ['id', 'repo', 'repoRemote', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort', 'request']);
-  const d: DispatchInput = { id: identifier(b.id), repo: identifier(b.repo), repoRemote: repoIdentity(b.repoRemote), brief: text(b.brief, 48000) };
+  keys(b, ['id', 'repo', 'repoRemote', 'target', 'grounds', 'brief', 'lane', 'for', 'boat', 'followUp', 'harness', 'model', 'effort', 'request']);
+  const target = b.target === undefined ? undefined : configuredTarget(b.target);
+  if (target) requireThat(['repo', 'repoRemote', 'followUp', 'harness', 'model', 'effort'].every((key) => b[key] === undefined), 400, 'configured target cannot carry repository or launch metadata');
+  const d: DispatchInput = { id: identifier(b.id), brief: text(b.brief, 48000), ...(target ? { target, for: `trap:${target.profile}`, grounds: target.grounds } : { repo: identifier(b.repo), repoRemote: repoIdentity(b.repoRemote), ...(b.grounds ? { grounds: identifier(b.grounds) } : {}) }) };
+  if (target && b.for !== undefined) requireThat(b.for === d.for, 400, 'configured address must match its profile');
   if (b.lane !== undefined) { requireThat(b.lane === 'work' || b.lane === 'chore', 400, 'invalid lane'); d.lane = b.lane; }
   for (const k of ['for', 'boat', 'followUp', 'harness', 'effort', 'request'] as const) {
-    if (b[k] !== undefined) d[k] = identifier(b[k]);
+    if (b[k] !== undefined && !(target && k === 'for')) d[k] = identifier(b[k]);
   }
   if (b.model !== undefined) { const model = text(b.model, 128); requireThat(/^[A-Za-z0-9._-]+$/.test(model), 400, 'invalid model identifier'); d.model = model; }
   return d;
@@ -46,7 +63,7 @@ export function reportInput(value: unknown): ReportInput {
   const r: ReportInput = { verb: b.verb as ReportInput['verb'] };
   if (b.note !== undefined) r.note = text(b.note, 16000);
   if (b.waitingOn !== undefined) {
-    requireThat(['paused', 'needs-decision', 'blocked'].includes(r.verb) && ['review', 'pr', 'deploy', 'person', 'external'].includes(String(b.waitingOn)), 400, 'invalid waitingOn');
+    requireThat(['paused', 'needs-decision', 'blocked'].includes(r.verb) && ['review', 'pr', 'deploy', 'person', 'external', 'heavy'].includes(String(b.waitingOn)), 400, 'invalid waitingOn');
     r.waitingOn = b.waitingOn as ReportInput['waitingOn'];
   }
   if (b.until !== undefined) {

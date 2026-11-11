@@ -61,7 +61,7 @@ describe('the PRs a report --pr records', () => {
       const v = views[args[2]!];
       return v ? { status: 0, stdout: JSON.stringify(v) } : { status: 1, stdout: '' };
     };
-    expect(stackPrUrls([pr(2)], { cwd: dir, branches: ['b3', 'b1', 'b2', 'b9', 'gone'], run })).toEqual([pr(2), pr(1), pr(3)]);
+    expect(stackPrUrls([pr(2)], { cwd: dir, branches: ['b3', 'b1', 'b2', 'b9', 'gone'], run })).toEqual([pr(2), pr(1), pr(3), pr(9)]);
     expect(asked).toEqual(['b3', 'b1', 'b2', 'b9', 'gone']);
     // One branch: no chain, and no gh.
     asked.length = 0;
@@ -75,4 +75,58 @@ describe('the PRs a report --pr records', () => {
     };
     expect(stackPrUrls([pr(1)], { cwd: dir, branches: ['a', 'b'], run })).toEqual([pr(1)]);
   });
+});
+
+it('persists one-based stack positions and every PR watch even after bases change', async () => {
+  const { dispatchPrDiscovery, recordDispatchPrs } = await import('../src/pr-stack.js');
+  const { enqueue, ensureLayout, readEvidence, readWatch, dispatchPrLines } = await import('@lobstah/core');
+  ensureLayout(); enqueue({ id: 'stack-dispatch', repo: 'web', brief: 'stack' });
+  ghStack([[1, 2, 3]]);
+  const discovered = dispatchPrDiscovery([pr(3)], { cwd: path.join(dir, 'repo') });
+  recordDispatchPrs('stack-dispatch', 'work', discovered, true);
+  const evidence = readEvidence('stack-dispatch', 'work');
+  expect(evidence.prUrl).toBe(pr(3));
+  expect(evidence.prPositions?.[pr(2)]).toEqual({ bottom: pr(1), position: 2, size: 3 });
+  for (const number of [1, 2, 3]) expect(readWatch(`pr:o/r#${number}`)?.owner).toBe('dispatch:stack-dispatch');
+  recordDispatchPrs('stack-dispatch', 'work', { urls: [pr(2)], positions: {} }, true);
+  expect(dispatchPrLines(readEvidence('stack-dispatch', 'work'))).toEqual([`PR 1/3: ${pr(1)}`, `PR 2/3: ${pr(2)}`, `PR 3/3: ${pr(3)}`]);
+});
+
+it('the normal PR watch backfills a whole owned stack into dispatch evidence and watches', async () => {
+  const { ensureLayout, enqueue, parsePrRef, readEvidence, readPr, readWatch, mergeEvidence } = await import('@lobstah/core');
+  const { observePr } = await import('../src/pr-watch.js');
+  const { discoverPrStack } = await import('../src/pr-stack-watch.js');
+  ensureLayout(); enqueue({ id: 'watched-stack', repo: 'web', brief: 'stack' });
+  const view = (number: number) => ({
+    url: pr(number), number, state: 'OPEN', isDraft: false, headRefOid: `sha${number}`,
+    headRefName: `b${number}`, baseRefName: number === 1 ? 'main' : `b${number - 1}`,
+    isCrossRepository: false, author: { login: 'bot' }, mergeStateStatus: 'CLEAN', reviewDecision: 'APPROVED', statusCheckRollup: [],
+  });
+  mergeEvidence('watched-stack', 'work', { prUrl: pr(3) });
+  observePr(parsePrRef(pr(3))!, view(3), { dispatchId: 'watched-stack' });
+  expect(readPr('pr:o/r#3')?.dispatches).toContain('watched-stack');
+  discoverPrStack(parsePrRef(pr(3))!, { viewer: () => 'bot', fetch: (_ref, branch, direction) => {
+    const number = direction === 'head' ? Number(branch.slice(1)) : Number(branch.slice(1)) + 1;
+    return number >= 1 && number <= 3 ? [view(number)] : [];
+  } });
+  const evidence = readEvidence('watched-stack', 'work');
+  expect(evidence.prUrls).toEqual([pr(3), pr(1), pr(2)]);
+  for (const number of [1, 2, 3]) {
+    expect(evidence.prPositions?.[pr(number)]).toMatchObject({ position: number, size: 3 });
+    expect(readWatch(`pr:o/r#${number}`)?.owner).toBe('dispatch:watched-stack');
+    expect(readPr(`pr:o/r#${number}`)?.dispatches).toContain('watched-stack');
+  }
+});
+
+it('records all pushed stack branches beyond the old twelve-branch limit', async () => {
+  const { dispatchPrDiscovery } = await import('../src/pr-stack.js');
+  const branches = Array.from({ length: 17 }, (_, index) => `b${index + 1}`);
+  const run: StackRun = (command, args) => {
+    if (command !== 'gh') return { status: 1, stdout: '' };
+    const number = Number(args[2]!.slice(1));
+    return { status: 0, stdout: JSON.stringify({ url: pr(number), headRefName: `b${number}`, baseRefName: number === 1 ? 'main' : `b${number - 1}` }) };
+  };
+  const discovery = dispatchPrDiscovery([pr(17)], { cwd: dir, branches, run });
+  expect(discovery.urls).toHaveLength(17);
+  expect(discovery.positions[pr(16)]).toEqual({ bottom: pr(1), position: 16, size: 17 });
 });

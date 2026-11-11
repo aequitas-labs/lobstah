@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
-import { missingCatch, trapView } from '../src/glass-diff.js';
+import { missingCatch, trapView } from '../../../packages/glass-ui/src/glass-diff.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, acceptanceFleet } from './fixtures/glass-snapshots.js';
