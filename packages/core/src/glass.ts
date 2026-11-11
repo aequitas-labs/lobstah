@@ -445,6 +445,8 @@ export interface GlassDecision {
 
 /** A run card as the glass shows it: the stored script in full, what runs it, and what a reader could miss in it. */
 export interface GlassRunCard extends RunCard {
+  /** Durable run metadata, with output fetched separately by the local person view. */
+  latest?: import('./run-history.js').RunAttempt;
   /** The stored script's text, whole. */
   script: string;
   /** Characters a reader could miss or misread, by line and column. */

@@ -34,8 +34,11 @@ export interface DecisionAnswerPayload {
   dispatch?: string;
   lane?: string;
   repo?: string;
+  grounds?: string;
   option?: string;
   text?: string;
+  /** A completed run keeps its card available for retry until dismissed. */
+  run?: { id: string; state: import('./run-history.js').RunState; exitCode: number; tail: string };
   attachments: Array<{ name: string; path: string; bytes: number; type: string }>;
 }
 
@@ -117,6 +120,7 @@ export function writeRequest(
     text: wakeText(r),
     refId: r.id,
     repo: typeof payload.repo === 'string' ? payload.repo : undefined,
+    grounds: typeof payload.grounds === 'string' ? payload.grounds : undefined,
   });
   return r;
 }

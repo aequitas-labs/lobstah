@@ -1203,6 +1203,8 @@ export function serveGlass(
           case 'run-challenge':
           case 'run':
           case 'run-output':
+          case 'run-stop':
+          case 'run-dismiss':
           case 'run-line': {
             if (!isRunRequestKind(body.kind)) return reply(400, { ok: false, reason: 'Unknown run request.' });
             void handleRunRequest(body.kind, body.payload, {
