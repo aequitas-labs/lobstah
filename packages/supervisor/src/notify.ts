@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { activeIds, answeredAt, listReviews, laneDirs, lastEventAt, questionHeld, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
+import { activeIds, answeredAt, reviewDispatchIds, laneDirs, lastEventAt, questionHeld, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 
 export interface NotifyEvent {
@@ -48,7 +48,7 @@ export function pendingNotifications(
   }
   fs.writeFileSync(cursorPath(id, lane), String(end));
   const question = (e: StatusEntry) => e.verb === 'needs-decision' || e.verb === 'blocked';
-  if (listReviews().some(item => item.rounds.some(r => r.dispatch === id))) return [];
+  if (reviewDispatchIds().has(id)) return [];
   return fresh
     .filter((e) => verbs.includes(e.verb) && e.waitingOn !== 'heavy' && !(question(e) && answeredAt(id, lane, e.at) !== undefined))
     .map((entry) => ({ id, lane, entry }));
@@ -170,6 +170,7 @@ export function freshWakeEvents(
   match?: (id: string, lane: Lane) => boolean,
 ): NotifyEvent[] {
   const out: NotifyEvent[] = [];
+  const reviewJobs = reviewDispatchIds();
   for (const lane of ['work', 'chore'] as Lane[]) {
     for (const id of notifiableIds(lane, Number.POSITIVE_INFINITY)) {
       if (match && !match(id, lane)) continue; // baseline untouched — stays fresh for its owner
@@ -180,6 +181,8 @@ export function freshWakeEvents(
         baseline[key] = log.length;
         for (const [offset, entry] of log.slice(seen).entries()) {
           if (!verbs.includes(entry.verb)) continue;
+          // Successful drafts already belong to the person's Reviews page.
+          if (lane === 'chore' && entry.verb === 'done' && reviewJobs.has(id)) continue;
           if (entry.waitingOn === 'heavy') continue; // a push in line is routine
           // A question already answered by the time we look is not a wake.
           if ((entry.verb === 'needs-decision' || entry.verb === 'blocked') && answeredAt(id, lane, entry.at) !== undefined) continue;

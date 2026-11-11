@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from '@lobstah/core';
+import type { MirrorStatus } from '@lobstah/core';
 
 /**
  * Pairing a phone's passkey with this boat (ume 2ec9c88b-193, intent
@@ -45,6 +46,20 @@ export function pairingOrigin(value: string): { origin: string; rpId: string } |
   } catch {
     return undefined;
   }
+}
+
+/**
+ * This boat's name for the pairing link, which the hosted glass's pairing page
+ * looks up among its mirror boats. The mirror's status doesn't record the
+ * name, so ask the wharf, as `lobstah wharf whoami` does. Undefined when this
+ * Mac doesn't mirror to a hosted glass.
+ */
+export async function pairingBoatName(status: MirrorStatus | undefined, askWharf: (wharf: string) => Promise<unknown>): Promise<string | undefined> {
+  if (!status?.glass) return undefined;
+  if (status.boat) return status.boat;
+  const answer = await askWharf(status.wharf);
+  const name = answer && typeof answer === 'object' ? (answer as { name?: unknown }).name : undefined;
+  return typeof name === 'string' && name.trim() ? name.trim() : undefined;
 }
 
 /** Issue a pairing code for this hosted glass. A newer code replaces any older one. */

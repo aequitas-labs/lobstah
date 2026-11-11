@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { backendScopes, displayGrounds, loadConfig, readHostedViews } from '@lobstah/core';
+import { backendScopes, briefFirstLine, displayGrounds, loadConfig, readHostedViews } from '@lobstah/core';
 import type { Config, DispatchView, HostedView, GlassDispatch, TendAttention, WharfDocumentSummary } from '@lobstah/core';
 
 // Display identity only: never used as authority or sent to the wharf.
@@ -16,7 +16,7 @@ export function hostedDispatch(view: HostedView, d: DispatchView): GlassDispatch
   const label = `${view.grounds}@${view.wharf}`;
   return {
     id, lane: d.lane ?? 'work', bucket: d.state === 'cancelled' ? 'done' : d.state,
-    repo: d.repo ? `${label} · ${d.repo}` : undefined, ...(d.target ? { target: d.target, for: `trap:${d.target.profile}` } : {}), title: `[${label}] ${d.brief.split('\n')[0].slice(0, 200)}`,
+    repo: d.repo ? `${label} · ${d.repo}` : undefined, ...(d.target ? { target: d.target, for: `trap:${d.target.profile}` } : {}), title: `[${label}] ${briefFirstLine(d.brief).slice(0, 200)}`,
     verb: view.unavailable ? 'unknown' : d.status?.verb ?? (d.state === 'queued' ? 'queued' : 'unknown'),
     note: view.unavailable ?? d.status?.note, verbAt: d.status?.at, updated: at, sort: Date.parse(at) || 0,
     brief: d.brief, attachments: [], messageAttachments: [], inbox: [], log: d.status ? [d.status] : [],

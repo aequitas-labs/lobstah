@@ -5,6 +5,7 @@ import {
   answerSummary,
   applyBeats,
   decisionCards,
+  decisionNeighbours,
   filteredDecisionCards,
   modalItem,
   openDecisionOrder,
@@ -135,13 +136,17 @@ async function loadClosedDecision(key: string): Promise<void> {
 }
 
 /** Previous (-1) or next (+1) in the modal's order. It never wraps and never sends anything. */
+/** Previous or next from the decision on screen, including a finished run card the snapshot no longer lists. */
 export function stepDecision(dir: -1 | 1): void {
-  const open = getState().decisionModal;
+  const state = getState();
+  const open = state.decisionModal;
   if (!open?.key) return;
   const order = modalOrder();
-  const i = order.findIndex((c) => c.key === open.key);
-  const next = order[i + dir];
-  if (i >= 0 && next) setState({ decisionModal: { key: next.key } });
+  const shown = order.find((c) => c.key === open.key) ?? state.runs?.[open.key]?.card;
+  if (!shown) return;
+  const near = decisionNeighbours(order, shown);
+  const next = dir < 0 ? near.prev : near.next;
+  if (next) setState({ decisionModal: { key: next.key } });
 }
 
 export const closeDecision = (): void => setState({ decisionModal: null });
@@ -208,18 +213,33 @@ export function receiveBeats(beats: GlassBeats): void {
   setState({ stale: false, ...(snapshot ? { snapshot: applyBeats(snapshot, beats) } : {}) });
 }
 
-/** Fetch the open dispatch modal's detail; a later modal or a newer answer wins. */
+/** The dispatch whose detail is being read: one read at a time, so a slow source never stacks them. */
+let detailInflight: string | null = null;
+
+/** What a failed detail read says; the next poll reads again. */
+function detailError(status: number): string {
+  if (status === 404) return 'this dispatch is gone';
+  if (status === 429) return 'Busy right now. Retrying…';
+  if (status === 504) return "The boat didn't answer yet. Retrying…";
+  return `the detail answered ${status}`;
+}
+
+/** Fetch the open dispatch modal's detail; a later modal or a newer answer wins. A read already in flight for it is not repeated. */
 export async function refreshDetail(): Promise<void> {
   const { modal } = getState();
   if (modal?.type !== 'dispatch') return;
   const key = modal.key;
+  if (detailInflight === key) return;
+  detailInflight = key;
   const id = key.slice(key.indexOf(':') + 1);
   let next: { data?: GlassDispatch; error?: string };
   try {
     const r = await backend().dispatch(id);
-    next = r.ok ? { data: r.data } : { error: r.status === 404 ? 'this dispatch is gone' : `the detail answered ${r.status}` };
+    next = r.ok ? { data: r.data } : { error: detailError(r.status) };
   } catch {
     next = { error: 'the detail could not be read' };
+  } finally {
+    if (detailInflight === key) detailInflight = null;
   }
   const now = getState();
   if (now.modal?.type !== 'dispatch' || now.modal.key !== key) return;

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { laneDirs, storedDescriptor, storageGrounds, listNotices, loadConfig, repoKey, readEvidence, readHelm, wakeFloorMs, readStatusLog, toonKV, toonTable, TERMINAL_VERBS, QUIET_NOTICE_KINDS } from '@lobstah/core';
+import { laneDirs, storedDescriptor, storageGrounds, listNotices, loadConfig, repoKey, readEvidence, readHelm, wakeFloorMs, readStatusLog, reviewDispatchIds, toonKV, toonTable, TERMINAL_VERBS, QUIET_NOTICE_KINDS } from '@lobstah/core';
 import type { Descriptor, Lane } from '@lobstah/core';
 import { buildTendReport, repoOf } from './tend.js';
 import type { TendReport } from './tend.js';
@@ -89,10 +89,13 @@ export function buildDigest(opts: DigestOptions = {}): Digest {
     (!opts.grounds || !grounds || storageGrounds(grounds, config) === storageGrounds(opts.grounds, config)) && (opts.repos === undefined || repo === undefined || opts.repos.has(repo));
 
   const landed: DigestLanding[] = [];
+  const reviewJobs = reviewDispatchIds();
   for (const lane of ['work', 'chore'] as Lane[]) {
     for (const id of doneIds(lane)) {
       const last = readStatusLog(id, lane).at(-1);
       if (!last || !TERMINAL_VERBS.includes(last.verb)) continue;
+      // A completed draft stays on the person's Reviews page.
+      if (lane === 'chore' && last.verb === 'done' && reviewJobs.has(id)) continue;
       const at = Date.parse(last.at) || 0;
       if (at <= sinceMs || at > now) continue;
       const repo = repoOf(id, lane);

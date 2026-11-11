@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence } from '@lobstah/core';
+import { appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence, observeReviewRequest, readReview, writeReview } from '@lobstah/core';
 import { advanceCursor, buildDigest, dueHelmDigest, lastReportedAt, renderDigest } from '../src/digest.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -26,6 +26,24 @@ function land(id: string, verb: 'done' | 'failed', note?: string): void {
 }
 
 describe('man report — the delta digest', () => {
+  it('keeps completed review drafts out of fleet landings while preserving the review record', () => {
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 8, url: 'https://github.com/acme/web/pull/8', title: 'Review the tray', author: 'a', headSha: 'abc' }, round: { id: 'round', requestedAt: new Date().toISOString() } }).item;
+    const id = 'review-draft-job';
+    item.rounds[0]!.dispatch = id;
+    item.rounds[0]!.state = 'drafted';
+    writeReview(item);
+    enqueue({ id, repo: 'r', brief: 'Draft the review', readOnly: true }, 'chore');
+    claimNext('chore');
+    appendStatus(id, 'chore', 'done', 'Review draft ready');
+    complete(id, 'chore');
+    const digest = buildDigest();
+    expect(digest.landed).toEqual([]);
+    expect(digest.changed).toBe(false);
+    expect(readReview(item.key)?.rounds[0]!.state).toBe('drafted');
+    land('ordinary-work', 'done', 'Feature ready');
+    expect(buildDigest().landed.map(landing => landing.id)).toEqual(['ordinary-work']);
+  });
+
   it('an empty fleet has nothing to say', () => {
     const d = buildDigest();
     expect(d.changed).toBe(false);

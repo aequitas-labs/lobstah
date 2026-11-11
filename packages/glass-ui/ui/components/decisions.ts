@@ -2,6 +2,7 @@ import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Attachment } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
+import { decisionNeighbours } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
 import {
   addFiles,
@@ -165,10 +166,10 @@ function source(c: DecisionCard) {
 }
 
 /**
- * A decision on the deck: the question, then its repo and age with Answer
- * (Run on a run card), highlighted while unread. A run card adds a line with
- * the boat it runs on; once it has run, its run's state takes Run's place.
- * Who asked and the dispatch are in the decision itself.
+ * A decision on the deck: one row, the whole of it a button that opens the
+ * decision. The question, then its repo and age, then "sent" once answered
+ * or a run card's run state once it has run; a run card names its boat.
+ * Highlighted while unread. Who asked and the dispatch are in the decision itself.
  */
 function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean, focused: boolean) {
   const state = stateOf(c, draft, viewedHere);
@@ -190,20 +191,17 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   const boat = run ? (run.boat ?? getState().snapshot?.viewer?.machine) : undefined;
   const runTone = runState === 'failed' ? 'bad' : runState === 'succeeded' ? 'ok' : 'dim';
   const meta = [c.repo, [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
+  const status = run?.latest
+    ? html`<span class=${'dsent ' + runTone}>${runLabel}</span>`
+    : state === 'answered' && html`<span class="dsent ok">sent</span>`;
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
     <button type="button" class="dopen" onClick=${open} aria-label=${`${STATE_WORD[state]}: ${c.kind === 'decision' ? c.title : c.note}`}>
       ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
       <b class="dtitle">${titleOf(c)}</b>
+      <span class="dmeta dim">${meta}</span>
+      ${boat && html`<span class="dboat dim">⛵ ${boat}</span>`}
+      ${status}
     </button>
-    <span class="dmeta dim">${meta}</span>
-    ${
-      run?.latest
-        ? html`<span class=${'dsent ' + runTone}>${runLabel}</span>`
-        : state === 'answered'
-          ? html`<span class="dsent ok">sent</span>`
-          : html`<button type="button" class="btn dgo" onClick=${open}>${run ? 'Run' : 'Answer'}</button>`
-    }
-    ${boat && html`<span class="dboat dim">⛵ ${boat}</span>`}
   </li>`;
 }
 
@@ -325,7 +323,8 @@ export function DecisionModal({
   // A run card stays on screen with its output after its run answers it and the snapshot drops it.
   const ran = key ? getState().runs?.[key] : undefined;
   const c = key ? (order.find((x) => x.key === key) ?? ran?.card) : undefined;
-  const i = c ? order.indexOf(c) : -1;
+  // Its place among the open decisions; a finished run card the snapshot dropped still has neighbours.
+  const near = c ? decisionNeighbours(order, c) : undefined;
   const shell = (label: string, body: unknown, shown = '') =>
     html`<div id="doverlay" class="open" onClick=${(e: Event) => e.target === e.currentTarget && closeDecision()}>
       <div class=${'modal dmodal' + (c?.kind === 'decision' && c.permission ? ' dpermission' : '')} role="dialog" aria-modal="true" aria-labelledby="dmodal-title" tabindex="-1" ref=${box} onKeyDown=${trap} onTouchStart=${swipeStart} onTouchEnd=${swipeEnd} data-decision=${shown}>
@@ -359,9 +358,9 @@ export function DecisionModal({
     c.kind === 'decision' ? c.title : c.note,
     html`<div class="dhead">
         <div class="dnav">
-          <button type="button" class="btn dprev" aria-label="previous decision" aria-keyshortcuts="ArrowLeft" disabled=${i <= 0} onClick=${() => stepDecision(-1)}>‹ prev</button>
-          <span class="dpos" aria-live="polite">${i + 1} of ${order.length}</span>
-          <button type="button" class="btn dnext" aria-label="next decision" aria-keyshortcuts="ArrowRight" disabled=${i >= order.length - 1} onClick=${() => stepDecision(1)}>next ›</button>
+          <button type="button" class="btn dprev" aria-label="previous decision" aria-keyshortcuts="ArrowLeft" disabled=${!near?.prev} onClick=${() => stepDecision(-1)}>‹ prev</button>
+          <span class="dpos" aria-live="polite">${near?.listed ? `${near.index + 1} of ${order.length}` : `${order.length} open`}</span>
+          <button type="button" class="btn dnext" aria-label="next decision" aria-keyshortcuts="ArrowRight" disabled=${!near?.next} onClick=${() => stepDecision(1)}>next ›</button>
         </div>
       </div>
       <div class="dbody">
