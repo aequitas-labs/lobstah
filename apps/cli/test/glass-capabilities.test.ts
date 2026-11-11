@@ -8,6 +8,7 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
 import { RUN_KEY, runCardFleet } from './fixtures/run-card.js';
 import { WHARF_CAPABILITIES } from '../../../packages/glass-ui/ui/backends/wharf.js';
 import { MIRROR_CAPABILITIES } from '../../../packages/glass-ui/ui/backends/mirror.js';
+import { GLASS_ACTIONS } from '../../../packages/glass-ui/ui/backend.js';
 import { mirrorWriteAllowed } from '@lobstah/core';
 
 /**
@@ -93,6 +94,7 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(narrow.$('[data-helm-chat]')?.textContent).toContain('full');
     expect(narrow.$('[data-helm-chat] button')).toBeNull();
     expect(narrow.$('[data-helm-chat] input')).toBeNull();
+    for (const g of [local, narrow]) expect(g.$$('.settings input, .settings button, .settings select')).toEqual([]);
   });
   it('shows a run card with no Run button where its source runs nothing, as the wharf does', async () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
@@ -104,11 +106,9 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(narrow.$('#doverlay .runscript')).not.toBeNull();
     expect(narrow.$('#doverlay .runbtn')).toBeNull();
   });
-  it('keeps review settings and helm chat local while leaving hosted review actions available', () => {
-    for (const action of ['review-settings', 'helm-chat'] as const) {
-      expect(MIRROR_CAPABILITIES.actions.has(action)).toBe(false);
-      expect(WHARF_CAPABILITIES.actions.has(action)).toBe(false);
-    }
+  it('offers review actions but no settings actions on any glass', () => {
+    expect([...GLASS_ACTIONS]).not.toContain('review-settings');
+    expect([...GLASS_ACTIONS]).not.toContain('helm-chat');
     expect(MIRROR_CAPABILITIES.actions.has('review-request')).toBe(true);
     for (const kind of ['review-mode', 'helm-chat']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
   });

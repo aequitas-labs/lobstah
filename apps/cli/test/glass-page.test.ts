@@ -63,11 +63,6 @@ async function openRow(g: GlassDom, tab: string, label: string) {
   await g.go(tab);
   await click(g, g.$$(`#${tab.slice(1)} tr.rowhead`).find((tr) => text(tr).includes(label)) ?? null);
 }
-async function settings(g: GlassDom, row: 'view' | 'lobs', choice: string) {
-  await click(g, g.$('#gearbtn'));
-  const rowEl = g.$$('#modalbox .settings .row').find((r) => text(r.querySelector('.lbl')).startsWith(row))!;
-  await click(g, [...rowEl.querySelectorAll('.seg button')].find((b) => text(b) === choice) ?? null);
-}
 const escape = async (g: GlassDom) => {
   g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
   await g.settle();
@@ -797,15 +792,17 @@ describe('glass page: modals', () => {
     expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
   });
 
-  it('⚙ opens settings; the view switch persists in this browser and applies everywhere', async () => {
-    const g = await page(acceptanceFleet(), { hash: '#dispatches' });
+  it('⚙ shows settings as text without changing browser preferences', async () => {
+    const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'cards', lobs: false } });
+    const before = g.window.localStorage.getItem('spyglass');
     await click(g, g.$('#gearbtn'));
     expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
     expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
-    await click(g, g.$$('#modalbox .seg button').find((b) => text(b) === 'cards')!);
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).view).toBe('cards');
+    const values = g.$$('#modalbox .settings .row').map(row => text(row.lastElementChild));
+    expect(values.slice(0, 3)).toEqual(['cards', 'off', 'full']);
+    expect(g.$$('#modalbox .settings button, #modalbox .settings input, #modalbox .settings select')).toEqual([]);
+    expect(g.window.localStorage.getItem('spyglass')).toBe(before);
     expect(g.$$('#dispatches .card')).toHaveLength(4);
-    expect(g.$$('#modalbox .seg button.on').map(text)).toEqual(['cards', 'on', 'full']);
   });
 });
 
@@ -1111,14 +1108,11 @@ describe('glass page: lobs', () => {
     expect(g.$$('#lobs .lob .bub').map(text).join(' ')).toContain('question item 0');
   });
 
-  it('the lobs switch turns them off', async () => {
-    const g = await page(acceptanceFleet(), { prefs: { lobs: false } });
-    expect(g.$$('#lobs .lob')).toHaveLength(0);
-    await settings(g, 'lobs', 'on');
-    expect(g.$$('#lobs .lob')).toHaveLength(2);
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).lobs).toBe(true);
-    await settings(g, 'lobs', 'off');
-    expect(g.$$('#lobs .lob')).toHaveLength(0);
+  it.each([true, false])('honors the stored lobs preference %s', async (lobs) => {
+    const g = await page(acceptanceFleet(), { prefs: { lobs } });
+    expect(g.$$('#lobs .lob')).toHaveLength(lobs ? 2 : 0);
+    await click(g, g.$('#gearbtn'));
+    expect(text(g.$$('#modalbox .settings .row')[1]?.lastElementChild ?? null)).toBe(lobs ? 'on' : 'off');
   });
 });
 

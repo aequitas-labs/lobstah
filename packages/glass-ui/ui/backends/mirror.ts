@@ -49,11 +49,11 @@ interface ListedBoat {
  * this browser on a boat, and not Run: a run card runs only from the glass
  * at localhost on the Mac itself, so the hosted glass shows it as the wharf
  * does, without Run (the relay takes no run request either). Review settings
- * and helm chat are visible values, changed only from local glass.
+ * and helm chat are visible values, with no editing controls.
  */
 export const MIRROR_CAPABILITIES: GlassCapabilities = {
   tabs: [...ALL_CAPABILITIES.tabs, 'boats'],
-  actions: new Set([...ALL_CAPABILITIES.actions].filter((a) => !['presence', 'focus', 'run', 'helm-chat', 'review-settings'].includes(a))),
+  actions: new Set([...ALL_CAPABILITIES.actions].filter((a) => !['presence', 'focus', 'run'].includes(a))),
   daemon: false,
 };
 

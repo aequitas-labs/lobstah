@@ -105,7 +105,7 @@ describe('the Reviews tab', () => {
     expect(g.$$('#reviews button').find((b) => b.textContent === 'Skip')?.getAttribute('title')).toContain('does not decline the review on GitHub');
   });
 
-  it('offers the setup command when disabled, and notify/on-demand/auto modes without TOML editing', async () => {
+  it('shows the setup command when disabled and review settings as text when enabled', async () => {
     const disabled = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviewSetup: { enabled: false, mode: 'notify', running: false } }, { now: NOW });
     open.push(disabled);
     await disabled.go('#reviews');
@@ -114,12 +114,10 @@ describe('the Reviews tab', () => {
     open.push(g);
     await g.go('#reviews');
     expect(g.$$('#reviews button').some((b) => b.textContent === 'Review (draft)')).toBe(false);
-    const select = g.$('#reviews select') as unknown as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(['notify', 'on-demand', 'auto-draft', 'auto-review']);
-    select.value = 'on-demand';
-    select.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
-    await g.settle();
-    expect(g.posts().some((p) => p.body === JSON.stringify({ kind: 'review-mode', payload: { mode: 'on-demand', publish: false } }))).toBe(true);
+    expect(g.$('#reviews .rv-controls')?.textContent).toContain('Review mode · default: Notify');
+    expect(g.$('#reviews .rv-controls')?.textContent).toContain('Publish: off');
+    expect(g.$$('#reviews .rv-controls input, #reviews .rv-controls select, #reviews .rv-controls button')).toEqual([]);
+    expect(g.posts().some(p => JSON.parse(p.body).kind === 'review-mode')).toBe(false);
   });
 
   it('a workflow request names the PR author and uses the configured review tool', () => {
@@ -151,12 +149,10 @@ describe('the Reviews tab', () => {
     expect(g.$('#reviews')?.textContent).toContain('Review mode · web');
     expect([...g.$$('#f-repo option')].map(o => o.textContent)).toContain('web');
     expect(g.$('#reviews')?.textContent).toContain('Review (publish)');
-    const toggle = g.$('#reviews input[aria-label="Publish reviews"]') as unknown as HTMLInputElement;
-    expect(toggle.checked).toBe(true);
-    toggle.checked = false;
-    toggle.dispatchEvent(new (g.window as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
-    await g.settle();
-    expect(g.posts().some(p => p.body === JSON.stringify({ kind: 'review-mode', payload: { mode: 'on-demand', publish: false, repo: 'web' } }))).toBe(true);
+    expect(g.$('#reviews .rv-controls')?.textContent).toContain('Review mode · web: On-demand');
+    expect(g.$('#reviews .rv-controls')?.textContent).toContain('Publish: on');
+    expect(g.$$('#reviews .rv-controls input, #reviews .rv-controls select, #reviews .rv-controls button')).toEqual([]);
+    expect(g.posts().some(p => JSON.parse(p.body).kind === 'review-mode')).toBe(false);
   });
   it('rows open the review tool as seen; explicit actions send guarded requests', async () => {
     const g = await loadGlass(GLASS_PAGE, fleet(), { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
@@ -220,24 +216,33 @@ describe('review requests on /requests', () => {
     for (const kind of ['review-post', 'review-edit']) expect((await send(base, token, kind, { key: 'review:acme/web#7' })).status).toBe(400);
   });
 
-  it('the mode switch writes config and the Draft action starts a requested round only on demand', async () => {
+  it('refuses review settings writes with a valid page token and preserves config', async () => {
+    const configFile = path.join(home, 'config.toml');
+    fs.writeFileSync(configFile, '[reviews]\nenabled = true\nmode = "notify"\n[repos.web]\npath = "/w"\n');
+    const before = fs.readFileSync(configFile, 'utf8');
+    const { base, token } = await start();
+    for (const payload of [{ mode: 'on-demand' }, { mode: 'auto-review', publish: true, repo: 'web' }]) {
+      const response = await send(base, token, 'review-mode', payload);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ ok: false, reason: 'Settings are read-only in glass.' });
+    }
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(before);
+    expect(loadConfig().reviews.mode).toBe('notify');
+  });
+
+  it('the Draft action follows the configured on-demand mode', async () => {
     process.env.LOBSTAH_TEST_REVIEW_TOKEN = 'fixture';
     try {
-      fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "notify"\nidentity = "chris"\ntokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"\n[repos.web]\npath = "/w"\n');
+      const configFile = path.join(home, 'config.toml');
+      const config = '[reviews]\nenabled = true\nmode = "notify"\nidentity = "chris"\ntokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"\n[repos.web]\npath = "/w"\n';
+      fs.writeFileSync(configFile, config);
       observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1', repoKey: 'web' }, round: { id: 'RRE_7', requestedAt: ago(60) } });
       const { base, token } = await start();
       expect((await send(base, token, 'review-draft', { key: 'review:acme/web#7' })).status).toBe(409);
-      expect((await send(base, token, 'review-mode', { mode: 'on-demand' })).status).toBe(200);
-      expect(loadConfig().reviews.mode).toBe('on-demand');
+      fs.writeFileSync(configFile, config.replace('mode = "notify"', 'mode = "on-demand"'));
       expect((await send(base, token, 'review-draft', { key: 'review:acme/web#7' })).status).toBe(200);
       expect(pendingIds('chore')).toHaveLength(1);
       expect(latestRound(readReview('review:acme/web#7')!)?.state).toBe('drafting');
-      expect((await send(base, token, 'review-mode', { mode: 'post' })).status).toBe(400);
-      expect((await send(base, token, 'review-mode', { mode: 'auto-review', repo: 'web', publish: true })).status).toBe(200);
-      expect(loadConfig().reviews.perRepo.web).toMatchObject({ mode: 'auto-review', publish: true });
-      expect(loadConfig().reviews.mode).toBe('on-demand');
-      expect((await send(base, token, 'review-mode', { mode: 'notify', repo: 'missing' })).status).toBe(400);
-      expect((await send(base, token, 'review-mode', { mode: 'notify', publish: 'yes' })).status).toBe(400);
     } finally { delete process.env.LOBSTAH_TEST_REVIEW_TOKEN; }
   });
 

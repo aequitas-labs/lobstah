@@ -121,7 +121,7 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
 ];
 /**
  * What the hosted glass may write on a mirror boat. Settings stay read-only
- * here: review-mode and helm-chat are local glass requests only. Focus is
+ * on every glass: review-mode and helm-chat are never relayed. Focus is
  * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [

@@ -81,16 +81,12 @@ export const GLASS_ACTIONS = [
   'focus',
   /** Ask the helm for a new trap. */
   'trap-request',
-  /** Switch the helm between brief and full chat. */
-  'helm-chat',
   /** Set or move a TODO's time. */
   'todo-schedule',
   /** Acknowledge PR and stack attention. */
   'pr-ack',
   /** Ask for, see or dismiss a review round. */
   'review-request',
-  /** Change review mode and publishing settings for the current repo scope. */
-  'review-settings',
   /** Attach files to a decision's answer. */
   'answer-files',
   /** Page in history older than the snapshot. */

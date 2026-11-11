@@ -28,8 +28,6 @@ import {
   executorPath,
   helmLabel,
   helmChat,
-  setHelmChat,
-  resolveGrounds,
   laneDirs,
   listHelms,
   listNotices,
@@ -100,7 +98,7 @@ import { answerPermissionsProposal, previewPermissionsProposal } from './permiss
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
-import { reviewSetupView, writeReviewMode } from './reviews-setup.js';
+import { reviewSetupView } from './reviews-setup.js';
 import { buildTendReport, landedCatches } from './tend.js';
 import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
@@ -157,7 +155,6 @@ export function requestBodyCap(): number {
 /** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
-  ['helm-chat', 1024],
   ['todo-schedule', 1024],
   ['decision-viewed', 1024],
   ['checklist-tick', 1024],
@@ -169,7 +166,6 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ...['review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
   ['review-redraft', 1024],
   ['review-draft', 1024],
-  ['review-mode', 1024],
   ['pr-ack', 256 * 1024],
 ]);
 
@@ -1046,22 +1042,10 @@ export function serveGlass(
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
-          case 'helm-chat': {
-            const { grounds, chat } = (body.payload ?? {}) as { grounds?: unknown; chat?: unknown };
-            if (typeof grounds !== 'string' || grounds.length > 200 || (chat !== 'full' && chat !== 'brief')) {
-              return reply(400, { ok: false, reason: 'Helm grounds and chat full or brief are required.' });
-            }
-            let name: string;
-            try { name = resolveGrounds(loadConfig(), grounds).name; }
-            catch { return reply(400, { ok: false, reason: 'Unknown helm grounds.' }); }
-            try {
-              const seat = setHelmChat(name, chat);
-              return reply(200, { ok: true, grounds: displayGrounds(seat.grounds, loadConfig()), chat });
-            } catch (err) {
-              if (err instanceof Error && err.message.startsWith('no helm signed on')) return reply(409, { ok: false, reason: 'No helm is signed on for these grounds.' });
-              return reply(500, { ok: false, reason: 'The helm chat setting could not be stored.' });
-            }
-          }
+          // Glass settings are read-only, including requests with a valid page token.
+          case 'helm-chat':
+          case 'review-mode':
+            return reply(403, { ok: false, reason: 'Settings are read-only in glass.' });
           case 'todo-schedule': {
             // Set or move a todo's time from its row. No helm gate, the same as answering a card.
             const { grounds, id, until } = (body.payload ?? {}) as { grounds?: unknown; id?: unknown; until?: unknown };
@@ -1140,17 +1124,6 @@ export function serveGlass(
             if (typeof id !== 'string' || !/^g-[a-f0-9]+$/.test(id)) return reply(400, { ok: false, reason: 'A grant id is required.' });
             try { revokeGrant(id, 'glass'); return reply(200, { ok: true }); }
             catch (err) { return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) }); }
-          }
-          case 'review-mode': {
-            const { mode, repo, publish } = (body.payload ?? {}) as { mode?: unknown; repo?: unknown; publish?: unknown };
-            if (typeof mode !== 'string') return reply(400, { ok: false, reason: 'A reviews mode is required.' });
-            if ((repo !== undefined && (typeof repo !== 'string' || !repo)) || (publish !== undefined && typeof publish !== 'boolean')) return reply(400, { ok: false, reason: 'A repo key and boolean publish setting are required.' });
-            try {
-              writeReviewMode(mode, undefined, { repo: repo as string | undefined, publish: publish as boolean | undefined });
-              return reply(200, { ok: true });
-            } catch (err) {
-              return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) });
-            }
           }
           case 'review-skip':
           case 'review-seen':

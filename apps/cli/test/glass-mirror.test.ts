@@ -143,6 +143,7 @@ describe('two mirror boats in one fleet', () => {
     const chat = h.doc.querySelector('[data-helm-chat]');
     expect(text(chat)).toContain('full');
     expect(chat?.querySelector('button, input, select')).toBeNull();
+    expect(h.doc.querySelector('.settings')?.querySelector('button, input, select, textarea')).toBeNull();
     expect(h.relayed.filter(c => c.write?.kind === 'review-mode' || c.write?.kind === 'helm-chat')).toEqual([]);
   });
 
