@@ -27,8 +27,9 @@ const hostedRun = (over: Partial<GlassRunCard> = {}) => glassRun('#!/bin/bash\ne
 
 type Sent = { kind: string; payload: Record<string, unknown> };
 
-async function page(run: GlassRunCard, opts: { phones?: number; answer?: (sent: Sent) => { status: number; body: unknown } } = {}) {
+async function page(run: GlassRunCard, opts: { phones?: number; answer?: (sent: Sent) => { status: number; body: unknown }; fleet?: (f: ReturnType<typeof runCardFleet>) => void } = {}) {
   const fleet = runCardFleet(run);
+  opts.fleet?.(fleet);
   fleet.runPasskeys = { count: 0, hosted: opts.phones ?? 1 };
   const sent: Sent[] = [];
   let prompts = 0;
@@ -59,7 +60,7 @@ async function page(run: GlassRunCard, opts: { phones?: number; answer?: (sent: 
     (g.$('#doverlay .runbtn') as HTMLButtonElement).click();
     for (let i = 0; i < 6; i++) await g.settle();
   };
-  return { g, sent, prompts: () => prompts, run: run_ };
+  return { g, sent, prompts: () => prompts, run: run_, fleet };
 }
 
 describe('Run on the hosted glass', () => {
@@ -114,6 +115,77 @@ describe('Run on the hosted glass', () => {
     expect(runs[1]!.payload).toMatchObject({ key: RUN_KEY, challenge: 'd2luZG93', window: 'w1' });
     expect(String(runs[1]!.payload.windowSignature)).toMatch(/^[A-Za-z0-9_-]{80,}$/);
     expect(runs[1]!.payload.credentialId).toBeUndefined();
+  });
+});
+
+describe('a finished run card', () => {
+  it('still goes to the previous and next decision, by button and by arrow key, after its run answered it', async () => {
+    const run = hostedRun();
+    const decision = (key: string, title: string, at: string) => ({
+      attention: { kind: 'decision' as const, key, stateHash: key, id: key, lane: 'work' as const, verb: 'decision', ageSecs: 60, at, standingSince: at, note: title },
+      decision: { key, title, detail: '', options: ['Yes', 'No'], attachments: [], askedBy: 'helm', askedAt: at, stateHash: key },
+    });
+    // One decision asked before the run card, one after.
+    const before = decision('decision:before', 'Asked before', new Date(NOW - 120_000).toISOString());
+    const after = decision('decision:after', 'Asked after', new Date(NOW - 30_000).toISOString());
+    const answer = (s: Sent) => {
+      if (s.kind === 'run-challenge') return { status: 200, body: { ok: true, challenge: 'cGFzc2tleQ', rpId: 'glass.test', credentialIds: [], sha256: run.scriptSha256 } };
+      if (s.kind === 'run') return { status: 202, body: { ok: true, running: true, key: RUN_KEY } };
+      if (s.kind === 'run-output') return { status: 200, body: { ok: true, id: 'a1', state: 'succeeded', text: 'hi\n', next: 3, result: { exitCode: 0, timedOut: false, durationMs: 5, outputBytes: 3, scrubbed: 0 } } };
+      return { status: 404, body: { ok: false } };
+    };
+    const h = await page(run, {
+      answer,
+      fleet: (f) => {
+        f.attention.push(before.attention, after.attention);
+        f.decisions.push(before.decision, after.decision);
+      },
+    });
+    await h.run();
+    expect(text(h.g.$('#doverlay .runstate'))).toContain('Succeeded');
+    // The run answered the card: the next snapshot no longer lists it, and the card stays on screen with its result.
+    h.fleet.attention = h.fleet.attention.filter((a) => a.key !== RUN_KEY);
+    h.fleet.decisions = h.fleet.decisions.filter((d) => d.key !== RUN_KEY);
+    h.g.serve(h.fleet);
+    await h.g.poll();
+    expect(text(h.g.$('#doverlay .runstate'))).toContain('Succeeded');
+    expect((h.g.$('#doverlay .dprev') as HTMLButtonElement).disabled).toBe(false);
+    expect((h.g.$('#doverlay .dnext') as HTMLButtonElement).disabled).toBe(false);
+    (h.g.$('#doverlay .dnext') as HTMLButtonElement).click();
+    await h.g.settle();
+    expect(h.g.$('#doverlay .dmodal')!.getAttribute('data-decision')).toBe('decision:after');
+    // The run card is no longer listed, so ← from the next decision goes to the one asked before it.
+    h.g.document.dispatchEvent(new h.g.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await h.g.settle();
+    expect(h.g.$('#doverlay .dmodal')!.getAttribute('data-decision')).toBe('decision:before');
+  });
+
+  it('goes back by arrow key too, from the finished card', async () => {
+    const run = hostedRun();
+    const at = new Date(NOW - 120_000).toISOString();
+    const answer = (s: Sent) => {
+      if (s.kind === 'run-challenge') return { status: 200, body: { ok: true, challenge: 'cGFzc2tleQ', rpId: 'glass.test', credentialIds: [], sha256: run.scriptSha256 } };
+      if (s.kind === 'run') return { status: 202, body: { ok: true, running: true, key: RUN_KEY } };
+      if (s.kind === 'run-output') return { status: 200, body: { ok: true, id: 'a1', state: 'failed', text: '', next: 0, result: { exitCode: 2, timedOut: false, durationMs: 5, outputBytes: 0, scrubbed: 0 } } };
+      return { status: 404, body: { ok: false } };
+    };
+    const h = await page(run, {
+      answer,
+      fleet: (f) => {
+        f.attention.push({ kind: 'decision', key: 'decision:before', stateHash: 'b', id: 'b', lane: 'work', verb: 'decision', ageSecs: 60, at, standingSince: at, note: 'Asked before' });
+        f.decisions.push({ key: 'decision:before', title: 'Asked before', detail: '', options: ['Yes'], attachments: [], askedBy: 'helm', askedAt: at, stateHash: 'b' });
+      },
+    });
+    await h.run();
+    h.fleet.attention = h.fleet.attention.filter((a) => a.key !== RUN_KEY);
+    h.fleet.decisions = h.fleet.decisions.filter((d) => d.key !== RUN_KEY);
+    h.g.serve(h.fleet);
+    await h.g.poll();
+    expect(text(h.g.$('#doverlay .runstate'))).toContain('Failed');
+    expect((h.g.$('#doverlay .dnext') as HTMLButtonElement).disabled).toBe(true);
+    h.g.document.dispatchEvent(new h.g.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await h.g.settle();
+    expect(h.g.$('#doverlay .dmodal')!.getAttribute('data-decision')).toBe('decision:before');
   });
 });
 

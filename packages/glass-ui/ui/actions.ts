@@ -5,6 +5,7 @@ import {
   answerSummary,
   applyBeats,
   decisionCards,
+  decisionNeighbours,
   filteredDecisionCards,
   modalItem,
   openDecisionOrder,
@@ -135,13 +136,17 @@ async function loadClosedDecision(key: string): Promise<void> {
 }
 
 /** Previous (-1) or next (+1) in the modal's order. It never wraps and never sends anything. */
+/** Previous or next from the decision on screen, including a finished run card the snapshot no longer lists. */
 export function stepDecision(dir: -1 | 1): void {
-  const open = getState().decisionModal;
+  const state = getState();
+  const open = state.decisionModal;
   if (!open?.key) return;
   const order = modalOrder();
-  const i = order.findIndex((c) => c.key === open.key);
-  const next = order[i + dir];
-  if (i >= 0 && next) setState({ decisionModal: { key: next.key } });
+  const shown = order.find((c) => c.key === open.key) ?? state.runs?.[open.key]?.card;
+  if (!shown) return;
+  const near = decisionNeighbours(order, shown);
+  const next = dir < 0 ? near.prev : near.next;
+  if (next) setState({ decisionModal: { key: next.key } });
 }
 
 export const closeDecision = (): void => setState({ decisionModal: null });
