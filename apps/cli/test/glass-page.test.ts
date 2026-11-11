@@ -859,7 +859,7 @@ describe('glass page: PRs', () => {
     for (const c of cards) {
       const p = d.prs.find((x) => '#' + x.number === cardNumber(c))!;
       expect(c.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
-      expect(text(c.querySelector('.gtop .gword'))).toBe(p.badge.text.toLowerCase());
+      expect(text(c.querySelector('.gcontext .gword'))).toBe(p.badge.text.toLowerCase());
       expect(text(c.querySelector('.gaction'))).toBe('↗ Open');
       // Two lines, nothing more: merge readiness, the watch and the gate are in the modal.
       expect(c.querySelectorAll(':scope > .gline')).toHaveLength(2);
@@ -1000,7 +1000,7 @@ describe('glass page: On deck', () => {
     // Two lines: the instruction and its status chip; the repo and trap, with the queue time at the right.
     const line = [...flight.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
     expect(text(line.querySelector('.gchip'))).toBe('queued');
-    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
+    expect(text(line.querySelector('.gtext'))).toBe('📁 api · 🪤 wt:t2');
     expect(text(line.querySelector('.gright'))).toBe('60s ago');
   });
 
@@ -1009,7 +1009,7 @@ describe('glass page: On deck', () => {
     d.dispatches = d.dispatches.map((x) => (x.id.startsWith('dddddddd') ? { ...x, verbAt: undefined } : x));
     const g = await page(d);
     const line = [...g.$$('#deck section')[1]!.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
+    expect(text(line.querySelector('.gtext'))).toBe('📁 api · 🪤 wt:t2');
     expect(line.querySelector('.gright')).toBeNull();
     expect(text(line)).not.toContain('ago');
   });

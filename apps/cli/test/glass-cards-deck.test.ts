@@ -40,7 +40,7 @@ describe('a dispatch card', () => {
     // The title is the brief's first line (the server's briefTitle).
     expect(text(card.querySelector('.gtitle'))).toBe(x.brief.split('\n')[0]!.trim());
     expect(text(card.querySelector('.gchip'))).toBe('needs decision');
-    expect(text(card.querySelector('.gcontext'))).toMatch(/^web · 🪤 hardy-kelp · \d+\w ago$/);
+    expect(text(card.querySelector('.gcontext'))).toMatch(/^📁 web · 🪤 hardy-kelp · \d+\w ago$/);
     // The id, note, worker, PR, waiting and activity lines are in the dispatch's modal.
     expect(card.querySelector('.gnow')).toBeNull();
     expect(card.querySelector('.gfoot')).toBeNull();

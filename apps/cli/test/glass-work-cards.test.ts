@@ -52,15 +52,16 @@ function review(n: number, over: Partial<GlassReview> = {}): GlassReview {
 }
 
 describe('a PR card', () => {
-  it('shows its title and status on line 1, its repo, number, checks and age on line 2 with ↗ Open, and no third line', async () => {
+  it('shows its title on line 1, then its status, repo, number, checks and age on line 2 with ↗ Open, and no third line', async () => {
     const d = acceptanceFleet();
     const p = d.prs.find((x) => x.number === 41)!;
     const g = await page(d, '#prs');
     const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#41'))!;
     expect(card.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
     expect(card.querySelector('.gtop .pricon')).toBeTruthy();
-    expect(text(card.querySelector('.gtop .gword'))).toBe(p.badge.text.toLowerCase());
-    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^web #41 · 4\/4 passed · \d+\w ago$/);
+    expect(card.querySelector('.gtop .gword')).toBeNull();
+    expect(text(card.querySelector('.gcontext .gword'))).toBe(p.badge.text.toLowerCase());
+    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^📁 web #41 · 4\/4 passed · \d+\w ago$/);
     expect(card.querySelectorAll(':scope > .gline')).toHaveLength(2);
     // The gate moved to the modal.
     expect(text(card)).not.toContain('gate');
@@ -101,7 +102,7 @@ describe('a review card', () => {
     const card = (n: number) => g.$(`#reviews [data-review="review:acme/web#${n}"]`)!;
     expect(card(7).className).toContain('gcard-edge gedge-bad');
     expect(text(card(7).querySelector('.gword'))).toBe('drafted');
-    expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web#7 · approval drafted · 60m ago');
+    expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('📁 acme/web#7 · approval drafted · 60m ago');
     const draft = card(7).querySelector('.gaction a')!;
     expect([text(draft), draft.getAttribute('href')]).toEqual(['Open draft', 'https://github.com/acme/web/pull/7#pullrequestreview-1']);
     expect(card(8).className).toContain('gcard-edge gedge-warn');

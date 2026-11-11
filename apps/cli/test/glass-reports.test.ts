@@ -88,7 +88,7 @@ describe('glass: the deck reports block', () => {
       // A card says no "acked": it is greyed instead.
       expect(metas).toEqual(
         view === 'cards'
-          ? ['60s ago', '5m ago', 'web · kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']
+          ? ['60s ago', '5m ago', '📁 web · 🪤 kind-crab · 20m ago', '📁 web · aaaaaaaa · 40m ago']
           : ['· 60s ago · acked', '· 5m ago', '· kind-crab · 20m ago', '· aaaaaaaa · 40m ago'],
       );
       expect(rows[0]!.className).toContain('acked');
@@ -276,7 +276,7 @@ describe('glass: the Reports tab', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
-    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual(['60s ago', '5m ago', 'web · kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']);
+    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual(['60s ago', '5m ago', '📁 web · 🪤 kind-crab · 20m ago', '📁 web · aaaaaaaa · 40m ago']);
     expect(cards.$$('#reports .card').map((c) => c.className.includes('quiet'))).toEqual([true, false, false, false]);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
@@ -346,19 +346,17 @@ describe('glass: cards keep their text inside', () => {
 });
 
 describe('glass: a PR card with a long badge', () => {
-  it('keeps the whole PR number on line 2; the title gives way first, then the status word truncates', async () => {
+  it('keeps the title alone on line 1, and truncates a long status word on line 2, never below 12ch', async () => {
     const d = everyAttentionFleet();
     const p = d.prs.find((x) => x.state === 'OPEN')!;
     p.number = 1826;
     p.badge = { ...p.badge, text: 'repairing: checks (attempt 1 of 2)' };
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
     const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#1826'))!;
-    const title = card.querySelector('.gtop > .gtitle')!;
-    const word = card.querySelector('.gtop .gword')!;
+    expect(card.querySelector('.gtop .gword')).toBeNull();
+    const word = card.querySelector('.gcontext .gword')!;
     expect(word.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
     const style = (el: Element) => g.window.getComputedStyle(el as never);
-    // The title shrinks first (1000000 to the word's 1); the long word then truncates, never below 12ch.
-    expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
     expect(word.className).toContain('long');
     expect(style(word).getPropertyValue('flex-shrink')).toBe('1');
     expect(style(word).getPropertyValue('min-width').replace(/\s/g, '')).toBe('min(12ch,100%)');

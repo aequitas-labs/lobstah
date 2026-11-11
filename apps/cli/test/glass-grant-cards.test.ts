@@ -34,7 +34,7 @@ it('shows what a grant allows and `active` on a green edge, then its scope and t
   expect(card.className).toContain('gcard-edge gedge-ok');
   expect(text(card.querySelector('.gtitle'))).toBe('Read-only diagnosis of staging');
   expect(text(card.querySelector('.gword'))).toBe('active');
-  expect(text(card.querySelector('.gcontext .gtext'))).toBe('Every trap in web · expires in 9 min');
+  expect(text(card.querySelector('.gcontext .gtext'))).toBe('Every trap in 📁 web · expires in 9 min');
   // Uses, harness, patterns and id wait behind a tap.
   for (const hidden of ['2 uses', 'Codex', 'npx wrangler tail', 'grant-standing-1']) expect(text(card)).not.toContain(hidden);
   // Revoke sends, and leaves the card closed.

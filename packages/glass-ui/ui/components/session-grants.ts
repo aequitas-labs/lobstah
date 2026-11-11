@@ -3,6 +3,7 @@ import type { Grant } from '@lobstah/core';
 import { html } from '../html.js';
 import { closeModal, reviewRequest } from '../actions.js';
 import { ExpandingCard } from './card.js';
+import { REPO_MARK, TRAP_MARK } from './common.js';
 
 export function activeSessionGrants(grants: Grant[], now = Date.now()): Grant[] {
   return grants.filter((g) => g.mode === 'session' && !g.revokedAt && !!g.expiresAt && Date.parse(g.expiresAt) > now);
@@ -31,8 +32,8 @@ export function grantExpiryText(expiresAt: string | undefined, now = Date.now())
 
 /** Who a grant covers, in words. */
 function grantScopeText(grant: Grant): string {
-  if (grant.trap) return `Trap ${grant.trap}`;
-  if (grant.mode === 'intent') return `Every trap in ${grant.repo}`;
+  if (grant.trap) return `${TRAP_MARK} ${grant.trap}`;
+  if (grant.mode === 'intent') return `Every trap in ${REPO_MARK} ${grant.repo}`;
   return 'Every trap';
 }
 

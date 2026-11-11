@@ -122,7 +122,7 @@ it("shows the trap name first, keeps repo context secondary, and retains the tab
   dom = await loadGlass(GLASS_PAGE, { ...emptyFleet(), traps: buildGlassSnapshot().traps }, { now: NOW, hash: '#traps', prefs: { view: 'cards' } });
   expect(dom.$('main .card .gtitle')?.textContent).toBe('amber-gull');
   expect(dom.$('main .card .gtitle')?.getAttribute('title')).toBe(address);
-  expect(dom.$('main .card .gcontext .gtext')?.textContent).toBe('web');
+  expect(dom.$('main .card .gcontext .gtext')?.textContent).toBe('📁 web');
   expect(dom.$('main .card .gtop')?.textContent).not.toContain('web');
   (dom.$('main .card') as unknown as HTMLElement).click();
   await dom.settle();

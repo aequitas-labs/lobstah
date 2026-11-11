@@ -19,6 +19,7 @@ import {
   stackNumbers,
   stackTitle,
   watchCell,
+  RepoName,
 } from './common.js';
 import type { OlderControl } from './common.js';
 import { LinkedText } from './links.js';
@@ -69,8 +70,8 @@ function prTable(inp: PrsInputs, older: unknown) {
 }
 
 /**
- * A PR card: its title, PR icon and status word on a colored edge (you act
- * on PRs); then repo #number, checks and age, with ↗ Open. Merge readiness,
+ * A PR card: its title and PR icon; then its status word on a colored edge
+ * (you act on PRs), repo #number, checks and age, with ↗ Open. Merge readiness,
  * the watch and the gate are in the PR's modal. `quiet` greys an acked one.
  */
 export function prCard(p: GlassPr, quiet = false) {
@@ -82,7 +83,8 @@ export function prCard(p: GlassPr, quiet = false) {
     titleAttr=${p.title || undefined}
     icon=${PrIcon}
     state=${{ word: p.badge.text.toLowerCase(), tone: p.badge.tone, mark: 'edge' }}
-    context=${[`${p.repo} #${p.number} · ${checks} · `, Age(at), ' ago']}
+    stateBelow
+    context=${[RepoName(p.repo), ` #${p.number} · ${checks} · `, Age(at), ' ago']}
     contextTitle=${`${p.repo} #${p.number} · ${checks}`}
     action=${html`<${CardLink} href=${reviewLink(p.url)} />`}
     quiet=${quiet}

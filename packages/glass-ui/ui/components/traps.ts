@@ -25,6 +25,7 @@ import {
   trapWorkText,
   windowAction,
   DesktopStartAction,
+  RepoName,
 } from './common.js';
 
 /** The Traps tab: live seats, reserved (starting) ones, and the history of signed-off ones. */
@@ -52,7 +53,7 @@ export function trapCard(t: GlassTrap) {
     titleAttr=${`wt:${t.trapId}`}
     icon=${t.harness && html`<${Harness} worker=${t} cls="" compact />`}
     state=${{ word: status.word, tone: status.tone, mark: 'chip' }}
-    context=${scope}
+    context=${t.repo && !t.configured ? RepoName(t.repo) : scope}
     contextTitle=${scope}
     action=${trapOpen(t)}
     now=${trapWork(t)}

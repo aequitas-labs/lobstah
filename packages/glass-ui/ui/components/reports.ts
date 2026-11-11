@@ -2,7 +2,7 @@ import type { GlassReport } from '@lobstah/core';
 import { reportFrom, reportPageUrl } from '../../src/glass-diff.js';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
-import { Age, Table, ageText } from './common.js';
+import { Age, RepoName, TRAP_MARK, Table, ageText } from './common.js';
 import { Card, CardLink } from './card.js';
 
 /**
@@ -29,12 +29,13 @@ export function reportMeta(r: GlassReport): { nodes: unknown[]; text: string } {
 
 /** A report card: no status word; greyed once read (its page acks it). */
 export function reportCard(r: GlassReport) {
-  const lead = [r.repo, reportFrom(r)].filter(Boolean).join(' · ');
+  const from = reportFrom(r);
+  const lead = [r.repo, from].filter(Boolean).join(' · ');
   return html`<${Card}
     key=${r.key}
     title=${r.title}
     titleAttr=${r.title}
-    context=${[lead && lead + ' · ', Age(r.filedAt), ' ago']}
+    context=${[r.repo && [RepoName(r.repo), ' · '], from && [r.trap ? `${TRAP_MARK} ${from}` : from, ' · '], Age(r.filedAt), ' ago']}
     contextTitle=${[lead, `${ageText(r.filedAt)} ago`].filter(Boolean).join(' · ')}
     action=${html`<${CardLink} href=${reportPageUrl(r.key)} />`}
     quiet=${!!r.acked}

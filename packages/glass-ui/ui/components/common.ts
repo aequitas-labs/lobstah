@@ -412,7 +412,15 @@ export function trapScope(trap: Pick<GlassTrap, 'repo' | 'configured'>): string 
   return trap.configured ? `trap:${trap.configured.profile} · ${trap.configured.grounds}` : (trap.repo ?? '');
 }
 
-/** A trap shown by name, its full `wt:<id>` in the title. A click opens the trap's modal. */
+/** The mark before a trap's name everywhere but the trap's own card, as the trap modal and deck show it. */
+export const TRAP_MARK = '🪤';
+/** The mark before a repo's name in every card. */
+export const REPO_MARK = '📁';
+
+/** A repo, as every card names it: 📁 and its name. */
+export const RepoName = (repo: string): Children => html`<span class="reponame">${REPO_MARK} ${repo}</span>`;
+
+/** A trap shown by name, its full `wt:<id>` in the title. A click opens the trap's modal. A card puts TRAP_MARK before it. */
 export function TrapName(trapId: string): Children {
   const address = 'wt:' + trapId;
   const name = knownTrapName(trapId) ?? address;
@@ -436,9 +444,11 @@ export function verbTone(verb: string): 'ok' | 'warn' | 'bad' | 'dim' {
   return 'dim';
 }
 
-/** A dispatch's context line: its repo, 🪤 the trap that has it, and how long ago it last moved. */
+/** A dispatch's context line: 📁 its repo, 🪤 the trap that has it, and how long ago it last moved. */
 export function dispatchContext(repo: string | undefined, trap: string | undefined, at?: string): Children {
-  const parts: Children[] = [repo, trap && ['🪤 ', WorkerAddress(trap)], at && [Age(at), ' ago']].filter(Boolean);
+  const parts: Children[] = [repo && RepoName(repo), trap && [`${TRAP_MARK} `, WorkerAddress(trap)], at && [Age(at), ' ago']].filter(
+    Boolean,
+  );
   return parts.flatMap((p, i) => (i ? [' · ', p] : [p]));
 }
 

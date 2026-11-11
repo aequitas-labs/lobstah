@@ -48,12 +48,12 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       (b) =>
         html`<span class=${b.unavailable ? 'chip warn' : 'chip dim'} title=${b.url ?? 'local files'}>${b.grounds} · ${b.wharf ?? 'local'}${b.unavailable ? ' · unknown' : ''}</span>`,
     ),
-    inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday} today</span>`,
+    inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday}</span>`,
     d.slots &&
       html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     d.heavy &&
       d.heavy.tickets.length > 0 &&
-      html`<span class="chip" title="The machine's line for heavy commands">heavy ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` · ${d.heavy.waiting} waiting` : ''}</span>`,
+      html`<span class="chip" title="The machine's line for heavy commands">⛰️ ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` · ${d.heavy.waiting} waiting` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
         html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds} · chat ${h.chat ?? 'full'}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span><${GrantChip} session=${h.sessionId} grants=${d.sessionGrants} /></span>`,
@@ -200,12 +200,12 @@ function HelmPill({ inp }: { inp: SectionInputs['chips'] }) {
 /** One line of the fleet's numbers: catches today, traps, slots in use, the heavy line. */
 function Strip({ d, inp }: { d: GlassSnapshot; inp: SectionInputs['chips'] }) {
   const parts = [
-    inp.stats && html`<span title="catches today">🦞 ${inp.stats.catchesToday} today</span>`,
+    inp.stats && html`<span title="catches today">🦞 ${inp.stats.catchesToday}</span>`,
     d.slots && html`<span title="traps">🪤 ${d.slots.traps} ${d.slots.traps === 1 ? 'trap' : 'traps'}</span>`,
     d.slots && html`<span title="headless slots in use">🎣 ${d.slots.headless} of ${d.slots.limit}</span>`,
     d.heavy &&
       d.heavy.tickets.length > 0 &&
-      html`<span title="The machine's line for heavy commands">heavy ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` +${d.heavy.waiting}` : ''}</span>`,
+      html`<span title="The machine's line for heavy commands">⛰️ ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` +${d.heavy.waiting}` : ''}</span>`,
   ].filter(Boolean);
   if (!parts.length) return null;
   return html`<div class="phone-strip">${parts.flatMap((p, i) => (i ? [html`<span class="dim" aria-hidden="true"> · </span>`, p] : [p]))}</div>`;
