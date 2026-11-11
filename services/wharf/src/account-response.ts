@@ -72,6 +72,13 @@ async function mirrorResponse(request: Request, env: Env, c: Command): Promise<R
   const result = object(JSON.parse(serialized));
   if (typeof result.status !== 'number') throw new ApiError(503, 'invalid state response');
   if (result.status !== 200) return Response.json(result.value, { status: result.status, headers: noStore });
+  // Another boat's lists: one the reader holds at the same ETag comes back unchanged, without its items.
+  if (c.path === 'mirror/attention' && c.method === 'GET') {
+    const known = new Map((new URL(request.url).searchParams.get('known') ?? '').split(',').filter(Boolean).map((pair) => pair.split(':') as [string, string]));
+    const boats = (object(result.value).boats as Array<{ boat: string; etag: string; attention?: unknown[] }>)
+      .map(({ attention, ...b }) => (known.get(b.boat) === b.etag ? { ...b, unchanged: true } : { ...b, attention }));
+    return Response.json({ boats }, { headers: noStore });
+  }
   if (c.path === 'mirror' && c.method === 'GET') {
     const known = new Map((new URL(request.url).searchParams.get('known') ?? '').split(',').filter(Boolean).map((pair) => pair.split(':') as [string, string]));
     const boats = (object(result.value).boats as MirrorListing[]);

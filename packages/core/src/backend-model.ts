@@ -97,6 +97,24 @@ export type WharfMirrorCall = WharfMirrorCallInput & {
   at: string; expiresAt: string; state: WharfMirrorCallState; by: string;
   answer?: { status: number; contentType: string; bytes: number; at: string };
 };
+/**
+ * One mirror boat's walking list, as another boat with the `attention`
+ * grant reads it: the items its pet walks, without ages. `unchanged` stands
+ * in for a list the reader already holds at this ETag.
+ */
+export interface WharfAttentionList {
+  boat: string; name: string;
+  /** When the boat put this list. */
+  at: string;
+  /** A digest of the list's JSON: unchanged while the boat's items are. */
+  etag: string;
+  attention?: unknown[];
+  unchanged?: true;
+}
+/** The largest attention list a boat may put, as JSON. */
+export const MIRROR_ATTENTION_MAX_BYTES = 256 * 1024;
+/** The most items one attention list may hold. */
+export const MIRROR_ATTENTION_MAX_ITEMS = 500;
 /** How long a relayed call waits for its boat. */
 export const MIRROR_CALL_MS = 600_000;
 /** The largest snapshot a boat may put, gzipped. */
