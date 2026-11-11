@@ -125,6 +125,7 @@ import {
   bounceTrapMessages,
   cancelQueued,
   unseenNotices,
+  noticeFilterForGrounds,
   dispatchProgress,
   trapWorkingStop,
   resumeTrapTurn,
@@ -2821,7 +2822,7 @@ async function mainCli(): Promise<void> {
                 return descriptor?.target ? descriptor.target.grounds === storageGrounds(groundsScope!.name, cfgWait) : repo === undefined || groundsRepos.has(repo);
               }
             : undefined;
-        const noticeFilter = groundsRepos !== undefined ? (n: Notice) => (!n.grounds || n.grounds === storageGrounds(groundsScope?.name ?? 'fleet', cfgWait)) && (n.repo === undefined || groundsRepos.has(n.repo)) : undefined;
+        const noticeFilter = groundsScope ? noticeFilterForGrounds(groundsScope.name, cfgWait) : undefined;
         // A helm's cursor starts at its sign-on: older notices and watch
         // events are consumed without waking. Standing questions and
         // standing conditions still wake (attentionNow, noticeWakes).
@@ -3126,7 +3127,7 @@ async function mainCli(): Promise<void> {
           // deserve one wake before the quiet sets in.
           const idleNotices = unseenNotices(
             true,
-            helm ? (n: Notice) => (!n.grounds || n.grounds === helm.grounds) && (n.repo === undefined || helm.repos.includes(n.repo)) : undefined,
+            helm ? noticeFilterForGrounds(helm.grounds, cfgHaul) : undefined,
             noticeWakes(helm),
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
@@ -3156,7 +3157,7 @@ async function mainCli(): Promise<void> {
                 return descriptor?.target ? descriptor.target.grounds === helm?.grounds : repo === undefined || helmRepos.has(repo);
               }
             : undefined;
-        const helmNoticeFilter = helmRepos !== undefined ? (n: Notice) => (!n.grounds || n.grounds === helm?.grounds) && (n.repo === undefined || helmRepos.has(n.repo)) : undefined;
+        const helmNoticeFilter = helm ? noticeFilterForGrounds(helm.grounds, cfgHaul) : undefined;
         const progressLines = () => dispatchProgress().filter((p) => !helmRepos || !p.repo || helmRepos.has(p.repo)).map((p) => `- ${p.text}`);
         // The helm's cursor starts at its sign-on (see `man wait`).
         const helmWakes = noticeWakes(helm);
