@@ -25,6 +25,8 @@ import { removeTempDir } from '../../../test/temp-dir.js';
  */
 
 const GLASS = 'https://glass.test';
+/** A run executes with /bin/bash, which CI's Windows runner lacks (as run-execute.test.ts); the checks before it run everywhere. */
+const RUNS_HERE = process.platform !== 'win32';
 
 let home: string;
 let server: Server | undefined;
@@ -124,7 +126,7 @@ describe('a Run from the hosted glass', () => {
     const res = await relayed('run', { key: card.key, ...phone.assert(asked.json.challenge as string, GLASS), inputs: {} });
     expect(res.status).toBe(202);
     await runs.settled();
-    expect((await relayed('run-output', { key: card.key })).json).toMatchObject({ ok: true, state: 'succeeded' });
+    if (RUNS_HERE) expect((await relayed('run-output', { key: card.key })).json).toMatchObject({ ok: true, state: 'succeeded' });
   });
 
   it("never takes the Mac's passkey through the relay, nor the phone's on the Mac", async () => {
@@ -233,12 +235,15 @@ describe('a secret input from the hosted glass', () => {
     const sealKey = (await call(`127.0.0.1:${port}`, '/data')).json.decisions as Array<{ key: string; run?: { sealKey?: string } }>;
     const boatKey = sealKey.find((d) => d.key === card.key)!.run!.sealKey!;
     expect(boatKey).toBe(runSealKey().publicKey);
-    expect(fs.statSync(path.join(home, 'run', 'seal-key.pem')).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX file modes to check.
+    if (process.platform !== 'win32') expect(fs.statSync(path.join(home, 'run', 'seal-key.pem')).mode & 0o777).toBe(0o600);
     expect((await run(card, { TOKEN: seal('hunter', boatKey) })).status).toBe(202);
     await runs.settled();
     const out = (await relayed('run-output', { key: card.key })).json;
-    expect(out).toMatchObject({ state: 'succeeded' });
-    expect(String(out.text)).toContain('length 6');
+    if (RUNS_HERE) {
+      expect(out).toMatchObject({ state: 'succeeded' });
+      expect(String(out.text)).toContain('length 6');
+    }
   });
 
   it('refuses a plain secret, swapped inputs, and a seal another key made', async () => {
