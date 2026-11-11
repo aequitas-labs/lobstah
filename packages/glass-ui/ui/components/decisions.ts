@@ -146,6 +146,19 @@ function source(c: DecisionCard) {
 
 function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean, focused: boolean) {
   const state = stateOf(c, draft, viewedHere);
+  const run = c.kind === 'decision' ? c.run : undefined;
+  const runState = run?.latest?.state;
+  const runLabel = run
+    ? runState === 'failed'
+      ? `Failed · exit ${run.latest?.result?.exitCode}`
+      : runState === 'succeeded'
+        ? 'Succeeded'
+        : runState === 'stopped'
+          ? 'Stopped'
+          : runState === 'running'
+            ? 'Running'
+            : 'Ready'
+    : undefined;
   const open = () => openDecision(c.key);
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
     <button type="button" class="dopen" onClick=${open} aria-label=${`${state}: ${c.kind === 'decision' ? c.title : c.note}`}>
@@ -154,7 +167,7 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
     </button>
     <span class="dmeta dim">${source(c)}</span>
     <span class="dage dim">${Age(c.at)} ago</span>
-    <span class=${'dstate ' + state}>${state === 'answered' ? `answered · ${draft!.sent}` : state}</span>
+    <span class=${'dstate ' + state}>${runLabel ?? (state === 'answered' ? `answered · ${draft!.sent}` : state)}</span>
   </li>`;
 }
 
@@ -283,13 +296,13 @@ export function DecisionModal({
                 c.detail.trim() &&
                 html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => fileUrl({ kind: 'decision', key: c.key }, name)} />`,
               c.kind === 'decision' && attachments(c.key, c.attachments),
-              c.kind === 'decision' && c.run && html`<${RunCardBody} cardKey=${c.key} run=${c.run} />`,
+              c.kind === 'decision' && c.run && html`<${RunCardBody} cardKey=${c.key} run=${c.run} readOnly=${c.readOnly} />`,
               c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
                 ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
                 : c.kind === 'decision' && c.readOnly
                   ? html`<div class="dim">Closed decision</div>`
-                  : ran && (ran.busy || ran.result)
-                    ? html`<div class="danswered ok">${ran.busy ? 'running · its result answers the card' : 'answered by its run'}</div>`
+                  : c.kind === 'decision' && c.run && (ran?.busy || ran?.result || c.run.latest)
+                    ? null
                     : draft?.sent
                       ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
                       : answerForm(c, draft, extensions.join(',')),

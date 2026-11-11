@@ -782,24 +782,89 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
       )
     ).body;
     if (!started.ok) return setRun(key, { busy: false, error: started.reason ?? 'The run did not start.' });
+    await followRunCard(key);
+  } catch (err) {
+    setRun(key, { busy: false, error: err instanceof Error ? err.message : 'The run did not start.' });
+  }
+}
+
+const runPollers = new Set<string>();
+
+/** Reconnect a card to its persisted attempt, including after a page reload. */
+export async function followRunCard(key: string): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token || runPollers.has(key)) return;
+  runPollers.add(key);
+  try {
     for (;;) {
-      await new Promise((r) => setTimeout(r, 700));
-      const after = getState().runs?.[key]?.next ?? 0;
+      const current = getState().runs?.[key];
       const page = (
         await backend().request<{
           ok: boolean;
           reason?: string;
+          warning?: string;
           text?: string;
           next?: number;
-          result?: import('./store.js').RunView['result'];
-        }>('run-output', { key, after }, token)
+          id?: string;
+          state?: import('@lobstah/core').RunState;
+          startedAt?: string;
+          finishedAt?: string;
+          result?: import('@lobstah/core').RunResult;
+        }>('run-output', { key, after: current?.next ?? 0, id: current?.id }, token)
       ).body;
-      if (!page.ok) return setRun(key, { busy: false, error: page.reason ?? 'The run’s output stopped.' });
-      setRun(key, { output: (getState().runs?.[key]?.output ?? '') + (page.text ?? ''), next: page.next ?? after });
-      if (page.result) return setRun(key, { busy: false, result: page.result });
+      if (!page.ok) return setRun(key, { busy: false, error: page.reason ?? 'The output could not be loaded. Reload the card.' });
+      const output = (current?.id && current.id !== page.id ? '' : (current?.output ?? '')) + (page.text ?? '');
+      setRun(key, {
+        id: page.id,
+        state: page.state,
+        startedAt: page.startedAt,
+        finishedAt: page.finishedAt,
+        busy: !page.result,
+        result: page.result,
+        error: page.warning,
+        output: page.result
+          ? output
+              .split('\n')
+              .slice(-201)
+              .join('\n')
+              .slice(-256 * 1024)
+          : output.slice(-256 * 1024),
+        next: page.next ?? 0,
+      });
+      if (page.result) return;
+      await new Promise((resolve) => setTimeout(resolve, 700));
     }
-  } catch (err) {
-    setRun(key, { busy: false, error: err instanceof Error ? err.message : 'The run did not start.' });
+  } catch {
+    setRun(key, { busy: false, error: 'The output could not be loaded. Reload the card.' });
+  } finally {
+    runPollers.delete(key);
+  }
+}
+
+/** Ask the local server to stop the card's complete process group. */
+export async function stopRunCard(key: string): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return;
+  try {
+    const response = (await backend().request<{ ok: boolean; reason?: string }>('run-stop', { key }, token)).body;
+    if (!response.ok) setRun(key, { error: response.reason ?? 'The command could not be stopped. Try again.' });
+  } catch {
+    setRun(key, { error: 'The command could not be stopped. Try again.' });
+  }
+}
+
+/** Archive a finished card and retain the old queue slot. */
+export async function dismissRunCard(key: string): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return;
+  try {
+    const response = (await backend().request<{ ok: boolean; reason?: string }>('run-dismiss', { key }, token)).body;
+    if (!response.ok) return setRun(key, { error: response.reason ?? 'The card could not be dismissed. Try again.' });
+    const previous = modalOrder();
+    setDraft(key, { sent: 'Dismissed' });
+    if (getState().decisionModal?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
+  } catch {
+    setRun(key, { error: 'The card could not be dismissed. Try again.' });
   }
 }
 
