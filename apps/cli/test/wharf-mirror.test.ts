@@ -181,12 +181,14 @@ describe('relayed calls', () => {
     const wharf = new FakeWharf();
     const glass = recordingGlass();
     wharf.queued = [
+      call('review-settings', { write: { kind: 'review-mode', payload: { mode: 'auto-review', publish: true } } }),
+      call('helm-chat', { write: { kind: 'helm-chat', payload: { grounds: 'fleet', chat: 'brief' } } }),
       call('focus', { write: { kind: 'focus', payload: { trapId: 'x' } } }),
       call('raw', { read: '/api/focus/x' }),
       call('climb', { read: '/data/dispatch/%2e%2e' }),
     ];
     await mirror(wharf, glass).pass();
-    for (const id of ['focus', 'raw', 'climb']) {
+    for (const id of ['review-settings', 'helm-chat', 'focus', 'raw', 'climb']) {
       expect(wharf.answers.get(id)?.status, id).toBe(403);
     }
     expect(glass.requests).toEqual([]);

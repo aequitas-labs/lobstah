@@ -1,3 +1,4 @@
+import { cancelledTrapTool, isTrapWaitCommand } from './trap-cancellation.js';
 import type { GrantIntent, IntentPattern } from '@lobstah/core';
 import {
   firstHeavyReminder,
@@ -520,6 +521,14 @@ export function permissionRequestHook(preToolUse = false, preHarness: 'claude' |
     const command = call.input.command ?? call.input.cmd;
     const report = !!trap && ['Bash', 'shell', 'exec_command'].includes(call.tool.split('.').at(-1)!)
       && typeof command === 'string' && isTrapReportCommand(command);
+    const waiting = !!trap && ['Bash', 'shell', 'exec_command'].includes(call.tool.split('.').at(-1)!) && typeof command === 'string' && isTrapWaitCommand(command);
+    const cancelled = report || waiting ? undefined : cancelledTrapTool(call.session);
+    if (cancelled) {
+      console.log(JSON.stringify({ hookSpecificOutput: preToolUse
+        ? { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: cancelled }
+        : { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: cancelled } } }));
+      return;
+    }
     // Auto mode's classifier decides before any PermissionRequest, so there a trap's card grants are honoured in PreToolUse.
     const autoMode = call.harness === 'claude' && h.permission_mode === 'auto';
     const ids = report ? undefined : checkCall(call, cwd, preToolUse && !autoMode);

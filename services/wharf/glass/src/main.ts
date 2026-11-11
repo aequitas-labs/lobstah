@@ -13,7 +13,7 @@ import { AuthScreen, authDestination, authEntry } from './auth-screen.js';
 import type { AuthState } from './auth-screen.js';
 import { Boats } from './boats.js';
 import { html } from './common.js';
-import { DeviceApproval } from './device.js';
+import { DeviceConsent } from './device.js';
 import { requestState } from './model.js';
 import { glassWake } from './wake.js';
 
@@ -21,11 +21,10 @@ import { glassWake } from './wake.js';
  * The hosted glass: GitHub sign-in around the shared glass, which runs on the
  * wharf backend with the local glass's own components. This file holds only
  * what is the host's: the sign-in screen, sign-out, the wake hint, the boats
- * page, the human requests waiting for the helm, boat approval on /device,
- * and the links boats hand out (`#job/<id>`, `#trap/<id>`) mapped onto the
+ * page, the human requests waiting for the helm, and the links boats hand out (`#job/<id>`, `#trap/<id>`) mapped onto the
  * shared glass's routes. An account with mirror boats runs on the mirror
  * backend: each boat's own glass, merged, with the wharf's own grounds beside
- * them.
+ * them. Boat approval on /device is its own consent page (device.ts).
  */
 
 /** The backend a session runs on: the wharf's, or its mirror boats' with the wharf's beside them. */
@@ -53,7 +52,9 @@ function translateLink(): { kind: 'dispatch' | 'trap'; id: string } | undefined 
 }
 
 function showAuth(state: AuthState): void {
-  render(html`<${AuthScreen} state=${state} authenticate=${authenticate} />`, document.body);
+  // Signing in on the way to approve a boat shows the sign-in card alone.
+  const device = authDestination(location).pathname === '/device';
+  render(html`<${AuthScreen} state=${state} authenticate=${authenticate} device=${device} />`, document.body);
 }
 
 let authBusy = false;
@@ -94,7 +95,7 @@ function notify(text: string, bad = false): void {
 async function action(path: string, body: unknown): Promise<boolean> {
   try {
     await json('/api/glass/' + path, body);
-    notify(path === 'requests' ? 'Queued for the helm; it expires in 10 minutes.' : 'Saved.');
+    notify(path === 'requests' ? 'Queued for the helm; it expires in 10 minutes.' : path.endsWith('/revoke') ? 'Boat revoked.' : 'Saved.');
     await session?.page.refresh();
     return true;
   } catch (e) {
@@ -130,7 +131,7 @@ async function deleteAccount(): Promise<void> {
 function HumanRequests({ backend }: { backend: HostedBackend }) {
   const requests = backend.account()?.requests ?? [];
   if (!requests.length) return null;
-  return html`<div class="sec">Human requests</div>${requests.map(
+  return html`<div class="sec">Your requests</div>${requests.map(
     (r) =>
       html`<div class="msg" key=${r.id}><b>${r.kind}</b> · ${r.dispatch ?? r.boat ?? r.document} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`,
   )}`;
@@ -157,12 +158,11 @@ function start(mirror = false): void {
   window.addEventListener('hashchange', follow);
   page = startGlassPage(backend, {
     chips: () => [
-      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">helm ${backend.account()?.helmLive ? 'live' : 'unknown / no live lease'}</span>`,
+      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">${backend.account()?.helmLive ? 'helm live' : 'no helm signed on'}</span>`,
       html`<button class="btn" onClick=${() => void signOut()}>Sign out</button>`,
     ],
     banner: () => [
       notice && html`<div class=${notice.bad ? 'bad' : 'ok'} role=${notice.bad ? 'alert' : 'status'}>${notice.text}</div>`,
-      location.pathname === '/device' && html`<${DeviceApproval} notify=${notify} />`,
     ],
     deck: () => html`<${HumanRequests} backend=${backend} />`,
     boats: () => html`<${Boats} boats=${backend.account()?.boats ?? []} action=${action} deleteAccount=${deleteAccount} />`,
@@ -188,13 +188,32 @@ function start(mirror = false): void {
   };
 }
 
-/** Sign-in first: a returning auth error shows its screen; otherwise the session decides. */
+/** The session the server saw when it served this page (glass-page.ts), if it could tell. */
+function sessionHint(): string | undefined {
+  return document.querySelector<HTMLMetaElement>('meta[name="lobstah-session"]')?.content;
+}
+
+/** Boat approval: its own page, for a signed-in person. */
+function showDevice(): void {
+  hadSession = true;
+  render(html`<${DeviceConsent} signedOut=${(status: 401 | 403) => end(status === 403 ? 'denied' : 'expired')} />`, document.body);
+}
+
+/**
+ * A returning auth error shows its screen. Otherwise the server's session
+ * hint decides: signed out goes straight to sign-in; signed in (or unknown)
+ * shows nothing until the session answers, then the glass or boat approval.
+ * The sign-in screen never flashes before the glass.
+ */
 async function boot(): Promise<void> {
   const entry = authEntry(location);
   if (entry) return showAuth(entry);
-  showAuth('checking');
+  const hint = sessionHint();
+  if (hint === 'out') return showAuth('signin');
+  if (hint === 'denied') return showAuth('denied');
   try {
     await json('/api/glass');
+    if (location.pathname === '/device') return showDevice();
     // Mirror boats show their own glass here; without any, the wharf's grounds show as they always have.
     // A wharf without mirror routes, or any odd answer, means no mirror boats.
     const mirrored = await json<{ boats?: unknown }>('/api/glass/mirror').catch(() => undefined);
