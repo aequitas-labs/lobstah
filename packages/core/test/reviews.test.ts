@@ -200,6 +200,9 @@ describe('drafts', () => {
     const meta = (verdict: string, blocking: unknown[]) => fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict, blocking }));
     meta('request_changes', [{ path: 'a.ts', line: 9, body: 'Race' }]);
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 9 }] });
+    // Sound code drafts approve as written, whatever the PR's checks say: nothing here reads them.
+    meta('approve', []);
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ verdict: 'approve', blocking: [] });
     meta('approve', [{ path: 'a.ts', line: 9, body: 'Race' }]);
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
     meta('request_changes', []);
@@ -222,6 +225,19 @@ describe('drafts', () => {
     expect(brief).toContain('lobstah report d1 done');
     expect(brief).toContain("Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md");
     expect(brief).toContain('Follow any review rules appended below this brief too.');
+  });
+
+  it('the brief judges the code alone: a red or stale merge gate never downgrades the verdict or reaches the review', () => {
+    observeReviewRequest(seen(), T0);
+    const item = readReview('review:acme/web#7')!;
+    const brief = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'd1', outDir: '/x', checkout: '/x/checkout' });
+    expect(brief).toContain('Judge the code alone.');
+    expect(brief).toContain('A merge gate, required check, submit or approval label, or CI status that is red, pending or older than the head');
+    expect(brief).toContain('it never changes the verdict, and the review never mentions it or asks anyone to rerun it.');
+    expect(brief).toContain('approve when the code is sound with no blockers');
+    expect(brief).not.toContain('ready to merge');
+    // A test this change breaks is still a finding, with its file and line.
+    expect(brief).toContain('A test that fails because of this change is a code finding: give its file and line.');
   });
 
   it('a stale or failed round re-drafts at the current head; others refuse', () => {
