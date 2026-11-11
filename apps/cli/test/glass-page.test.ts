@@ -885,7 +885,9 @@ describe('glass page: PRs', () => {
   it('cards: a new stack at the top keeps every existing stack heading and card node', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
     const cards = g.$$('#prs .card');
-    const heads = g.$$('#prs h2');
+    // Stack headings only: not Yours, nor the Other PRs summary, whose counts change.
+    const stackHeads = () => g.$$('#prs h2:not(.yourshead)').filter((h) => h.parentElement?.tagName !== 'SUMMARY');
+    const heads = stackHeads();
     const d = everyAttentionFleet();
     const id = 'pr:acme/web#99';
     d.stacks.unshift({ id, floor: 'main', repo: d.stacks[0]!.repo, numbers: [99], open: true, nextNumber: 99, behind: 0 });
@@ -895,7 +897,7 @@ describe('glass page: PRs', () => {
     const after = g.$$('#prs .card');
     expect(text(after[0]!.querySelector('.gtitle'))).toBe('fresh');
     expect(after.slice(1)).toEqual(cards);
-    expect(g.$$('#prs h2').slice(1)).toEqual(heads);
+    expect(stackHeads().slice(1)).toEqual(heads);
   });
 
   it('the PRs table groups by stack and never shows a watch cursor', async () => {
@@ -907,8 +909,8 @@ describe('glass page: PRs', () => {
     expect(rows[1]![5]).toBe('CLEAN · blocked by #41');
     expect(rows[1]![6]).toBe('watching · 60s ago');
     expect(text(g.$('#prs'))).not.toContain('a-long-opaque-cursor');
-    // Other (non-PR) watches list below, cursor shortened.
-    expect(g.$$('#prs h2').map(text)).toEqual(['other watches']);
+    // None of these PRs is the person's, so they sit under Other PRs; non-PR watches list below, cursor shortened.
+    expect(g.$$('#prs h2').map(text)).toEqual(['Yours · 0', 'Other PRs · 3', 'other watches']);
     expect(text(g.$$('#prs table')[1]!)).toContain('ci-nightly');
   });
 

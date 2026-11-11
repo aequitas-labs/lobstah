@@ -27,9 +27,11 @@ import { can } from '../backend.js';
 import { Card, CardLink, PrIcon } from './card.js';
 
 /**
- * The PRs tab: PRs grouped by stack, then the watches that are not PR
- * watches. Every stack group and PR row is keyed, so a poll patches rows in
- * place and never re-creates the list.
+ * The PRs tab: Yours first (the stacks holding a PR of the person's own,
+ * `GlassPr.mine`), then every other watched PR in a section that starts
+ * closed, then the watches that are not PR watches. Each group is by stack.
+ * Every stack group and PR row is keyed, so a poll patches rows in place and
+ * never re-creates the list.
  */
 
 export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: GlassStack; prs: GlassPr[] }> {
@@ -41,6 +43,21 @@ export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: Gla
   }
   return inp.stacks.map((s) => ({ s, prs: byStack.get(s.id) || [] })).filter((g) => g.prs.length);
 }
+
+/** The stack groups split in two: those holding one of the person's own PRs, and the rest. */
+export function splitMine(groups: Array<{ s: GlassStack; prs: GlassPr[] }>): { yours: typeof groups; others: typeof groups } {
+  const yours = groups.filter((g) => g.prs.some((p) => p.mine));
+  return { yours, others: groups.filter((g) => !yours.includes(g)) };
+}
+
+/** How many of the person's own open PRs need them: failed checks, a conflict, or a repair that stopped (a bad badge). */
+export function prsNeedingYou(prs: readonly GlassPr[]): number {
+  return prs.filter((p) => p.mine && p.state === 'OPEN' && p.badge.tone === 'bad').length;
+}
+
+/** The section after Yours: every other watched PR, closed until opened. */
+const othersSection = (count: number, body: unknown) =>
+  count > 0 && html`<details class="otherprs"><summary><h2>Other PRs · ${count}</h2></summary>${body}</details>`;
 
 const chainText = (s: GlassStack, prs: GlassPr[]) => stackNumbers(s.numbers, new Map(prs.map((p) => [p.number, p.title])));
 const stateText = (p: GlassPr): string =>
@@ -59,15 +76,28 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
 }
 
 function prTable(inp: PrsInputs, older: unknown) {
-  const rows = prGroups(inp).flatMap(({ s, prs }) => [
-    html`<tr key=${'stack:' + s.id}><th colspan="8">${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}</th></tr>`,
-    ...prs.map(
-      (p) =>
-        html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
-    ),
-  ]);
-  return [Table(['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'], rows, 'no PR evidence'), older, otherWatches(inp)];
+  const { yours, others } = splitMine(prGroups(inp));
+  const rowsOf = (groups: typeof yours) =>
+    groups.flatMap(({ s, prs }) => [
+      html`<tr key=${'stack:' + s.id}><th colspan="8">${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}</th></tr>`,
+      ...prs.map(
+        (p) =>
+          html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
+      ),
+    ]);
+  const cols = ['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'];
+  const otherCount = others.reduce((n, g) => n + g.prs.length, 0);
+  return [
+    html`<h2 class="yourshead">Yours · ${yours.reduce((n, g) => n + g.prs.filter((p) => p.mine).length, 0)}</h2>`,
+    Table(cols, rowsOf(yours), YOURS_EMPTY),
+    othersSection(otherCount, Table(cols, rowsOf(others), '')),
+    older,
+    otherWatches(inp),
+  ];
 }
+
+/** What Yours says when it is empty: how a PR gets there. */
+const YOURS_EMPTY = 'no PRs of yours are watched: a trap’s PR shows here, and `lobstah watch add <url>` adds one you opened';
 
 /**
  * A PR card: its title and PR icon; under them its status word on a colored
@@ -94,15 +124,21 @@ export function prCard(p: GlassPr, quiet = false) {
 }
 
 function prCards(inp: PrsInputs, older: unknown) {
-  const groups = prGroups(inp);
+  const { yours, others } = splitMine(prGroups(inp));
   const card = (p: GlassPr) => prCard(p);
-  const body = groups.length
-    ? groups.map(
-        ({ s, prs }) =>
-          html`<${Fragment} key=${'stack:' + s.id}><h2>${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} /></h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${prs.map(card)}</div><//>`,
-      )
-    : html`<div class="empty">no PR evidence</div>`;
-  return [body, older, otherWatches(inp)];
+  const stacksOf = (groups: typeof yours) =>
+    groups.map(
+      ({ s, prs }) =>
+        html`<${Fragment} key=${'stack:' + s.id}><h2>${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} /></h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${prs.map(card)}</div><//>`,
+    );
+  const otherCount = others.reduce((n, g) => n + g.prs.length, 0);
+  return [
+    html`<h2 class="yourshead">Yours · ${yours.reduce((n, g) => n + g.prs.filter((p) => p.mine).length, 0)}</h2>`,
+    yours.length ? stacksOf(yours) : html`<div class="empty">${YOURS_EMPTY}</div>`,
+    othersSection(otherCount, stacksOf(others)),
+    older,
+    otherWatches(inp),
+  ];
 }
 
 /**
