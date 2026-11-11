@@ -114,6 +114,9 @@ export interface DecisionMeta {
   stateHash: string;
 }
 
+/** Where a decision was answered: the local glass, a terminal, or a person's verified answer relayed by the wharf. */
+export type AnswerSource = 'glass' | 'cli' | 'wharf';
+
 export interface DecisionAnswer {
   key: string;
   /** The `decision-answer` request that carries it. */
@@ -124,8 +127,10 @@ export interface DecisionAnswer {
   /** The human's files, stored in the request's directory. */
   attachments: Attachment[];
   answeredAt: string;
-  /** Where it was answered. */
+  /** Where it was answered. `wharf` is a person's verified answer from the wharf, applied by this boat. */
   by: AnswerSource;
+  /** A wharf answer's receipt: the one id it applies under, once. */
+  receipt?: string;
 }
 
 /**
@@ -142,14 +147,9 @@ interface AnswerMarker {
   attachments?: Attachment[];
   answeredAt: string;
   by: AnswerSource;
+  receipt?: string;
 }
 
-/**
- * Where a decision was answered: this machine's glass, the hosted glass (a
- * mirror boat carries out what a person did there, so `wharf`), or the
- * command line (`man answer`).
- */
-export type AnswerSource = 'glass' | 'cli' | 'wharf';
 /** Whether a person answered in a glass, local or hosted: the only answers that may allow a permission card. */
 export function answeredInGlass(by: AnswerSource): boolean {
   return by === 'glass' || by === 'wharf';
@@ -290,6 +290,7 @@ export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
       attachments: marker.attachments,
       answeredAt: marker.answeredAt,
       by: marker.by,
+      ...(marker.receipt ? { receipt: marker.receipt } : {}),
     };
   }
   const p = readRequest(marker.request)?.payload as DecisionAnswerPayload | undefined;
@@ -570,6 +571,8 @@ export interface AnswerInput {
   /** Files the glass uploaded. */
   uploads?: DecisionUpload[];
   by: AnswerSource;
+  /** A wharf answer's receipt id. */
+  receipt?: string;
   /** Per-file limit (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -646,6 +649,7 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
     attachments: stored,
     answeredAt,
     by: input.by,
+    ...(input.receipt ? { receipt: input.receipt } : {}),
   };
   // The marker is the claim: of two answers racing, the first one written stands.
   try {
