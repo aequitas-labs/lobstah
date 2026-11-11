@@ -12,7 +12,7 @@ const browser = (path: string, body?: unknown, method = body === undefined ? 'GE
 const api = (path: string, body?: unknown) => SELF.fetch(`https://state.test/v1/accounts/${account}/${path}`, {
   method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${token}`, 'X-Lobstah-Helm': 'live', 'Idempotency-Key': `api-${++sequence}` }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
-const sql = (statement: string) => runInDurableObject(env.ACCOUNTS.getByName(account), (_instance: Account, state) => state.storage.sql.exec(statement).toArray());
+const sql = (statement: string, ...bindings: SqlStorageValue[]) => runInDurableObject(env.ACCOUNTS.getByName(account), (_instance: Account, state) => state.storage.sql.exec(statement, ...bindings).toArray());
 beforeAll(async () => {
   await authFixtures();
   const start = await SELF.fetch('https://glass.test/api/auth/sign-in/social', { method: 'POST', headers: { Origin: 'https://glass.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'github', callbackURL: 'https://glass.test/' }) });
@@ -38,10 +38,11 @@ beforeEach(async () => {
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
   });
   await env.AUTH_DB.exec('DELETE FROM rateLimit');
+  await env.AUTH_DB.batch(['slackLinkGround', 'slackConnectGround', 'slackLink', 'slackConnect', 'slackInstallation'].map((table) => env.AUTH_DB.prepare(`DELETE FROM ${table}`)));
 });
 async function job() {
   expect((await api('helm/take', { session: 'live' })).status).toBe(200);
-  expect((await api('dispatches', { id: 'job', brief: 'Work', repo: 'repo', repoRemote: 'github.com/test/repo' })).status).toBe(200);
+  expect((await api('dispatches', { id: 'job', grounds: 'away', brief: 'Work', repo: 'repo', repoRemote: 'github.com/test/repo' })).status).toBe(200);
 }
 it('serves the same bundled look on the glass host only, with nonce CSP and no credentials', async () => {
   const page = await SELF.fetch('https://glass.test/'); expect(page.status).toBe(200);
@@ -66,9 +67,11 @@ it('requires its cookie, not an API bearer, and derives the account rather than 
 });
 it('links this person’s own Slack once per connect, shows their standing cards there, and disconnects', async () => {
   await job();
-  expect(await (await browser('slack')).json()).toEqual({ configured: true });
+  expect(await (await browser('slack')).json()).toEqual({ configured: true, grounds: ['away'] });
   expect((await browser('slack/connect', {}, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
-  const start = new URL((await (await browser('slack/connect', {})).json<{ url: string }>()).url);
+  expect((await browser('slack/connect', {})).status).toBe(400);
+  expect((await browser('slack/connect', { grounds: ['private'] })).status).toBe(400);
+  const start = new URL((await (await browser('slack/connect', { grounds: ['away'] })).json<{ url: string }>()).url);
   expect(start.origin + start.pathname).toBe('https://slack.com/oauth/v2/authorize');
   expect(Object.fromEntries(start.searchParams)).toMatchObject({ client_id: 'stub-slack-client', scope: 'chat:write,im:write,im:history', redirect_uri: 'https://glass.test/api/slack/oauth' });
   const state = start.searchParams.get('state')!;
@@ -87,9 +90,10 @@ it('links this person’s own Slack once per connect, shows their standing cards
     return Response.json({ ok: true, ts: '9.000001' });
   });
   try {
-    const back = await SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}`, { redirect: 'manual', headers: { Cookie: cookie } });
+    const back = await SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}&grounds=private`, { redirect: 'manual', headers: { Cookie: cookie } });
     expect(back.status).toBe(302); expect(back.headers.get('Location')).toBe('https://glass.test/#boats');
     expect(await (await browser('slack')).json()).toMatchObject({ configured: true, link: { team: 'T9', slackUser: 'U9' } });
+    expect((await env.AUTH_DB.prepare('SELECT grounds FROM slackLinkGround WHERE person=?').bind(account).all()).results).toEqual([{ grounds: 'away' }]);
     // The token is sealed at rest, never stored as sent.
     const stored = await env.AUTH_DB.prepare('SELECT botToken FROM slackInstallation WHERE team=?').bind('T9').first<{ botToken: string }>();
     expect(stored!.botToken).toMatch(/^v1\./); expect(stored!.botToken).not.toContain('xoxb-installed');
@@ -100,9 +104,24 @@ it('links this person’s own Slack once per connect, shows their standing cards
     const again = await SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}`, { redirect: 'manual', headers: { Cookie: cookie } });
     expect(new URL(again.headers.get('Location')!).searchParams.get('slack_error')).toContain('expired or was already used');
     expect((await browser('slack/disconnect', {})).status).toBe(200);
-    expect(await (await browser('slack')).json()).toEqual({ configured: true });
+    expect(await (await browser('slack')).json()).toEqual({ configured: true, grounds: ['away'] });
     expect(await sql(`SELECT revoked_at IS NOT NULL AS revoked FROM slack_links WHERE person='${account}'`)).toEqual([{ revoked: 1 }]);
   } finally { outbound.mockRestore(); }
+});
+it('changes a signed-in Slack link’s grounds in both structured stores', async () => {
+  await job();
+  expect((await api('dispatches', { id: 'home-job', grounds: 'home', brief: 'Home work', repo: 'repo', repoRemote: 'github.com/test/repo' })).status).toBe(200);
+  const linkedAt = new Date().toISOString();
+  await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', account, 'D1', linkedAt).run();
+  await env.AUTH_DB.prepare('INSERT INTO slackLinkGround VALUES (?,?)').bind(account, 'away').run();
+  await env.ACCOUNTS.getByName(account).linkSlack(account, { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt, grounds: ['away'] });
+  expect((await browser('slack/grounds', { grounds: ['home'] }, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
+  expect((await browser('slack/grounds', { grounds: [] })).status).toBe(400);
+  expect((await browser('slack/grounds', { grounds: ['private'] })).status).toBe(400);
+  expect((await browser('slack/grounds', { grounds: ['home'] })).status).toBe(200);
+  expect((await env.AUTH_DB.prepare('SELECT grounds FROM slackLinkGround WHERE person=?').bind(account).all()).results).toEqual([{ grounds: 'home' }]);
+  expect(await sql('SELECT grounds FROM slack_link_grounds WHERE person=?', account)).toEqual([{ grounds: 'home' }]);
+  expect(await (await browser('slack')).json()).toMatchObject({ link: { grounds: ['home'] } });
 });
 it('reads cards with the glass cookie, by list or by id, and nothing else under cards', async () => {
   await job();

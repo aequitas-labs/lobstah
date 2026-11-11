@@ -6,6 +6,7 @@ import { glassPage } from './glass-page.js';
 import { glassInstall } from './glass-install.js';
 import { completeConnect, connectError, connectUrl, disconnect, personLink, slackConfigured } from './slack-install.js';
 import type { SlackEnv } from './slack-install.js';
+import { groundStatements, slackGrounds } from './slack-grounds.js';
 
 /** Browser-only routes. No account selector, credential issuance or helm seat. */
 export async function glassBrowser(request: Request, env: Env): Promise<Response> {
@@ -59,12 +60,25 @@ async function slackRoute(request: Request, env: SlackEnv, route: string, person
   const json = (value: unknown) => Response.json(value, { headers: { 'Cache-Control': 'no-store' } });
   if (route === 'slack' && request.method === 'GET') {
     const link = await personLink(env, person.id);
-    return json({ configured: slackConfigured(env), ...(link ? { link: { team: link.team, slackUser: link.slackUser, linkedAt: link.linkedAt } } : {}) });
+    return json({ configured: slackConfigured(env), grounds: await env.ACCOUNTS.getByName(person.id).slackGrounds(), ...(link ? { link: { team: link.team, slackUser: link.slackUser, linkedAt: link.linkedAt, grounds: link.grounds } } : {}) });
   }
-  requireThat(request.method === 'POST' && ['slack/connect', 'slack/disconnect'].includes(route), 404, 'browser action not available');
+  requireThat(request.method === 'POST' && ['slack/connect', 'slack/disconnect', 'slack/grounds'].includes(route), 404, 'browser action not available');
   const { glass } = authOrigins(env);
   requireThat(request.headers.get('Origin') === glass, 403, 'same-origin browser action required');
-  if (route === 'slack/connect') return json({ url: await connectUrl(env, glass, person.id, person.sessionId) });
+  if (route === 'slack/connect' || route === 'slack/grounds') {
+    let body: Record<string, unknown>;
+    try { body = object(JSON.parse(new TextDecoder().decode(await boundedBody(request)))); }
+    catch (error) { if (error instanceof ApiError) throw error; throw new ApiError(400, 'Choose the grounds to use with Slack'); }
+    const grounds = slackGrounds(body.grounds);
+    const available = await env.ACCOUNTS.getByName(person.id).slackGrounds();
+    requireThat(grounds.every((name) => available.includes(name)), 400, 'Choose grounds shown in the glass');
+    if (route === 'slack/connect') return json({ url: await connectUrl(env, glass, person.id, person.sessionId, grounds) });
+    const link = await personLink(env, person.id);
+    requireThat(link, 409, 'Connect Slack before choosing its grounds');
+    await env.AUTH_DB.batch(groundStatements(env, person.id, grounds));
+    await env.ACCOUNTS.getByName(person.id).linkSlack(person.id, { ...link, grounds });
+    return json({});
+  }
   await disconnect(env, person.id);
   await env.ACCOUNTS.getByName(person.id).linkSlack(person.id, null);
   return json({});

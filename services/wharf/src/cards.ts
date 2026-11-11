@@ -64,7 +64,7 @@ export function decisionCard(d: WharfDocument): ProjectedCard {
     ? { state: 'answered', at: d.answer.at, by: d.answer.by, outcome: d.answer.option ?? firstLine(d.answer.text ?? '', 300) }
     : d.withdrawn ? { state: 'withdrawn', at: d.at } : undefined;
   return {
-    family: 'decision', key: d.id, stateHash: `${d.at}:${d.answer?.at ?? ''}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.answer?.at ?? d.at,
+    family: 'decision', key: d.id, stateHash: `${d.at}:${d.answer?.at ?? ''}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.answer?.at ?? d.at, ...(d.grounds ? { grounds: d.grounds } : {}),
     title: firstLine(d.title, 300), item: { kind: 'decision', id: d.id },
     actions: terminal ? [] : [...(d.options ?? []).map((option): GlassCardAction => ({ kind: 'answer', option })), { kind: 'answer-text' }, ...seenAction(d.ack)],
     ...(d.ack ? { seen: d.ack } : {}), ...(terminal ? { terminal } : {}),
@@ -73,7 +73,7 @@ export function decisionCard(d: WharfDocument): ProjectedCard {
 /** A report stands until a person has seen it; it never asks for an answer. */
 export function reportCard(d: WharfDocument): ProjectedCard {
   return {
-    family: 'report', key: d.id, stateHash: `${d.at}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.at, title: firstLine(d.title, 300),
+    family: 'report', key: d.id, stateHash: `${d.at}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.at, ...(d.grounds ? { grounds: d.grounds } : {}), title: firstLine(d.title, 300),
     item: { kind: 'report', id: d.id }, actions: d.withdrawn ? [] : seenAction(d.ack),
     ...(d.ack ? { seen: d.ack } : {}), ...(d.withdrawn ? { terminal: { state: 'withdrawn', at: d.at } } : {}),
   };
@@ -84,7 +84,7 @@ export function reviewCard(d: WharfDocument): ProjectedCard {
   const r = d.review!;
   const ended = d.withdrawn ? 'withdrawn' : REVIEW_ENDED[r.state];
   return {
-    family: 'review', key: d.id, stateHash: `${r.round}:${r.state}:${r.headSha ?? ''}:${r.stands ? 'stands' : ''}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.at,
+    family: 'review', key: d.id, stateHash: `${r.round}:${r.state}:${r.headSha ?? ''}:${r.stands ? 'stands' : ''}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.at, ...(d.grounds ? { grounds: d.grounds } : {}),
     title: firstLine(d.title, 300), ...(r.reason ? { summary: r.reason } : {}), item: { kind: 'review', id: d.id },
     links: [...(r.open ? [{ label: 'Open review', url: r.open }] : []), { label: 'Open PR', url: r.pr }],
     actions: !ended && r.stands ? [{ kind: 'review-dismiss' }] : [],
@@ -100,7 +100,7 @@ export function dispatchCard(v: DispatchView): ProjectedCard {
   const waits = s?.waitingOn ? `waiting on ${s.waitingOn}${s.until ? ` until ${s.until}` : ''}` : undefined;
   const summary = [s?.note, waits, v.unservable?.note].filter(Boolean).join('\n');
   return {
-    family: 'dispatch', key: v.id, stateHash: `${v.state}:${s?.at ?? ''}:${s?.verb ?? ''}:${v.unservable ? 'unservable' : ''}`, sourceAt: s?.at ?? '',
+    family: 'dispatch', key: v.id, stateHash: `${v.state}:${s?.at ?? ''}:${s?.verb ?? ''}:${v.unservable ? 'unservable' : ''}`, sourceAt: s?.at ?? '', ...(v.grounds ? { grounds: v.grounds } : {}),
     title: firstLine(v.brief), ...(summary ? { summary } : {}), item: { kind: 'job', id: v.id },
     links: [...prLinks(s?.evidence?.prUrls), ...(s?.link ? [{ label: 'Open link', url: s.link }] : [])],
     actions: terminal ? [] : [{ kind: 'message-helm' }, { kind: 'cancel' }],
@@ -118,7 +118,7 @@ export function questionCard(v: DispatchView, framed: boolean): ProjectedCard | 
   if (v.state !== 'active' || !s || !['needs-decision', 'blocked'].includes(s.verb) || framed) return undefined;
   const seen = v.ack?.status === s.at ? { at: v.ack.at, by: v.ack.by } : undefined;
   return {
-    family: 'question', key: `${v.id}@${s.at}`, stateHash: `${s.at}:${s.verb}`, sourceAt: s.at,
+    family: 'question', key: `${v.id}@${s.at}`, stateHash: `${s.at}:${s.verb}`, sourceAt: s.at, ...(v.grounds ? { grounds: v.grounds } : {}),
     title: firstLine(v.brief), ...(s.note ? { summary: s.note } : {}), item: { kind: 'job', id: v.id },
     links: s.link ? [{ label: 'Open link', url: s.link }] : [], actions: [{ kind: 'message-helm' }, ...seenAction(seen)],
     ...(seen ? { seen } : {}),
@@ -130,7 +130,7 @@ export function landedCard(v: DispatchView): ProjectedCard | undefined {
   if (v.state === 'cancelled' || !s || !['done', 'failed'].includes(s.verb)) return undefined;
   const seen = v.ack?.status === s.at ? { at: v.ack.at, by: v.ack.by } : undefined;
   return {
-    family: 'landed', key: v.id, stateHash: `${s.at}:${s.verb}`, sourceAt: s.at, title: firstLine(v.brief),
+    family: 'landed', key: v.id, stateHash: `${s.at}:${s.verb}`, sourceAt: s.at, ...(v.grounds ? { grounds: v.grounds } : {}), title: firstLine(v.brief),
     summary: [s.verb, s.note].filter(Boolean).join(' · '), item: { kind: 'job', id: v.id },
     links: [...prLinks(s.evidence?.prUrls), ...(s.link ? [{ label: 'Open link', url: s.link }] : [])], actions: seenAction(seen),
     ...(seen ? { seen } : {}),
@@ -142,7 +142,7 @@ export function requestCard(r: WharfHumanRequest): ProjectedCard {
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   const waiting = r.state === 'queued' && r.waitingForHelm;
   return {
-    family: 'request', key: r.id, stateHash: `${r.state}:${r.outcome ?? ''}:${waiting ? 'waiting' : ''}`, sourceAt: r.at,
+    family: 'request', key: r.id, stateHash: `${r.state}:${r.outcome ?? ''}:${waiting ? 'waiting' : ''}`, sourceAt: r.at, ...(r.grounds ? { grounds: r.grounds } : {}),
     title: r.kind === 'message' ? 'Message to the helm' : r.kind === 'trap-request' ? 'Trap request' : 'Review dismissal',
     summary: [r.text ? firstLine(r.text, 300) : r.repo, waiting ? 'waiting for helm' : r.state, r.outcome].filter(Boolean).join(' · '),
     ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : {}), quiet: true,
@@ -165,7 +165,7 @@ export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
   const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   return {
-    family: 'request', key: r.id, sourceAt: r.at,
+    family: 'request', key: r.id, sourceAt: r.at, ...(r.grounds ? { grounds: r.grounds } : {}),
     stateHash: `${r.state}:${r.dispatch ?? ''}:${r.response ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}`,
     title: firstLine(r.text ?? '', 150) || 'Work request', summary: [stands, notes].filter(Boolean).join('\n'),
     ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : {}),
@@ -193,12 +193,13 @@ export function boatCard(b: Boat, now: number): ProjectedCard {
 }
 /** Every card the wharf's own records hold. Boats publish the rest. */
 export function wharfCards(records: CardRecords, now: number): ProjectedCard[] {
-  const documents = records.documents();
+  const dispatches = records.dispatches();
+  const documents = records.documents().map((document) => ({ ...document, grounds: document.grounds ?? dispatches.find((dispatch) => dispatch.id === document.dispatch)?.grounds }));
   const framed = new Set(documents.filter((d) => d.kind === 'decision' && !d.answer && !d.withdrawn && d.dispatch).map((d) => d.dispatch!));
   return [
     ...documents.map((d) => (d.kind === 'decision' ? decisionCard(d) : d.kind === 'report' ? reportCard(d) : reviewCard(d))),
-    ...records.dispatches().flatMap((v) => [dispatchCard(v), questionCard(v, framed.has(v.id)), landedCard(v)].filter((c): c is ProjectedCard => !!c)),
-    ...records.requests(now).map(requestCard),
+    ...dispatches.flatMap((v) => [dispatchCard(v), questionCard(v, framed.has(v.id)), landedCard(v)].filter((c): c is ProjectedCard => !!c)),
+    ...records.requests(now).map((request) => requestCard({ ...request, grounds: request.grounds ?? dispatches.find((dispatch) => dispatch.id === request.dispatch)?.grounds })),
     ...records.workers().map((w) => trapCard(w, now)),
     ...records.boats().map((b) => boatCard(b, now)),
   ];
@@ -267,7 +268,7 @@ export class CardStore {
     const terminal = !input.terminal ? undefined
       : before?.terminal?.state === input.terminal.state ? { ...input.terminal, at: before.terminal.at }
       : { ...input.terminal, at: input.terminal.at || new Date(now).toISOString() };
-    const restated = before && before.stateHash === input.stateHash;
+    const restated = before && before.stateHash === input.stateHash && before.grounds === input.grounds;
     // An answer relayed to the card's boat belongs to the state it answered: it stays while that state does.
     const relay = restated ? before.relay : undefined;
     const card: GlassCard = {
@@ -378,6 +379,14 @@ export class Cards {
     if (card?.relay && card.relay.state === 'awaiting boat' && card.stateHash.startsWith(r.stateHash)) {
       changed.push(this.store.setRelay(card, { ...card.relay, state: state === 'applied' ? 'applied' : state, at: new Date(now).toISOString(), ...(outcome ? { outcome } : {}) }));
     }
+  }
+  /** A removed grounds binding stops pending Slack answers before a boat can take them. */
+  restrictSlackAnswers(person: string, linked: (grounds: string | undefined) => boolean, now: number): void {
+    const changed: GlassCard[] = [];
+    for (const row of this.sql.exec<{ card: number; data: string }>("SELECT card,data FROM card_answers WHERE json_extract(data,'$.state')='pending' AND json_extract(data,'$.by')=?", person).toArray()) {
+      if (!linked(this.store.get(`c${row.card}`)?.grounds)) this.settleReceipt(JSON.parse(row.data) as CardAnswerReceipt, row.card, 'refused', 'Slack no longer serves these grounds', now, changed);
+    }
+    if (changed.length) this.hooks.changed(changed, now);
   }
   execute(c: Command, actor: Actor, now: number): { status: number; value: unknown } | undefined {
     const parts = c.path.split('/');

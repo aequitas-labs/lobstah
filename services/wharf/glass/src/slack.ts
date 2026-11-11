@@ -5,7 +5,8 @@ import { html, when } from './common.js';
 /** This person's Slack link as the wharf holds it. */
 export interface SlackStatus {
   configured: boolean;
-  link?: { team: string; slackUser: string; linkedAt: string };
+  grounds: string[];
+  link?: { team: string; slackUser: string; linkedAt: string; grounds: string[] };
 }
 
 /**
@@ -13,11 +14,15 @@ export interface SlackStatus {
  * their cards. A workspace install links nobody else. Disconnecting stops
  * what is sent and keeps every card.
  */
-export function SlackLinkSection() {
+export function SlackLinkSection(): ReturnType<typeof html> {
   const [status, setStatus] = useState<SlackStatus>(),
     [error, setError] = useState(() => new URLSearchParams(location.search).get('slack_error') ?? ''),
-    [busy, setBusy] = useState(false);
-  const load = () => json<SlackStatus>('/api/glass/slack').then(setStatus, (e: Error) => setError(e.message));
+    [busy, setBusy] = useState(false),
+    [selectedGrounds, setSelectedGrounds] = useState<string[]>([]);
+  const load = () => json<SlackStatus>('/api/glass/slack').then((next) => {
+    setStatus(next);
+    setSelectedGrounds(next.link?.grounds.length ? next.link.grounds : next.grounds.length === 1 ? next.grounds : []);
+  }, (e: Error) => setError(e.message));
   useEffect(() => {
     void load();
   }, []);
@@ -33,19 +38,22 @@ export function SlackLinkSection() {
       setBusy(false);
     }
   };
-  const connect = () => run(async () => location.assign((await json<{ url: string }>('/api/glass/slack/connect', {})).url));
+  const connect = () => run(async () => location.assign((await json<{ url: string }>('/api/glass/slack/connect', { grounds: selectedGrounds })).url));
+  const save = () => run(async () => { await json('/api/glass/slack/grounds', { grounds: selectedGrounds }); await load(); });
   const disconnect = () =>
     run(async () => {
       await json('/api/glass/slack/disconnect', {});
       await load();
     });
-  return html`<div class="sec">slack</div>${error && html`<div class="bad" role="alert">${error}</div>`}${
+  return html`<div class="sec">Slack</div>${error && html`<div class="bad" role="alert">${error}</div>`}${status?.configured && html`<fieldset disabled=${busy}><legend>Grounds for Slack</legend>${status.grounds.map((grounds) => html`<label key=${grounds}><input type="checkbox" checked=${selectedGrounds.includes(grounds)} onChange=${(event: Event) => {
+    setSelectedGrounds((event.currentTarget as HTMLInputElement).checked ? [...selectedGrounds, grounds] : selectedGrounds.filter((name) => name !== grounds));
+  }} />${grounds}</label>`)}${!status.grounds.length && html`<div class="dim">No grounds are available yet. Wait for a boat to publish its cards.</div>`}</fieldset>`}${
     !status
       ? html`<div class="dim">checking Slack</div>`
       : !status.configured
         ? html`<div class="dim">No Slack app is configured on this wharf</div>`
         : status.link
-          ? html`<div class="sub">Your cards go to your private chat with the lobstah app · linked ${when(status.link.linkedAt)}</div><button class="btn" disabled=${busy} onClick=${disconnect}>disconnect Slack</button>`
-          : html`<div class="sub">Get your cards in a private Slack chat with the lobstah app. Answers still happen here</div><button class="btn" disabled=${busy} onClick=${connect}>connect Slack…</button>`
+          ? html`<div class="sub">Slack serves ${status.link.grounds.join(', ') || 'no grounds'} · linked ${when(status.link.linkedAt)}</div><button class="btn" disabled=${busy || !selectedGrounds.length} onClick=${save}>Save grounds</button><button class="btn" disabled=${busy} onClick=${disconnect}>Disconnect Slack</button>`
+          : html`<div class="sub">Choose which grounds to use from your private chat with the lobstah app</div><button class="btn" disabled=${busy || !selectedGrounds.length} onClick=${connect}>Connect Slack</button>`
   }`;
 }

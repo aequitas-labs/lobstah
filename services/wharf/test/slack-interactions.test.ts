@@ -51,14 +51,14 @@ beforeEach(async () => {
   const linkedAt = '2026-10-30T00:00:00.000Z';
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 async function decision(id: string) {
   const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: `boat-${id}`, permissions: ['work', 'helm'] }, key: `issue-${++sequence}` })));
   const b = result.value as { token: string };
   expect((await call('helm/take', { session: 'seat' }, b.token, 'seat')).status).toBe(200);
-  expect((await call('documents', { id, kind: 'decision', title: 'Keep the PR cache across restarts?', options: ['Keep the cache', 'Drop the cache'] }, b.token, 'seat')).status).toBe(200);
+  expect((await call('documents', { id, kind: 'decision', grounds: 'away', title: 'Keep the PR cache across restarts?', options: ['Keep the cache', 'Drop the cache'] }, b.token, 'seat')).status).toBe(200);
   expect((await call(`documents/${id}/publish`, {}, b.token, 'seat')).status).toBe(200);
   await deliver();
   return b;
@@ -117,8 +117,8 @@ it('a worker’s question takes a message for the helm from its form, through th
   const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: 'qboat', permissions: ['work', 'helm'] }, key: `issue-${++sequence}` })));
   const b = result.value as { token: string };
   await call('helm/take', { session: 'seat' }, b.token, 'seat');
-  await call('dispatches', { id: 'job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Fix the checkout' }, b.token, 'seat');
-  await call('workers/sign-on', { worker: 'worker', repo: 'repo', repoRemote: 'github.com/test/repo' }, b.token);
+  await call('dispatches', { id: 'job', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Fix the checkout' }, b.token, 'seat');
+  await call('workers/sign-on', { worker: 'worker', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo' }, b.token);
   const claim = await (await call('claims', { worker: 'worker' }, b.token)).json<{ token: string }>();
   await call('dispatches/job/report', { verb: 'needs-decision', note: 'Which branch?' }, claim.token);
   await deliver();

@@ -4,6 +4,7 @@ import { LEASE_MS, identifier, object, repoIdentity, requireThat, text, tmuxPane
 import { cardSchema, cardTables } from './cards.js';
 import { slackSchema, slackTables } from './slack-outbox.js';
 import type { Actor, Command } from './account.js';
+import { slackRoutingSchema } from './slack-routing.js';
 import type { SlackMessageIn } from './slack-ingress.js';
 
 /** A person's request for work waits this long for the helm: a sleeping boat can still take it. */
@@ -15,9 +16,10 @@ export const glassSchema = `
   CREATE TABLE IF NOT EXISTS worker_details (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS dispatch_acks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   ${cardSchema}
+  ${slackRoutingSchema}
   ${slackSchema}
 `;
-export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', ...cardTables, ...slackTables];
+export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', 'slack_ground_requests', ...cardTables, ...slackTables];
 type Result = { status: number; value: unknown };
 type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
@@ -87,14 +89,14 @@ export class GlassState {
    * reply under anything else (a card's message) is not a request and does
    * nothing. The helm is woken; nothing runs until it acts.
    */
-  slackMessage(m: SlackMessageIn, person: string, now: number): { request?: string; ignored?: string } {
+  slackMessage(m: SlackMessageIn, person: string, now: number, grounds: string): { request?: string; ignored?: string } {
     const top = m.threadTs ?? m.ts;
     const id = `slack-${m.channel}-${top.replace('.', '-')}`;
     const r = this.get<WharfHumanRequest>('human_requests', id);
     const at = new Date(now).toISOString();
     if (!m.threadTs) {
       if (r) return { request: id };
-      const request: WharfHumanRequest = { id, kind: 'work', by: person, at, expiresAt: new Date(now + WORK_REQUEST_MS).toISOString(), state: 'queued',
+      const request: WharfHumanRequest = { id, kind: 'work', grounds, by: person, at, expiresAt: new Date(now + WORK_REQUEST_MS).toISOString(), state: 'queued',
         text: m.text, origin: { team: m.team, user: m.user, channel: m.channel, ts: m.ts } };
       this.put('human_requests', id, request); this.hooks.event('human-request', undefined, id);
       return { request: id };
@@ -110,9 +112,10 @@ export class GlassState {
     return this.get<WharfHumanRequest>('human_requests', id)?.origin;
   }
   /** The helm dispatched a work request: it is fulfilled by that dispatch, once. */
-  fulfillWork(id: string, dispatch: string, now: number) {
+  fulfillWork(id: string, dispatch: string, now: number, grounds: string | undefined) {
     const r = this.get<WharfHumanRequest>('human_requests', identifier(id));
     requireThat(r && r.kind === 'work' && ['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'no open work request to dispatch');
+    requireThat(r.grounds && r.grounds === grounds, 400, 'Dispatch the request on its selected grounds');
     r.state = 'fulfilled'; r.dispatch = dispatch; r.outcome = `dispatched as ${dispatch}`;
     this.put('human_requests', r.id, r);
   }
@@ -225,8 +228,16 @@ export class GlassState {
         requireThat(Array.isArray(options) && options.length <= 6 && options.every((o) => typeof o === 'string' && o.trim() === o && o.length > 0 && o.length <= 80) && new Set(options).size === options.length, 400, 'invalid decision options');
         requireThat(b.kind === 'decision' || options.length === 0, 400, 'reports have no options');
         const d: WharfDocument = { id, title, kind: b.kind as WharfDocumentInput['kind'], options, attachments: [], published: false, at: new Date(now).toISOString(), author: `${actor.kind}:${actor.id}` };
+        if (b.grounds !== undefined) d.grounds = identifier(b.grounds);
         if (d.kind === 'review') d.review = this.reviewMeta(b.review);
-        if (b.dispatch !== undefined) { d.dispatch = identifier(b.dispatch); requireThat(this.sql.exec('SELECT id FROM dispatches WHERE id=?', d.dispatch).toArray().length, 404, 'dispatch not found'); }
+        if (b.dispatch !== undefined) {
+          d.dispatch = identifier(b.dispatch);
+          const dispatch = this.sql.exec<{ data: string }>('SELECT data FROM dispatches WHERE id=?', d.dispatch).toArray()[0];
+          requireThat(dispatch, 404, 'dispatch not found');
+          const grounds = (JSON.parse(dispatch.data) as { grounds?: string }).grounds;
+          requireThat(!grounds || !d.grounds || d.grounds === grounds, 400, 'The document must use its dispatch’s grounds');
+          if (grounds) d.grounds = grounds;
+        }
         this.put('documents', id, d); return ok(d);
       }
       const d = this.document(parts[1]!);

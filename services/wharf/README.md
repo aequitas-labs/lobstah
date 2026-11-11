@@ -73,6 +73,11 @@ its client ID in `SLACK_CLIENT_ID` and its client secret in
 list; the install stores the workspace's bot token sealed under `AUTH_SECRET`,
 and links no one but the person who connected.
 
+Choose the grounds the link serves before connecting. The picker selects the
+only available grounds; with several, choose explicitly. Cards, PR watches,
+requests and answers use only that binding. Change it with **Save grounds**
+on the boat list. Existing unbound links send nothing until grounds are chosen.
+
 For asking for work from Slack, also set Event Subscriptions' Request URL to
 `https://api.lobstah.dev/slack/events` with the bot event `message.im`, set
 Interactivity's Request URL to `https://api.lobstah.dev/slack/interactions`,
@@ -80,6 +85,9 @@ and put the app's signing secret in `SLACK_SIGNING_SECRET`. Each call is
 checked against that secret before anything is read. A linked person's
 top-level message in their DM with the app becomes a work request for the
 helm, with a receipt in its thread; replies in that thread add to it.
+If the link serves several grounds, the app first asks which one in that
+message's thread. Reply with a listed grounds name; no work is queued until
+that choice is made.
 
 Work in `services/wharf`. R2 must be enabled on the account in the dashboard
 first. Secrets go in on standard input, never as arguments:

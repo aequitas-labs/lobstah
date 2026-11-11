@@ -10,6 +10,7 @@ import { SlackOutbox } from './slack-outbox.js';
 import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
+import { routeSlackMessage } from './slack-routing.js';
 import { MIRROR_WATCH_MS, MirrorState, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
@@ -103,26 +104,41 @@ export class Account extends DurableObject<Env> {
   }
   /** Private binding only: deliver what is due now, and wait for it. */
   async deliverSlack(): Promise<void> { await this.outbox.drain(); }
+  /** Grounds observed from explicit card and dispatch ownership, offered by the signed-in link picker. */
+  async slackGrounds(): Promise<string[]> {
+    const names = new Set(this.cards.store.list(Date.now()).flatMap((card) => card.grounds ? [card.grounds] : []));
+    for (const row of this.ctx.storage.sql.exec<{ grounds: string | null }>("SELECT DISTINCT json_extract(data,'$.grounds') AS grounds FROM dispatches").toArray()) if (row.grounds) names.add(row.grounds);
+    return [...names].sort();
+  }
   /** Private binding only: a person's Slack link as D1 now holds it, or none. Changes no card. */
   async linkSlack(person: string, link: SlackLink | null): Promise<void> {
     const now = Date.now();
-    this.ctx.storage.transactionSync(() => this.outbox.link(person, link, this.cards.store.list(now).filter((c) => !c.terminal), now));
+    this.ctx.storage.transactionSync(() => {
+      this.outbox.link(person, link, this.cards.store.list(now).filter((c) => !c.terminal), now);
+      this.cards.restrictSlackAnswers(person, (grounds) => this.outbox.serves(person, grounds), now);
+    });
     if (this.outbox.due(now)) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
   }
   /**
    * Private binding only: a verified DM message from this account's linked
    * person. It is recorded, and its receipt queued, before Slack hears back.
    */
-  async slackMessage(person: string, message: SlackMessageIn): Promise<{ request?: string; ignored?: string }> {
+  async slackMessage(person: string, message: SlackMessageIn): Promise<{ request?: string; ignored?: string; question?: { threadTs: string; grounds: string[] } }> {
     const result = this.ctx.storage.transactionSync(() => {
       requireThat(!this.get('deleted'), 410, 'account deleted');
       const now = Date.now(); this.expire(now); this.capacity();
-      const recorded = this.glass.slackMessage(message, person, now);
+      const route = routeSlackMessage(this.ctx.storage.sql, person, message, this.outbox.grounds(person), now);
+      if (!('message' in route)) return route;
+      const recorded = this.glass.slackMessage(route.message, person, now, route.grounds);
       this.cards.project(now);
       return recorded;
     });
     if (this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
     return result;
+  }
+  /** The routing question was posted; a replay need not post another one. */
+  async slackGroundsPrompted(person: string, channel: string, threadTs: string): Promise<void> {
+    this.ctx.storage.sql.exec('UPDATE slack_ground_requests SET prompted=1 WHERE person=? AND channel=? AND ts=?', person, channel, threadTs);
   }
   /**
    * Private binding only: the linked person pressed a button on a card's
@@ -485,7 +501,7 @@ export class Account extends DurableObject<Env> {
       requireThat(!this.ctx.storage.sql.exec('SELECT id FROM dispatches WHERE id=?', d.id).toArray().length, 409, 'dispatch already exists');
       if (d.followUp) this.dispatch(d.followUp);
       // A dispatch that answers a person's work request fulfills it in the same transaction.
-      if (d.request) this.glass.fulfillWork(d.request, d.id, now);
+      if (d.request) this.glass.fulfillWork(d.request, d.id, now, d.grounds);
       if (d.target?.parentDispatch) {
         const parent = this.dispatch(d.target.parentDispatch), origin = JSON.parse(parent.data) as DispatchInput;
         requireThat(['queued', 'active'].includes(parent.state), 409, 'assistance parent has ended');

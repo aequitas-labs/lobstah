@@ -43,7 +43,7 @@ export interface WharfReviewMeta {
   open?: string;
 }
 export interface WharfDocumentInput {
-  id: string; kind: 'decision' | 'report' | 'review'; title: string; options?: string[]; dispatch?: string;
+  id: string; kind: 'decision' | 'report' | 'review'; title: string; grounds?: string; options?: string[]; dispatch?: string;
   /** kind review only. */
   review?: WharfReviewMeta;
 }
@@ -73,7 +73,7 @@ export interface WharfHumanRequest {
    * `work` is a person asking the helm for new work. The helm reads it,
    * answers it (`response`) or dispatches it; it never runs by itself.
    */
-  id: string; kind: 'message' | 'trap-request' | 'work' | (typeof WHARF_REVIEW_REQUEST_KINDS)[number]; dispatch?: string; text?: string; boat?: string; repo?: string;
+  id: string; grounds?: string; kind: 'message' | 'trap-request' | 'work' | (typeof WHARF_REVIEW_REQUEST_KINDS)[number]; dispatch?: string; text?: string; boat?: string; repo?: string;
   /** kind work: the Slack message it came from, what the person added in its thread, and the helm's reply. */
   origin?: WharfRequestOrigin;
   followUps?: Array<{ text: string; at: string; source?: string }>;
