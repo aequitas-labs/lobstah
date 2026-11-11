@@ -90,8 +90,7 @@ naming a dispatch id. Then:
   `--pr <url>` may be given on any report verb. It records the PR and registers
   its `pr:` watch for your chain; `--no-watch` opts out. For several PRs,
   repeat `--pr` once per PR. A PR in a gh stack also records the stack's
-  other PRs. A dispatch parked on its PRs finishes when all of them have
-  merged or closed. Your PR is tracked
+  other PRs. Your PR is tracked
   from its first push: the beat finds it on your branch once you commit
   there after taking the work.
 - A `needs-decision` or `blocked` report queues your question to the human.
@@ -104,14 +103,18 @@ naming a dispatch id. Then:
   `done "<one-line note>" --report <file.md>`, its images added with `--attach`.
 - After you act on a message from the helm, say what you did in your next
   note. Any verb reaches the helm.
-- Before you wait on something external (a PR review or a deploy), report
-  `paused "<note>" --waiting-on review|pr|deploy|external
-  --link <url>` (`--until <iso|4h>` if it has an end). `paused` is a state,
-  not a question: the helm gets one wake to read it. Report `working` when you resume. When the
-  PR you wait on merges, lobstah finishes the dispatch `done`; closed without
-  merge, `failed`. For `review` or `pr`, `--link` is the PR's URL. If the
-  report prints a `warning`, lobstah knows no PR for the wait: report again
-  with `--link <PR url>`.
+- Never park on your own PR's CI or review. Once the PR is up, finish with
+  `done "<note>" --pr <url>`: that frees the trap, and the PR's watch starts
+  the next round on review feedback, a failing check or a merge. A
+  `paused --waiting-on pr|review` about your own PR is recorded as
+  `done --pr`.
+- Before you wait on something else external (a deploy, an outside event, or
+  another PR you depend on), report `paused "<note>" --waiting-on
+  deploy|external|pr --link <url>` (`--until <iso|4h>` if it has an end).
+  `paused` is a state, not a question: the helm gets one wake to read it.
+  Report `working` when you resume. For another PR, `--link` is its URL; when
+  it merges, lobstah finishes the dispatch `done`; closed without merge,
+  `failed`.
 - A failing check that passes only when a person approves is a human gate.
   Do not change code for it. Name it on your report with
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.

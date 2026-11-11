@@ -612,10 +612,11 @@ export interface SettingsSection {
   rows: SettingRow[];
 }
 
-/** One repo's settings, with its trap count beside its cap. */
+/** One repo's settings, with its traps in use beside its cap. */
 export interface SettingsRepo {
   key: string;
-  traps: { used: number; limit?: number };
+  /** In use against the cap; `idle` stowed and ghosted traps hold no slot; `held` ghosted ones still have a session open. */
+  traps: { used: number; limit?: number; idle?: number; held?: string[] };
   rows: SettingRow[];
 }
 

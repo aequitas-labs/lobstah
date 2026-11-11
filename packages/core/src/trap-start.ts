@@ -7,7 +7,6 @@ import { withDirLock } from './dir-lock.js';
 import { postNotice } from './notices.js';
 import { pendingIds, queuedDescriptor } from './queue.js';
 import { newTrapId, readTrap, listTraps, trapLabel, trapRepoLabel } from './soak.js';
-import { listRoster } from './roster.js';
 import { reserveTrapName, trapIdForName } from './trap-names.js';
 
 /**
@@ -143,6 +142,8 @@ export function reservationByAddress(address: string): TrapReservation | undefin
 
 /** A second reservation for a trap that already has one: a double launch. */
 export class TrapStartingError extends Error {}
+/** A trap could not come into use: its repo is at its cap on traps in use. */
+export class TrapCapError extends Error {}
 
 /**
  * Reserve a trap: a fresh id, a reserved name, and a one-time ticket. The
@@ -166,17 +167,22 @@ export function reserveTrap(opts: {
   remoteControl?: boolean;
   /** The Codex trap attaches to the shared app-server. */
   codexServer?: boolean;
-  /** A new throw enforces its configured repo cap under a cross-process reservation lock. */
+  /**
+   * The repo's cap on traps in use, enforced under a cross-process reservation
+   * lock: a new trap and a stowed or ghosted one coming back each take a slot.
+   */
   maxTraps?: number;
   now?: number;
 }): { reservation: TrapReservation; ticket: string } {
-  if (!opts.returning && opts.maxTraps !== undefined) {
+  if (opts.maxTraps !== undefined) {
     fs.mkdirSync(soakingDir(), { recursive: true });
     const lock = path.join(soakingDir(), `${hashTicket(opts.repo)}.capacity-lock`);
     const max = opts.maxTraps;
     return withDirLock(lock, () => {
-      const entries = new Map([...listRoster(), ...listTraps(), ...listReservations()].filter((r) => r.repo === opts.repo).map((r) => [r.trapId, r.name ?? `wt:${r.trapId}`]));
-      if (entries.size >= max) throw new Error(`${opts.repo}: ${entries.size}/${max} traps; cannot create more. Existing traps: ${[...entries.values()].join(', ') || '(none)'}. Use dispatch --trap-any, or stow and man roster forget an unwanted trap.`);
+      // In use: signed on or starting. Stowed and ghosted roster traps hold no slot.
+      const inUse = new Map([...listTraps(), ...listReservations()].filter((r) => r.repo === opts.repo).map((r) => [r.trapId, r.name ?? `wt:${r.trapId}`]));
+      if (inUse.size >= max)
+        throw new TrapCapError(`${opts.repo}: ${inUse.size}/${max} traps in use; cannot bring another into use. In use: ${[...inUse.values()].join(', ') || '(none)'}. Use dispatch --trap-any, which waits for a free one, or stow a trap in use.`);
       // The reservation is visible before releasing the cap lock, including across processes.
       const { maxTraps: _cap, ...unguarded } = opts;
       return reserveTrap(unguarded);

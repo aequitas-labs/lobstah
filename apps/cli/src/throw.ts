@@ -24,6 +24,7 @@ import {
   trapRef,
   writeTrapAnchor,
   DEFAULT_TRAP_START_SECS,
+  TrapCapError,
   TrapStartingError,
   type Config,
   type RosterEntry,
@@ -419,6 +420,8 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     startSecs: startTimeoutSecs(opts, row.harness ?? entry.harness),
     by: opts.by,
     returning: { trapId: entry.trapId, worktree: entry.worktree },
+    // Coming back takes a slot, as a new trap does: at the repo's cap on traps in use, the throw refuses.
+    ...(repo.traps !== undefined ? { maxTraps: repo.traps } : {}),
     startMode: startMode(row.config, opts.bypass),
     ...(opts.remoteControl && harness === 'claude' ? { remoteControl: true } : {}),
     ...(codexServer ? { codexServer } : {}),
@@ -564,7 +567,7 @@ export async function throwBatch(
       jobs.push(
         throwTrap({ ...each, address: `wt:${row.trapId}` }).then(
           (r) => ({ trap, repo: row.repo, result: r.action === 'resume' ? 'resumed' : 'cold', why: r.why, seconds: r.seconds }) as BatchResult,
-          (err: unknown) => ({ trap, repo: row.repo, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
+          (err: unknown) => ({ trap, repo: row.repo, result: err instanceof ThrowPendingError ? 'starting' : err instanceof TrapCapError ? 'skipped' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
       );
     }

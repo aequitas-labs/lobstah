@@ -120,8 +120,9 @@ describe('reuse-first CLI and summaries', () => {
     expect(report.traps.find((r) => r.name === 'kind-crab')?.availability).toBe('free');
     expect(run(['status', 'young-foam']).stdout).toContain('state: stowed');
     expect(run(['status', 'fresh-cove']).stdout).toContain('state: ghosted');
-    expect(renderTend(report)).toContain('4/2 traps');
-    expect(renderTend(report)).toContain('over limit');
+    // The cap counts the two live traps; the stowed and the ghosted one show beside it.
+    expect(renderTend(report)).toContain('2/2 traps in use +2 stowed/ghosted');
+    expect(renderTend(report)).not.toContain('over limit');
     const stop = run(['hook', 'stop'], { session_id: HELM, hook_event_name: 'Stop' });
     expect(stop.status, stop.stderr).toBe(0);
     expect(stop.stdout).toContain('young-foam'); expect(stop.stdout).toContain('stowed');

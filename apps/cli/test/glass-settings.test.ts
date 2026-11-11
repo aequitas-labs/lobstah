@@ -321,7 +321,7 @@ describe('the Settings tab', () => {
     versions: { rows: [{ name: 'CLI', version: '1.2.3' }, { name: 'Daemon', version: '1.2.2', note: 'not running' }], match: false, text: 'Daemon differs from the CLI' },
     grounds: [{ name: 'product', repos: ['web', 'api'] }],
     repos: [
-      { key: 'web', traps: { used: 3, limit: 2 }, rows: [{ key: 'reviewTool', value: 'linear-app', source: 'config' }] },
+      { key: 'web', traps: { used: 3, limit: 2, idle: 2, held: ['old-gull'] }, rows: [{ key: 'reviewTool', value: 'linear-app', source: 'config' }] },
       { key: 'api', traps: { used: 1 }, rows: [{ key: 'reviewTool', value: 'github', source: 'default' }] },
     ],
     sections: [{ title: 'Helm', rows: [{ key: 'reportSecs', value: '1234', source: 'config' }, { key: 'token', value: SECRET_MASK, source: 'config' }, { key: 'ttlSecs', value: '300', source: 'default' }] }],
@@ -350,7 +350,7 @@ describe('the Settings tab', () => {
     const g = await open(page);
     try {
       const repos = g.$$('#settings .cfgrepo h3').map((h) => h.textContent);
-      expect(repos).toEqual(['web 3 of 2 traps, over the cap', 'api 1 trap, no cap']);
+      expect(repos).toEqual(['web 3 of 2 traps in use, over the cap · +2 stowed or ghosted · old-gull still has its session open', 'api 1 trap in use, no cap']);
     } finally {
       await g.close();
     }

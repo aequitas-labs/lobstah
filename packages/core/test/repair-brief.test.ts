@@ -67,7 +67,7 @@ describe('a repair that changes the head of a reviewed PR', () => {
         expect(brief).toContain('re-request review from its current reviewers');
         expect(brief).toContain('gh pr view 7 --repo acme/web --json reviews,reviewRequests');
         expect(brief).toContain('gh pr edit 7 --repo acme/web --add-reviewer');
-        expect(brief).toContain('lobstah report r1 paused "<note>" --waiting-on review --link https://github.com/acme/web/pull/7');
+        expect(brief).toContain('lobstah report r1 done "<note>" --pr https://github.com/acme/web/pull/7');
         expect(brief).not.toContain('Report done with the same PR URL.');
       }
     }

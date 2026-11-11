@@ -56,7 +56,8 @@ describe('trap availability and selection', () => {
     const live = trap('kind-crab', 'codex');
     expect(selectRepoTrap(loadConfig(), 'r', undefined, NOW)).toMatchObject({ action: 'reuse', registration: { trapId: live.trapId } });
     expect(selectRepoTrap(loadConfig(), 'r', 'claude', NOW)).toMatchObject({ action: 'return', row: { trapId: stowed.trapId } });
-    expect(selectRepoTrap(loadConfig(), 'r', 'codex', NOW + 3600_000).action).toBe('wait');
+    // The codex trap has gone quiet but is still registered: it holds a slot; the stowed one doesn't, so there is room for a new one.
+    expect(selectRepoTrap(loadConfig(), 'r', 'codex', NOW + 3600_000).action).toBe('new');
   });
 
   it('prefers a listening free trap and skips failed return candidates', () => {
@@ -113,8 +114,9 @@ describe('new guard and roster capacity', () => {
     stowTrap(a.trapId);
     expect(() => guardNewTraps(cfg, 'r', 1)).toThrow('stowed');
     trap('kind-crab');
-    expect(repoTrapCount(cfg, 'r')).toMatchObject({ used: 2, limit: 2, text: '2/2 traps' });
-    expect(() => guardNewTraps(cfg, 'r', 1, 'reason')).toThrow('cannot create');
+    trap('young-foam');
+    expect(repoTrapCount(cfg, 'r')).toMatchObject({ used: 2, limit: 2, stowed: 1, ghosted: 0, text: '2/2 traps in use +1 stowed/ghosted' });
+    expect(() => guardNewTraps(cfg, 'r', 1, 'reason')).toThrow('cannot bring 1 more into use');
   });
 
   it('counts ghosted and new reservations once, and reports a lowered cap without removing records', () => {
@@ -123,12 +125,46 @@ describe('new guard and roster capacity', () => {
     sweepGhostTraps(1000, Date.now() + 60_000);
     expect(readRoster(a.trapId)?.state).toBe('ghosted');
     const b = reserveTrap({ repo: 'r' }).reservation;
-    expect(repoTrapCount(loadConfig(), 'r').used).toBe(2);
+    // The ghosted trap holds no slot; the starting reservation does.
+    expect(repoTrapCount(loadConfig(), 'r')).toMatchObject({ used: 1, ghosted: 1, stowed: 0 });
     const cfg = loadConfig(); cfg.repos.r!.traps = 0;
     expect(repoTrapCount(cfg, 'r').text).toContain('over limit');
     expect(listRoster()).toHaveLength(1);
     expect(b.trapId).not.toBe(a.trapId);
-    expect(() => guardNewTraps(cfg, 'r', 1, 'reason')).toThrow('cannot create');
+    expect(() => guardNewTraps(cfg, 'r', 1, 'reason')).toThrow('cannot bring');
+  });
+
+  it('counts only traps in use: free and busy live ones and starting ones; stowed, ghosted and held ones show apart', () => {
+    const claude = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-claude-'));
+    process.env.CLAUDE_CONFIG_DIR = claude;
+    try {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = '${path.join(home, 'repo')}'\ntraps = 3\n`);
+      const cfg = loadConfig();
+      // Stowed, and two ghosted: one whose Claude session is still running (held).
+      stowTrap(trap('stowed-one').trapId);
+      const ghost = trap('ghost-gone');
+      const held = trap('ghost-held');
+      for (const r of [ghost, held]) heartbeatTrap(r.trapId, { parked: true });
+      sweepGhostTraps(1000, Date.now() + 60_000);
+      fs.mkdirSync(path.join(claude, 'sessions'));
+      fs.writeFileSync(path.join(claude, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'ghost-held' }));
+      // In use: one free, one busy, one starting.
+      const free = trap('free-one');
+      busy(trap('busy-one'));
+      reserveTrap({ repo: 'r' });
+      const count = repoTrapCount(cfg, 'r');
+      expect(count).toMatchObject({ used: 3, limit: 3, stowed: 1, ghosted: 2, held: ['ghost-held'] });
+      expect(count.names).toEqual(expect.arrayContaining(['free-one', 'busy-one']));
+      expect(count.text).toBe('3/3 traps in use +3 stowed/ghosted; ghost-held ghosted with its session still open (end it)');
+      // A free trap in use takes the work; once it's busy too, neither a new trap nor a stowed one coming back gets a slot: the work waits.
+      expect(selectRepoTrap(cfg, 'r', undefined, NOW)).toMatchObject({ action: 'reuse', registration: { trapId: free.trapId } });
+      busy(free, 'job2');
+      expect(selectRepoTrap(cfg, 'r', undefined, NOW).action).toBe('wait');
+      expect(() => guardNewTraps(cfg, 'r', 1, 'reason')).toThrow('3/3 traps in use');
+    } finally {
+      delete process.env.CLAUDE_CONFIG_DIR;
+      removeTempDir(claude);
+    }
   });
 
   it('missing limit is unlimited; creation reason survives stow and return', () => {
