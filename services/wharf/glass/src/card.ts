@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { GlassCard, GlassCardItem } from '../../../../packages/core/src/backend-model.js';
-import { safeHref } from '../../../../apps/cli/src/glass-markdown.js';
-import { LinkedText } from '../../../../apps/cli/glass/src/components/links.js';
+import { safeHref } from '../../../../packages/glass-ui/src/glass-markdown.js';
+import { LinkedText } from '../../../../packages/glass-ui/ui/components/links.js';
 import { json } from './api.js';
 import { html, when } from './common.js';
 

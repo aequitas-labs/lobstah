@@ -150,7 +150,7 @@ describe('glass process lifecycle', () => {
     }
   });
 
-  it('doctor warns when the glass runs another version than the CLI', async () => {
+  it('doctor and glass status flag a glass that runs another version than the CLI', async () => {
     const server = http.createServer((_req, res) => {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ service: 'lobstah-glass', version: '0.0.1', pid: process.pid }));
@@ -158,6 +158,9 @@ describe('glass process lifecycle', () => {
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
     try {
       expect((await runAsync('doctor')).stdout).toMatch(/glass,warn,.*answering \(v0\.0\.1\); CLI is v.*: run lobstah glass restart/);
+      const status = (await runAsync('glass', 'status')).stdout;
+      expect(status).toContain('version: 0.0.1');
+      expect(status).toMatch(/stale: "?CLI is v.*: run lobstah glass restart/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -1,0 +1,248 @@
+import type { GlassPr, GlassSnapshot, GlassStack, WorkerMetadata, Grant } from '@lobstah/core';
+import {
+  DECK_TRAPS_MAX,
+  INFLIGHT_MAX,
+  LANDED_MAX,
+  REPORTS_MAX,
+  catchCount,
+  goalLine,
+  prBadgeClass,
+  reportPageUrl,
+} from '../../src/glass-diff.js';
+import type { DeckAttention, DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
+import { html } from '../html.js';
+import type { Children } from '../html.js';
+import {
+  Age,
+  lastPassText,
+  Harness,
+  NamedText,
+  WorkerAddress,
+  namedText,
+  KIND_TONE,
+  ageText,
+  badgeLong,
+  badgeTitle,
+  kindLabel,
+  NewTrap,
+  opener,
+  prName,
+  stackNumbers,
+  stackTitle,
+  startCommands,
+  trapNow,
+  trapNowText,
+  trapDisplayName,
+  trapScope,
+  windowAction,
+} from './common.js';
+import { GrantChip } from './session-grants.js';
+import { reportMeta } from './reports.js';
+import { PrAck } from './prs.js';
+import { DeckDecisions } from './decisions.js';
+import { LinkedText } from './links.js';
+import { Todos } from './todos.js';
+import type { DecisionDraft } from '../store.js';
+import { visibleTabs } from '../backend.js';
+import type { GlassTab } from '../../src/glass-diff.js';
+
+/**
+ * On deck: decisions (full-row cards), in flight, landed in the last 24h, reviews waiting on you (only when some are), reports, traps,
+ * and open PR stacks. The dispatch, trap, and landed items follow the site-wide view;
+ * decisions are always full-row cards; PRs have their own stack presentation.
+ */
+
+interface DeckItem {
+  key: string;
+  title: Children;
+  /** Trap-only secondary context beside Open, with its stable address on the name. */
+  trap?: { address: string; scope: string };
+  badge?: { text: string; tone?: string; worker?: Partial<WorkerMetadata> };
+  worker?: WorkerMetadata;
+  meta?: Children;
+  /** The meta line as text: a card clamps it to two lines and shows the rest on hover. */
+  metaText?: string;
+  /** A control at the right end of the card's foot line, or the row's end. */
+  action?: Children;
+  /** A page this item opens in a new tab, instead of `open`. */
+  href?: string;
+  /** A block under the card or line: a starting trap's start commands. */
+  extra?: Children;
+  open?: () => void;
+  acked?: boolean;
+}
+
+type View = GlassPrefs['view'] | undefined;
+
+function deckItem(it: DeckItem, view: View) {
+  const badge =
+    it.badge &&
+    (it.badge.worker
+      ? html`<${Harness} worker=${it.badge.worker} label=${it.badge.text} cls=${'badge ' + (it.badge.tone || 'dim')} compact />`
+      : html`<span class=${'badge ' + (it.badge.tone || 'dim') + badgeLong(it.badge.text)} title=${badgeTitle(it.badge.text)}>${it.badge.text}</span>`);
+  const worker = it.worker && html`<${Harness} worker=${it.worker} />`;
+  if (it.href) {
+    // A page of its own, in a new tab (a report).
+    const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
+    return view === 'cards'
+      ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener"><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
+      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
+  }
+  if (view === 'cards')
+    return html`<div key=${it.key} class=${'card' + (it.acked ? ' acked' : '')} onClick=${it.open} style=${it.open ? undefined : 'cursor:default'}><div class="top"><b title=${it.trap?.address}>${it.title}</b>${worker}${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}${it.extra}${(it.action || it.trap?.scope) && html`<div class="foot">${it.trap?.scope && html`<span class="trap-scope" title=${it.trap.scope}>${it.trap.scope}</span>`}<span class="footact">${it.action}</span></div>`}</div>`;
+  if (it.trap)
+    return html`<div key=${it.key} class="deckline trap-deckline click" onClick=${it.open}><div class="trap-heading"><b title=${it.trap.address}>${it.title}</b>${badge}${it.meta && html`<span class="dim">${it.meta}</span>`}</div><div class="trap-secondary">${it.trap.scope && html`<span class="trap-scope" title=${it.trap.scope}>${it.trap.scope}</span>`}<span class="footact">${it.action}</span></div>${it.extra}</div>`;
+  return html`<div key=${it.key} class=${'deckline' + (it.open ? ' click' : '') + (it.acked ? ' acked' : '')} onClick=${it.open}>${badge && [badge, ' ']}<b>${it.title}</b>${worker && [' ', worker]}${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}${it.action && [' ', html`<span class="dim">· </span>`, it.action]}${it.extra}</div>`;
+}
+
+const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
+
+function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number, view: View, headAction?: Children) {
+  // A section for a tab this page's source does not fill is not shown, empty or otherwise.
+  if (!visibleTabs().includes(tab)) return null;
+  const shown = items.slice(0, max);
+  const lines = shown.map((i) => deckItem(i, view));
+  const body = shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">none</div>`;
+  return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
+}
+
+function deckStack(
+  s: GlassStack,
+  members: GlassPr[],
+  standing: Map<string, DeckAttention[]>,
+  view: View,
+  attention: readonly DeckAttention[],
+) {
+  const ack = html`<${PrAck} stack=${s} prs=${members} attention=${attention} />`;
+  const next = members.find((p) => p.number === s.nextNumber) || members[0];
+  const chain = stackNumbers(s.numbers, new Map(members.map((p) => [p.number, p.title])));
+  const nextText = next ? 'next #' + next.number : 'nothing mergeable';
+  if (view === 'cards') {
+    const card = (p: GlassPr) => {
+      const kinds = standing.get(p.key) || [];
+      const acked = kinds.length > 0 && kinds.every((a) => a.acked);
+      const badges = kinds.length
+        ? kinds.map((a) => html`<span class=${'badge ' + (KIND_TONE[a.kind] || 'dim')}>${kindLabel(a.kind)}</span>`)
+        : html`<span class=${'badge ' + prBadgeClass(p.badge) + badgeLong(p.badge.text)} title=${badgeTitle(p.badge.text)}>${p.badge.text}</span>`;
+      const meta = `${p.repo} · ${p.badge.text}${acked ? ' · acked' : ''}`;
+      return html`<div key=${p.key} class=${'card' + (acked ? ' acked' : '')} onClick=${opener('pr', p.key)}><div class="top">${prName(p)}${badges}</div><div class="meta" title=${meta}>${meta}</div></div>`;
+    };
+    return html`<div key=${s.id} class="deckstack"><div class="dim">${stackTitle(s)}${chain} · ${nextText}${ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${members.map(card)}</div></div>`;
+  }
+  const badges = members.flatMap((p) =>
+    (standing.get(p.key) || []).map(
+      (a) =>
+        html`<span class=${'badge ' + (KIND_TONE[a.kind] || prBadgeClass(p.badge)) + (a.acked ? ' acked' : '')}>#${p.number} ${p.badge.text}</span>`,
+    ),
+  );
+  const spaced = badges.flatMap((b, i) => (i ? [' ', b] : [b]));
+  const lone = members.length === 1 ? members[0] : undefined;
+  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}>${stackTitle(s)}${lone ? prName(lone) : html`<b>${chain}</b>`} <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}${ack}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}${!lone && members.map((p) => html`<div key=${p.key} class="deckmember dim">${prName(p)}</div>`)}</div>`;
+}
+
+function deckPrs(inp: DeckInputs, view: View) {
+  if (!visibleTabs().includes('prs')) return null;
+  const shown = inp.stacks.slice(0, 3);
+  const standing = new Map<string, DeckAttention[]>();
+  for (const a of inp.prAttention) {
+    const kinds = standing.get(a.key) || [];
+    kinds.push(a);
+    standing.set(a.key, kinds);
+  }
+  const body = shown.length
+    ? shown.map((s) =>
+        deckStack(
+          s,
+          inp.prs.filter((p) => p.stackId === s.id).sort((a, b) => a.position - b.position),
+          standing,
+          view,
+          inp.prAttention,
+        ),
+      )
+    : html`<div class="empty">none</div>`;
+  return html`<section><h2><a href="#prs">PRs →</a></h2>${body}${more(inp.stacks.length - shown.length, 'prs')}</section>`;
+}
+
+export function Deck({
+  inp,
+  goals = [],
+  passes = [],
+  grants = [],
+  drafts,
+  focus,
+  viewedHere,
+  unread,
+}: {
+  inp: DeckInputs;
+  goals?: GlassSnapshot['goals'];
+  passes?: GlassSnapshot['helmPasses'];
+  grants?: Grant[];
+  drafts: Record<string, DecisionDraft>;
+  focus: string | null;
+  viewedHere: Record<string, true>;
+  unread: number;
+}) {
+  const shownGoals = goals.filter((g) => g.lines.length);
+  const view = inp.view;
+  const flight = inp.inflight.map((x): DeckItem => ({
+    key: x.lane + ':' + x.id,
+    title: [x.id.slice(0, 8), ' ', x.repo || ''],
+    worker: x.worker,
+    badge: { text: x.verb, tone: x.verb === 'needs-decision' || x.verb === 'blocked' ? 'bad' : 'dim' },
+    // No time at all (no log, no queue time): drop the fragment, not render "· ago".
+    meta: [
+      NamedText(x.note || '', 90),
+      x.verbAt && [' · ', Age(x.verbAt), ' ago'],
+      (x.for || x.claimedBy) && [' · ', WorkerAddress((x.for || x.claimedBy)!)],
+    ],
+    metaText: [namedText(x.note || ''), x.verbAt && `${ageText(x.verbAt)} ago`, namedText(x.for || x.claimedBy || '')]
+      .filter(Boolean)
+      .join(' · '),
+    open: opener('dispatch', x.lane + ':' + x.id),
+  }));
+  const landed = inp.landed.map((x): DeckItem => ({
+    key: x.key,
+    title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
+    badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
+    meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
+    metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
+    open: opener('dispatch', x.lane + ':' + x.id),
+  }));
+  const reports = inp.reports.map((r): DeckItem => {
+    const meta = reportMeta(r);
+    return { key: r.key, title: r.title, meta: meta.nodes, metaText: meta.text, href: reportPageUrl(r.key), acked: !!r.acked };
+  });
+  const traps = inp.traps.map(({ x: t }): DeckItem => ({
+    key: t.trapId,
+    title: '🪤 ' + trapDisplayName(t),
+    trap: { address: `wt:${t.trapId}`, scope: trapScope(t) },
+    badge: t.requested
+      ? { text: 'requested', tone: 'dim' }
+      : t.starting
+        ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
+        : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim', worker: t.live ? t : undefined },
+    meta: [
+      html`<${GrantChip} session=${t.sessionId} grants=${grants} />`,
+      html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`,
+      ' · ',
+      trapNow(t),
+    ],
+    metaText: `🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
+    action: windowAction(t),
+    extra: startCommands(t),
+    open: opener('trap', t.trapId),
+  }));
+  return [
+    shownGoals.length > 0 &&
+      html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map(
+        (g) =>
+          html`<section key=${g.grounds} class="goals-callout"><h2>Today's goals · ${g.grounds} · ${g.date}</h2><div class="dim">${lastPassText(passes.find((pass) => pass.grounds === g.grounds)?.lastPassAt)}</div><ol>${g.lines.map(
+            (line, i) => {
+              const goal = goalLine(line);
+              return html`<li class=${goal.done ? 'done' : undefined}><label class="goal-check"><input type="checkbox" checked=${goal.done} disabled aria-label=${`Goal ${i + 1}: ${goal.text}`} title=${`Read-only; use lobstah goals ${goal.done ? 'undo' : 'done'} ${i + 1} --grounds ${g.grounds}`} /><span>${goal.done ? html`<s>${LinkedText(goal.text)}</s>` : LinkedText(goal.text)}</span></label></li>`;
+            },
+          )}</ol></section>`,
+      )}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+  ];
+}

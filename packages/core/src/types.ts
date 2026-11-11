@@ -1,3 +1,4 @@
+import type { ConfiguredTrapTarget, RepoDispatchTarget } from './configured-trap-model.js';
 import type { PrEvidence } from './pr.js';
 import type { WorkerMetadata } from './worker-metadata.js';
 import type { PushRecord } from './pushes.js';
@@ -29,7 +30,9 @@ export interface DescriptorPr {
 
 export interface Descriptor {
   id: string;
-  repo: string;
+  repo?: string;
+  /** Configured targets carry no repo; legacy repo descriptors keep their existing shape. */
+  target?: ConfiguredTrapTarget;
   brief: string;
   harness?: string;
   /** `harness` was named on the command line (`dispatch`/`swap --harness`),
@@ -80,7 +83,7 @@ export interface Descriptor {
 }
 
 /** What a paused (or questioning) worker waits on, outside lobstah. */
-export const WAITING_ON = ['review', 'pr', 'deploy', 'person', 'external'] as const;
+export const WAITING_ON = ['review', 'pr', 'deploy', 'person', 'external', 'heavy'] as const;
 export type WaitingOn = (typeof WAITING_ON)[number];
 /** The verbs that may say what they wait on (`--waiting-on`, `--link`). */
 export const WAITING_ON_VERBS: readonly Verb[] = ['paused', 'needs-decision', 'blocked'];
@@ -97,6 +100,18 @@ export interface StatusEntry {
   until?: string;
   /** Written by `lobstah report`: the worker's own note, not one lobstah wrote. */
   reported?: true;
+  /**
+   * Written by `report needs-decision --ask` or `--ask-path`: a permission
+   * request. It has its own card and is never the dispatch's question.
+   */
+  permissionRequest?: true;
+}
+
+/** A pull request's one-based position in its dispatch's stack. */
+export interface DispatchPrPosition {
+  bottom: string;
+  position: number;
+  size: number;
 }
 
 export interface Evidence {
@@ -115,6 +130,8 @@ export interface Evidence {
   prUrl?: string;
   /** Every PR the dispatch reported when it has more than one (`--pr` repeated, or the PRs of its stack), `prUrl` first. */
   prUrls?: string[];
+  /** Stack positions, by canonical PR URL, retained after retargeting. */
+  prPositions?: Record<string, DispatchPrPosition>;
   transcriptPath?: string;
   note?: string;
   /** Delivery receipt: the trap address that actually claimed this dispatch. */
@@ -169,4 +186,16 @@ export interface RunnerInfo {
   startedAt: string;
   processStartTime?: string;
   attempts: number;
+}
+
+/** Resolve the persisted routing boundary without inventing a repository for a configured trap. */
+export function dispatchTarget(descriptor: Descriptor): RepoDispatchTarget | ConfiguredTrapTarget {
+  if (descriptor.target) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(descriptor.id)) throw new Error('invalid configured dispatch id');
+    if (descriptor.target.kind !== 'configured-trap' || !/^[a-z][a-z0-9-]{0,63}$/.test(descriptor.target.profile) || !/^[A-Za-z0-9_-]+$/.test(descriptor.target.grounds) || !['terminal', 'claude-desktop'].includes(descriptor.target.surface) || descriptor.for !== `trap:${descriptor.target.profile}`) throw new Error('invalid configured trap target');
+    if (descriptor.repo || descriptor.pool || descriptor.trapAny || descriptor.pr || descriptor.followUp) throw new Error('configured trap dispatches cannot carry repo, pool, PR or follow-up metadata');
+    return descriptor.target;
+  }
+  if (!descriptor.repo) throw new Error('repo dispatch requires a repo');
+  return { kind: 'repo', repo: descriptor.repo };
 }

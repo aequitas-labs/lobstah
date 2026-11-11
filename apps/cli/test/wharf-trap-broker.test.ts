@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { BackendError, brokerAddressFile, brokerRequest, ensureLayout, loadConfig, saveBrokerAgent, type BrokerAgent, type ClaimReceipt } from '@lobstah/core';
 import { BROKER_LIVENESS_MS, startWharfBroker, WharfTrapBroker, type BrokerOptions } from '../src/wharf-trap-broker.js';
 import { wharfCommand } from '../src/wharf-commands.js';
+import { lobstahTmuxPane } from '../src/wharf-soak.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string, now: number, alive: boolean;
@@ -129,6 +130,18 @@ it('uses the same bounded local interface for manual soak and throw, returning o
   } finally { await running.close(); }
   await expect(brokerRequest('ticket', {})).rejects.toThrow("the boat's daemon is not running");
 });
+it('forwards only a real tmux pane id to the wharf, and only from lobstah\'s own server', async () => {
+  const signOnBody = async (tmuxPane: unknown) => {
+    const f = fixture(), t = await f.broker.ticket('away', 'repo');
+    await f.broker.signOn({ ...t, session: 'session', pid: 123, harness: 'codex', tmuxPane });
+    return f.request.mock.calls.find(([route]) => route === 'workers/sign-on')![1];
+  };
+  expect(await signOnBody('%12')).toMatchObject({ tmuxPane: '%12' });
+  expect(await signOnBody('%1;id')).not.toHaveProperty('tmuxPane');
+  expect(lobstahTmuxPane({ TMUX: '/private/tmp/tmux-501/lobstah,1,0', TMUX_PANE: '%12' })).toBe('%12');
+  expect(lobstahTmuxPane({ TMUX: '/private/tmp/tmux-501/default,1,0', TMUX_PANE: '%12' })).toBeUndefined();
+  expect(lobstahTmuxPane({})).toBeUndefined();
+});
 it('a bound coding agent cannot invoke global reads, login or helm using the boat credential', async () => {
   saveBrokerAgent({ grounds: 'away', repo: 'repo', trap: 'test-crab', session: 'session', capability: 'secret', worktree: home }, home);
   const cwd = vi.spyOn(process, 'cwd').mockReturnValue(home);
@@ -158,4 +171,33 @@ it('manual CLI soak, report and inbox share broker sign-on/renew without ever re
     expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/dispatches/job/messages'))).toBe(true);
     await wharfCommand('stow', [], opts, loadConfig());
   } finally { await running.close(); }
+});
+
+it('signs a configured desktop on through the boat without git preparation, then stows and rejoins the same slot', async () => {
+  fs.appendFileSync(path.join(home, 'config.toml'), '\n[traps.desk]\nharness="claude"\nsurface="claude-desktop"\ngrounds="away"\n');
+  const f = fixture();
+  const ticket = await f.broker.ticket('away', undefined, 'configured-request', undefined, undefined, 'desk');
+  expect(ticket.repo).toBeUndefined(); expect(ticket.configured?.profile).toBe('desk'); expect(f.prepare).not.toHaveBeenCalled();
+  const agent = await f.broker.signOn({ ...ticket, session: 'desktop-session', pid: 123, harness: 'claude', entrypoint: 'claude-desktop' });
+  expect(agent.repo).toBeUndefined(); expect(agent.configured?.grounds).toBe('away');
+  expect(fs.existsSync(path.join(agent.worktree, '.lobstah-trap'))).toBe(false);
+  const signOn = f.request.mock.calls.find((call) => call[0] === 'workers/sign-on')!;
+  expect(signOn[1]).toMatchObject({ target: { kind: 'configured-trap', profile: 'desk', grounds: 'away' } });
+  expect(signOn[1]).not.toHaveProperty('repo'); expect(signOn[1]).not.toHaveProperty('repoRemote');
+  f.claim.mockResolvedValue({ ...receipt, dispatch: { id: 'inspection', brief: 'Inspect', target: { kind: 'configured-trap', profile: 'desk', grounds: 'away', surface: 'claude-desktop' } } });
+  await f.broker.handle('poll', body(agent));
+  await f.broker.handle('finish', { ...body(agent), dispatch: 'inspection' });
+  await f.broker.handle('end', body(agent));
+  const returned = await f.broker.ticket('away', undefined, 'return-request', undefined, undefined, 'desk');
+  expect(returned.trap).toBe(ticket.trap);
+  const second = await f.broker.signOn({ ...returned, session: 'returned-session', pid: 123, harness: 'claude', entrypoint: 'claude-desktop' });
+  expect(second.worktree).toBe(agent.worktree);
+  expect(f.launch).not.toHaveBeenCalled(); expect(f.prepare).not.toHaveBeenCalled();
+});
+
+it('rejects a configured desktop session on a terminal surface before registering a remote worker', async () => {
+  fs.appendFileSync(path.join(home, 'config.toml'), '\n[traps.desk]\nharness="claude"\nsurface="claude-desktop"\ngrounds="away"\n');
+  const f = fixture(), ticket = await f.broker.ticket('away', undefined, 'configured-request', undefined, undefined, 'desk');
+  await expect(f.broker.signOn({ ...ticket, session: 'terminal-session', pid: 123, harness: 'claude', entrypoint: 'cli' })).rejects.toThrow('surface');
+  expect(f.request).not.toHaveBeenCalled(); expect(f.prepare).not.toHaveBeenCalled();
 });

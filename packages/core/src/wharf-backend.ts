@@ -1,4 +1,4 @@
-import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput, WharfAck, WharfDocumentSummary } from './backend-model.js';
+import type { BackendLocation, BackendMessage, ClaimReceipt, CoordinationBackend, DispatchInput, DispatchView, EventBatch, ReportInput, WharfAck, WharfDocumentSummary, WharfMirrorCall } from './backend-model.js';
 
 export class BackendError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -36,7 +36,13 @@ async function responseValue(response: Response): Promise<unknown> {
   return value;
 }
 function input(v: unknown): DispatchInput {
-  const r = record(v); const d: DispatchInput = { id: string(r.id), repo: string(r.repo), brief: string(r.brief) };
+  const r = record(v); const d: DispatchInput = { id: string(r.id), brief: string(r.brief) };
+  if (r.target !== undefined) {
+    const target = record(r.target);
+    if (target.kind !== 'configured-trap' || !['claude-desktop', 'terminal'].includes(String(target.surface)) || r.repo !== undefined || r.repoRemote !== undefined) throw new BackendError(502, 'invalid configured target');
+    d.target = { kind: 'configured-trap', profile: string(target.profile), grounds: string(target.grounds), surface: target.surface as 'claude-desktop' | 'terminal', ...(target.parentDispatch === undefined ? {} : { parentDispatch: string(target.parentDispatch) }) };
+  } else d.repo = string(r.repo);
+  if (r.grounds !== undefined) d.grounds = string(r.grounds);
   if (r.repoRemote !== undefined) d.repoRemote = string(r.repoRemote);
   for (const k of ['for', 'boat', 'followUp', 'harness', 'model', 'effort'] as const) if (r[k] !== undefined) d[k] = string(r[k]);
   if (r.lane === 'work' || r.lane === 'chore') d.lane = r.lane;
@@ -50,7 +56,7 @@ function report(v: unknown): ReportInput & { at: string } {
   if (r.until !== undefined) out.until = string(r.until);
   if (r.link !== undefined) out.link = url(r.link);
   if (r.waitingOn !== undefined) {
-    if (!['review', 'pr', 'deploy', 'person', 'external'].includes(String(r.waitingOn))) throw new BackendError(502, 'invalid waiting kind');
+    if (!['review', 'pr', 'deploy', 'person', 'external', 'heavy'].includes(String(r.waitingOn))) throw new BackendError(502, 'invalid waiting kind');
     out.waitingOn = r.waitingOn as ReportInput['waitingOn'];
   }
   if (r.evidence !== undefined) {
@@ -105,7 +111,12 @@ export class WharfBackend implements CoordinationBackend {
     return value.map((v) => {
       const r = record(v); if (!['queued', 'active', 'done', 'cancelled'].includes(String(r.state))) throw new BackendError(502, 'invalid dispatch state');
       const unservable = r.unservable ? record(r.unservable) : undefined;
-      return { ...input(r), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}),
+      let assistance: DispatchView['assistance'];
+      if (r.assistance !== undefined) {
+        if (!Array.isArray(r.assistance) || r.assistance.length > 32) throw new BackendError(502, 'invalid assistance results');
+        assistance = r.assistance.map((value) => { const child = record(value); if (!Array.isArray(child.files) || child.files.length > 32) throw new BackendError(502, 'invalid assistance files'); return { id: string(child.id), state: string(child.state), ...(child.note === undefined ? {} : { note: string(child.note) }), files: child.files.map((value) => { const file = record(value); if (typeof file.size !== 'number' || file.size < 0) throw new BackendError(502, 'invalid assistance file size'); return { id: string(file.id), name: string(file.name), size: file.size }; }) }; });
+      }
+      return { ...input(r), ...(assistance ? { assistance } : {}), state: r.state as DispatchView['state'], ...(r.status ? { status: report(r.status) } : {}),
         ...(r.ack ? { ack: { ...ack(r.ack), status: string(record(r.ack).status) } } : {}),
         ...(r.boatName ? { boatName: string(r.boatName) } : {}),
         ...(r.workerId ? { workerId: string(r.workerId) } : {}), ...(r.claimedBoat ? { claimedBoat: string(r.claimedBoat) } : {}),
@@ -191,6 +202,46 @@ export class WharfBackend implements CoordinationBackend {
   }
   async uploadDocument(id: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
     return this.uploadPath(`documents/${encodeURIComponent(id)}/files`, name, bytes, key);
+  }
+  /** A mirror boat's put: its glass snapshot, gzipped. The wharf keeps only the latest. */
+  async putMirrorSnapshot(gzip: Uint8Array): Promise<{ etag: string; bytes: number; at: string }> {
+    const value = record(await responseValue(await this.raw('mirror/snapshot', 'PUT', gzip, { 'Content-Type': 'application/gzip' })));
+    return { etag: string(value.etag), bytes: Number(value.bytes), at: string(value.at) };
+  }
+  /** The calls waiting for this boat, and until when a hosted glass is open. */
+  async mirrorCalls(): Promise<{ calls: WharfMirrorCall[]; watchedUntil?: string }> {
+    const value = record(await this.request('mirror/calls'));
+    if (!Array.isArray(value.calls) || value.calls.length > 32) throw new BackendError(502, 'invalid mirror calls');
+    const calls = value.calls.map((v) => {
+      const c = record(v);
+      if (typeof c.id !== 'string' || typeof c.boat !== 'string' || (c.read === undefined) === (c.write === undefined)) throw new BackendError(502, 'invalid mirror call');
+      return c as unknown as WharfMirrorCall;
+    });
+    return { calls, ...(typeof value.watchedUntil === 'string' ? { watchedUntil: value.watchedUntil } : {}) };
+  }
+  /** Take a call before running it, so it runs once. */
+  async takeMirrorCall(id: string): Promise<void> {
+    await this.request(`mirror/calls/${encodeURIComponent(id)}/take`, {}, undefined, 'POST');
+  }
+  /** Answer a taken call with the local glass's own status, type and body. */
+  async answerMirrorCall(id: string, status: number, contentType: string, body: Uint8Array): Promise<void> {
+    await responseValue(await this.raw(`mirror/calls/${encodeURIComponent(id)}/answer`, 'POST', body, { 'Content-Type': contentType, 'X-Mirror-Status': String(status) }));
+  }
+  /** A file the person attached on the hosted glass, for one of this boat's calls. */
+  async mirrorFile(id: string): Promise<{ name: string; bytes: Uint8Array }> {
+    const response = await this.raw(`mirror/files/${encodeURIComponent(id)}`, 'GET');
+    if (!response.ok) await responseValue(response);
+    const name = decodeURIComponent(response.headers.get('X-File-Name') ?? 'attachment');
+    return { name, bytes: new Uint8Array(await response.arrayBuffer()) };
+  }
+  /** One request whose body or answer is bytes, not JSON. */
+  private async raw(path: string, method: string, body?: Uint8Array, headers: Record<string, string> = {}): Promise<Response> {
+    try {
+      return await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`, {
+        method, headers: { Authorization: `Bearer ${this.token}`, ...headers },
+        ...(body ? { body: new Uint8Array(body).buffer } : {}), signal: AbortSignal.timeout(30000), redirect: 'manual',
+      });
+    } catch { throw new BackendError(503, 'backend unavailable; state unknown (no local fallback)'); }
   }
   private async uploadPath(path: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
     const response = await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`, {

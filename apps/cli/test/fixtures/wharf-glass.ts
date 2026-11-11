@@ -2,7 +2,7 @@ import type { Snapshot, DispatchView, Detail } from '../../../../services/wharf/
 export const snapshot: Snapshot = {
   helmLive: true,
   boats: [{ id: 'boat', name: 'chris-macbook', revoked: 0, permissions: ['work', 'helm'], repos: ['github.com/aequitas-labs/lobstah'], lastCheckIn: '2026-10-10T17:00:00Z' }],
-  workers: [{ id: 'kind-crab', boat: 'boat', boatName: 'chris-macbook', repoRemote: 'github.com/aequitas-labs/lobstah', harness: 'codex', session: 'test-session', current: 'job', lastCheckIn: '2026-10-10T17:00:00Z' }],
+  workers: [{ id: 'kind-crab', live: false, boat: 'boat', boatName: 'chris-macbook', repoRemote: 'github.com/aequitas-labs/lobstah', harness: 'codex', session: 'test-session', current: 'job', lastCheckIn: '2026-10-10T17:00:00Z' }],
   documents: [
     { id: 'card', kind: 'decision', title: 'Choose the next catch', options: ['Keep it small', 'Split the work'], at: '2026-10-10T16:50:00Z', author: 'helm', published: true, markdown: { id: 'md', name: 'detail.md', size: 40 }, attachments: [{ id: 'image', name: 'lob.png', size: 100 }] },
     { id: 'report', kind: 'report', title: 'Wharf progress', at: '2026-10-10T16:45:00Z', author: 'kind-crab', published: true, markdown: { id: 'report-md', name: 'report.md', size: 40 }, attachments: [] },

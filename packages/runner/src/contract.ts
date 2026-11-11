@@ -23,9 +23,11 @@ export function buildPrompt(brief: string, opts: { id: string; nudge?: string; a
     `Use \`needs-decision\` when you are blocked on a question only a human can answer, then stop. ` +
       `New operator messages may arrive between your turns as user messages; treat them as instructions from the dispatcher.`,
     `Before you wait on something outside lobstah (a human review, a PR review, a deploy), report ` +
-      `\`lobstah report ${opts.id} paused "<note>" --waiting-on ${WAITING_ON.join('|')} --link <url>\`. Report \`working\` when you resume. ` +
+      `\`lobstah report ${opts.id} paused "<note>" --waiting-on ${WAITING_ON.filter((w) => w !== 'heavy').join('|')} --link <url>\`. Report \`working\` when you resume. ` +
       `A turn that ends on \`paused\` ends your session and stops its background work. The same session resumes when an operator message arrives, ` +
       `the \`--until\` time passes, or the PR you wait on ends; a merged PR finishes the dispatch as done.`,
+    `Run full test suites, full builds and Playwright as \`lobstah heavy -- <command>\`: one line per machine keeps them from overloading it. A focused test file or single-package build doesn't need it. ` +
+      `A \`git push\` waits in that line on its own, so run it in the background and end your turn with no report: you are woken when it finishes.`,
     opts.existingPr
       ? `Commit your work with clear messages. This chain already has PR ${opts.existingPr.url}. The runner does not push or open another PR. ` +
         `${pushRule(opts.existingPr.headRefName, opts.id)} ` +

@@ -1,3 +1,4 @@
+import { configuredFolderOverlaps } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -157,6 +158,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
     if (doneAt !== undefined && doneAt >= cutoff) continue; // recent catch — keep for attach/swap
     const p = path.join(wtRoot, id);
+    if (configuredFolderOverlaps(p)) continue;
     const proof = proofs.get(id);
     if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) {
       for (const user of proof.users) { live.add(user); keptUsers.add(user); retainReferences(user, 'work'); retainReferences(user, 'chore'); }
@@ -372,6 +374,7 @@ export function planPressureCull(now = Date.now()): CullItem[] {
   for (const id of idsIn(wtRoot)) {
     if (live.has(id)) continue;
     const p = path.join(wtRoot, id);
+    if (configuredFolderOverlaps(p)) continue;
     const proof = proofs.get(id);
     if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) continue;
     if (readTrapAnchor(p)?.createdBy === 'soak' && inspectTrapWorktree(p).reason) continue;
@@ -386,6 +389,7 @@ export function planPressureCull(now = Date.now()): CullItem[] {
  * `git worktree remove` keeps the branch: a culled dispatch's commits stay.
  */
 export function removeWorktree(id: string, dir: string): void {
+  if (configuredFolderOverlaps(dir)) throw new Error(`configured working folder is never culled: ${dir}`);
   const anchor = readTrapAnchor(dir);
   if (anchor?.createdBy === 'soak') {
     // The trap's revision goes under its protected ref first; the roster records it.

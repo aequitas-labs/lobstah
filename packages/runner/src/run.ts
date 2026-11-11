@@ -20,6 +20,7 @@ import {
   mergeEvidence,
   modelForHarness,
   originProgress,
+  liveHeavyTickets,
   pausedWaiting,
   isFinished,
   readActivity,
@@ -161,6 +162,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   const cfg = loadConfig();
   const descriptor = JSON.parse(fs.readFileSync(path.join(activeDir, 'descriptor.json'), 'utf8')) as Descriptor;
+  if (descriptor.target || !descriptor.repo) throw new Error('configured trap work cannot launch headless');
   const resolved = resolveDispatch(descriptor, cfg);
   const repo = cfg.repos[descriptor.repo]!;
 
@@ -407,7 +409,9 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
         // stops the clock, even before the turn ends.
         paused: () => {
           const last = readStatusLog(id, lane).at(-1);
-          return pausedWaiting(last) || isFinished(id, lane);
+          // In line isn't working, but holding a slot is.
+          const inLine = liveHeavyTickets({ dispatch: id }).some((t) => t.state === 'waiting');
+          return pausedWaiting(last) || isFinished(id, lane) || inLine;
         },
         progress: madeProgress,
         onTick: persistWall,
