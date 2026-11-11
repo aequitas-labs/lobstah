@@ -89,7 +89,8 @@ import {
   heavyGlassView,
 } from '@lobstah/core';
 import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
-import { currentAck, writeAck } from './acks.js';
+import { ackWalkingItem } from './attention-ack.js';
+import type { WalkingAck } from './attention-ack.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
@@ -100,7 +101,7 @@ import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { glassReviews } from './reviews.js';
 import { reviewSetupView } from './reviews-setup.js';
-import { buildTendReport, landedCatches } from './tend.js';
+import { buildTendReport, landedCatches, walkingAttention } from './tend.js';
 import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
@@ -168,6 +169,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['review-redraft', 1024],
   ['review-draft', 1024],
   ['pr-ack', 256 * 1024],
+  ['attention-ack', 1024],
 ]);
 
 const readJson = <T>(f: string): T | undefined => {
@@ -415,14 +417,14 @@ function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
 
 /**
  * Attention exactly as `man tend` derives it (the one place kinds are
- * decided), plus the active attentionKinds for the read-only line under the
- * heading. A config error surfaces on the page instead of failing /data.
+ * decided), as the pet walks it (walkingAttention), plus the active
+ * attentionKinds for the read-only line under the heading. A config error
+ * surfaces on the page instead of failing /data.
  */
 function attentionSnapshot(): { attention: TendAttention[]; landed: LandedCatch[]; attentionKinds: string[]; attentionError?: string } {
   try {
     const cfg = loadConfig();
-    // The pet's list: a question held on the helm's turn is not the human's yet.
-    return { attention: buildTendReport().attention.filter((a) => !a.held), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
+    return { attention: walkingAttention(buildTendReport()), landed: landedCatches(cfg), attentionKinds: cfg.attentionKinds };
   } catch (err) {
     return { attention: [], landed: [], attentionKinds: [], attentionError: err instanceof Error ? err.message : String(err) };
   }
@@ -1154,27 +1156,30 @@ export function serveGlass(
             );
             return;
           }
-          case 'pr-ack': {
-            // Ack only the PR/stack states this page showed, never a newer state.
+          case 'pr-ack':
+          case 'attention-ack': {
+            // Ack only the states this page showed, never a newer state. A PR group's
+            // ack (pr-ack) names PR and stack items only; a lob click (attention-ack)
+            // names the one item it walked, of any kind the pet walks.
+            const prOnly = body.kind === 'pr-ack';
             const items = (body.payload as { items?: unknown } | undefined)?.items;
-            if (!Array.isArray(items) || items.length > 1000 || items.some((i) =>
-              !i || typeof i.key !== 'string' || !/^(pr:|stack:)/.test(i.key) || i.key.length > 300 ||
-              typeof i.stateHash !== 'string' || i.stateHash.length > 100))
-              return reply(400, { ok: false, reason: 'PR or stack attention states are required.' });
-            try {
-              const standing = buildTendReport().attention;
-              const acked = [];
-              for (const item of items) {
-                const a = standing.find((a) => a.key === item.key && a.stateHash === item.stateHash && (a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
-                if (!a) continue;
-                const ack = currentAck(a.key, a.stateHash) ?? { key: a.key, kind: a.kind, stateHash: a.stateHash, at: new Date().toISOString(), by: 'glass' };
-                writeAck(ack);
-                acked.push(ack);
+            if (!Array.isArray(items) || items.length > (prOnly ? 1000 : 1) || items.some((i) =>
+              !i || typeof i.key !== 'string' || (prOnly && !/^(pr:|stack:)/.test(i.key)) || i.key.length > 300 ||
+              typeof i.stateHash !== 'string' || i.stateHash.length > 200))
+              return reply(400, { ok: false, reason: prOnly ? 'PR or stack attention states are required.' : 'One attention item and its state are required.' });
+            void (async () => {
+              const standing = walkingAttention(buildTendReport());
+              const acked: WalkingAck[] = [];
+              for (const item of items as Array<{ key: string; stateHash: string }>) {
+                const a = standing.find((a) => a.key === item.key && a.stateHash === item.stateHash && (!prOnly || a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
+                if (a) acked.push(await ackWalkingItem(a, 'glass'));
               }
-              return reply(200, { ok: true, acked });
-            } catch {
-              return reply(500, { ok: false, reason: 'The acknowledgments could not be stored.' });
-            }
+              return acked;
+            })().then(
+              (acked) => reply(200, { ok: true, acked }),
+              () => reply(500, { ok: false, reason: 'The acknowledgments could not be stored.' }),
+            );
+            return;
           }
           case 'run-passkey-challenge':
           case 'run-passkey-register':

@@ -4,7 +4,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { addWatch, appendWatchEvents, appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence, upsertPr, syncStackReadiness } from '@lobstah/core';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { addWatch, appendWatchEvents, appendStatus, claimNext, complete, enqueue, ensureLayout, executorPath, mergeEvidence, observeReviewRequest, readReview, refreshReviewNotifications, upsertPr, syncStackReadiness, writeReview } from '@lobstah/core';
+import { serveGlass } from '../src/glass.js';
 import { petRow, petStateFile, type PetState } from '../src/pet.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -18,7 +21,10 @@ beforeEach(() => {
   fs.writeFileSync(executorPath(), JSON.stringify({ heartbeat: new Date().toISOString() }));
   fs.writeFileSync(path.join(home, 'config.toml'), 'attentionKinds = ["question", "pr:draft"]\n');
 });
-afterEach(() => {
+let server: Server | undefined;
+afterEach(async () => {
+  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  server = undefined;
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
@@ -104,6 +110,64 @@ describe('attention --json', () => {
     expect(question).toMatchObject({ id: Q, verb: 'needs-decision', note: 'which color?', key: `work:${Q}` });
     const draft = parsed.attention.find((a) => a.kind === 'pr:draft')!;
     expect(draft).toMatchObject({ id: P, key: 'pr:acme/web#9', prUrl: PR_URL, acked: { by: 'pet' } });
+  });
+
+  it('walks the same items as the glass’s lobs, review notifications included', async () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[reviews]\nenabled = true\n');
+    standingItems();
+    observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'aaaaaaa1', repoKey: 'web' }, round: { id: 'RRE_7', requestedAt: new Date().toISOString() } });
+    const review = readReview('review:acme/web#7')!;
+    Object.assign(review.rounds[0]!, { state: 'drafted', verdict: 'comment', draftedAt: new Date().toISOString() });
+    writeReview(review);
+    refreshReviewNotifications();
+    const pet = (JSON.parse(lobstah('attention', '--json').stdout) as { attention: Item[] }).attention;
+    server = serveGlass(0);
+    await new Promise<void>((resolve) => server!.once('listening', resolve));
+    const data = (await (await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/data`)).json()) as { attention: Item[] };
+    expect(pet.map((a) => a.kind).sort()).toEqual(['pr:draft', 'question', 'review']);
+    expect(withoutAge(data.attention)).toEqual(withoutAge(pet));
+  });
+
+  it('acks a lob clicked on the glass for the pet too, and a pet click for the glass', async () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[reviews]\nenabled = true\n');
+    standingItems();
+    observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'aaaaaaa1', repoKey: 'web' }, round: { id: 'RRE_7', requestedAt: new Date().toISOString() } });
+    const review = readReview('review:acme/web#7')!;
+    Object.assign(review.rounds[0]!, { state: 'drafted', verdict: 'comment', draftedAt: new Date().toISOString() });
+    writeReview(review);
+    refreshReviewNotifications();
+    server = serveGlass(0);
+    await new Promise<void>((resolve) => server!.once('listening', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const glass = async () => (await (await fetch(`${base}/data`)).json()) as { attention: Item[]; focusToken: string };
+    const pet = () => (JSON.parse(lobstah('attention', '--json').stdout) as { attention: Item[] }).attention;
+    const { focusToken } = await glass();
+    const click = (item: Item) =>
+      fetch(`${base}/requests`, {
+        method: 'POST',
+        headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': focusToken },
+        body: JSON.stringify({ kind: 'attention-ack', payload: { items: [{ key: item.key, stateHash: item.stateHash }] } }),
+      });
+    const walking = (items: Item[]) => items.filter((a) => !a.acked && !a.quiet).map((a) => a.kind).sort();
+    expect(walking(pet())).toEqual(['pr:draft', 'question', 'review']);
+    const question = pet().find((a) => a.kind === 'question')!;
+    // A page that read an older state acks nothing.
+    expect((await (await click({ ...question, stateHash: 'older' })).json()).acked).toEqual([]);
+    expect(walking(pet())).toEqual(['pr:draft', 'question', 'review']);
+    // A glass click on the question and the review: neither walks on the pet.
+    expect((await click(question)).status).toBe(200);
+    expect(pet().find((a) => a.kind === 'question')?.acked).toMatchObject({ by: 'glass' });
+    expect((await click(pet().find((a) => a.kind === 'review')!)).status).toBe(200);
+    expect(walking(pet())).toEqual(['pr:draft']);
+    // A pet click on the PR: it stops walking on the glass.
+    expect(lobstah('attention', 'ack', 'pr:acme/web#9', '--by', 'pet').status).toBe(0);
+    expect(walking((await glass()).attention)).toEqual([]);
+    expect(withoutAge((await glass()).attention)).toEqual(withoutAge(pet()));
+    // One item per click, always with its state.
+    const bad = (payload: unknown) =>
+      fetch(`${base}/requests`, { method: 'POST', headers: { Origin: base, 'content-type': 'application/json', 'x-lobstah-token': focusToken }, body: JSON.stringify({ kind: 'attention-ack', payload }) });
+    expect((await bad({ items: [{ key: question.key }] })).status).toBe(400);
+    expect((await bad({ items: [question, question].map((a) => ({ key: a.key, stateHash: a.stateHash })) })).status).toBe(400);
   });
 
   it('prints an empty list when nothing stands', () => {

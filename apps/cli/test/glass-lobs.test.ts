@@ -64,10 +64,12 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
   });
 
   it('caps at four, the last one counting the rest', () => {
-    const many = Array.from({ length: 6 }, (_, i) => ({ id: `id${i}`, lane: 'work', verb: 'blocked' }));
+    const many = Array.from({ length: 6 }, (_, i) => ({ id: `id${i}`, lane: 'work', verb: 'blocked', key: `work:id${i}`, stateHash: `h${i}` }));
     const items = lobItems(many, { lobs: true, preview: false,  });
     expect(items).toHaveLength(4);
     expect(items[3]?.text).toBe('…and 2 more — see attention');
+    // A click acknowledges what its lob walked; the last stands for several, so it acknowledges none.
+    expect(items.map((i) => i.hideKey)).toEqual(['work:id0', 'work:id1', 'work:id2', undefined]);
   });
 
   it('serves no settings endpoint: POST /settings gets the page like any unknown path', async () => {

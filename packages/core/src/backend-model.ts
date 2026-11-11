@@ -125,7 +125,7 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
  * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [
-  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack',
+  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-dismiss', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
 ] as const;
