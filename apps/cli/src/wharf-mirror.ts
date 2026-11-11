@@ -13,6 +13,8 @@ import {
 import type { BackendScope, Config, MirrorStatus, WharfMirrorCall } from '@lobstah/core';
 import { glassPort } from './glass-lifecycle.js';
 import { WharfWake } from './wharf-wake.js';
+import { forgetOtherBoats, ownAttentionList, readOtherBoats, writeOtherBoats } from './wharf-attention.js';
+import type { OtherBoats } from './wharf-attention.js';
 
 /**
  * The mirror: this machine's fleet stays on its own local grounds, and the
@@ -29,6 +31,10 @@ export const MIRROR_WATCHED_PASS_MS = 2_000;
 export const MIRROR_IDLE_PASS_MS = 30_000;
 /** How often an unchanged-but-unwatched snapshot is put anyway, so the hosted glass shows a recent copy when it opens. */
 export const MIRROR_IDLE_PUT_MS = 5 * 60_000;
+/** How often other boats' attention lists are read without a hint, in case one was lost. */
+export const MIRROR_ATTENTION_READ_MS = 5 * 60_000;
+/** How long the mirror waits before asking again for lists it may not read (no attention grant, or a wharf without them). */
+export const MIRROR_ATTENTION_OFF_MS = 30 * 60_000;
 /** The largest local answer a relayed call carries back. */
 const MIRROR_ANSWER_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -49,7 +55,7 @@ export interface LocalGlass {
 }
 
 /** What the mirror needs of its wharf. */
-export type MirrorWharf = Pick<WharfBackend, 'putMirrorSnapshot' | 'mirrorCalls' | 'takeMirrorCall' | 'answerMirrorCall' | 'mirrorFile'> & { glass?: string };
+export type MirrorWharf = Pick<WharfBackend, 'putMirrorSnapshot' | 'mirrorCalls' | 'takeMirrorCall' | 'answerMirrorCall' | 'mirrorFile' | 'putMirrorAttention' | 'mirrorAttention'> & { glass?: string };
 
 export interface WharfMirrorOptions {
   /** The wharf `[glass] mirror` names, for the status file. */
@@ -73,6 +79,14 @@ export class WharfMirror {
   private putAt = 0;
   private watchedUntil = 0;
   private status: MirrorStatus;
+  /** This boat's own walking list, from the last snapshot read, and the JSON last put. */
+  private attention?: Array<Record<string, unknown>>;
+  private attentionPut?: string;
+  /** The wharf has no attention routes yet: puts and reads wait until this time. */
+  private attentionOffUntil = 0;
+  /** Other boats' lists: when they were last read, and until when this boat may not read them. */
+  private othersAt = 0;
+  private othersOffUntil = 0;
   constructor(private options: WharfMirrorOptions) {
     const prior = readMirrorStatus();
     const same = prior?.wharf === options.wharf ? prior : undefined;
@@ -90,7 +104,7 @@ export class WharfMirror {
    * a hosted glass is open, else at most every five minutes), and carry out
    * the calls waiting. Returns how long to wait before the next pass.
    */
-  async pass(): Promise<number> {
+  async pass(hints: { attention?: boolean } = {}): Promise<number> {
     try {
       const { calls, watchedUntil } = await this.options.backend.mirrorCalls();
       this.watchedUntil = watchedUntil ? Date.parse(watchedUntil) : 0;
@@ -103,6 +117,13 @@ export class WharfMirror {
       this.status.error = error instanceof Error ? error.message : String(error);
       this.options.log?.(`wharf mirror: ${this.status.error}`);
     }
+    // The pets' lists come last, on their own: a failure here never holds a relayed call or the snapshot.
+    try {
+      await this.putAttentionIfChanged();
+      await this.readOthersIfDue(hints.attention === true);
+    } catch (error) {
+      this.options.log?.(`wharf mirror: attention lists: ${error instanceof Error ? error.message : String(error)}`);
+    }
     this.status.at = new Date(this.now()).toISOString();
     if (this.watchedUntil) this.status.watchedUntil = new Date(this.watchedUntil).toISOString();
     (this.options.writeStatus ?? writeMirrorStatus)(this.status);
@@ -114,6 +135,7 @@ export class WharfMirror {
     if (r.status === 304) return;
     if (r.status !== 200) throw new Error(`the local glass answered /data with ${r.status}`);
     const snapshot = JSON.parse(r.body.toString('utf8')) as Record<string, unknown>;
+    if (Array.isArray(snapshot.attention)) this.attention = ownAttentionList(snapshot.attention);
     // The page token opens this glass for writes. The mirror keeps it here, for the calls it carries out, and never sends it.
     if (typeof snapshot.focusToken === 'string') this.token = snapshot.focusToken;
     delete snapshot.focusToken;
@@ -131,6 +153,52 @@ export class WharfMirror {
     this.putEtag = this.localEtag;
     this.putAt = this.now();
     Object.assign(this.status, { lastPutAt: put.at, etag: put.etag, bytes: put.bytes });
+  }
+  /**
+   * Put this boat's walking list when it changed since the last put (the
+   * first pass always puts), so the other boats' pets walk it. A wharf
+   * without the route (404) is asked again in half an hour.
+   */
+  private async putAttentionIfChanged(): Promise<void> {
+    if (!this.attention || this.now() < this.attentionOffUntil) return;
+    const json = JSON.stringify(this.attention);
+    if (json === this.attentionPut) return;
+    try {
+      await this.options.backend.putMirrorAttention(this.attention);
+      this.attentionPut = json;
+    } catch (error) {
+      if (!(error instanceof BackendError && error.status === 404)) throw error;
+      this.attentionOffUntil = this.now() + MIRROR_ATTENTION_OFF_MS;
+    }
+  }
+  /**
+   * Read the other boats' lists on an attention hint, or every five minutes,
+   * into the cache `lobstah attention --json` reads. Lists held at an
+   * unchanged ETag are kept. Without the grant (403) or the route (404) the
+   * cache is removed, so nothing stale walks, and the read waits half an hour.
+   */
+  private async readOthersIfDue(hinted: boolean): Promise<void> {
+    if (this.now() < this.othersOffUntil) return;
+    if (!hinted && this.othersAt && this.now() - this.othersAt < MIRROR_ATTENTION_READ_MS) return;
+    const held = readOtherBoats();
+    const prior = held?.wharf === this.options.wharf ? held : undefined;
+    const known = Object.fromEntries((prior?.boats ?? []).map((b) => [b.boat, b.etag]));
+    let lists;
+    try {
+      lists = await this.options.backend.mirrorAttention(known);
+    } catch (error) {
+      if (!(error instanceof BackendError && (error.status === 403 || error.status === 404))) throw error;
+      forgetOtherBoats();
+      this.othersOffUntil = this.now() + MIRROR_ATTENTION_OFF_MS;
+      return;
+    }
+    const boats: OtherBoats['boats'] = lists.flatMap((b) => {
+      if (!b.unchanged) return [{ ...b, attention: b.attention ?? [] }];
+      const kept = prior?.boats.find((p) => p.boat === b.boat);
+      return kept ? [{ ...kept, name: b.name, at: b.at }] : [];
+    });
+    writeOtherBoats({ wharf: this.options.wharf, at: new Date(this.now()).toISOString(), boats });
+    this.othersAt = this.now();
   }
   /** Take one call, run it against the local glass if it is one the hosted glass may make, and answer it. */
   private async carryOut(call: WharfMirrorCall): Promise<void> {
@@ -236,10 +304,10 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
   }
   const port = glassPort();
   const mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, token), glass: loopbackGlass(port), glassPort: port, log });
-  const hints = new WharfWake(scope.location, token, ['mirror-call', 'mirror-watch']);
+  const hints = new WharfWake(scope.location, token, ['mirror-call', 'mirror-watch', 'attention']);
   let stopped = false;
   void (async () => {
-    while (!stopped) await hints.wait(await mirror.pass());
+    while (!stopped) await hints.wait(await mirror.pass({ attention: hints.heard('attention') }));
   })();
   return {
     stop: () => {
