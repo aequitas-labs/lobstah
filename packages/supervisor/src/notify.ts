@@ -50,7 +50,7 @@ export function pendingNotifications(
   const question = (e: StatusEntry) => e.verb === 'needs-decision' || e.verb === 'blocked';
   if (listReviews().some(item => item.rounds.some(r => r.dispatch === id))) return [];
   return fresh
-    .filter((e) => verbs.includes(e.verb) && !(question(e) && answeredAt(id, lane, e.at) !== undefined))
+    .filter((e) => verbs.includes(e.verb) && e.waitingOn !== 'heavy' && !(question(e) && answeredAt(id, lane, e.at) !== undefined))
     .map((entry) => ({ id, lane, entry }));
 }
 
@@ -149,6 +149,7 @@ export function attentionNow(
       const index = log.length - 1 - [...log].reverse().findIndex((e) => e.verb === state);
       const entry = log[index];
       if (!entry) continue;
+      if (entry.waitingOn === 'heavy') continue; // a push in line is routine
       if (state !== 'paused' && answeredAt(id, lane, entry.at) !== undefined) continue; // answered: nothing to remind
       const file = attnCursorPath(id, lane);
       const cursor = readAttnCursor(file);
@@ -179,6 +180,7 @@ export function freshWakeEvents(
         baseline[key] = log.length;
         for (const [offset, entry] of log.slice(seen).entries()) {
           if (!verbs.includes(entry.verb)) continue;
+          if (entry.waitingOn === 'heavy') continue; // a push in line is routine
           // A question already answered by the time we look is not a wake.
           if ((entry.verb === 'needs-decision' || entry.verb === 'blocked') && answeredAt(id, lane, entry.at) !== undefined) continue;
           out.push({ id, lane, entry });

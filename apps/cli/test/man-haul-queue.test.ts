@@ -5,6 +5,8 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, helmOf, takeHelm } from '@lobstah/core';
+import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
+import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 // Exercise the built CLI: the bug is the Stop hook's control-flow gate.
@@ -17,6 +19,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-haul-queue-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  recordHelmPass('fleet', DEFAULT_HELM);
   takeHelm({ sessionId, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
 });
 afterEach(() => {
@@ -46,7 +49,7 @@ describe('man haul --park with queued-only work', () => {
       expect(res.signal).toBeNull();
       expect(res.status).toBe(0);
       expect(res.elapsedMs).toBeGreaterThanOrEqual(1_500);
-      expect(res.stdout).toBe(''); // a quiet Stop hook allows the stop
+      expect(JSON.parse(res.stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER }); // a quiet Stop hook allows the stop
       expect(Date.parse(helmOf(sessionId)!.heartbeatAt) - beforeHeartbeat).toBeGreaterThanOrEqual(1_000);
     });
   }
@@ -57,6 +60,6 @@ describe('man haul --park with queued-only work', () => {
     expect(res.signal).toBeNull();
     expect(res.status).toBe(0);
     expect(res.elapsedMs).toBeLessThan(1_500);
-    expect(res.stdout).toBe('');
+    expect(JSON.parse(res.stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   });
 });

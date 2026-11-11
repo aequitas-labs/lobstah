@@ -6,11 +6,15 @@ import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
+  addTodo,
   askDecision,
   closeRequest,
+  closeTodo,
   dropReservation,
   ensureLayout,
+  fireDueTodos,
   listNotices,
+  listTodos,
   listRequests,
   listGrants,
   readDecisionAnswer,
@@ -363,4 +367,72 @@ it("a lone PR's Ack acknowledges only it, and again is a no-op", async () => {
   await post(body);
   expect(listAcks()).toEqual(first);
   expect(stack().every((a) => !a.acked)).toBe(true);
+});
+
+describe('todo-schedule: set or move a todo time from the glass', () => {
+  const schedule = (payload: unknown, headers: Record<string, string> = {}) => post({ kind: 'todo-schedule', payload }, headers);
+  const grounds = 'fleet';
+
+  it('a valid time responds 200 with the resolved time, and the todo holds that due', async () => {
+    addTodo(grounds, 'Retry');
+    const response = await schedule({ grounds, id: 1, until: '2099-11-06T14:00Z' });
+    expect(response.status).toBe(200);
+    const result = (await response.json()) as { ok: boolean; dueAt: string; due: string };
+    expect(result).toMatchObject({ ok: true, dueAt: '2099-11-06T14:00:00.000Z' });
+    expect(result.due).toMatch(/Nov 6/);
+    expect(listTodos(grounds)[0]!.dueAt).toBe('2099-11-06T14:00:00.000Z');
+  });
+
+  it('takes a duration, and clears a firing', async () => {
+    addTodo(grounds, 'Retry', Date.now() - 5000, { dueAt: new Date(Date.now() - 1000).toISOString() });
+    fireDueTodos();
+    expect(listTodos(grounds)[0]!.firing).toBeDefined();
+    expect((await schedule({ grounds, id: 1, until: '2h' })).status).toBe(200);
+    const [todo] = listTodos(grounds);
+    expect(todo!.firing).toBeUndefined();
+    expect(todo!.snoozes).toBe(1);
+  });
+
+  it.each([
+    ['next week', 'as a time: try'],
+    ['2020-01-01 09:00', 'has passed: give a time ahead'],
+    ['fri 9am', 'use 24-hour time'],
+  ])('an unreadable time %s responds 400 with the parser’s message and keeps the due', async (until, message) => {
+    const dueAt = '2099-01-01T00:00:00.000Z';
+    addTodo(grounds, 'Retry', Date.now(), { dueAt });
+    const response = await schedule({ grounds, id: 1, until });
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { reason: string }).reason).toContain(message);
+    expect(listTodos(grounds)[0]!.dueAt).toBe(dueAt);
+  });
+
+  it('no valid token responds 403 and keeps the due', async () => {
+    const dueAt = '2099-01-01T00:00:00.000Z';
+    addTodo(grounds, 'Retry', Date.now(), { dueAt });
+    for (const bad of ['', 'wrong']) {
+      expect((await schedule({ grounds, id: 1, until: '2h' }, { 'x-lobstah-token': bad })).status).toBe(403);
+    }
+    expect(listTodos(grounds)[0]!.dueAt).toBe(dueAt);
+  });
+
+  it('a missing todo, a closed one, and a bad grounds or payload are refused', async () => {
+    addTodo(grounds, 'Done already');
+    closeTodo(grounds, 1, 'done');
+    const reason = async (payload: unknown) => {
+      const response = await schedule(payload);
+      expect(response.status).toBe(400);
+      return ((await response.json()) as { reason: string }).reason;
+    };
+    expect(await reason({ grounds, id: 9, until: '2h' })).toContain('no todo 9');
+    expect(await reason({ grounds, id: 1, until: '2h' })).toContain('already done');
+    expect(await reason({ grounds: '../evil', id: 1, until: '2h' })).toContain('not a grounds name');
+    expect(await reason({ grounds, id: 'one', until: '2h' })).toContain('A todo and a time are required');
+    expect(await reason({ grounds, id: 1 })).toContain('A todo and a time are required');
+  });
+
+  it('the snapshot carries the storage grounds name the route needs', async () => {
+    addTodo(grounds, 'Retry');
+    const snapshot = (await (await fetch(`${base}/data`)).json()) as GlassSnapshot;
+    expect(snapshot.todos?.[0]).toMatchObject({ groundsKey: grounds, grounds: 'home' });
+  });
 });

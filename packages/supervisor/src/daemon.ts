@@ -1,3 +1,4 @@
+import { reconcileConfiguredProfiles, reconcileAssistance } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -50,6 +51,8 @@ import {
   daemonSkip,
   sweepGhostTraps,
   expireReservations,
+  heavyDaemonPass,
+  liveHeavyTickets,
   pausedWaiting,
   poolDir,
   poolWaits,
@@ -213,7 +216,8 @@ export function reconcileOne(
     alive,
     lastVerb,
     // Paused on something external (--waiting-on): silence is expected.
-    pausedWaiting: pausedWaiting(statusLog.at(-1)),
+    // So is a command in the heavy line: it may not start for a while.
+    pausedWaiting: pausedWaiting(statusLog.at(-1)) || liveHeavyTickets({ dispatch: st.id }).length > 0,
     lastEventAt: lastEventAt(st.id, st.lane),
     startedAt: st.runner ? Date.parse(st.runner.startedAt) : undefined,
     now: Date.now(),
@@ -434,6 +438,10 @@ export interface DaemonHooks {
   spawnPoolWarm?: (name: string) => void;
   /** Dispatch-owned PR observer and repairer, provided by the CLI daemon entry. */
   prWatches?: (now: number, log: (message: string) => void) => void;
+  /** Records todo firings, provided by the CLI daemon entry. Runs after `prWatches`, so PR records are fresh. */
+  todoFiring?: (now: number, log: (message: string) => void) => void;
+  /** Wakes traps on Codex's shared app-server after it restarts; provided by the CLI daemon entry. */
+  codexServerWatch?: (now: number, log: (message: string) => void) => void;
   /** CLI-owned asynchronous trap startup; never waits for sign-on in the tick. */
   trapStarts?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
@@ -557,6 +565,8 @@ const tickTimes = new Map<string, { last: number; resumed?: number }>();
 export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {}): void {
   const cfg = loadConfig();
   ensureLayout();
+  reconcileAssistance();
+  reconcileConfiguredProfiles(cfg);
   const now = hooks.now?.() ?? Date.now();
   const ttl = cfg.soak.ttlSecs * 1000;
   const wedgeMs = cfg.limits.wedgeThresholdSecs * 1000;
@@ -574,6 +584,17 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   } catch (err) {
     // A failed PR poll must not skip the rest of the tick (ghost sweeps, claims).
     log(`pr watches: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    hooks.todoFiring?.(hooks.now?.() ?? Date.now(), log);
+  } catch (err) {
+    // A failure here must not skip the rest of the tick either.
+    log(`todo firing: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    hooks.codexServerWatch?.(hooks.now?.() ?? Date.now(), log);
+  } catch (err) {
+    log(`codex server watch: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {
@@ -603,6 +624,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   for (const t of bounceExpiredSignOffs(signOffGraceMs)) log(`trap wt:${t} did not re-soak within the sign-off grace — its messages bounced to the helm`);
   noticeOrphanedBait(Date.now(), signOffGraceMs);
   noticeIdleTrapClaims(now, cfg.soak.claimIdleNoticeSecs * 1000);
+  try {
+    heavyDaemonPass(now);
+  } catch (err) {
+    log(`heavy line: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const trapSkip = daemonSkip(listTraps(), cfg.soak.deferSecs * 1000);
   // A queue-mode pool dispatch stays queued while its pool has no free worktree.
   const workSkip = (d: Descriptor) => trapSkip(d) || poolWaits(d, cfg);

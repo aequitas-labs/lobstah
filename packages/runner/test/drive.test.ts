@@ -8,9 +8,11 @@ import {
   enqueue,
   ensureLayout,
   eventsPath,
+  joinHeavyLine,
   laneDirs,
   lastEventAt,
   readStatusLog,
+  releaseHeavyTicket,
   requestCancel,
   sendMessage,
 } from '@lobstah/core';
@@ -284,6 +286,57 @@ describe("drive — only the worker's report finishes a dispatch", () => {
     await driving;
     expect(f.sent).toEqual([unreportedNudge('q5')]);
     expect(verbs('q5').at(-1)).toBe('done');
+  });
+
+  it('a command in the heavy line holds the turn past the window, however long it waits', async () => {
+    claimed('h1');
+    const ticket = joinHeavyLine({ pid: process.pid, command: 'git push', dispatch: 'h1', lane: 'work' });
+    const f = fakeRun([(api) => api.bg(1), () => appendStatus('h1', 'work', 'done')]);
+    const driving = drive(f.run, { id: 'h1', lane: 'work', pollMs: 10, backgroundWaitMs: 30, settleGraceMs: 30 });
+    await sleep(150);
+    expect(f.sent).toEqual([]);
+    expect(f.state().ended).toBe(false);
+    releaseHeavyTicket(ticket.seq);
+    f.bg(0);
+    f.wake();
+    await driving;
+    expect(f.sent).toEqual([]);
+    expect(verbs('h1').at(-1)).toBe('done');
+  });
+
+  it('a turn that ends in the heavy line with no background report still holds', async () => {
+    claimed('h2');
+    const ticket = joinHeavyLine({ pid: process.pid, command: 'git push', dispatch: 'h2', lane: 'work' });
+    const f = fakeRun([() => {}, () => appendStatus('h2', 'work', 'done')]);
+    const driving = drive(f.run, { id: 'h2', lane: 'work', pollMs: 10, backgroundWaitMs: 30 });
+    await sleep(100);
+    expect(f.sent).toEqual([]);
+    releaseHeavyTicket(ticket.seq);
+    f.wake();
+    await driving;
+    expect(verbs('h2').at(-1)).toBe('done');
+  });
+
+  it('paused on the heavy line does not park: parking would kill the push', async () => {
+    claimed('h3');
+    const ticket = joinHeavyLine({ pid: process.pid, command: 'git push', dispatch: 'h3', lane: 'work' });
+    const f = fakeRun([() => appendStatus('h3', 'work', 'paused', 'Push in line', undefined, { waitingOn: 'heavy' }), () => appendStatus('h3', 'work', 'done')]);
+    const driving = drive(f.run, { id: 'h3', lane: 'work', pollMs: 10, backgroundWaitMs: 30 });
+    await sleep(100);
+    expect(f.state().ended).toBe(false);
+    releaseHeavyTicket(ticket.seq);
+    f.wake();
+    const result = await driving;
+    expect(result.parked).toBeUndefined();
+    expect(verbs('h3').at(-1)).toBe('done');
+  });
+
+  it('another dispatch\'s ticket does not hold this one', async () => {
+    claimed('h4');
+    joinHeavyLine({ pid: process.pid, command: 'git push', dispatch: 'someone-else', lane: 'work' });
+    const f = fakeRun([(api) => api.bg(1), () => {}]);
+    await drive(f.run, { id: 'h4', lane: 'work', pollMs: 10, backgroundWaitMs: 30 });
+    expect(f.sent).toEqual([unreportedNudge('h4')]);
   });
 
   it('the background hold heartbeats the event stream the wedge detector reads', async () => {

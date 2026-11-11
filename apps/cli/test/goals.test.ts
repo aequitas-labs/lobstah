@@ -4,9 +4,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { addTodo, askDecision, answerDecision, appendStatus, claimNext, closeTodo, complete, enqueue, ensureLayout, goalDate, goalsCardTitle, loadConfig,
+import { addTodo, askDecision, answerDecision, appendStatus, claimNext, closeTodo, complete, enqueue, ensureLayout, goalDate, GOAL_WORDING_RULE, goalsCardTitle, loadConfig,
   parsePrRef, prEvidence, setGoalDone, setGoals, statusPath, takeHelm, upsertPr, type GhPrView } from '@lobstah/core';
+import { charter, GOAL_CHECK_RULE } from '../src/charter.js';
 import { dailyGoalsContext, goalsRecapData } from '../src/goals.js';
+import { usageFor } from '../src/usage.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -31,15 +33,15 @@ it('CLI reads/writes goals and past recaps, and refuses a different session writ
   takeHelm({ sessionId: 'helm', grounds: { name: 'day', repos: ['r'] }, ttlMs: 60000 });
   const command = (...args: string[]) => run('goals', ...args, '--grounds', 'day', '--session', 'helm');
   expect(command('set', 'Ship it', 'Review it').status).toBe(0);
-  expect(command().stdout).toContain('1. Ship it\n2. Review it');
-  expect(command('add', 'Later').stdout).toContain('3. Later');
+  expect(command().stdout).toContain('1. [ ] Ship it\n2. [ ] Review it');
+  expect(command('add', 'Later').stdout).toContain('3. [ ] Later');
   expect(command('done', '2').stdout).toContain('2. [x] Review it');
   expect(run('goals', 'undo', '2', '--grounds', 'day', '--session', 'other').status).toBe(1);
   expect(command('undo', '2').stdout).toContain('2. [ ] Review it');
   expect(command('done', '99').status).toBe(1);
   const removed = command('rm', '2');
   expect(removed.status, removed.stderr).toBe(0);
-  expect(removed.stdout).toContain('1. Ship it\n2. Later');
+  expect(removed.stdout).toContain('1. [ ] Ship it\n2. [ ] Later');
   expect(removed.stdout).not.toContain('Review it');
   expect(command('rm', '99').status).toBe(1);
   expect(run('goals', 'set', 'No', '--grounds', 'day', '--session', 'other').status).toBe(1);
@@ -61,6 +63,19 @@ it('prompt reminder crosses 04:00 once per grounds/day, across sessions and conf
   expect(dailyGoalsContext('day', cfg, after)).toBeUndefined();
   setGoals('day', '2026-10-16', ['Already written']);
   expect(dailyGoalsContext('day', cfg, new Date('2026-10-16T12:00:00Z'))).toBeUndefined();
+});
+
+it('the goal rule is one text in the charter, both man skills, goals help and the first-message prompt', () => {
+  expect(GOAL_CHECK_RULE.startsWith(GOAL_WORDING_RULE)).toBe(true);
+  expect(GOAL_CHECK_RULE).toContain('no verb or no done state');
+  expect(GOAL_CHECK_RULE).toContain('Never ask for IDs or numbers.');
+  const skills = ['claude-code', 'codex'].map((plugin) => fs.readFileSync(fileURLToPath(new URL(`../../../plugins/${plugin}/skills/man/SKILL.md`, import.meta.url)), 'utf8'));
+  const role = charter({ name: 'fleet', repos: ['r'] }).split('Role:')[1]?.split('Fences:')[0];
+  for (const text of [role, ...skills]) expect(text).toContain(GOAL_CHECK_RULE);
+  const help = usageFor('goals')!;
+  const prompt = dailyGoalsContext('day', loadConfig(), new Date('2026-10-15T12:00:00Z'))!;
+  for (const text of [help, prompt]) expect(text).toContain(GOAL_WORDING_RULE);
+  for (const text of [role, ...skills, help, prompt]) expect(text).not.toMatch(/measurable/);
 });
 
 it('an existing canonical goals card suppresses another prompt without a marker', () => {
@@ -182,4 +197,16 @@ it('drops a done Todo from tend and the glass once the day rolls over at 04:00 l
   expect(renderTend(buildTendReport())).not.toContain('Ship it');
   expect(buildGlassSnapshot().todos ?? []).toEqual([]);
   expect(run('todo', 'ls', '--all', '--grounds', 'day').stdout).toContain('Ship it');
+});
+
+it('recap-data lists a repeating todo done that day, and leaves out one only skipped', () => {
+  const doneAt = '2026-10-14T15:00:00.000Z';
+  const items = [
+    { id: 1, text: 'Done on a series', state: 'open', updatedAt: doneAt, lastDoneAt: doneAt, every: { cadence: 'daily', at: '09:00' } },
+    { id: 2, text: 'Skipped on a series', state: 'open', updatedAt: doneAt, every: { cadence: 'daily', at: '09:00' } },
+    { id: 3, text: 'Done on another day', state: 'open', updatedAt: doneAt, lastDoneAt: '2026-10-10T15:00:00.000Z', every: { cadence: 'daily', at: '09:00' } },
+  ];
+  fs.mkdirSync(path.join(home, 'todos'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'todos', 'day.json'), JSON.stringify({ items }));
+  expect(goalsRecapData('day', '2026-10-14', loadConfig()).todos.map((t) => t.id)).toEqual([1]);
 });

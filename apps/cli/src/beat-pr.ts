@@ -11,7 +11,7 @@ import {
   writeTrapPrProbe,
 } from '@lobstah/core';
 import type { TrapRegistration } from '@lobstah/core';
-import { autoRegisterPrWatch } from './pr-watch.js';
+import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 
 /** One subprocess run; tests swap in a fake `gh`. */
 export type ProbeRun = (cmd: string, args: string[], cwd: string) => { status: number | null; stdout: string };
@@ -55,7 +55,9 @@ export function probeTrapPr(reg: TrapRegistration, opts: { now?: number; run?: P
   const repo = storedDescriptor(id, 'work')?.repo ?? reg.repo;
   const trunk = (repo ? loadConfig().repos[repo]?.trunk : undefined) ?? 'main';
   if (branch === trunk) return { recorded: false, reason: 'trunk' };
-  if (known) return { recorded: false, reason: 'known' };
+  const evidence = readEvidence(id, 'work');
+  const branches = [...new Set([evidence.branch, ...(evidence.pushes ?? []).map((push) => push.branch), branch])].filter((name): name is string => !!name && name !== 'HEAD' && name !== trunk);
+  if (known && branches.length < 2) return { recorded: false, reason: 'known' };
   // A branch cut from origin/<trunk> tracks trunk until its first push.
   const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
   const tracked = upstream.status === 0 ? upstream.stdout.trim() : '';
@@ -66,12 +68,11 @@ export function probeTrapPr(reg: TrapRegistration, opts: { now?: number; run?: P
     const at = committed.status === 0 ? Number(committed.stdout.trim()) * 1000 : NaN;
     if (!(at >= claimedAt)) return { recorded: false, reason: 'before-claim' };
   }
-  const view = run('gh', ['pr', 'view', branch, '--json', 'url', '--jq', '.url'], reg.worktree);
+  const view = known ? { status: 0, stdout: known } : run('gh', ['pr', 'view', branch, '--json', 'url', '--jq', '.url'], reg.worktree);
   const prUrl = view.status === 0 ? view.stdout.trim() : '';
   if (!parsePrRef(prUrl)) return { recorded: false, reason: 'no-pr' };
   writeTrapPrProbe(reg.trapId, { dispatch: id, branch, checkedAt: new Date(now).toISOString(), prUrl });
-  if (readEvidence(id, 'work').prUrl === prUrl) return { recorded: false, reason: 'known' };
-  mergeEvidence(id, 'work', { prUrl });
-  const watch = autoRegisterPrWatch(id, prUrl);
-  return { recorded: true, dispatch: id, prUrl, ...(watch ? { watch: watch.key } : {}) };
+  const discovery = dispatchPrDiscovery([evidence.prUrl ?? prUrl, prUrl], { cwd: reg.worktree, branches, run });
+  const watches = recordDispatchPrs(id, 'work', discovery, true);
+  return { recorded: true, dispatch: id, prUrl, ...(watches[0] ? { watch: watches[0] } : {}) };
 }

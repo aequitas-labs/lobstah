@@ -1,4 +1,4 @@
-import { listRoster, listTraps, listReservations, loadConfig, readRoster, repoTrapCount, trapAvailability, trapLabel, workerLabel, toonTable, type Config, type TrapRegistration, type WorkerConfig } from '@lobstah/core';
+import { configuredTrapViews, listRoster, listTraps, listReservations, loadConfig, readRoster, repoTrapCount, trapAvailability, trapLabel, workerLabel, toonTable, type Config, type TrapRegistration, type WorkerConfig } from '@lobstah/core';
 import { nextStartMode } from './throw.js';
 
 /** The config, or none when it cannot be read: a trap list never fails on it. */
@@ -32,7 +32,7 @@ export function trapRows(now = Date.now(), repos?: readonly string[], cfg: Pick<
     const hbAgeSecs = Math.max(0, Math.round((now - Date.parse(r.heartbeatAt)) / 1000));
     return {
       trap: `wt:${r.trapId}`, name: r.name, label: trapLabel(r), session: r.sessionId.slice(0, 8),
-      worker: liveWorker(r), repo: r.repo ?? '(addressed only)', worktree: r.worktree,
+      worker: liveWorker(r), repo: r.configured ? `trap:${r.configured.profile} (${r.configured.grounds}, ${r.configured.surface})` : r.repo ?? '(addressed only)', worktree: r.worktree,
       claimed: availability.dispatch, availability: availability.text,
       listening: r.firstParkedAt === undefined ? 'never' : hbAgeSecs <= 10 ? 'now' : `${hbAgeSecs}s ago`,
       state: undefined as 'starting' | 'start-failed' | 'stowed' | 'ghosted' | undefined,
@@ -52,9 +52,9 @@ export function trapRows(now = Date.now(), repos?: readonly string[], cfg: Pick<
     rows.push({ trap: `wt:${r.trapId}`, name: r.name, label: trapLabel(r), session: r.sessionId.slice(0, 8),
       // A stowed trap shows the mode its next throw starts it in.
       worker: workerLabel({ harness: r.profile?.harness ?? r.harness, model: r.profile?.model ?? r.model, config: { ...(r.profile?.config ?? r.config), permissionMode: nextStartMode(cfg, r) as WorkerConfig['permissionMode'] } }),
-      repo: r.repo ?? '(addressed only)', worktree: r.worktree, claimed: undefined, availability: state, listening: state, state });
+      repo: r.configured ? `trap:${r.configured.profile} (${r.configured.grounds}, ${r.configured.surface})` : r.repo ?? '(addressed only)', worktree: r.worktree, claimed: undefined, availability: state, listening: state, state });
   }
-  return rows.filter((r) => !repos || repos.includes(r.repo)).sort((a, b) => a.label.localeCompare(b.label));
+  return rows.filter((r) => !repos || r.repo.startsWith('trap:') || repos.includes(r.repo)).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export function repoTrapRows(cfg: Config, repos: readonly string[] = Object.keys(cfg.repos)) {
@@ -64,6 +64,7 @@ export function repoTrapRows(cfg: Config, repos: readonly string[] = Object.keys
 export function trapSummary(cfg: Config, repos?: readonly string[], now = Date.now()): string {
   const rows = trapRows(now, repos, cfg);
   return [
+    ...(configuredTrapViews(cfg).length ? [toonTable('configured-traps', configuredTrapViews(cfg).map((profile) => ({ ...profile })), ['profile', 'grounds', 'surface', 'harness', 'capacity', 'state', 'cwd'])] : []),
     toonTable('repo-traps', repoTrapRows(cfg, repos), ['repo', 'traps']),
     ...(rows.length ? [toonTable('traps', rows, ['name', 'trap', 'worker', 'repo', 'availability', 'listening'])] : []),
   ].join('\n');

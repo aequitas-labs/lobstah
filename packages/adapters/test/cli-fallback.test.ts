@@ -145,6 +145,7 @@ describe('codexExecArgs', () => {
     const first = codexExecArgs(opts({ model: 'gpt-5-codex', effort: 'high' }), 'go');
     expect(first.slice(0, 2)).toEqual(['exec', '--json']);
     expect(first.join(' ')).toContain('--sandbox workspace-write');
+    expect(first[first.indexOf('--add-dir') + 1]).toMatch(/heavy$/);
     expect(first.join(' ')).toContain('-m gpt-5-codex');
     expect(first.at(-1)).toBe('go');
     const resumed = codexExecArgs(opts(), 'more', 't-42');

@@ -27,10 +27,33 @@ import type { CheckoutRoot } from './grant-scope.js';
  * checkout roots in its command as `{repo:<key>}`. Older always-grants,
  * stored absolute, are read the same way when they sit inside a checkout.
  * A once-grant stays exact.
+ *
+ * An intent grant is a person's approval of a kind of action for one trap or
+ * repo. The grant is its patterns: lobstah's own hook matches them, the same on
+ * Claude Code and Codex, from the moment the grant is made. The sentence only
+ * labels the grant for the person reading it. Anything that doesn't match goes
+ * to the harness's own reviewer, unchanged and told nothing.
+ *
+ * A session command grant is a once-grant bound to one session: a glass
+ * Allow on a helm's command card. It covers that session's shell call with
+ * exactly the granted command, one time.
  */
 
 export type GrantHarness = 'claude' | 'codex' | 'any';
-export type GrantMode = 'once' | 'always' | 'session';
+export type GrantMode = 'once' | 'always' | 'session' | 'intent';
+
+/** One thing an intent grant allows straight through: a command prefix or glob, a tool glob, or a repo-relative path. */
+export interface IntentPattern {
+  kind: 'command' | 'tool' | 'path';
+  pattern: string;
+}
+
+/** What a person approved in an intent grant: the patterns that run without asking, and the sentence that labels them. */
+export interface GrantIntent {
+  /** The label on the card and the Grants tab. It allows nothing itself. */
+  text: string;
+  patterns: IntentPattern[];
+}
 
 /** An unused once-grant lapses after this long unless an expiry is given. */
 export const ONCE_TTL_MS = 60 * 60 * 1000;
@@ -50,17 +73,23 @@ export interface Grant {
   match?: 'exact' | 'prefix';
   /** A file grant: a path for the write tools; a trailing slash covers everything under it. */
   path?: string;
-  /** Set on an always path grant inside a repo: `path` is relative to that repo's root, in any of its checkouts. */
+  /**
+   * On an always path grant inside a repo: `path` is relative to that repo's root, in any of its checkouts.
+   * On an intent grant with no trap: the repo whose traps it covers.
+   */
   repo?: string;
   /** Only this trap may use it, when set. */
   trap?: string;
   /** The dispatch whose request it answered, when it came from a card. */
   dispatch?: string;
   expiresAt?: string;
+  /** A session grant's session; on a once-grant, the one session whose call it covers (a session command grant). */
   session?: string;
   tools?: string;
   hosts?: string[];
   reason?: string;
+  /** An intent grant's approved kind of action. */
+  intent?: GrantIntent;
   audit?: Array<{ tool: string; at: string; hosts?: string[] }>;
   callIds?: string[];
   uses: number;
@@ -70,6 +99,9 @@ export interface Grant {
 }
 
 export interface GrantInput {
+  intent?: GrantIntent;
+  /** An intent grant's scope when it has no trap. */
+  repo?: string;
   session?: string;
   tools?: string;
   hosts?: string[];
@@ -95,6 +127,8 @@ export interface GrantRequest {
   command?: string;
   path?: string;
   trap?: string;
+  /** The repo of the trap making the call: an intent grant can be scoped to it. */
+  repo?: string;
 }
 
 type LedgerEvent =
@@ -265,10 +299,13 @@ function pathCovers(want: string, have: string, sep: string): boolean {
  */
 export function grantCovers(g: Grant, req: GrantRequest, roots: readonly CheckoutRoot[] = checkoutRoots()): boolean {
   if (g.mode === 'session') return sessionGrantCovers(g, req);
+  if (g.mode === 'intent') return intentGrantCovers(g, req, roots);
+  if (g.mode === 'once' && g.session !== undefined) return sessionCommandGrantCovers(g, req);
   if (req.session) return false;
   if (req.session && g.session && req.session !== g.session) return false;
   if (g.harness !== 'any' && g.harness !== req.harness) return false;
   if (g.trap && g.trap !== req.trap) return false;
+  if (g.tools !== undefined && g.command === undefined && g.path === undefined) return g.mode === 'always' && standingToolCovers(g, req);
   const widen = g.mode === 'always';
   if (g.command !== undefined) {
     let cmd = req.command?.trim();
@@ -310,6 +347,154 @@ export function grantCovers(g: Grant, req: GrantRequest, roots: readonly Checkou
   return false;
 }
 
+/** A command word that runs whatever follows it: a pattern on one would allow anything. */
+const RUNS_ANYTHING = new Set([
+  'sh', 'bash', 'zsh', 'fish', 'dash', 'node', 'python', 'python3', 'ruby', 'perl', 'php', 'deno', 'tsx', 'ts-node',
+  'eval', 'exec', 'source', 'sudo', 'su', 'env', 'xargs', 'nohup', 'command', 'time', 'timeout', 'osascript', 'powershell', 'pwsh', 'cmd',
+]);
+/** A package runner: the word after it is the one that runs. */
+const PACKAGE_RUNNERS = new Set(['npx', 'pnpx', 'pnpm', 'npm', 'yarn', 'bun', 'bunx']);
+const PACKAGE_RUNNER_VERBS = new Set(['exec', 'dlx', 'run', 'x']);
+/**
+ * Repo-relative paths that run code or hold configuration: an intent never
+ * allows writing them, at any depth. Case doesn't count, because `.GIT/hooks`
+ * is `.git/hooks` on a case-insensitive filesystem.
+ */
+const PROTECTED_PATH = /(?:^|\/)(?:\.git|\.husky|\.claude|\.codex|\.lobstah)(?:\/|$)/i;
+/** The longest intent sentence: a person reads it on a card before approving it. */
+const INTENT_TEXT_MAX = 300;
+/** The most patterns one intent grant carries. */
+const INTENT_PATTERNS_MAX = 12;
+
+/** A pattern as a trap writes it: `tool:<glob>`, `path:<glob>`, otherwise a command prefix or glob. */
+export function parseIntentPattern(raw: string): IntentPattern {
+  const text = raw.trim();
+  if (text.startsWith('tool:')) return { kind: 'tool', pattern: text.slice('tool:'.length).trim() };
+  if (text.startsWith('path:')) return { kind: 'path', pattern: text.slice('path:'.length).trim() };
+  return { kind: 'command', pattern: text };
+}
+
+/** The pattern as a card or a listing shows it. */
+export function intentPatternText(pattern: IntentPattern): string {
+  return pattern.kind === 'command' ? pattern.pattern : `${pattern.kind}:${pattern.pattern}`;
+}
+
+function validateCommandPattern(pattern: string): void {
+  if (SHELL_JOINERS.test(pattern)) throw new GrantError(`pattern \`${pattern}\` has shell syntax (;, &, |, a redirect or a subshell), which a pattern never covers`);
+  const words = pattern.split(/\s+/);
+  if (words.length < 2) throw new GrantError(`pattern \`${pattern}\` is one word, which allows everything it can do: name the subcommand too`);
+  const literal = words.filter((word) => !word.includes('*'));
+  if (words[0]!.includes('*') || literal.length < 2) throw new GrantError(`pattern \`${pattern}\` must start with a literal word and name at least two`);
+  const runner = words[0]!.split('/').at(-1)!;
+  // A wrapper runs what follows it, so any literal word that runs anything counts, wherever it stands.
+  if (literal.some((word) => RUNS_ANYTHING.has(word.split('/').at(-1)!))) {
+    throw new GrantError(`pattern \`${pattern}\` names a command that runs anything`);
+  }
+  const afterRunner = PACKAGE_RUNNERS.has(runner) ? words.slice(1).find((word) => !PACKAGE_RUNNER_VERBS.has(word) && !word.startsWith('-')) : undefined;
+  if (afterRunner !== undefined && afterRunner.includes('*')) throw new GrantError(`pattern \`${pattern}\` lets a glob choose what the package runner runs`);
+  if (runner === 'lobstah' && ['grant', 'grants', 'revoke', 'permissions', 'trap'].includes(words[1]!)) {
+    throw new GrantError(`pattern \`${pattern}\` would let a trap change its own permissions`);
+  }
+  if (pattern.includes('*') && /--dry-run/.test(pattern)) throw new GrantError(`pattern \`${pattern}\` is a glob on a dry run: it could also cover the real run`);
+}
+
+function validatePathPattern(pattern: string): void {
+  const relative = pattern.replace(/\\/g, '/');
+  if (!relative || path.isAbsolute(pattern) || /^[A-Za-z]:/.test(relative) || relative.startsWith('~') || relative.split('/').includes('..')) {
+    throw new GrantError(`path pattern \`${pattern}\` must be relative to the repo, inside it`);
+  }
+  if (!/[A-Za-z0-9]/.test(relative)) throw new GrantError(`path pattern \`${pattern}\` covers the whole repo: name a directory`);
+  if (PROTECTED_PATH.test(relative)) throw new GrantError(`path pattern \`${pattern}\` covers files that run code or hold configuration`);
+}
+
+function validateToolPattern(pattern: string): void {
+  if (!TOOL_GLOB.test(pattern) || !/^[A-Za-z0-9_.-]{3}/.test(pattern)) throw new GrantError(`tool pattern \`${pattern}\` must start with a name`);
+  if (SHELL_TOOL_GLOB.test(pattern) || [...SHELL_TOOLS, ...WRITE_TOOLS].some((tool) => toolGlobMatches(pattern, tool))) {
+    throw new GrantError(`tool pattern \`${pattern}\` names a shell or file tool: give a command or path pattern instead`);
+  }
+}
+
+/**
+ * The intent a card may offer, cleaned, or a GrantError saying why not. Traps
+ * propose these, so nothing here can become "allow anything": see the checks
+ * above. What passes is shown on the card for a person to read before approving.
+ */
+export function validateIntent(intent: GrantIntent): GrantIntent {
+  const text = intent.text.replace(/\s+/g, ' ').trim();
+  if (!text) throw new GrantError('an intent needs a sentence saying what it covers');
+  if (text.length > INTENT_TEXT_MAX) throw new GrantError(`an intent is at most ${INTENT_TEXT_MAX} characters`);
+  if (intent.patterns.length === 0) throw new GrantError('an intent needs at least one pattern: the patterns are what it allows');
+  if (intent.patterns.length > INTENT_PATTERNS_MAX) throw new GrantError(`an intent has at most ${INTENT_PATTERNS_MAX} patterns`);
+  const patterns = intent.patterns.map((item) => ({ kind: item.kind, pattern: item.pattern.trim() }));
+  for (const { kind, pattern } of patterns) {
+    if (kind === 'command') validateCommandPattern(pattern);
+    else if (kind === 'path') validatePathPattern(pattern);
+    else validateToolPattern(pattern);
+  }
+  return { text, patterns };
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A glob against a path: `*` matches anything, `/` included, and nothing else is special. */
+function pathGlobMatches(glob: string, text: string): boolean {
+  return new RegExp(`^${glob.split('*').map(escapeRegExp).join('[\\s\\S]*')}$`).test(text);
+}
+
+/**
+ * A glob against a command. A `*` inside the pattern matches within one word,
+ * so `with-timeout * npx wrangler tail` can't take `60 bash -c "rm x"` as its
+ * `*`. Only a final `*` runs on past a space, and one inside an open quote stops
+ * at the closing quote, so `--command "SELECT *` doesn't take `1" --file evil.sql`.
+ * A glob with no final `*` takes more arguments after it, as a prefix does.
+ */
+function commandGlobMatches(glob: string, command: string): boolean {
+  const parts = glob.split('*');
+  const last = parts.pop()!;
+  let body = parts.map((part) => `${escapeRegExp(part)}\\S*`).join('');
+  if (last === '') {
+    const before = parts.join('*');
+    const openQuote = ['"', "'"].find((quote) => (before.split(quote).length - 1) % 2 === 1);
+    const stem = parts.slice(0, -1).map((part) => `${escapeRegExp(part)}\\S*`).join('') + escapeRegExp(parts.at(-1)!);
+    body = stem + (openQuote ? `[^${openQuote}]*${openQuote}` : '[\\s\\S]*');
+  } else {
+    body += `${escapeRegExp(last)}(?: [\\s\\S]*)?`;
+  }
+  return new RegExp(`^${body}$`).test(command);
+}
+
+function intentPatternCovers(item: IntentPattern, req: GrantRequest, roots: readonly CheckoutRoot[]): boolean {
+  if (item.kind === 'command') {
+    const command = req.command?.trim();
+    // A pattern never covers a second command joined on, whatever it matches.
+    if (!command || SHELL_JOINERS.test(command)) return false;
+    if (item.pattern.includes('*')) return commandGlobMatches(item.pattern, command);
+    if (command === item.pattern) return true;
+    if (!command.startsWith(`${item.pattern} `)) return false;
+    // As for a prefix grant: a later flag must not negate a dry run.
+    return !(/(?:^|\s)--dry-run(?:\s|$)/.test(item.pattern) && /--(?:no-?)?dry[-_]?run\b/i.test(command.slice(item.pattern.length)));
+  }
+  if (item.kind === 'path') {
+    if (!req.path || !(WRITE_TOOLS as readonly string[]).includes(req.tool)) return false;
+    const located = locateInRepo(req.path, roots);
+    if (!located || (req.repo !== undefined && located.repo !== req.repo) || PROTECTED_PATH.test(located.rel)) return false;
+    return item.pattern.endsWith('/') ? located.rel.startsWith(item.pattern) : pathGlobMatches(item.pattern, located.rel);
+  }
+  return req.command === undefined && req.path === undefined && toolGlobMatches(item.pattern, req.tool);
+}
+
+/**
+ * Does an intent grant allow this call straight through? Only for the trap or
+ * repo and harness it names, only on a pattern, and never on a protected
+ * target. Everything else is the harness reviewer's, exactly as without a grant.
+ */
+export function intentGrantCovers(g: Grant, req: GrantRequest, roots: readonly CheckoutRoot[] = checkoutRoots()): boolean {
+  if (!g.intent || (g.harness !== 'any' && g.harness !== req.harness)) return false;
+  const inScope = g.trap !== undefined ? req.trap === g.trap : g.repo !== undefined && req.repo === g.repo;
+  if (!inScope || sessionGuarded(req)) return false;
+  return g.intent.patterns.some((item) => intentPatternCovers(item, req, roots));
+}
+
 /** The grants in force, newest first; with `all`, every grant ever made. */
 export function listGrants(opts: { all?: boolean; now?: number } = {}): { grants: Grant[]; intact: boolean; problem?: string } {
   const ledger = readLedger();
@@ -325,6 +510,30 @@ export function listGrants(opts: { all?: boolean; now?: number } = {}): { grants
 export function addGrant(input: GrantInput, now = new Date(), roots: readonly CheckoutRoot[] = checkoutRoots()): Grant {
   const command = input.command?.trim();
   const target = input.path?.trim();
+  if (input.mode === 'intent') {
+    if (!input.intent) throw new GrantError('an intent grant needs an intent');
+    if (!input.trap && !input.repo) throw new GrantError('an intent grant is scoped to a trap or a repo');
+    if (input.expiresAt !== undefined && Number.isNaN(Date.parse(input.expiresAt))) throw new GrantError(`invalid expiry ${input.expiresAt}`);
+    const grant: Grant = {
+      id: `g-${crypto.randomBytes(4).toString('hex')}`,
+      at: now.toISOString(),
+      by: input.by,
+      harness: input.harness ?? 'any',
+      mode: 'intent',
+      intent: validateIntent(input.intent),
+      ...(input.trap ? { trap: input.trap } : { repo: input.repo! }),
+      ...(input.dispatch ? { dispatch: input.dispatch } : {}),
+      ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+      uses: 0,
+    };
+    return withLock(() => {
+      const ledger = readLedger();
+      if (!ledger.intact) throw new GrantError(`the grants ledger is damaged (${ledger.problem}); nothing was written`);
+      const { uses: _uses, ...rest } = grant;
+      append(ledger.head, { type: 'grant', ...rest });
+      return grant;
+    });
+  }
   if (input.mode === 'session') {
     const { expiresAt, hosts } = validateSessionGrant(input, now);
     const tool = input.tools!;
@@ -351,7 +560,39 @@ export function addGrant(input: GrantInput, now = new Date(), roots: readonly Ch
       return grant;
     });
   }
+  if (input.mode === 'always' && input.tools !== undefined && !command && !target) {
+    // A standing tool grant: one tool or tool glob, for every trap, until revoked.
+    if (!TOOL_GLOB.test(input.tools) || !/[A-Za-z0-9]/.test(input.tools)) throw new GrantError('an exact tool name or tool glob is required');
+    if (SHELL_TOOL_GLOB.test(input.tools) || [...SHELL_TOOLS, ...WRITE_TOOLS].some((t) => toolGlobMatches(input.tools!, t)))
+      throw new GrantError('a shell or file tool is granted by its command or path, not by its name');
+    const hosts = exactHosts(input.hosts ?? []);
+    const grant: Grant = {
+      id: `g-${crypto.randomBytes(4).toString('hex')}`,
+      at: now.toISOString(),
+      by: input.by,
+      harness: input.harness ?? 'any',
+      mode: 'always',
+      tools: input.tools,
+      ...(hosts.length ? { hosts: [...new Set(hosts)] } : {}),
+      ...(input.reason ? { reason: input.reason.slice(0, 1000) } : {}),
+      ...(input.dispatch ? { dispatch: input.dispatch } : {}),
+      uses: 0,
+    };
+    return withLock(() => {
+      const ledger = readLedger();
+      if (!ledger.intact) throw new GrantError(`the grants ledger is damaged (${ledger.problem}); nothing was written`);
+      const { uses: _uses, ...rest } = grant;
+      append(ledger.head, { type: 'grant', ...rest });
+      return grant;
+    });
+  }
   if (!command === !target) throw new GrantError('a grant names one command or one path');
+  if (input.session !== undefined) {
+    // A session command grant: one session, one exact command, one use.
+    if (input.mode !== 'once' || !command || (input.match ?? 'exact') !== 'exact')
+      throw new GrantError('a once-grant for a session names one exact command');
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(input.session)) throw new GrantError('a session command grant needs exactly one session id');
+  }
   if (command && input.match === 'prefix' && SHELL_JOINERS.test(command)) {
     throw new GrantError('a prefix grant cannot contain shell syntax (;, &, |, a redirect or a subshell); grant the exact command instead');
   }
@@ -374,6 +615,7 @@ export function addGrant(input: GrantInput, now = new Date(), roots: readonly Ch
     harness: input.harness ?? 'any',
     mode: input.mode,
     ...what,
+    ...(input.session !== undefined ? { session: input.session } : {}),
     ...(input.trap ? { trap: input.trap } : {}),
     ...(input.dispatch ? { dispatch: input.dispatch } : {}),
     ...(expiresAt ? { expiresAt } : {}),
@@ -406,7 +648,7 @@ export function revokeGrant(id: string, by: string, now = new Date()): Grant {
  * once-grant is spent by it. Returns undefined when nothing covers it, or
  * when the ledger is damaged.
  */
-export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date; callId?: string } = {}): Grant | undefined {
+export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date; callId?: string; only?: GrantMode } = {}): Grant | undefined {
   const now = opts.now ?? new Date();
   if (!fs.existsSync(ledgerPath())) return undefined;
   const roots = checkoutRoots();
@@ -415,7 +657,7 @@ export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date
     if (!ledger.intact) return undefined;
     // Prefer an always-grant, so a once-grant is not spent where an always-grant would do.
     const covering = ledger.grants
-      .filter((g) => grantActive(g, now.getTime()) && grantCovers(g, req, roots))
+      .filter((g) => (!opts.only || g.mode === opts.only) && grantActive(g, now.getTime()) && grantCovers(g, req, roots))
       .sort((a, b) => (a.mode === b.mode ? 0 : a.mode === 'always' ? -1 : 1));
     const g = covering[0];
     if (!g) return undefined;
@@ -425,7 +667,7 @@ export function useGrant(req: GrantRequest, opts: { session?: string; now?: Date
       id: g.id,
       at: now.toISOString(),
       ...(opts.session ? { session: opts.session } : {}),
-      ...(g.mode === 'session'
+      ...(g.mode === 'session' || g.mode === 'intent' || g.tools !== undefined
         ? { tool: req.tool, hosts: toolHosts(req.input ?? {}).hosts, ...(opts.callId ? { callId: opts.callId } : {}) }
         : {}),
     });
@@ -547,22 +789,69 @@ export function sessionGrantCovers(g: Grant, req: GrantRequest): boolean {
   if (!req.session || req.session !== g.session || !g.expiresAt || !grantActive(g)) return false;
   if (g.harness !== 'any' && g.harness !== req.harness) return false;
   if (!g.tools || sessionGuarded(req)) return false;
-  const pattern = g.tools
-    .split('*')
-    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*');
-  if (!new RegExp(`^${pattern}$`).test(req.tool)) return false;
-  if (['Bash', 'shell', 'exec_command'].includes(req.tool.split('.').at(-1)!)) {
+  if (!toolGlobMatches(g.tools, req.tool)) return false;
+  if (SHELL_TOOLS.includes(req.tool.split('.').at(-1)!)) {
     if (g.tools !== 'Bash' || !g.command || !req.command) return false;
     return grantCovers({ ...g, mode: 'once', session: undefined, trap: undefined }, { ...req, session: undefined }, []);
   }
+  return hostsCover(g, req);
+}
+
+/**
+ * A session command grant covers its own session's shell call when the
+ * command is exactly the granted one. Sensitive targets stay uncovered.
+ */
+export function sessionCommandGrantCovers(g: Grant, req: GrantRequest): boolean {
+  if (g.command === undefined || !req.session || req.session !== g.session || !req.command) return false;
+  if (g.harness !== 'any' && g.harness !== req.harness) return false;
+  if (!SHELL_TOOLS.includes(req.tool.split('.').at(-1)!) || sessionGuarded(req)) return false;
+  return req.command.trim() === g.command.trim();
+}
+
+/** The shell tools: a grant covers one only through its command. */
+const SHELL_TOOLS = ['Bash', 'shell', 'exec_command'];
+/** A tool name or glob a grant may name. */
+const TOOL_GLOB = /^[A-Za-z0-9_.*-]{1,200}$/;
+/** A tool glob that names a shell tool. */
+const SHELL_TOOL_GLOB = /(?:^|[.*_])(Bash|shell|exec_command)(?:$|[.*_])/;
+
+/** Does a tool name or glob (`*` matches anything) match the tool? */
+function toolGlobMatches(glob: string, tool: string): boolean {
+  const pattern = glob
+    .split('*')
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${pattern}$`).test(tool);
+}
+
+/** A grant's pinned hosts against the URLs in the call: none pinned allows any. */
+function hostsCover(g: Grant, req: GrantRequest): boolean {
   const urls = toolHosts(req.input ?? {});
-  if (
+  return !(
     g.hosts?.length &&
     (urls.invalid || urls.hosts.some((h) => !g.hosts!.includes(h)) || (/navigate|WebFetch/i.test(req.tool) && !urls.hosts.length))
-  )
-    return false;
-  return true;
+  );
+}
+
+/**
+ * A standing tool grant: a person allowed one tool or tool glob for every
+ * trap, until revoked. It covers that tool in any trap's session, never a
+ * shell or file tool (those are granted by command or path) and never a
+ * protected target.
+ */
+function standingToolCovers(g: Grant, req: GrantRequest): boolean {
+  if (!g.tools || sessionGuarded(req) || !toolGlobMatches(g.tools, req.tool)) return false;
+  const tool = req.tool.split('.').at(-1)!;
+  if (SHELL_TOOLS.includes(tool) || (WRITE_TOOLS as readonly string[]).includes(tool)) return false;
+  return hostsCover(g, req);
+}
+
+/** Exact hostnames, lowercased: no URL paths, ports or wildcards. */
+function exactHosts(raw: readonly string[]): string[] {
+  const hosts = raw.map((h) => h.trim().toLowerCase().replace(/\.$/, ''));
+  if (hosts.some((h) => !h || h.includes('*') || new URL(`https://${h}`).hostname !== h || /[/:@?#]/.test(h)))
+    throw new GrantError('hosts must be exact hostnames without URL paths or wildcards');
+  return hosts;
 }
 
 /** Validate a request without writing any grant or ledger entry. */
@@ -570,19 +859,16 @@ export function validateSessionGrant(input: GrantInput, now = new Date()): { exp
   const command = input.command?.trim();
   const target = input.path?.trim();
   if (!input.session || !/^[A-Za-z0-9_-]{1,200}$/.test(input.session)) throw new GrantError('a session grant needs exactly one session id');
-  if (!input.tools || !/^[A-Za-z0-9_.*-]{1,200}$/.test(input.tools) || !/[A-Za-z0-9]/.test(input.tools))
+  if (!input.tools || !TOOL_GLOB.test(input.tools) || !/[A-Za-z0-9]/.test(input.tools))
     throw new GrantError('an exact tool name or tool glob is required');
   if (target) throw new GrantError('a session grant cannot name a file');
   const tool = input.tools;
-  if ((tool === 'Bash' || /(?:^|[.*_])(Bash|shell|exec_command)(?:$|[.*_])/.test(tool)) && (!command || input.match !== 'prefix'))
+  if ((tool === 'Bash' || SHELL_TOOL_GLOB.test(tool)) && (!command || input.match !== 'prefix'))
     throw new GrantError('Bash session grants require a command prefix');
   if (command && (tool !== 'Bash' || input.match !== 'prefix' || SHELL_JOINERS.test(command)))
     throw new GrantError('a session Bash prefix cannot contain shell syntax');
   const expiresAt = input.expiresAt ?? new Date(now.getTime() + 15 * 60_000).toISOString();
   const ttl = Date.parse(expiresAt) - now.getTime();
   if (!Number.isFinite(ttl) || ttl <= 0 || ttl > 4 * 3600_000) throw new GrantError('session grants expire after at most 4h');
-  const hosts = (input.hosts ?? []).map((h) => h.trim().toLowerCase().replace(/\.$/, ''));
-  if (hosts.some((h) => !h || h.includes('*') || new URL(`https://${h}`).hostname !== h || /[/:@?#]/.test(h)))
-    throw new GrantError('hosts must be exact hostnames without URL paths or wildcards');
-  return { expiresAt, hosts };
+  return { expiresAt, hosts: exactHosts(input.hosts ?? []) };
 }

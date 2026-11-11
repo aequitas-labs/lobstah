@@ -20,6 +20,7 @@ import {
   isTerminalApp,
   TERMINAL_APPS,
   trapLabel,
+  withTrapRepo,
   trapRef,
   writeTrapAnchor,
   DEFAULT_TRAP_START_SECS,
@@ -33,13 +34,23 @@ import {
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
-import { codexTrapHookArgs } from './codex-startup.js';
+import { listCodexHooks } from './codex-hook-list.js';
+import { prepareCodexServer } from './codex-server.js';
+import { codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
+import { trapTabTitle } from './terminal-title.js';
+import { openTmuxPane, tmuxPaneTail, type TmuxPaneRef, type TmuxRunner } from './tmux-terminal.js';
 
 /** One terminal tab to open: a directory, an environment, and a command line. */
 export interface TerminalLaunch {
   cwd: string;
   env: Record<string, string>;
   argv: string[];
+  /** Runs in the terminal first; the session starts whether or not it succeeds. */
+  preface?: string;
+  /** The title of the trap's tmux pane. */
+  trap?: string;
+  /** The trap's repo: which tmux window it joins. */
+  repo?: string;
 }
 
 /**
@@ -48,13 +59,14 @@ export interface TerminalLaunch {
  */
 export interface TerminalAdapter {
   app: TerminalApp;
-  launch(launch: TerminalLaunch): Promise<void>;
+  /** Opens the session; a tmux adapter says which pane it opened. */
+  launch(launch: TerminalLaunch): Promise<TmuxPaneRef | void>;
 }
 
 /** The shell text a terminal runs: `cd <dir> && VAR=value <argv>`, every word quoted. */
 export function launchShellText(launch: TerminalLaunch): string {
   const env = Object.entries(launch.env).map(([k, v]) => `${k}=${shellQuote(v)}`);
-  return [`cd ${shellQuote(launch.cwd)} &&`, ...env, ...launch.argv.map(shellQuote)].join(' ');
+  return [`cd ${shellQuote(launch.cwd)} &&`, ...(launch.preface ? [`{ ${launch.preface}; } ;`] : []), ...env, ...launch.argv.map(shellQuote)].join(' ');
 }
 
 const execFileP = promisify(execFile);
@@ -64,7 +76,7 @@ const execFileP = promisify(execFile);
  * text is fixed: nothing from the trap, the path, or the prompt is ever
  * spliced into it, so no AppleScript quoting is needed.
  */
-const APPLESCRIPT: Record<TerminalApp, string[]> = {
+const APPLESCRIPT: Record<Exclude<TerminalApp, 'tmux'>, string[]> = {
   terminal: ['on run argv', 'tell application "Terminal"', 'activate', 'do script (item 1 of argv)', 'end tell', 'end run'],
   iterm: [
     'on run argv',
@@ -77,22 +89,34 @@ const APPLESCRIPT: Record<TerminalApp, string[]> = {
   ],
 };
 
+/** Run AppleScript lines that open a terminal app on this shell text, which is the script's first argument. */
+export async function tellTerminalApp(app: Exclude<TerminalApp, 'tmux'>, script: string[], shellText: string): Promise<void> {
+  try {
+    await execFileP('osascript', [...script.flatMap((line) => ['-e', line]), shellText], { timeout: 30_000 });
+  } catch (err) {
+    const detail = ((err as { stderr?: string }).stderr ?? (err instanceof Error ? err.message : String(err))).trim();
+    throw new Error(
+      `${terminalAppName(app)} did not open a tab: ${detail}` +
+        (/not allowed|-1743|not authori[sz]ed/i.test(detail) ? ' — allow this terminal to control it in System Settings › Privacy & Security › Automation' : ''),
+    );
+  }
+}
+
+/** The tmux adapter: a pane in lobstah's own tmux server (`[soak] terminal = "tmux"`). */
+export function tmuxTerminalAdapter(cfg: Config, run?: TmuxRunner): TerminalAdapter {
+  return {
+    app: 'tmux',
+    launch: (launch) => openTmuxPane(cfg, { cwd: launch.cwd, command: launchShellText(launch), trap: launch.trap, repo: launch.repo }, run),
+  };
+}
+
 /** The macOS adapter for a terminal app. */
-export function macTerminalAdapter(app: TerminalApp): TerminalAdapter {
+export function macTerminalAdapter(app: Exclude<TerminalApp, 'tmux'>): TerminalAdapter {
   return {
     app,
     async launch(launch) {
       if (process.platform !== 'darwin') throw new Error(`${terminalAppName(app)} runs only on macOS`);
-      const args = APPLESCRIPT[app].flatMap((line) => ['-e', line]);
-      try {
-        await execFileP('osascript', [...args, launchShellText(launch)], { timeout: 30_000 });
-      } catch (err) {
-        const detail = ((err as { stderr?: string }).stderr ?? (err instanceof Error ? err.message : String(err))).trim();
-        throw new Error(
-          `${terminalAppName(app)} did not open a tab: ${detail}` +
-            (/not allowed|-1743|not authori[sz]ed/i.test(detail) ? ' — allow this terminal to control it in System Settings › Privacy & Security › Automation' : ''),
-        );
-      }
+      await tellTerminalApp(app, APPLESCRIPT[app], launchShellText(launch));
     },
   };
 }
@@ -139,13 +163,18 @@ export function nextStartMode(cfg: Pick<Config, 'repos' | 'harness'>, entry: Pic
 export function harnessCommand(opts: {
   harness: string;
   cwd: string;
-  ticket: string;
+  ticket?: string;
+  /** Configured profiles sign on by name rather than a repo ticket. */
+  prompt?: string;
   resume?: string;
   model?: string;
   config?: Record<string, string>;
   /** `man throw --bypass`: this start runs with no permission checks. */
   bypass?: boolean;
+  /** The trap's name, to start connected to Claude Remote Control under it. */
+  remoteControl?: string;
 }): StartCommand {
+  if (!opts.ticket && !opts.prompt) throw new Error('a start command requires a ticket or configured sign-on prompt');
   const unapplied: string[] = [];
   const mode = startMode(opts.config, opts.bypass);
   if (opts.harness === 'claude') {
@@ -159,7 +188,9 @@ export function harnessCommand(opts: {
       if (key === 'effort') argv.push('--effort', value);
       else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
     }
-    argv.push(`/lobstah:trap soak --ticket ${opts.ticket}`);
+    // The interactive option, not `claude remote-control` server mode, which can create more sessions.
+    if (opts.remoteControl) argv.push('--remote-control', opts.remoteControl);
+    argv.push(opts.prompt ?? `/lobstah:trap soak --ticket ${opts.ticket}`);
     return { cwd: opts.cwd, env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }, argv, unapplied, mode };
   }
   if (opts.harness === 'codex') {
@@ -175,8 +206,10 @@ export function harnessCommand(opts: {
       if (key === 'effort') argv.push('-c', `model_reasoning_effort=${JSON.stringify(value)}`);
       else if (key !== 'permissionMode' && key !== 'bypass') unapplied.push(key);
     }
+    // Attach to the shared app-server, so a paired phone and this pane drive one thread. Before any subcommand.
+    if (opts.remoteControl) argv.splice(1, 0, '--remote', 'unix://');
     if (opts.resume) argv.push('resume', opts.resume);
-    argv.push(`$lobstah:trap soak --ticket ${opts.ticket}`);
+    argv.push(opts.prompt ?? `$lobstah:trap soak --ticket ${opts.ticket}`);
     return { cwd: opts.cwd, env: {}, argv, unapplied, mode };
   }
   throw new Error(`no start command for harness ${opts.harness}`);
@@ -188,7 +221,7 @@ export function harnessCommand(opts: {
  * worktree explicitly. A cold start opens a new session in that worktree. Either way the first prompt redeems the
  * ticket, so the session signs on under the trap's own id and name.
  */
-export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: string, bypass?: boolean): StartCommand {
+export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: string, bypass?: boolean, remoteControl?: boolean): StartCommand {
   const resume = row.action === 'resume';
   const harness = row.harness ?? entry.harness;
   // Codex can resume a session whose saved cwd is the primary checkout.
@@ -199,6 +232,7 @@ export function startCommand(row: ThrowPlanRow, entry: RosterEntry, ticket: stri
     cwd,
     ticket,
     ...(bypass ? { bypass } : {}),
+    ...(remoteControl ? { remoteControl: entry.name } : {}),
     ...(resume ? { resume: entry.sessionId } : {}),
     ...(row.model ? { model: row.model } : {}),
     ...(row.config ? { config: row.config } : {}),
@@ -222,7 +256,7 @@ export interface ThrowResult {
   seconds: number;
 }
 
-type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'harness' | 'command' | 'mode'> & { timeoutSecs: number };
+type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'terminal' | 'harness' | 'command' | 'mode'> & { timeoutSecs: number; folderTrust?: string };
 
 /** What every throw takes. */
 export interface ThrowOptions {
@@ -237,6 +271,12 @@ export interface ThrowOptions {
   reason?: string;
   /** `man throw --bypass`, a person's choice: start with no permission checks. */
   bypass?: boolean;
+  /** `man throw --remote-control`: this start connects to the harness's remote control: Claude's Remote Control, for a machine without `remoteControlAtStartup`. */
+  remoteControl?: boolean;
+  /** Test seam: asks Codex for its hooks' hashes; production uses listCodexHooks. */
+  listHooks?: typeof listCodexHooks;
+  /** Test seam: readies Codex's shared server for a trap about to attach; production uses prepareCodexServer. */
+  prepareCodexServer?: (cwd: string, trapId: string) => Promise<void>;
 }
 
 /** Explicit CLI timeout wins; Codex gets time for plugin and model startup. */
@@ -256,7 +296,8 @@ function resolveAdapter(opts: ThrowOptions, terminal: unknown, label: string, fr
   if (!isTerminalApp(terminal)) {
     throw new Error(`cannot throw ${label}: terminal "${String(terminal)}" (${from}) is not supported — use ${TERMINAL_APPS.join(' or ')}`);
   }
-  return (opts.adapter ?? macTerminalAdapter)(terminal);
+  if (opts.adapter) return opts.adapter(terminal);
+  return terminal === 'tmux' ? tmuxTerminalAdapter(opts.cfg) : macTerminalAdapter(terminal);
 }
 
 /**
@@ -275,24 +316,45 @@ function giveUp(trapId: string, label: string, repo: string | undefined, retry: 
   });
 }
 
+/**
+ * Why a Codex trap may not have signed on: the hooks that would hold it at
+ * "Hooks need review" before its first prompt, or that none would.
+ */
+export function codexStallReason(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): string {
+  const blockers = codexTrapHookBlockers(cwd, opts);
+  if (blockers.length === 0) return 'no hook would hold it at Codex\'s hook review';
+  const named = blockers.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ');
+  return `Codex is likely waiting at "Hooks need review" for ${named} — trust them in that session's /hooks`;
+}
+
 /** Open the command, then wait until the trap signed on after `started` and parked. */
 async function launchAndWait(
   opts: ThrowOptions,
-  w: { trapId: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
+  w: { trapId: string; name?: string; label: string; repo?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
 ): Promise<ThrowResult> {
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
+  let opened: TmuxPaneRef | undefined;
+  let folderTrust: string | undefined;
   try {
     if (w.launched.harness === 'codex') {
+      const folder = codexTrapFolderTrust(w.command.cwd, w.trapId);
+      folderTrust = folder.detail;
+      if (w.command.argv.includes('--remote')) {
+        // The flags below don't reach a server this TUI attaches to, so the server needs its trust first.
+        await (opts.prepareCodexServer ?? prepareCodexServer)(w.command.cwd, w.trapId);
+        // The pane's own window: a tool on the shared server sees the server's environment instead.
+        w.command.preface = `lobstah soak remember-window --ticket ${w.ticket}`;
+      }
       // An unattended throw must not park at the interactive update picker.
-      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...codexTrapHookArgs());
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd, listed: await (opts.listHooks ?? listCodexHooks)(w.command.cwd) }));
     }
-    await w.adapter.launch(w.command);
+    opened = (await w.adapter.launch({ ...w.command, trap: w.name ? trapTabTitle(w.name, w.repo) : w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
   } catch (err) {
     giveUp(w.trapId, w.label, w.repo, w.retry, w.started, err instanceof Error ? err.message : String(err));
     throw err;
   }
-  const command = launchShellText({ ...w.command, argv: w.command.argv.map((a) => a.replace(w.ticket, '<ticket>')) });
-  opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode, timeoutSecs });
+  const command = launchShellText({ ...w.command, preface: w.command.preface?.replace(w.ticket, '<ticket>'), argv: w.command.argv.map((a) => a.replace(w.ticket, '<ticket>')) });
+  opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode, timeoutSecs, ...(folderTrust ? { folderTrust } : {}) });
   const deadline = w.started + timeoutSecs * 1000;
   for (;;) {
     const reg = readTrap(w.trapId);
@@ -309,14 +371,17 @@ async function launchAndWait(
       };
     }
     if (Date.now() >= deadline) {
-      if (fresh) throw new (w.launched.harness === 'codex' ? ThrowPendingError : ThrowTimeoutError)(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session`);
+      // A tmux pane can be read: say what its screen shows.
+      const screen = opened ? await tmuxPaneTail(opened.tmuxPane) : undefined;
+      const shows = screen ? `; its tmux pane ${opened!.tmuxPane} shows: ${screen}` : '';
+      if (fresh) throw new (w.launched.harness === 'codex' ? ThrowPendingError : ThrowTimeoutError)(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session${shows}`);
       if (w.launched.harness === 'codex') {
         // Keep both the ticket and the fence: an already-open slow session
         // can redeem late, and retry cannot create a competing writer.
-        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying`);
+        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${folderTrust}; ${codexStallReason(w.command.cwd)}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying${shows}`);
       }
       giveUp(w.trapId, w.label, w.repo, w.retry, w.started, `no sign-on within ${timeoutSecs}s`);
-      throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged`);
+      throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged${shows}`);
     }
     await sleep(opts.pollMs ?? 500);
   }
@@ -336,12 +401,15 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   const entry = rosterByAddress(opts.address);
   if (!row || !entry) throw new Error(`no roster record for ${opts.address} — \`lobstah man roster\` lists the traps a throw can bring back`);
   const label = trapLabel(entry);
+  if (row.sessionHeld) throw new Error(`not throwing ${label}: ${row.why}`);
   if (row.action === 'skip') throw new TrapStartingError(`not throwing ${label}: ${row.why}`);
   if (row.action === 'unresolved') throw new Error(`cannot throw ${label}: ${row.why}`);
   const terminal = row.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, label, row.terminalFrom ?? 'default');
   const repo = opts.cfg.repos[entry.repo!]!;
-  const retry = `lobstah man throw ${entry.name}`;
+  const harness = row.harness ?? entry.harness;
+  const codexServer = onCodexServer(opts, harness);
+  const retry = `lobstah man throw ${entry.name}${opts.remoteControl ? ' --remote-control' : ''}`;
 
   // The fence: one reservation per trap, created exclusively.
   const { ticket } = reserveTrap({
@@ -352,6 +420,8 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     by: opts.by,
     returning: { trapId: entry.trapId, worktree: entry.worktree },
     startMode: startMode(row.config, opts.bypass),
+    ...(opts.remoteControl && harness === 'claude' ? { remoteControl: true } : {}),
+    ...(codexServer ? { codexServer } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   });
 
@@ -365,7 +435,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
         trapId: entry.trapId,
         name: entry.name,
         createdBy: 'soak',
-        sessionId: entry.sessionId,
+        ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
         repo: entry.repo,
         ...(entry.soakBranch ? { branch: entry.soakBranch } : {}),
       });
@@ -374,13 +444,14 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
       // Kept as it is: branch and HEAD stay; setup reruns only when a lockfile changed.
       await prepareReuse(repo, entry.worktree);
     }
-    command = startCommand(row, entry, ticket, opts.bypass);
+    command = startCommand(row, entry, ticket, opts.bypass, opts.remoteControl || codexServer);
   } catch (err) {
     giveUp(entry.trapId, label, entry.repo, retry, started, err instanceof Error ? err.message : String(err));
     throw err;
   }
   return launchAndWait(opts, {
     trapId: entry.trapId,
+    name: entry.name,
     label,
     repo: entry.repo,
     retry,
@@ -403,6 +474,11 @@ export function freshProfile(cfg: Config, repoKey: string, harnessFlag?: string)
   return { harness, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}) };
 }
 
+/** Whether this start puts a Codex trap on the shared app-server: `--remote-control`, or `[soak].codexRemoteControl`. */
+export function onCodexServer(opts: Pick<ThrowOptions, 'cfg' | 'remoteControl'>, harness: string | undefined): boolean {
+  return harness === 'codex' && (opts.remoteControl === true || opts.cfg.soak.codexRemoteControl);
+}
+
 /**
  * `lobstah man throw --new`: start one fresh trap for a repo. It reserves a
  * new id and name, opens a session in the repo's primary checkout whose
@@ -414,6 +490,8 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
   if (!repo) throw new Error(`no repo "${opts.repo}" is configured (configured: ${Object.keys(opts.cfg.repos).join(', ') || 'none'})`);
   guardNewTraps(opts.cfg, opts.repo, 1, opts.reason);
   const profile = freshProfile(opts.cfg, opts.repo, opts.harness);
+  const codexServer = onCodexServer(opts, profile.harness);
+  const remoteControl = opts.remoteControl && profile.harness === 'claude';
   const terminal = opts.cfg.soak.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, `a new ${opts.repo} trap`, opts.cfg.soak.terminal ? 'config' : 'default');
   const { reservation, ticket } = reserveTrap({
@@ -425,6 +503,8 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     creationReason: opts.reason?.trim() || `no free live or stowed ${opts.repo} trap existed at creation`,
     maxTraps: repo.traps,
     startMode: startMode(profile.config, opts.bypass),
+    ...(remoteControl ? { remoteControl } : {}),
+    ...(codexServer ? { codexServer } : {}),
     ...(opts.batch ? { batch: opts.batch } : {}),
   });
   const label = trapLabel(reservation);
@@ -435,12 +515,14 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.config ? { config: profile.config } : {}),
     ...(opts.bypass ? { bypass: true } : {}),
+    ...(remoteControl || codexServer ? { remoteControl: reservation.name } : {}),
   });
   return launchAndWait(opts, {
     trapId: reservation.trapId,
+    name: reservation.name,
     label,
     repo: opts.repo,
-    retry: `lobstah man throw --new --repo ${opts.repo}`,
+    retry: `lobstah man throw --new --repo ${opts.repo}${opts.remoteControl ? ' --remote-control' : ''}`,
     ticket,
     command,
     adapter,
@@ -452,6 +534,8 @@ export async function throwNew(opts: ThrowOptions & { repo: string; harness?: st
 /** One trap's outcome in a batch. */
 export interface BatchResult {
   trap: string;
+  /** The trap's repo: its notice shows the trap after it. */
+  repo?: string;
   result: 'resumed' | 'cold' | 'new' | 'skipped' | 'starting' | 'failed';
   why: string;
   seconds?: number;
@@ -479,8 +563,8 @@ export async function throwBatch(
       }
       jobs.push(
         throwTrap({ ...each, address: `wt:${row.trapId}` }).then(
-          (r) => ({ trap, result: r.action === 'resume' ? 'resumed' : 'cold', why: r.why, seconds: r.seconds }) as BatchResult,
-          (err: unknown) => ({ trap, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
+          (r) => ({ trap, repo: row.repo, result: r.action === 'resume' ? 'resumed' : 'cold', why: r.why, seconds: r.seconds }) as BatchResult,
+          (err: unknown) => ({ trap, repo: row.repo, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
       );
     }
@@ -489,7 +573,7 @@ export async function throwBatch(
     for (let i = 0; i < opts.count; i++) {
       jobs.push(
         throwNew({ ...each, reason: opts.reason ?? `requested batch of ${opts.count} new traps; no reusable trap at batch start`, repo: opts.repo, ...(opts.harness ? { harness: opts.harness } : {}) }).then(
-          (r) => ({ trap: r.trap, result: 'new', why: r.why, seconds: r.seconds }) as BatchResult,
+          (r) => ({ trap: r.trap, repo: opts.repo, result: 'new', why: r.why, seconds: r.seconds }) as BatchResult,
           (err: unknown) => ({ trap: `new ${opts.repo} trap ${i + 1}`, result: err instanceof ThrowPendingError ? 'starting' : 'failed', why: err instanceof Error ? err.message : String(err) }) as BatchResult,
         ),
       );
@@ -505,8 +589,8 @@ export async function throwBatch(
       `batch throw settled: ${back} available (${count('resumed')} resumed, ${count('cold')} cold, ${count('new')} new), ` +
       `${count('skipped')} skipped, ${failed.length} failed` +
       (count('starting') ? `, ${count('starting')} still starting` : '') +
-      (failed.length ? ` — failed: ${failed.map((f) => f.trap).join(', ')}` : '') +
-      (back ? ` — available: ${results.filter((r) => r.result === 'resumed' || r.result === 'cold' || r.result === 'new').map((r) => r.trap).join(', ')}` : ''),
+      (failed.length ? ` — failed: ${failed.map((f) => withTrapRepo(f.repo, f.trap)).join(', ')}` : '') +
+      (back ? ` — available: ${results.filter((r) => r.result === 'resumed' || r.result === 'cold' || r.result === 'new').map((r) => withTrapRepo(r.repo, r.trap)).join(', ')}` : ''),
     refId: batch,
     ...('repo' in opts ? { repo: opts.repo } : {}),
     by: opts.by,
@@ -540,6 +624,7 @@ export function launchedText(launched: Launched, timeoutSecs = launched.timeoutS
     terminal: terminalAppName(launched.terminal),
     mode: launched.mode,
     command: launched.command,
+    ...(launched.folderTrust ? { folderTrust: launched.folderTrust } : {}),
     waiting: `for sign-on and first park (up to ${timeoutSecs}s)`,
   });
 }
