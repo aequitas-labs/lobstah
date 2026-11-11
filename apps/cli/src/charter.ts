@@ -7,7 +7,7 @@ export const CARD_RULE = 'Every question, choice or action for the human (answer
 export const RUN_CARD_RULE = 'Offer `lobstah man ask --run <script>` when the human must run a command on this machine. Use plain cards for steps the glass cannot run, such as app clicks or phone sign-ins. Use `--input NAME:secret` for secrets (values via stdin, never in the script), `--interactive` for logins/prompts, `--cwd`, `--timeout`, `--output scrubbed|exit`.';
 export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${RUN_CARD_RULE} ${CARD_LINK_RULE}`;
 /** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
-export const HELM_STOP_REMINDER = `If this reply requires human action, put it on a card. ${RUN_CARD_RULE}`;
+export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
 export const DESK_ROUTING_RULE = 'For a bounded browser, app or computer step a repo worker cannot do, dispatch --for trap:<profile> --assist <original-id>. The original worker keeps repo and PR ownership. Use man throw trap:<profile> for an absent desk; point at its app-start card instead of starting a terminal session.';
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
