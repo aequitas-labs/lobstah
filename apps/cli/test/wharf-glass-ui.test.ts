@@ -19,7 +19,7 @@ afterEach(async () => {
   windows = [];
 });
 
-type Data = { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void>; userAgent?: string };
+type Data = { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void>; userAgent?: string; card?: unknown };
 
 async function page(path = '/', signedOut = false, data: Data = {}) {
   const window = new Window({
@@ -84,6 +84,7 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     if (path === '/api/glass') return Response.json(data.snapshot ?? snapshot);
     if (path === '/api/glass/dispatches') return Response.json(data.jobs ?? jobs);
     if (path === '/api/glass/dispatches/job/detail') return Response.json(data.detail ?? detail);
+    if (path === '/api/glass/cards/c42') return Response.json(data.card);
     if (path.endsWith('/image') || path.endsWith('/worker-image')) return new Response(new Uint8Array([137, 80, 78, 71]));
     if (path.includes('/files/')) return new Response(markdown);
     if (path.startsWith('/api/auth/device?'))
@@ -524,4 +525,14 @@ it('uses the transparent lobster-and-star mark for main glass branding', async (
   const logos = g.doc.querySelectorAll('h1 .glass-brand, #foot .glass-brand');
   expect(logos).toHaveLength(2);
   for (const logo of logos) expect(logo.getAttribute('src')).toBe(canonical);
+});
+
+it('opens a canonical boat card link in the signed-in shared glass', async () => {
+  const g = await page('/#card/c42', false, { card: {
+    id: 'c42', family: 'permission', source: 'boat:boat', key: 'permission', revision: 1,
+    sourceAt: new Date().toISOString(), title: 'Allow the deployment', grounds: 'home', links: [], actions: [],
+  } });
+  expect(g.reads).toContain('/api/glass/cards/c42');
+  expect(g.doc.body.textContent).toContain('Allow the deployment');
+  expect(g.doc.body.textContent).toContain('permission · boat');
 });

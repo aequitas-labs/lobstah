@@ -1,10 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { ReportInput, BackendEvent, DispatchInput } from '../../../packages/core/src/backend-model.js';
+import type { ReportInput, BackendEvent, DispatchInput, DispatchView } from '../../../packages/core/src/backend-model.js';
 import { ApiError, LEASE_MS, boatName, capability, digest, dispatchInput, hex, identifier, configuredTarget, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
 import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
+import { Cards } from './cards.js';
 import { MIRROR_WATCH_MS, MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
@@ -23,6 +24,7 @@ const HELM_MS = 120_000;
 /** One account's only coordination authority. No alarms, timers or socket pings. */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
+  private cards: Cards;
   private mirrorState: MirrorState;
   private hintPending = false;
   /** Fetch is only for the private upgrade binding: normal state uses RPC. */
@@ -120,6 +122,15 @@ export class Account extends DurableObject<Env> {
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
     this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now) });
+    this.cards = new Cards(ctx.storage.sql, {
+      dispatches: () => ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches ORDER BY rowid DESC LIMIT 100').toArray().map((d) => this.view(d) as DispatchView),
+      documents: () => this.glass.publishedDocuments(), requests: (now) => this.glass.requestViews(now),
+      workers: () => this.glass.workers(), boats: () => this.glass.boats(),
+    }, {
+      read: (a) => this.requirePermission(a, 'read'),
+      // Work-only boats run traps, so they hold permission requests: either layer may restate its own cards.
+      publish: (a) => requireThat(a.kind === 'boat' && (permits(a.permissions, 'read') || permits(a.permissions, 'work')), 403, 'boat credential required'),
+    });
     this.mirrorState = new MirrorState(ctx.storage.sql, { read: (a) => this.requirePermission(a, 'read'), mirror: (a) => this.requirePermission(a, 'mirror') });
   }
   private get(key: string): string | undefined {
@@ -261,6 +272,8 @@ export class Account extends DurableObject<Env> {
       this.availability(now);
       const result = this.execute(c, actor, now);
       this.availability(now);
+      // The wharf's cards move in the same transaction as the records they show.
+      this.cards.project(now);
       if (c.method !== 'GET') this.ctx.storage.sql.exec('INSERT INTO idem VALUES (?,?,?,?)', `${actor.kind}:${actor.id}`, c.key!, fingerprint, JSON.stringify(result));
       return result;
     });
@@ -402,6 +415,7 @@ export class Account extends DurableObject<Env> {
     if (parts[0] === 'documents' && parts[2] === 'files' && !parts[3] && c.method === 'POST') {
       const scope = this.glass.uploadScope(c, actor, now); return this.reserveFile(c, b, scope);
     }
+    const cards = this.cards.execute(c, actor, now); if (cards) return cards;
     const glass = this.glass.execute(c, actor, now); if (glass) return glass;
     if (parts[0] === 'dispatches' && parts[1]) {
       const d = this.dispatch(identifier(parts[1])); const action = parts[2];

@@ -1,0 +1,62 @@
+import { useEffect, useState } from 'preact/hooks';
+import type { GlassCard, GlassCardItem } from '@lobstah/core';
+import { safeHref } from '../../src/glass-markdown.js';
+import { LinkedText } from './links.js';
+import { html } from '../html.js';
+
+/** A card timestamp as the person’s locale displays it. */
+function cardTime(iso: string): string {
+  return new Date(iso).toLocaleString();
+}
+
+/** How a card stands, in words: its end, or whether a person has seen it. */
+export function cardState(card: GlassCard): string {
+  if (card.terminal)
+    return [card.terminal.state, card.terminal.outcome, card.terminal.by && `by ${card.terminal.by}`, cardTime(card.terminal.at)]
+      .filter(Boolean)
+      .join(' · ');
+  if (card.seen) return `seen by ${card.seen.by} · ${cardTime(card.seen.at)}`;
+  return card.quiet ? 'in progress' : 'standing';
+}
+
+/**
+ * A card the wharf keeps, opened by its id. A card about a wharf record opens
+ * that record's own page; a card from a boat's glass shows here as it is.
+ */
+export function CardDetail({
+  id,
+  load,
+  open,
+  boatName,
+}: {
+  id: string;
+  load: (id: string) => Promise<GlassCard>;
+  open: (item: GlassCardItem) => void;
+  boatName: (id: string) => string | undefined;
+}): ReturnType<typeof html> {
+  const [card, setCard] = useState<GlassCard>(),
+    [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    load(id).then(
+      (c) => {
+        if (!live) return;
+        if (c.item) open(c.item);
+        else setCard(c);
+      },
+      (e: Error) => live && setError(e.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [id]);
+  if (error) return html`<div class="dim">${error}</div>`;
+  if (!card) return html`<div class="dim">loading card</div>`;
+  const boat = card.source.slice('boat:'.length);
+  const source = card.source === 'wharf' ? 'wharf' : `boat ${boatName(boat) ?? boat}`;
+  return html`<div class="sub">${card.family} · ${source}${card.grounds ? ' · ' + card.grounds : ''} · revision ${card.revision} · ${cardTime(card.sourceAt)}</div>
+    <h3>${LinkedText(card.title)}</h3>
+    <div class="meta">${cardState(card)}</div>
+    ${card.summary && html`<div class="note">${LinkedText(card.summary)}</div>`}
+    ${card.links.map((l) => html`<div><a href=${safeHref(l.url)} target="_blank" rel="noopener">${l.label}</a></div>`)}`;
+}

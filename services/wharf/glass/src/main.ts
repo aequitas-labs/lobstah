@@ -12,6 +12,7 @@ import { HttpError, json } from './api.js';
 import { AuthScreen, authDestination, authEntry } from './auth-screen.js';
 import type { AuthState } from './auth-screen.js';
 import { Boats } from './boats.js';
+import { CardDetail } from '../../../../packages/glass-ui/ui/components/canonical-card.js';
 import { html } from './common.js';
 import { DeviceConsent } from './device.js';
 import { PasskeyPairing } from './pairing.js';
@@ -145,6 +146,18 @@ function MirrorChips({ backend }: { backend: MirrorBackend }) {
   );
 }
 
+/** A canonical card link stays inside the signed-in glass after the shared UI migration. */
+function HostedCard({ backend }: { backend: HostedBackend }): ReturnType<typeof html> | null {
+  const match = /^#card\/(c\d{1,15})$/.exec(location.hash);
+  if (!match) return null;
+  return html`<section class="card"><button class="btn" onClick=${() => { location.hash = '#deck'; }}>Close card</button><${CardDetail}
+    id=${match[1]}
+    load=${(id: string) => json<import('../../../../packages/core/src/backend-model.js').GlassCard>(`/api/glass/cards/${encodeURIComponent(id)}`)}
+    open=${(item: import('../../../../packages/core/src/backend-model.js').GlassCardItem) => { location.hash = `#${item.kind}/${item.id}`; }}
+    boatName=${(id: string) => backend.account()?.boats.find((boat) => boat.id === id)?.name}
+  /></section>`;
+}
+
 function start(mirror = false): void {
   const signedOut = (status: 401 | 403) => end(status === 403 ? 'denied' : hadSession ? 'expired' : 'signin');
   const wharf = createWharfBackend({ onSignedOut: signedOut });
@@ -164,6 +177,7 @@ function start(mirror = false): void {
     ],
     banner: () => [
       notice && html`<div class=${notice.bad ? 'bad' : 'ok'} role=${notice.bad ? 'alert' : 'status'}>${notice.text}</div>`,
+      html`<${HostedCard} backend=${backend} />`,
     ],
     deck: () => html`<${HumanRequests} backend=${backend} />`,
     boats: () => html`<${Boats} boats=${backend.account()?.boats ?? []} mirrors=${mirror ? (backend as MirrorBackend).boats() : []} action=${action} deleteAccount=${deleteAccount} />`,
