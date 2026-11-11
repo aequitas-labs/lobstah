@@ -86,6 +86,9 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
   // A mirror boat shows its own fleet on the hosted glass: it asks for mirror and read only, never work or the helm.
   const mirror = opts.has('--mirror');
   if (mirror && (opts.has('--helm') || opts.has('--work-only'))) throw new Error('--mirror asks for mirror and read only; drop --helm and --work-only');
+  // A mirror boat may also ask to read every other mirror boat's walking list, so its pet walks them.
+  const attention = opts.has('--attention');
+  if (attention && !mirror) throw new Error('--attention goes with --mirror: only a mirror boat reads other boats\' items');
   const credentialFile = opts.opt('--credential-file');
   if (credentialFile) {
     if (opts.opt('--name') || opts.has('--helm') || opts.has('--work-only')) throw new Error('credential import does not change boat name or access');
@@ -100,7 +103,7 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
   const name = opts.opt('--name') ?? current?.name ?? systemBoatName();
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error('choose --name with 1–64 letters, digits, hyphens or underscores');
   const steering = opts.has('--work-only') ? 'none' : opts.has('--helm') ? 'helm' : 'read';
-  const issued = await authPost(scope, 'device/code', { client_id: 'lobstah-cli', account: scope.location.account, name, steering, ...(mirror ? { mirror: true } : {}), ...(old ? { boatToken: old } : {}) });
+  const issued = await authPost(scope, 'device/code', { client_id: 'lobstah-cli', account: scope.location.account, name, steering, ...(mirror ? { mirror: true } : {}), ...(attention ? { attention: true } : {}), ...(old ? { boatToken: old } : {}) });
   if (issued.status !== 200) throw new Error('wharf could not start boat approval');
   const code = issued.data;
   if (typeof code.device_code !== 'string' || code.device_code.length > 256 || typeof code.user_code !== 'string' || !/^[A-Za-z0-9-]{1,128}$/.test(code.user_code) || typeof code.verification_uri !== 'string') throw new Error('invalid boat approval code');
@@ -112,7 +115,7 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
   if (!Number.isFinite(expires) || expires <= 0 || expires > 3600 || !Number.isFinite(requested) || requested <= 0) throw new Error('invalid boat approval timeout');
   let interval = Number(code.interval ?? 5);
   if (!Number.isFinite(interval) || interval < 1 || interval > 30) throw new Error('invalid boat approval interval');
-  const access = mirror ? 'mirror + read' : steering === 'none' ? 'work only' : `work + ${steering}`;
+  const access = mirror ? (attention ? 'mirror + attention + read' : 'mirror + read') : steering === 'none' ? 'work only' : `work + ${steering}`;
   const opening = canOpenBrowser();
   console.log(`Approve boat ${name} (${access}) at ${url.href}, code ${code.user_code}.${opening ? ' Opening it in your browser.' : ''} The browser can approve${mirror ? '' : ', lower access,'} or refuse.`);
   if (opening) openBrowser(url.href);

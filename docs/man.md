@@ -948,7 +948,16 @@ grounds acks it on the wharf.
 
 **The pet's read.** Every six seconds the pet runs `lobstah attention --json`.
 It prints `{ "attention": [...] }`: the same items, with the same fields, that
-`man tend --json` puts under `attention`, and nothing else. If that command
+`man tend --json` puts under `attention`, and nothing else. On a Mac that
+mirrors to a wharf with the `attention` grant
+(`lobstah wharf login --wharf <name> --mirror --attention`), it also lists
+every other mirror boat's items, as the hosted glass shows them. Each one's
+key is `@<boat id>/<its own key>` and its note starts with `[<boat name>]`. A
+click opens it on the hosted glass, and its ack goes through the wharf to the
+boat that owns it. The daemon puts this boat's list on the wharf when an item
+changes, on its 30 s mirror pass. It reads the others when the wharf says one
+changed, and every 5 minutes. Another boat's item reaches this pet within
+about 30 seconds. A PR or stack that two boats watch walks once. If that command
 fails (an older CLI exits 2 on the unknown flag), the pet runs
 `man tend --json` instead. The pet reads the child's output while the child
 runs, so a report of any size works. Each read may take 10 seconds; then the

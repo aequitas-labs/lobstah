@@ -50,6 +50,8 @@ class FakeWharf implements MirrorWharf {
     this.answers.set(id, { status, contentType, body: Buffer.from(body).toString('utf8') });
   }
   async mirrorFile(id: string) { return this.files.get(id)!; }
+  async putMirrorAttention() { return { etag: 'a'.repeat(64), at: new Date(now).toISOString(), changed: true }; }
+  async mirrorAttention() { return []; }
 }
 
 /** The loopback glass, with every path and request kind the mirror sent it written down. */
@@ -274,6 +276,24 @@ describe('enrolling this machine as a mirror boat', () => {
     expect(lines.join('\n')).toMatch(/boat: studio/);
     expect(lines.join('\n')).toMatch(/permissions: mirror \+ read/);
     expect(lines.join('\n')).toMatch(/mirror: never/);
+  });
+
+  it("asks for attention beside mirror, so this Mac's pet walks every boat, and refuses it alone", async () => {
+    const asked: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      asked.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith('/v1/auth/device/code')) return Response.json({ device_code: 'device', user_code: 'ABCD-EFGH', verification_uri: 'https://glass.lobstah.test/device', expires_in: 600, interval: 1 });
+      if (url.endsWith('/v1/auth/device/token')) return Response.json({ token: BOAT_TOKEN, id: 'boat-1', name: 'studio', permissions: ['mirror', 'attention', 'read'] });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: unknown) => { lines.push(String(line)); });
+    const { wharfCommand } = await import('../src/wharf-commands.js');
+    expect(await wharfCommand('wharf', ['login'], options({ '--wharf': 'lobstah', '--mirror': true, '--attention': true, '--name': 'studio' }), loadConfig())).toBe(true);
+    expect(asked[0]!.body).toMatchObject({ steering: 'read', mirror: true, attention: true });
+    expect(lines.join('\n')).toContain('Approve boat studio (mirror + attention + read)');
+    await expect(wharfCommand('wharf', ['login'], options({ '--wharf': 'lobstah', '--attention': true }), loadConfig())).rejects.toThrow(/--mirror/);
   });
 
   it('refuses --wharf login without --mirror, since it has no grounds to work in', async () => {
