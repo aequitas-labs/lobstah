@@ -35,7 +35,9 @@ async function page(d: GlassFullSnapshot = fleet(), hash = '#deck') {
 }
 
 const bar = (g: GlassDom) => g.$('.bottombar')!;
-const item = (g: GlassDom, label: string) => [...bar(g).querySelectorAll('.bbitem')].find((b) => text(b.querySelector('.bblabel')) === label) as HTMLElement;
+// A tab by its label; Search and Menu, which show only an icon, by their accessible name.
+const item = (g: GlassDom, label: string) =>
+  [...bar(g).querySelectorAll('.bbitem')].find((b) => text(b.querySelector('.bblabel')) === label || b.getAttribute('aria-label') === label) as HTMLElement;
 
 describe('the phone header', () => {
   it("shows the helm as a pill, then one strip of today's catches, traps, slots and the heavy line", async () => {
@@ -57,12 +59,24 @@ describe('the phone header', () => {
 });
 
 describe('the bottom bar', () => {
-  it('holds On deck and Reviews with their counts, then Search and Menu', async () => {
+  it('holds On deck, Reviews and PRs with their labels, then Search and Menu as named icons', async () => {
     const g = await page();
-    expect([...bar(g).querySelectorAll('.bbitem .bblabel')].map(text)).toEqual(['On deck', 'Reviews', 'Search', 'Menu']);
+    expect([...bar(g).querySelectorAll('.bbitem .bblabel')].map(text)).toEqual(['On deck', 'Reviews', 'PRs']);
+    expect([...bar(g).querySelectorAll('.bbitem.bbiconly')].map((b) => [b.getAttribute('aria-label'), text(b)])).toEqual([
+      ['Search', ''],
+      ['Menu', ''],
+    ]);
     expect(item(g, 'On deck').getAttribute('href')).toBe('#deck');
     expect(item(g, 'On deck').getAttribute('aria-current')).toBe('page');
-    expect(item(g, 'Reviews').querySelector('.pricon')).toBeTruthy();
+    expect(item(g, 'PRs').getAttribute('href')).toBe('#prs');
+  });
+
+  it("counts the person's own PRs that need them on PRs", async () => {
+    const d = fleet();
+    const failing = { ...d.prs[0]!, key: 'pr:acme/web#77', number: 77, mine: true, state: 'OPEN', badge: { ...d.prs[0]!.badge, tone: 'bad' as const } };
+    d.prs = [failing, { ...failing, key: 'pr:acme/web#78', number: 78, mine: false }];
+    const g = await page(d);
+    expect(text(item(g, 'PRs').querySelector('.dbadge'))).toBe('1');
   });
 
   it('Search becomes a focused search box with the repo chips above it; ✕ puts the bar back', async () => {

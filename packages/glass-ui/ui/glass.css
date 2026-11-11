@@ -332,6 +332,10 @@ h2 {
 .bblabel {
   white-space: nowrap;
 }
+/* Search and Menu: an icon with no label, still a thumb's width (its name is its aria-label). */
+.bbitem.bbiconly {
+  flex: 0 0 48px;
+}
 .bottombar.searching .bbrow {
   gap: var(--space-2);
   padding: 4px var(--space-4);

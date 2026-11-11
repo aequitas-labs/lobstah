@@ -175,7 +175,8 @@ it('badges only open account decisions, updates on existing polls, and clears on
 
 it("the phone menu lists the boats' fleet chips and signs out", async () => {
   const g = await page('/');
-  await g.click('.bottombar button', 'Menu');
+  // Menu shows only its icon; its name is its aria-label.
+  await g.click('.bottombar button[aria-label="Menu"]');
   expect(g.text('#phone-menu')).toContain('Boats');
   expect(g.text('#phone-menu')).toContain('helm');
   await g.click('#phone-menu button', 'Sign out');
