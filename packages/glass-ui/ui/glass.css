@@ -2474,14 +2474,6 @@ a.lob {
   gap: 10px;
   margin-bottom: 14px;
 }
-.rv-controls select {
-  background: var(--card);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 5px 8px;
-  font: inherit;
-}
 .rv-person img {
   border-radius: 50%;
   flex: 0 0 24px;
