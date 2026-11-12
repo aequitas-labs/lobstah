@@ -58,7 +58,7 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'todos') return html`<${Todos} passes=${d?.helmPasses} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`;
     if (t === 'grants') return html`<${SessionGrants} grants=${d?.sessionGrants ?? []} standing=${d?.standingGrants ?? []} />`;
     if (t === 'settings')
-      return html`<${Settings} page=${state.settings} error=${state.settingsError} passkeys=${state.snapshot?.runPasskeys} passkey=${state.runPasskey} />`;
+      return html`<${Settings} page=${state.settings} error=${state.settingsError} passkeys=${state.snapshot?.runPasskeys} passkey=${state.runPasskey} reviewSetup=${state.snapshot?.reviewSetup} />`;
     if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
     return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
   };

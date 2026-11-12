@@ -370,10 +370,14 @@ it("a person's Dismiss on a review goes straight to the boat that published it, 
   const dismissed = await call('requests', { id: 'dismiss-1', kind: 'review-dismiss', document: 'rv-2' });
   expect(dismissed.status).toBe(200);
   expect(await dismissed.json()).toMatchObject({ kind: 'review-dismiss', state: 'authorized', boat: finder.id, document: 'rv-2' });
-  expect(((await (await call('requests/reviews', undefined, finder.token, '')).json()) as WharfHumanRequest[]).map((r) => r.id)).toEqual(['dismiss-1']);
+  expect((await call('requests', { id: 'mute-1', kind: 'review-mute', document: 'rv-2' })).status).toBe(200);
+  expect((await call('requests', { id: 'unmute-1', kind: 'review-unmute', document: 'rv-2' })).status).toBe(200);
+  expect(((await (await call('requests/reviews', undefined, finder.token, '')).json()) as WharfHumanRequest[]).map((r) => r.id)).toEqual(['unmute-1', 'mute-1', 'dismiss-1']);
   expect(await (await call('requests/reviews', undefined, other.token, '')).json()).toEqual([]);
   expect((await call('requests/reviews')).status).toBe(403); // boats only
   expect((await call('requests/dismiss-1/start', {}, other.token, '')).status).toBe(403);
   expect(await (await call('requests/dismiss-1/start', {}, finder.token, '')).json()).toMatchObject({ state: 'fulfilled', outcome: 'done by the boat' });
+  expect(await (await call('requests/mute-1/start', {}, finder.token, '')).json()).toMatchObject({ state: 'fulfilled' });
+  expect(await (await call('requests/unmute-1/start', {}, finder.token, '')).json()).toMatchObject({ state: 'fulfilled' });
   expect(await (await call('requests/reviews', undefined, finder.token, '')).json()).toEqual([]);
 });

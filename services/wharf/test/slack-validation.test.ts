@@ -94,7 +94,7 @@ it('every family renders within Slack’s limits; each action is a control here 
   const b = await helm(); await decision(b, 'pick');
   const fisher = await boat('fisher', ['work', 'read']);
   const at = new Date().toISOString();
-  const every: GlassCardAction[] = [{ kind: 'answer', option: 'One' }, { kind: 'answer', option: `A long option ${'x'.repeat(90)}` }, { kind: 'answer-text' }, { kind: 'allow-once' }, { kind: 'allow-always' }, { kind: 'deny' }, { kind: 'seen' }, { kind: 'message-helm' }, { kind: 'cancel' }, { kind: 'review-dismiss' }];
+  const every: GlassCardAction[] = [{ kind: 'answer', option: 'One' }, { kind: 'answer', option: `A long option ${'x'.repeat(90)}` }, { kind: 'answer-text' }, { kind: 'allow-once' }, { kind: 'allow-always' }, { kind: 'deny' }, { kind: 'seen' }, { kind: 'message-helm' }, { kind: 'cancel' }, { kind: 'review-dismiss' }, { kind: 'review-mute' }, { kind: 'review-unmute' }];
   const cards = GLASS_CARD_FAMILIES.map((family) => ({ family, key: `k-${family}`, stateHash: 's1', sourceAt: at, title: `${family} <!channel> ${'t'.repeat(200)}`,
     summary: `<@U9> ${'detail '.repeat(330)}`, grounds: 'away', links: [{ label: 'Open PR', url: 'https://github.com/test/repo/pull/7' }], actions: every }));
   expect((await call('cards', { cards }, fisher.token)).status).toBe(200);
@@ -121,8 +121,10 @@ it('every family renders within Slack’s limits; each action is a control here 
         : action.kind === 'seen' ? !!buttons(m).find((e) => e.url)?.value
         : action.kind === 'answer-text' ? labels.includes('Answer…')
         : action.kind === 'allow-once' ? labels.includes('Allow once') : action.kind === 'allow-always' ? labels.includes('Allow always') : action.kind === 'deny' ? labels.includes('No')
-        : action.kind === 'message-helm' ? labels.includes('Message the helm…') : false;
-      const named = { 'message-helm': 'message the helm', cancel: 'cancel the job', 'review-dismiss': 'dismiss the review' }[action.kind as string];
+        : action.kind === 'message-helm' ? labels.includes('Message the helm…')
+        : action.kind === 'review-mute' ? labels.includes('Mute this PR')
+        : action.kind === 'review-unmute' ? labels.includes('Unmute') : false;
+      const named = { 'message-helm': 'message the helm', cancel: 'cancel the job', 'review-dismiss': 'dismiss the review', 'review-mute': 'mute the PR', 'review-unmute': 'unmute the PR' }[action.kind as string];
       expect(here || (named !== undefined && section(m).includes(named)), `${card.family} ${action.kind}`).toBe(true);
     }
   }

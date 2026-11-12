@@ -11,6 +11,8 @@ import {
   observeReviewRequest,
   parseReviews,
   dismissReview,
+  muteReview,
+  unmuteReview,
   readReview,
   redraftReview,
   reviewAttention,
@@ -59,24 +61,25 @@ function seen(over: { id?: string; head?: string; number?: number; skip?: string
 
 describe('[reviews] config', () => {
   it('resolves mode and publish overrides per repo, with global defaults and legacy auto posting', () => {
-    const cfg = parseReviews({ mode: 'auto-review' }, {
-      web: { reviews: { mode: 'on-demand', publish: false } },
+    const cfg = parseReviews({ mode: 'auto-review', autoPostApprove: 'auto-post' }, {
+      web: { reviews: { mode: 'on-demand', publish: false, autoPostRequestChanges: 'auto-post' } },
       api: { reviews: { mode: 'auto-draft' } },
       cli: { reviews: { publish: false } },
       ops: { reviews: { mode: 'notify', publish: true } },
     });
-    expect(reviewSettings(cfg, 'web')).toMatchObject({ mode: 'on-demand', publish: false, work: 'off' });
+    expect(reviewSettings(cfg, 'web')).toMatchObject({ mode: 'on-demand', publish: false, work: 'off', autoPostApprove: 'auto-post', autoPostRequestChanges: 'auto-post' });
     expect(reviewSettings(cfg, 'api')).toMatchObject({ mode: 'auto-draft', publish: false, work: 'trap' });
     expect(reviewSettings(cfg, 'cli')).toMatchObject({ mode: 'auto-draft', publish: false });
     expect(reviewSettings(cfg, 'ops')).toMatchObject({ mode: 'notify', publish: true, work: 'off' });
     expect(reviewSettings(cfg, 'other')).toMatchObject({ mode: 'auto-review', publish: true, work: 'trap', post: 'auto' });
+    expect(reviewSettings(cfg, 'other').autoPostRequestChanges).toBe('ask');
     expect(parseReviews({ post: 'auto', work: 'off' })).toMatchObject({ mode: 'auto-review', publish: true, work: 'trap' });
     expect(parseReviews({ mode: 'on-demand', publish: true })).toMatchObject({ mode: 'on-demand', publish: true, work: 'off' });
     expect(() => parseReviews({ publish: 'yes' })).toThrow('publish must be a boolean');
   });
   it('is off by default, with the planned defaults', () => {
     const cfg = loadConfig().reviews;
-    expect(cfg).toMatchObject({ enabled: false, mode: 'notify', repos: 'configured', work: 'off', post: 'draft', trapWaitSecs: 600, maxPerDay: 20 });
+    expect(cfg).toMatchObject({ enabled: false, mode: 'notify', repos: 'configured', work: 'off', post: 'draft', autoPostApprove: 'ask', autoPostRequestChanges: 'ask', trapWaitSecs: 600, maxPerDay: 20 });
     expect(cfg.limits).toEqual({ wallClockSecs: 900, maxTurns: 40 });
   });
 
@@ -119,6 +122,34 @@ describe('review rounds', () => {
     ]);
   });
 
+  it('a dismissed round stays dismissed at its head and a new head starts a fresh round', () => {
+    observeReviewRequest(seen(), T0);
+    dismissReview('review:acme/web#7', 'glass', T0 + 1);
+    expect(observeReviewRequest(seen(), T0 + 2).opened).toBe(false);
+    expect(observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 3).opened).toBe(true);
+    const rounds = readReview('review:acme/web#7')!.rounds;
+    expect(rounds.map((round) => round.state)).toEqual(['dismissed', 'requested']);
+    expect(rounds[1]).toMatchObject({ requestEventId: 'RRE_1', headSha: 'bbbbbbb2' });
+    expect(observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 4).opened).toBe(false);
+  });
+
+  it('a dismissed request that disappears and returns starts a fresh round on PR reopen', () => {
+    observeReviewRequest(seen(), T0);
+    dismissReview('review:acme/web#7', 'glass', T0 + 1);
+    withdrawUnseenReviews(new Set(), () => true, T0 + 2);
+    expect(observeReviewRequest(seen(), T0 + 3).opened).toBe(true);
+    expect(readReview('review:acme/web#7')!.rounds.map((round) => round.state)).toEqual(['dismissed', 'requested']);
+  });
+
+  it('mutes PR requests until unmuted and keeps the item visible', () => {
+    observeReviewRequest(seen(), T0);
+    muteReview('review:acme/web#7', T0 + 1);
+    expect(observeReviewRequest(seen({ id: 'RRE_2', head: 'bbbbbbb2' }), T0 + 2).opened).toBe(false);
+    expect(readReview('review:acme/web#7')!.mutedAt).toBe(new Date(T0 + 1).toISOString());
+    unmuteReview('review:acme/web#7', T0 + 3);
+    expect(observeReviewRequest(seen({ id: 'RRE_2', head: 'bbbbbbb2' }), T0 + 4).opened).toBe(true);
+  });
+
   it('a moved head follows a requested round, and makes a drafted round stale', () => {
     observeReviewRequest(seen(), T0);
     observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1000);
@@ -158,10 +189,10 @@ describe('review notifications', () => {
     const item = readReview(key)!;
     Object.assign(item.rounds[0]!, { state: 'drafted', verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 4, body: 'race' }], draftedAt: new Date(T0).toISOString() });
     writeReview(item);
-    expect(refreshReviewNotifications(T0 + 1)[0]).toMatchObject({ hash: '#review-review%3Aacme%2Fweb%237', notification: { kind: 'draft-ready', text: 'Draft ready: #7 Add the thing · request changes · 1 blocking' } });
+    expect(refreshReviewNotifications(T0 + 1)[0]).toMatchObject({ hash: '#review-review%3Aacme%2Fweb%237', notification: { kind: 'needs-you', text: 'Draft ready (needs you): #7 Add the thing · request changes · 1 blocking' } });
     expect(refreshReviewNotifications(T0 + 2)).toEqual([]);
     markReviewSeen(key, T0 + 3);
-    expect(latestRound(readReview(key)!)).toMatchObject({ seenAt: new Date(T0 + 3).toISOString(), notification: { kind: 'draft-ready' } });
+    expect(latestRound(readReview(key)!)).toMatchObject({ seenAt: new Date(T0 + 3).toISOString(), notification: { kind: 'needs-you' } });
     expect(reviewAttention(T0 + 3)).toHaveLength(1);
     acknowledgeReview(key, T0 + 4);
     expect(reviewAttention(T0 + 4)).toEqual([]);
@@ -248,7 +279,7 @@ describe('drafts', () => {
     item.pr.headSha = 'bbbbbbb2';
     writeReview(item);
     redraftReview('review:acme/web#7', T0);
-    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
+    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestEventId: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
     expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
   });
 });
