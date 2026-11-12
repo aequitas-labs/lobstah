@@ -81,6 +81,11 @@ const ICON: Record<RunStatus, unknown> = {
   declined: svg('<circle cx="8" cy="8" r="6.2"/><path d="M3.6 12.4l8.8-8.8"/>'),
 };
 
+/** A run card's mark on the deck: a terminal before its title, in the row's grey. Its status stays at the row's end. */
+export const RunKindIcon = html`<span class="runkind" role="img" aria-label="Run card" title="Run card">${svg(
+  '<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6" stroke-width="1.5"/><path d="M4.6 6.3l2 1.7-2 1.7M8.4 10h3" stroke-width="1.5"/>',
+)}</span>`;
+
 /** The icon, named and titled with its words. */
 export function RunStatusIcon({ status, result, startedAt }: { status: RunStatus; result?: RunResult; startedAt?: string }) {
   const label = runStatusLabel(status, result, startedAt);

@@ -154,6 +154,50 @@ export const closeDecision = (): void => setState({ decisionModal: null });
 /** Hotkeys reach the first nine answers only: 1–9. */
 export const HOTKEY_MAX = 9;
 
+/** Whether this page pushed the open report's history entry, so Back can return to the entry before it. */
+let reportPushed = false;
+/** Where the page was scrolled when the sheet opened, to put it back on close: going back to `#deck` would jump to the tab's top. */
+let reportScroll: number | undefined;
+
+/**
+ * Open a report in the sheet over the glass: a `#report/<key>` hash, a new
+ * history entry, so the browser's back button and the phone's back gesture
+ * close it. The tab underneath keeps its place and scroll.
+ */
+export function openReportSheet(key: string): void {
+  reportPushed = true;
+  reportScroll = window.scrollY;
+  location.hash = '#report/' + encodeURIComponent(key);
+}
+
+/** The hash named a report, or stopped naming one (start.ts onRoute). */
+export function routeReport(key: string | null): void {
+  const closing = key === null && !!getState().reportSheet;
+  if (key === null) reportPushed = false;
+  if ((getState().reportSheet ?? null) !== key) setState({ reportSheet: key });
+  if (closing && reportScroll !== undefined) {
+    const y = reportScroll;
+    reportScroll = undefined;
+    // After the browser's own jump to the tab's anchor.
+    setTimeout(() => window.scrollTo(0, y), 0);
+  }
+}
+
+/**
+ * Close the sheet: back to the entry this page pushed, or, for a sheet a
+ * link opened, replace its hash with the tab's so nothing leaves the glass.
+ */
+export function closeReportSheet(): void {
+  if (!getState().reportSheet) return;
+  if (reportPushed) {
+    reportPushed = false;
+    history.back();
+    return;
+  }
+  history.replaceState(null, '', '#' + getState().route);
+  routeReport(null);
+}
+
 /** The decision the modal shows now, if any. */
 function shownDecision() {
   const key = getState().decisionModal?.key;

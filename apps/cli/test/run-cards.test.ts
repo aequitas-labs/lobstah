@@ -133,13 +133,29 @@ describe('a run card in the glass', () => {
     expect(card.textContent).toContain('the agent sees the exit code and output, with secrets removed');
     const input = card.querySelector('.runinput input') as HTMLInputElement;
     expect(input.getAttribute('type')).toBe('password');
-    const run = card.querySelector('.runbtn') as HTMLButtonElement;
+    // Run sits in the dock's one row of actions, beside Decline; the card body has none.
+    expect(card.querySelector('.runbtn')).toBeNull();
+    const row = g.$('#doverlay .ddock .runfoot .runactions')!;
+    const run = row.querySelector('.runbtn') as HTMLButtonElement;
     expect(run.disabled).toBe(true);
-    expect(card.textContent).toContain('Set up a passkey in Settings');
+    expect([...row.children].map((b) => b.textContent?.trim())).toEqual(['Run', '1Decline']);
+    expect(g.$('#doverlay .ddock .runnote')!.textContent).toContain('Set up a passkey in Settings');
     expect(g.$$('#doverlay .dopt').map((b) => b.textContent?.trim())).toEqual(['1Decline']);
     // A run card also takes a reply, sent with Send; Decline sends at once.
     expect(g.$('#doverlay .ddock textarea')).toBeTruthy();
     expect(g.$('#doverlay .ddock .dsend')).toBeTruthy();
+  });
+
+  it("leads the run card's deck row with a terminal, its status still at the row's end", async () => {
+    const g = await loadGlass(GLASS_PAGE, runCardFleet(glassRun()), { now: NOW, hash: '#deck' });
+    open.push(g);
+    const row = g.$(`.drow[data-decision="${RUN_KEY}"] .dopen`)!;
+    const icon = row.querySelector('.runkind')!;
+    expect(icon.getAttribute('role')).toBe('img');
+    expect(icon.getAttribute('aria-label')).toBe('Run card');
+    expect(icon.nextElementSibling!.className).toBe('dtitle');
+    // No pill: the terminal alone, in the row's grey.
+    expect(icon.className).toBe('runkind');
   });
 
   it('marks and names a zero-width or bidi character by its code point', async () => {
@@ -221,6 +237,8 @@ describe('a run card in the glass', () => {
     expect(g.$('#doverlay .runbtn')?.textContent).toBe('Run again');
     expect(g.$$('#doverlay .dopt')).toHaveLength(0);
     const dismiss = g.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Dismiss') as HTMLButtonElement;
+    // Run again and Dismiss share the dock's one row.
+    expect([...dismiss.closest('.ddock .runactions')!.children].map((b) => b.textContent)).toEqual(['Run again', 'Dismiss']);
     dismiss.click();
     await g.settle();
     expect(requests).toContain('run-dismiss');
@@ -246,6 +264,7 @@ describe('a run card in the glass', () => {
     open.push(g);
     const stop = g.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Stop') as HTMLButtonElement;
     expect(stop).toBeDefined();
+    expect(stop.closest('.ddock .runactions')).toBeTruthy();
     expect(g.$('#doverlay .runstate .runicon.run-running')?.getAttribute('aria-label')).toMatch(/^Running · started /);
     expect(g.$('#doverlay .runbtn')).toBeNull();
     stop.click();

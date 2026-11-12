@@ -19,7 +19,15 @@ afterEach(async () => {
   windows = [];
 });
 
-type Data = { snapshot?: typeof snapshot; jobs?: typeof jobs; detail?: typeof detail; badge?: (count: number) => Promise<void>; userAgent?: string; card?: unknown; slack?: unknown };
+type Data = {
+  snapshot?: typeof snapshot;
+  jobs?: typeof jobs;
+  detail?: typeof detail;
+  badge?: (count: number) => Promise<void>;
+  userAgent?: string;
+  card?: unknown;
+  slack?: unknown;
+};
 
 async function page(path = '/', signedOut = false, data: Data = {}) {
   const window = new Window({
@@ -36,19 +44,31 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
   } as ConstructorParameters<typeof Window>[0]);
   windows.push(window);
   const w = window as unknown as Record<string, unknown>;
-  const writes: { path: string; method: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] = [];
+  const writes: { path: string; method: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] =
+    [];
   const reads: string[] = [];
   const copied: string[] = [];
   const intervals: (() => void)[] = [];
   const opened: string[] = [];
   let unauthenticated = signedOut;
-  const sockets: { url: string; protocol?: string; onopen?: (() => void) | null; onmessage?: ((e: { data: string }) => void) | null; onclose?: (() => void) | null; closed: boolean; close(): void }[] = [];
+  const sockets: {
+    url: string;
+    protocol?: string;
+    onopen?: (() => void) | null;
+    onmessage?: ((e: { data: string }) => void) | null;
+    onclose?: (() => void) | null;
+    closed: boolean;
+    close(): void;
+  }[] = [];
   w.WebSocket = class {
     onopen?: (() => void) | null;
     onmessage?: ((e: { data: string }) => void) | null;
     onclose?: (() => void) | null;
     closed = false;
-    constructor(public url: string, public protocol?: string) {
+    constructor(
+      public url: string,
+      public protocol?: string,
+    ) {
       sockets.push(this);
     }
     close() {
@@ -70,7 +90,13 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     reads.push(path);
     const method = init.method ?? 'GET';
     const record = () =>
-      writes.push({ path, method, body: init.body ? JSON.parse(String(init.body)) : {}, headers: (init.headers ?? {}) as Record<string, string>, credentials: init.credentials });
+      writes.push({
+        path,
+        method,
+        body: init.body ? JSON.parse(String(init.body)) : {},
+        headers: (init.headers ?? {}) as Record<string, string>,
+        credentials: init.credentials,
+      });
     // Sign-in answers a signed-out page; the fixture sends it back to the same document.
     if (path === '/api/auth/sign-in/social') {
       record();
@@ -89,7 +115,12 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     if (path.endsWith('/image') || path.endsWith('/worker-image')) return new Response(new Uint8Array([137, 80, 78, 71]));
     if (path.includes('/files/')) return new Response(markdown);
     if (path.startsWith('/api/auth/device?'))
-      return Response.json({ boatName: 'chris-macbook-2', requestedPermissions: ['work', 'helm'], description: 'Work and steer the helm.', status: 'pending' });
+      return Response.json({
+        boatName: 'chris-macbook-2',
+        requestedPermissions: ['work', 'helm'],
+        description: 'Work and steer the helm.',
+        status: 'pending',
+      });
     throw new Error('unexpected path ' + path);
   };
   w.TextDecoder = TextDecoder;
@@ -101,11 +132,14 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
       await new Promise((r) => setTimeout(r, 0));
     }
   };
-  window.document.write(`<!doctype html><html><head><style>${GLASS_CSS}</style></head><body><script>${GLASS_SCRIPT}</script></body></html>`);
+  window.document.write(
+    `<!doctype html><html><head><style>${GLASS_CSS}</style></head><body><script>${GLASS_SCRIPT}</script></body></html>`,
+  );
   await settle();
   const doc = window.document;
   const find = (selector: string, text?: string) =>
-    Array.from(doc.querySelectorAll(selector)).find((e) => text === undefined || (e.textContent ?? '').includes(text)) as unknown as HTMLElement | undefined;
+    Array.from(doc.querySelectorAll(selector)).find((e) => text === undefined || (e.textContent ?? '').includes(text)) as unknown as
+      HTMLElement | undefined;
   const click = async (selector: string, text?: string) => {
     const el = find(selector, text);
     expect(el, `${selector} ${text ?? ''}`).toBeTruthy();
@@ -205,7 +239,9 @@ it('opens a cookie-only lobstah.2 socket, refreshes on pushed events, retains po
   await g.settle();
   expect(g.reads.length).toBe(reads);
   reads = g.reads.length;
-  g.sockets[0]!.onmessage?.({ data: JSON.stringify({ t: 'event', events: [{ cursor: 'g.1', kind: 'queued', at: '2026-11-12T00:00:00Z' }], cursor: 'g.1' }) });
+  g.sockets[0]!.onmessage?.({
+    data: JSON.stringify({ t: 'event', events: [{ cursor: 'g.1', kind: 'queued', at: '2026-11-12T00:00:00Z' }], cursor: 'g.1' }),
+  });
   await g.settle();
   expect(g.reads.length).toBeGreaterThan(reads);
   g.sockets[0]!.onclose?.();
@@ -268,7 +304,10 @@ it('offers a live worker its attach command or where it runs, and never resume',
 
 it('says where a live worker runs, on its boat, and offers no window it cannot open', async () => {
   const live = { ...snapshot, workers: [{ ...snapshot.workers[0]!, live: true, lastCheckIn: new Date().toISOString() }] };
-  const g = await page('/#traps', false, { snapshot: live, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1' });
+  const g = await page('/#traps', false, {
+    snapshot: live,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1',
+  });
   expect(g.text('#traps')).toContain('Running on chris-macbook, only reachable from there');
   expect(g.doc.querySelector('#traps button.btn.open')).toBeNull();
 });
@@ -285,7 +324,9 @@ it('renders decisions as safe elements, requests only their own attachment image
   g.input('Your answer, in your own words', 'Go ahead');
   await g.settle();
   await g.click('.dmodal button[aria-label="Send"]');
-  expect(g.writes).toContainEqual(expect.objectContaining({ path: '/api/glass/documents/card/answer', body: { option: 'Keep it small', text: 'Go ahead' } }));
+  expect(g.writes).toContainEqual(
+    expect.objectContaining({ path: '/api/glass/documents/card/answer', body: { option: 'Keep it small', text: 'Go ahead' } }),
+  );
   // The wharf takes no files: the answer offers none.
   expect(g.doc.querySelector('.dmodal .dattach')).toBeNull();
 });
@@ -296,7 +337,11 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
   g.input('message to helm', 'Please retry');
   await g.settle();
   await g.click('#modalbox button', 'Queue message for helm');
-  expect(g.writes[0]).toMatchObject({ path: '/api/glass/requests', body: { kind: 'message', dispatch: 'job', text: 'Please retry' }, credentials: 'same-origin' });
+  expect(g.writes[0]).toMatchObject({
+    path: '/api/glass/requests',
+    body: { kind: 'message', dispatch: 'job', text: 'Please retry' },
+    credentials: 'same-origin',
+  });
   await g.click('#modalbox button', 'Cancel dispatch…');
   expect(g.writes).toHaveLength(1);
   expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its agent stops.');
@@ -441,9 +486,11 @@ it('opens on the decision, job or trap its link names, in that item’s view', a
   expect((await page('/#reports')).activeTab()).toBe('reports');
 });
 
-it("opens a report's own page from its link, reads its Markdown, and acks it once", async () => {
+it("opens a report's link in the sheet and its own page alike, reads its Markdown, and acks it once", async () => {
   const link = await page('/#report/report');
-  expect(link.window.location.pathname).toBe('/report/report');
+  expect(link.window.location.pathname).toBe('/');
+  expect(link.text('.rsheet .reportview')).toContain('Wharf progress');
+  expect(link.writes.filter((w) => w.path.endsWith('/ack'))).toHaveLength(1);
   const g = await page('/report/report');
   expect(g.text('.reportview')).toContain('Wharf progress');
   expect(g.text('.reportview')).toContain('Small, safe changes');
@@ -475,7 +522,10 @@ it('carries a link through sign-in: the item waits behind the sign-in button and
   expect(g.doc.querySelector('.dmodal')).toBeNull();
   expect(g.window.location.hash).toBe('#decision/card');
   await g.click('button', 'Continue with GitHub');
-  expect(g.writes[0]).toMatchObject({ path: '/api/auth/sign-in/social', body: { provider: 'github', callbackURL: 'https://glass.test/#decision/card' } });
+  expect(g.writes[0]).toMatchObject({
+    path: '/api/auth/sign-in/social',
+    body: { provider: 'github', callbackURL: 'https://glass.test/#decision/card' },
+  });
 });
 
 it('opening a decision acks it once with the page’s cookie, and opening a job acks nothing', async () => {
@@ -491,7 +541,10 @@ it('opening a decision acks it once with the page’s cookie, and opening a job 
 });
 
 it('shows what the wharf records as seen: a read report stays read, and opening it again tells the wharf nothing', async () => {
-  const seen = { ...snapshot, documents: [snapshot.documents[0]!, { ...snapshot.documents[1]!, ack: { at: '2026-10-10T17:07:00Z', by: 'person' } }] };
+  const seen = {
+    ...snapshot,
+    documents: [snapshot.documents[0]!, { ...snapshot.documents[1]!, ack: { at: '2026-10-10T17:07:00Z', by: 'person' } }],
+  };
   const g = await page('/report/report', false, { snapshot: seen });
   expect(g.text('.reportview')).toContain('Wharf progress');
   expect(g.writes.filter((w) => w.path.endsWith('/ack'))).toEqual([]);
@@ -510,10 +563,20 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
     author: 'boat:boat-1',
     ack: undefined,
     answer: undefined,
-    review: { pr: `https://github.com/acme/web/pull/${id}`, round: 'RRE', state, stands, requestedBy: 'dana', open: `https://app.graphite.com/github/pr/acme/web/${id}` },
+    review: {
+      pr: `https://github.com/acme/web/pull/${id}`,
+      round: 'RRE',
+      state,
+      stands,
+      requestedBy: 'dana',
+      open: `https://app.graphite.com/github/pr/acme/web/${id}`,
+    },
   });
   s.documents.push(review('8', 'posted', false, '2026-10-15T12:00:00.000Z'), review('7', 'drafted', true, '2026-10-15T10:00:00.000Z'));
-  const g = await page('/#reviews', false, { snapshot: s, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15' });
+  const g = await page('/#reviews', false, {
+    snapshot: s,
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15',
+  });
   expect(g.text('#reviews')).toContain('acme/web#7 Add the thing');
   expect(g.text('#reviews')).toContain('acme/web#8 Add the thing');
   expect(g.text('#reviews').indexOf('#7 Add')).toBeLessThan(g.text('#reviews').indexOf('#8 Add'));
@@ -556,17 +619,28 @@ it('links bare http(s) URLs in decisions, notes, briefs and messages as text, ne
 
 it('uses the transparent lobster-and-star mark for main glass branding', async () => {
   const g = await page();
-  const canonical = 'data:image/png;base64,' + fs.readFileSync(new URL('../../../docs/assets/favicon.png', import.meta.url)).toString('base64');
+  const canonical =
+    'data:image/png;base64,' + fs.readFileSync(new URL('../../../docs/assets/favicon.png', import.meta.url)).toString('base64');
   const logos = g.doc.querySelectorAll('h1 .glass-brand, #foot .glass-brand');
   expect(logos).toHaveLength(2);
   for (const logo of logos) expect(logo.getAttribute('src')).toBe(canonical);
 });
 
 it('opens a canonical boat card link in the signed-in shared glass', async () => {
-  const g = await page('/#card/c42', false, { card: {
-    id: 'c42', family: 'permission', source: 'boat:boat', key: 'permission', revision: 1,
-    sourceAt: new Date().toISOString(), title: 'Allow the deployment', grounds: 'home', links: [], actions: [],
-  } });
+  const g = await page('/#card/c42', false, {
+    card: {
+      id: 'c42',
+      family: 'permission',
+      source: 'boat:boat',
+      key: 'permission',
+      revision: 1,
+      sourceAt: new Date().toISOString(),
+      title: 'Allow the deployment',
+      grounds: 'home',
+      links: [],
+      actions: [],
+    },
+  });
   expect(g.reads).toContain('/api/glass/cards/c42');
   expect(g.doc.body.textContent).toContain('Allow the deployment');
   expect(g.doc.body.textContent).toContain('permission · boat');

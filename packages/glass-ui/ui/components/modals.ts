@@ -7,6 +7,7 @@ import { useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
 import { LinkedText } from './links.js';
+import { openReport } from './reports.js';
 import {
   Age,
   WorkerDetails,
@@ -119,11 +120,11 @@ function helmModal(h: GlassHelm) {
   ];
 }
 
-/** A dispatch's report, in its modal: the title and byline, and a link to the report's own page. */
+/** A dispatch's report, in its modal: the title and byline, and a link that opens it in the sheet over the modal. */
 function reportLink(r: GlassReport) {
   return [
     html`<div class="sec">report · ${LinkedText(r.title)}</div>`,
-    html`<div class="sub">${reportByline(r)} · <a href=${reportPageUrl(r.key)} target="_blank" rel="noopener">open the report ↗</a></div>`,
+    html`<div class="sub">${reportByline(r)} · <a href=${reportPageUrl(r.key)} target="_blank" rel="noopener" onClick=${openReport(r)}>open the report</a></div>`,
   ];
 }
 

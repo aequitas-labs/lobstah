@@ -30,6 +30,8 @@ export interface GlassState {
   snapshot: GlassSnapshot | undefined;
   /** The tab, from the URL hash. */
   route: GlassTab;
+  /** The report the sheet shows over the tab, from a `#report/<key>` hash; the tab underneath keeps its place. */
+  reportSheet?: string | null;
   /** This browser's preferences and filters (localStorage). */
   prefs: GlassPrefs;
   /** The open modal, if any. */

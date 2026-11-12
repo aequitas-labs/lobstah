@@ -25,8 +25,8 @@ import { Age, ImageThumb, NamedText, RepoName, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
-import { RunCardBody } from './run-card.js';
-import { RUN_DECLINE, RunStatusIcon, runStatus } from './run-status.js';
+import { RunActions, RunCardBody } from './run-card.js';
+import { RUN_DECLINE, RunKindIcon, RunStatusIcon, runStatus } from './run-status.js';
 import type { RunStatus } from './run-status.js';
 import { can, fileUrl } from '../backend.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
@@ -75,9 +75,11 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
   const touch = touchOnly();
   const hotkey = (i: number) => (!touch && i + 1 <= HOTKEY_MAX ? String(i + 1) : undefined);
   const textKey = hotkey(options.length);
+  // A run card's one option, Decline, sits in the run row beside Run (RunDecline).
+  const shown = c.kind === 'decision' && c.run ? [] : options;
   return [
-    options.length > 0 &&
-      html`<div class="doptions">${options.map((o, i) => {
+    shown.length > 0 &&
+      html`<div class="doptions">${shown.map((o, i) => {
         const k = hotkey(i);
         return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => {
           if (instant) {
@@ -136,6 +138,21 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
   ];
 }
 
+/**
+ * A run card's Decline, beside Run in the run row: it sends at once, with
+ * anything typed in the answer box as the reason. It keeps the option's
+ * class, so its number key and Enter work as any option's do.
+ */
+function RunDecline({ c, draft }: { c: DecisionCard; draft: DecisionDraft | undefined }) {
+  const option = (c.kind === 'decision' && c.options[0]) || RUN_DECLINE;
+  const k = touchOnly() ? undefined : '1';
+  const on = draft?.option === option;
+  return html`<button type="button" class=${'btn dopt rundecline' + (on ? ' on' : '')} aria-pressed=${on ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${!!draft?.sending} onClick=${() => {
+    setDraft(c.key, { option, error: undefined });
+    void sendAnswer(c.key);
+  }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(option)}</span></span></button>`;
+}
+
 /** The dock's icons: a paperclip to attach, and the paper plane of Material's `send` to send. Each button carries its own label. */
 const AttachIcon = html`<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>`;
 const SendIcon = html`<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" /></svg>`;
@@ -190,6 +207,7 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
     <button type="button" class="dopen" onClick=${open} aria-label=${`${STATE_WORD[state]}: ${c.kind === 'decision' ? c.title : c.note}`}>
       ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
+      ${run && RunKindIcon}
       <b class="dtitle">${titleOf(c)}</b>
       <span class="dmeta dim">${meta}</span>
       ${boat && html`<span class="dboat dim">⛵ ${boat}</span>`}
@@ -223,7 +241,7 @@ function RecentRuns({ runs }: { runs: RecentRun[] }) {
   if (!runs.length) return null;
   return html`<details class="recent-runs"><summary class="dim">Recent runs (${runs.length})</summary><ul class="dlist">${runs.map(
     (r) =>
-      html`<li key=${r.key} class="recent-run"><a class="drow" href=${`#decision/${encodeURIComponent(r.key)}`}><b class="dtitle">${r.title}</b><span class="dmeta dim">${r.repo ? [RepoName(r.repo), ' · '] : ''}${Age(r.finishedAt)} ago${r.exitCode !== undefined ? ` · exit ${r.exitCode}` : ''}</span>${recentRunIcon(r)}</a></li>`,
+      html`<li key=${r.key} class="recent-run"><a class="drow" href=${`#decision/${encodeURIComponent(r.key)}`}>${RunKindIcon}<b class="dtitle">${r.title}</b><span class="dmeta dim">${r.repo ? [RepoName(r.repo), ' · '] : ''}${Age(r.finishedAt)} ago${r.exitCode !== undefined ? ` · exit ${r.exitCode}` : ''}</span>${recentRunIcon(r)}</a></li>`,
   )}</ul></details>`;
 }
 
@@ -366,19 +384,23 @@ export function DecisionModal({
   const draft = drafts[c.key];
   const touch = touchOnly();
   const proposal = c.kind === 'decision' && c.permissionsProposal && !c.readOnly;
+  const run = c.kind === 'decision' && !proposal ? c.run : undefined;
+  const runRow = (decline: boolean) =>
+    run &&
+    html`<${RunActions} cardKey=${c.key} run=${run} readOnly=${c.kind === 'decision' && c.readOnly} decline=${decline && html`<${RunDecline} c=${c} draft=${draft} />`} />`;
   const answer = proposal
     ? null
     : c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
       ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
       : c.kind === 'decision' && c.readOnly
-        ? html`<div class="dim">Closed decision</div>`
-        : c.kind === 'decision' && c.run && (ran?.busy || ran?.result || c.run.latest)
-          ? null
+        ? [runRow(false), !(run && ran?.busy) && html`<div class="dim">Closed decision</div>`]
+        : run && (ran?.busy || ran?.result || run.latest)
+          ? runRow(false)
           : draft?.sent
             ? c.kind === 'decision' && c.run && draft.option === RUN_DECLINE
               ? html`<div class="danswered runstate"><${RunStatusIcon} status="declined" /></div>`
               : html`<div class="danswered ok">answered · ${draft.sent}</div>`
-            : answerForm(c, draft, extensions.join(','));
+            : [runRow(true), answerForm(c, draft, extensions.join(','))];
   const showLegend = !touch && (proposal || !(c.kind === 'decision' && (c.appStart || c.readOnly)));
   return shell(
     c.kind === 'decision' ? c.title : c.note,
