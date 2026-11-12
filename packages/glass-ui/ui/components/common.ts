@@ -174,7 +174,7 @@ export interface TrapRoute {
   /** Where it works, beside the modal's button. */
   where: string;
   /** The control, with the text it carries. */
-  control: (text: string) => Children;
+  control: (text: Children) => Children;
 }
 
 /**
@@ -198,7 +198,8 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
       kind: 'raise',
       name: 'Raise window',
       where: 'on this Mac',
-      control: (text) => html`<button class="btn open" title="Raise this trap's window on this Mac" onClick=${clicked}>${text}</button>`,
+      control: (text) =>
+        html`<button class="btn open" title="Raise this trap's window on this Mac" aria-label="Raise this trap's window on this Mac" onClick=${clicked}>${text}</button>`,
     });
   }
   if (t.liveLink) {
@@ -208,7 +209,7 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
       name: 'Open live in Claude',
       where: 'any device',
       control: (text) =>
-        html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" onClick=${stop}>${text}</a>`,
+        html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" aria-label="Open this live session in Claude" onClick=${stop}>${text}</a>`,
     });
   }
   if (t.link && !desktopSession(t) && here && sessionLinkOpens()) {
@@ -217,7 +218,8 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
       kind: 'link',
       name: 'Session link',
       where: 'opens its app on this Mac',
-      control: (text) => html`<a class="btn open" href=${href} title="Open this session's link in its app" onClick=${stop}>${text}</a>`,
+      control: (text) =>
+        html`<a class="btn open" href=${href} title="Open this session's link in its app" aria-label="Open this session's link in its app" onClick=${stop}>${text}</a>`,
     });
   }
   return routes;
@@ -809,15 +811,15 @@ export function trapBoat(t: GlassTrap): string | undefined {
  * windowAction it never shows a note in place of the button; the card's
  * boat line already says where the trap runs, and the modal has every route.
  */
-export function trapOpen(t: GlassTrap): Children {
+export function trapOpen(t: GlassTrap, label: Children = '↗ Open'): Children {
   if (t.requested || t.starting) return null;
   if (!t.live) {
     if (!(desktopSession(t) && t.link) || !sessionLinkOpens()) return null;
-    return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
+    return html`<span class="winaction gopenbtn"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>${label}</a></span>`;
   }
   const [best] = trapRoutes(t);
   if (!best) return null;
-  return html`<span class="winaction">${best.control('↗ Open')}${focusResult(t)}</span>`;
+  return html`<span class="winaction gopenbtn">${best.control(label)}${focusResult(t)}</span>`;
 }
 
 /** A trap's or worker's place in the heavy line: `in line, 1st`, `running, 6m`, `over limit`. */

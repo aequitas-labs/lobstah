@@ -39,8 +39,8 @@ function row(t: GlassTrap, grants: Grant[]) {
 
 /**
  * A trap as a card, the same on every glass and at every width: its name,
- * harness and state chip; its repo and ↗ Open; what it is doing now; and the
- * boat it runs on with its catches. The session, worktree, heartbeat, mail
+ * harness and state chip; its repo and catches; what it is doing now; the
+ * boat it runs on; and a bottom bar with ↗ Open at its right. The session, worktree, heartbeat, mail
  * and grants are in the trap's modal.
  */
 export function trapCard(t: GlassTrap) {
@@ -53,13 +53,18 @@ export function trapCard(t: GlassTrap) {
     titleAttr=${`wt:${t.trapId}`}
     icon=${t.harness && html`<${Harness} worker=${t} cls="" compact />`}
     state=${{ word: status.word, tone: status.tone, mark: 'chip' }}
-    context=${t.repo && !t.configured ? RepoName(t.repo) : scope}
+    context=${[
+      t.repo && !t.configured ? RepoName(t.repo) : scope,
+      html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`,
+    ]
+      .filter(Boolean)
+      .flatMap((part, i) => (i ? [' · ', part] : [part]))}
     contextTitle=${scope}
-    action=${trapOpen(t)}
     now=${trapWork(t)}
     nowTitle=${trapWorkText(t)}
-    foot=${{ left: boat && ['⛵ ', boat], right: html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>` }}
+    foot=${boat && { left: ['⛵ ', boat] }}
     extra=${startCommands(t)}
+    actions=${trapOpen(t)}
     quiet=${!t.live && !t.starting}
     onClick=${opener('trap', t.trapId)}
   />`;

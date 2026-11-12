@@ -194,8 +194,8 @@ const showReview = (r: GlassReview) => () => {
  * A review card, in the PR card's layout (prShapedCard): the PR icon and
  * title; the review's status chip, and "needs you" when it waits on you;
  * then repo · age · #number · 🪤 the trap drafting it; then its actions
- * (draft, send, skip, or dismiss on a wharf) and Open draft (↗ Open before
- * there is one). Who asked, the findings and the reason are in its modal.
+ * (draft, send, skip, or dismiss on a wharf), then Open draft (↗ Open before
+ * there is one) at the bar's right. Who asked, the findings and the reason are in its modal.
  */
 function card(r: GlassReview, canDraft: boolean, publish: boolean) {
   const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;

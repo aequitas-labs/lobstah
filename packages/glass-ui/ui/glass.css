@@ -3190,3 +3190,20 @@ a.runbtn {
   border-left: 1px solid var(--line);
   cursor: default;
 }
+
+/* Open is last in a card's bottom bar and pushed to its right: the same corner on every card. */
+.gactions .gopenbtn {
+  margin-left: auto;
+}
+/* A report card's way out: a small arrow at the far right of its top line. */
+.gopen {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-2);
+  color: var(--dim);
+}
+.gopen:hover,
+.gopen:focus-visible {
+  color: var(--fg);
+}

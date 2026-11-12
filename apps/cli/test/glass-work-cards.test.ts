@@ -57,7 +57,7 @@ function review(n: number, over: Partial<GlassReview> = {}): GlassReview {
 }
 
 describe('a PR card', () => {
-  it('leads with its state-colored PR icon and title, then its state chip, then repo · age · #number · trap · checks, then its buttons', async () => {
+  it('leads with its state-colored PR icon and title, then its state chip, then repo · age · #number · trap, then its buttons', async () => {
     const d = acceptanceFleet();
     const p = d.prs.find((x) => x.number === 41)!;
     const g = await page(d, '#prs');
@@ -70,8 +70,8 @@ describe('a PR card', () => {
     // 2. GitHub's state as a chip; a green badge adds nothing.
     expect(card.querySelectorAll('.gtop + .gstate .gchip').length).toBe(1);
     expect(text(card.querySelector('.gstate .gchip.pr-open'))).toBe('Open');
-    // 3. The meta line: its dispatches' trap is the first one a trap was addressed or claimed.
-    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^web · \d+\w ago · #41 · 🪤 wt:t1 · 4\/4 passed$/);
+    // 3. The meta line: its dispatches' trap is the first one a trap was addressed or claimed. The checks' breakdown is a checks chip's hover, never here.
+    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^web · \d+\w ago · #41 · 🪤 wt:t1$/);
     expect(card.querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     // 4. The buttons, in a bar of their own.
     expect(card.querySelectorAll(':scope > .gline')).toHaveLength(4);
@@ -100,14 +100,16 @@ describe('a PR card', () => {
     expect([...card(41).querySelectorAll('.gactions button')].map(text)).toEqual(['Merge when green', 'Ack']);
     expect([...card(42).querySelectorAll('.gactions button')].map(text)).toEqual([]);
     expect([...card(42).querySelectorAll('.gactions a')].map(text)).toEqual(['↗ Open']);
-    // Merge when green still asks before it merges, and a tap on the bar never opens the card.
+    // ↗ Open sits at the bar's right on every card.
+    expect(card(41).querySelector('.gactions')!.lastElementChild?.className).toContain('gopenbtn');
+    // Merge when green asks the boat in one click, the repo's way, and a tap on the bar never opens the card.
     await click(
       g,
       [...card(41).querySelectorAll('.gactions button')].find((b) => text(b) === 'Merge when green'),
     );
     expect(g.$('#overlay')!.className).not.toBe('open');
-    expect(text(card(41).querySelector('.gactions .prmerge.asking'))).toContain('Merge #41 into');
-    expect(g.posts()).toEqual([]);
+    expect(g.$('#prs .prmerge.asking')).toBeNull();
+    expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'pr-merge', payload: { key: p.key } });
   });
 });
 

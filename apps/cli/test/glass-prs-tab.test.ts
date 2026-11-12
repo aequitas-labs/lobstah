@@ -91,35 +91,26 @@ describe('Merge when green', () => {
   const button = (g: GlassDom, label: string) => g.$$('#prs button').find((b) => text(b) === label) as HTMLElement | undefined;
 
   for (const view of ['cards', 'table'] as const) {
-    it(`asks before it asks the boat, says what it merges into and how, then offers Cancel, as ${view}`, async () => {
+    it(`asks the boat in one click, the repo's way, then offers Cancel merge, as ${view}`, async () => {
       const g = await page(mergeFleet(), { hash: '#prs', post: boat, prefs: { view } });
-      // Only your PR has it.
+      // Only your PR has it, and its hover says what it merges into and how; the card offers no other choice.
       expect(g.$$('#prs button').filter((b) => text(b) === 'Merge when green')).toHaveLength(1);
+      expect(button(g, 'Merge when green')!.getAttribute('title')).toBe('Merges #50 into main as a merge commit once green');
       button(g, 'Merge when green')!.click();
       await g.settle();
-      expect(g.posts()).toHaveLength(0);
-      expect(button(g, 'Keep')).toBeDefined();
-      button(g, 'Merge #50 into main as a merge commit')!.click();
-      await g.settle();
       expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'pr-merge', payload: { key: 'pr:acme/web#50' } });
-      expect(text(g.$('#prs .mergenote'))).toBe('merges when green');
-      button(g, 'Cancel')!.click();
+      expect(button(g, 'Keep')).toBeUndefined();
+      const cancel = button(g, 'Cancel merge')!;
+      expect(cancel.getAttribute('aria-pressed')).toBe('true');
+      // The table keeps its note beside the button; a card's button says it all.
+      if (view === 'table') expect(text(g.$('#prs .mergenote'))).toBe('merges when green');
+      else expect(g.$('#prs .mergenote')).toBeNull();
+      cancel.click();
       await g.settle();
       expect(JSON.parse(g.posts().at(-1)!.body).payload).toEqual({ key: 'pr:acme/web#50', cancel: true });
-      expect(g.$('#prs .mergenote')).toBeNull();
       expect(button(g, 'Merge when green')).toBeDefined();
     });
   }
-
-  it('Keep backs out without asking the boat', async () => {
-    const g = await page(mergeFleet(), { hash: '#prs', post: boat });
-    button(g, 'Merge when green')!.click();
-    await g.settle();
-    button(g, 'Keep')!.click();
-    await g.settle();
-    expect(g.posts()).toHaveLength(0);
-    expect(button(g, 'Merge when green')).toBeDefined();
-  });
 
   it('shows why the boat refused', async () => {
     const g = await page(mergeFleet(), {
@@ -127,8 +118,6 @@ describe('Merge when green', () => {
       post: () => ({ status: 403, body: { ok: false, reason: 'Only your own PRs, or ones a dispatch opened, merge from the glass.' } }),
     });
     button(g, 'Merge when green')!.click();
-    await g.settle();
-    button(g, 'Merge #50 into main as a merge commit')!.click();
     await g.settle();
     expect(text(g.$('#prs [role="alert"]'))).toBe('Only your own PRs, or ones a dispatch opened, merge from the glass.');
   });
