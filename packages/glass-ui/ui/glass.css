@@ -104,6 +104,16 @@ h2 {
   letter-spacing: 0.08em;
   margin: 20px 0 6px;
 }
+/* The PRs tab's Other PRs: its heading sits on the disclosure arrow's line. */
+.otherprs > summary {
+  margin: 20px 0 6px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.otherprs > summary > h2 {
+  display: inline;
+  margin: 0;
+}
 .chips,
 .controls {
   display: flex;
@@ -331,6 +341,10 @@ h2 {
 }
 .bblabel {
   white-space: nowrap;
+}
+/* Search and Menu: an icon with no label, still a thumb's width (its name is its aria-label). */
+.bbitem.bbiconly {
+  flex: 0 0 48px;
 }
 .bottombar.searching .bbrow {
   gap: var(--space-2);

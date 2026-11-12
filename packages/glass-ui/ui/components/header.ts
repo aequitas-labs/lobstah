@@ -9,7 +9,7 @@ import { Age, Harness, opener } from './common.js';
 import { capabilities, visibleTabs } from '../backend.js';
 import { host } from '../host.js';
 import { getState } from '../store.js';
-import { PrIcon } from './card.js';
+import { prsNeedingYou } from './prs.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -218,8 +218,13 @@ const DECK_ICON = svg(
 );
 const SEARCH_ICON = svg('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
 const MENU_ICON = svg('<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>');
+/** Reviews: a speech bubble. PRs: a pull request. Both from the same Feather set as the bar's other icons. */
+const REVIEWS_ICON = svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>');
+const PRS_ICON = svg(
+  '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/>',
+);
 
-/** The bar at the bottom of a phone: On deck and Reviews, then Search and Menu. */
+/** The bar at the bottom of a phone: On deck, Reviews and PRs with labels, then Search and Menu as icons. */
 function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: SectionInputs; tab: GlassTab; st: GlassPrefs; unread: number }) {
   const [mode, setMode] = useState<'bar' | 'search' | 'menu'>('bar');
   const root = useRef<HTMLDivElement>(null);
@@ -249,6 +254,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
   // A decision or run card takes the bottom edge with its own dock.
   if (getState().decisionModal) return null;
   const reviews = (d?.reviews ?? []).filter((r) => r.stands || r.notification).length;
+  const prsWaiting = prsNeedingYou(d?.prs ?? []);
   const count = (n: number, label: string) => n > 0 && html`<span class="dbadge" aria-label=${label}>${n}</span>`;
   if (mode === 'search') {
     const repos = d ? repoList(d) : [];
@@ -280,9 +286,10 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
     }
     <nav class="bbrow" aria-label="Spyglass">
       ${link('deck', DECK_ICON, count(unread, `${unread} new decision${unread === 1 ? '' : 's'}`))}
-      ${link('reviews', PrIcon, count(reviews, 'reviews in inbox'))}
-      <button type="button" class=${'bbitem' + (st.q || st.repo ? ' on' : '')} onClick=${() => setMode('search')}><span class="bbicon">${SEARCH_ICON}</span><span class="bblabel">Search</span></button>
-      <button type="button" class=${'bbitem' + (mode === 'menu' ? ' on' : '')} aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${MENU_ICON}</span><span class="bblabel">Menu</span></button>
+      ${link('reviews', REVIEWS_ICON, count(reviews, 'reviews in inbox'))}
+      ${link('prs', PRS_ICON, count(prsWaiting, `${prsWaiting} of your PR${prsWaiting === 1 ? '' : 's'} need${prsWaiting === 1 ? 's' : ''} you`))}
+      <button type="button" class=${'bbitem bbiconly' + (st.q || st.repo ? ' on' : '')} aria-label="Search" onClick=${() => setMode('search')}><span class="bbicon">${SEARCH_ICON}</span></button>
+      <button type="button" class=${'bbitem bbiconly' + (mode === 'menu' ? ' on' : '')} aria-label="Menu" aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${MENU_ICON}</span></button>
     </nav>
   </div>`;
 }
