@@ -41,9 +41,28 @@ describe('Recent runs on the deck', () => {
     expect(section.querySelector('summary')!.textContent).toBe('Recent runs (3)');
     const rows = g.$$('#deck .recent-runs .recent-run');
     expect(rows.map((r) => r.querySelector('.dtitle')!.textContent)).toEqual(['Publish the package', 'Rotate the key', 'Tail the logs']);
-    expect(rows.map((r) => r.querySelector('.badge')!.textContent)).toEqual(['succeeded', 'failed', 'stopped']);
+    expect(rows.map((r) => r.querySelector('.runicon')!.getAttribute('aria-label'))).toEqual(['Succeeded · exit 0', 'Failed · exit 2', 'Stopped']);
+    expect(g.$$('#deck .recent-runs .badge')).toHaveLength(0);
     expect(rows[1]!.textContent).toContain('exit 2');
     expect(rows[0]!.querySelector('a')!.getAttribute('href')).toBe(`#decision/${encodeURIComponent(d.recentRuns[0]!.key)}`);
+  });
+
+  it('shows each run’s status as the run card’s icon: check, X, clock or square, named with its exit code and time', async () => {
+    const d = emptyFleet();
+    d.recentRuns = [
+      { ...run('Publish the package', 'succeeded', 5 * MIN), durationMs: 4200 },
+      { ...run('Rotate the key', 'failed', 10 * MIN), durationMs: 42_000 },
+      { ...run('Migrate the database', 'failed', 15 * MIN, 124), timedOut: true, durationMs: 300_000 },
+      { ...run('Tail the logs', 'stopped', 20 * MIN, 130), durationMs: 192_000 },
+    ];
+    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#deck' });
+    pages.push(g);
+    const icons = g.$$('#deck .recent-runs .recent-run .runicon');
+    expect(icons.map((i) => i.className)).toEqual(['runicon run-succeeded ok', 'runicon run-failed bad', 'runicon run-timed-out bad', 'runicon run-stopped dim']);
+    expect(icons.map((i) => i.getAttribute('role'))).toEqual(['img', 'img', 'img', 'img']);
+    expect(icons.map((i) => i.getAttribute('aria-label'))).toEqual(['Succeeded · exit 0 · 4.2s', 'Failed · exit 2 · 42s', 'Timed out · exit 124 · 5m 0s', 'Stopped · 3m 12s']);
+    expect(icons.map((i) => i.getAttribute('title'))).toEqual(icons.map((i) => i.getAttribute('aria-label')));
+    expect(icons.every((i) => i.querySelector('svg'))).toBe(true);
   });
 
   it('shows no section when nothing ran', async () => {
@@ -82,6 +101,9 @@ describe('the run cleanup on the daemon and the glass', () => {
     const snapshot = buildGlassSnapshot();
     expect(snapshot.decisions?.map((d) => d.title)).toEqual(['Just finished']);
     expect(snapshot.recentRuns?.map((r) => r.title)).toEqual(['Finished earlier']);
+    // It carries what the status icon names: the exit code and how long it ran.
+    expect(snapshot.recentRuns?.[0]).toMatchObject({ state: 'succeeded', exitCode: 0, durationMs: MIN });
+    expect(snapshot.recentRuns?.[0]?.timedOut).toBeUndefined();
   });
 
   it('the daemon withdraws finished cards every 30 seconds, not every tick', () => {

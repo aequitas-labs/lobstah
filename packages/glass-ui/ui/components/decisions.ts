@@ -1,6 +1,6 @@
 import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
-import type { Attachment, RecentRun } from '@lobstah/core';
+import type { Attachment, RecentRun, RunResult } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
 import { decisionNeighbours } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
@@ -27,6 +27,7 @@ import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
 import { RunCardBody } from './run-card.js';
 import { RUN_DECLINE, RunStatusIcon, runStatus } from './run-status.js';
+import type { RunStatus } from './run-status.js';
 import { can, fileUrl } from '../backend.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 
@@ -197,12 +198,22 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   </li>`;
 }
 
-/** How a finished run ended, as its row's badge says it. */
-const RUN_ENDED: Record<RecentRun['state'], { text: string; tone: string }> = {
-  succeeded: { text: 'succeeded', tone: 'ok' },
-  failed: { text: 'failed', tone: 'bad' },
-  stopped: { text: 'stopped', tone: 'dim' },
-};
+/** How a finished run ended, as the run card's status icon shows it: its status, and the result its words name. */
+function recentRunIcon(r: RecentRun) {
+  const status: RunStatus = r.timedOut ? 'timed-out' : r.state;
+  const result: RunResult | undefined =
+    r.exitCode === undefined
+      ? undefined
+      : {
+          exitCode: r.exitCode,
+          timedOut: r.timedOut === true,
+          stopped: r.state === 'stopped',
+          durationMs: r.durationMs ?? 0,
+          outputBytes: 0,
+          scrubbed: 0,
+        };
+  return html`<span class="dsent"><${RunStatusIcon} status=${status} result=${result} /></span>`;
+}
 
 /**
  * Runs that finished and left the decisions, closed until opened. A row opens
@@ -210,10 +221,10 @@ const RUN_ENDED: Record<RecentRun['state'], { text: string; tone: string }> = {
  */
 function RecentRuns({ runs }: { runs: RecentRun[] }) {
   if (!runs.length) return null;
-  return html`<details class="recent-runs"><summary class="dim">Recent runs (${runs.length})</summary><ul class="dlist">${runs.map((r) => {
-    const ended = RUN_ENDED[r.state];
-    return html`<li key=${r.key} class="recent-run"><a class="drow" href=${`#decision/${encodeURIComponent(r.key)}`}><b class="dtitle">${r.title}</b><span class="dmeta dim">${r.repo ? [RepoName(r.repo), ' · '] : ''}${Age(r.finishedAt)} ago${r.exitCode !== undefined ? ` · exit ${r.exitCode}` : ''}</span><span class=${`badge ${ended.tone}`}>${ended.text}</span></a></li>`;
-  })}</ul></details>`;
+  return html`<details class="recent-runs"><summary class="dim">Recent runs (${runs.length})</summary><ul class="dlist">${runs.map(
+    (r) =>
+      html`<li key=${r.key} class="recent-run"><a class="drow" href=${`#decision/${encodeURIComponent(r.key)}`}><b class="dtitle">${r.title}</b><span class="dmeta dim">${r.repo ? [RepoName(r.repo), ' · '] : ''}${Age(r.finishedAt)} ago${r.exitCode !== undefined ? ` · exit ${r.exitCode}` : ''}</span>${recentRunIcon(r)}</a></li>`,
+  )}</ul></details>`;
 }
 
 export function DeckDecisions({

@@ -134,6 +134,10 @@ export interface RecentRun {
   title: string;
   state: Exclude<RunState, 'running'>;
   exitCode?: number;
+  /** It hit its time limit (a failed run, shown as timed out). */
+  timedOut?: true;
+  /** How long it ran. */
+  durationMs?: number;
   finishedAt: string;
   dispatch?: string;
   repo?: string;
@@ -174,7 +178,7 @@ export function recentRuns(now = Date.now()): RecentRun[] {
       key: attempt.key,
       title: meta.title,
       state: attempt.state,
-      ...(attempt.result ? { exitCode: attempt.result.exitCode } : {}),
+      ...(attempt.result ? { exitCode: attempt.result.exitCode, durationMs: attempt.result.durationMs, ...(attempt.result.timedOut ? { timedOut: true as const } : {}) } : {}),
       finishedAt: attempt.finishedAt,
       ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
       ...(meta.repo ? { repo: meta.repo } : {}),
