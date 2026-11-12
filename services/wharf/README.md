@@ -216,7 +216,7 @@ fall back to stored boats. The glass UI/approval page follows next; these APIs
 are currently exercised by local tests.
 
 Limits are configurable non-secret vars: 120 authenticated requests/minute/account,
-10,000 stored rows, 100 MiB account storage, and 25 MiB/file. Limits are abuse caps,
+10,000 stored rows (idempotency records aside: the 24-hour window bounds them), 100 MiB account storage, and 25 MiB/file. Limits are abuse caps,
 not paid tiers. JSON bodies are bounded at 64 KiB. Rate limits are per-account
 minute windows, not IP identities, counted in the account object's memory: a
 counter written to SQLite on every request spent the Durable Objects free tier
@@ -271,6 +271,8 @@ until the original deadline. No local-files authorization changes.
 All routes are under `/v1/accounts/<account>/`, authenticated with a bearer token.
 All mutations require `Idempotency-Key` (1–128 identifier characters). Reusing a
 key with a different request fails. Keys are scoped to authenticated principals.
+A key replays its first result for 24 hours; after that the same key runs as a new
+request. Each mutation drops at most one record past that window.
 Helm mutations require a live helm lease and `X-Lobstah-Helm: <session>`; credential
 administration requires `admin`. A different live helm needs explicit takeover.
 

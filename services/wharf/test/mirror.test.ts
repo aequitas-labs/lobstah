@@ -5,6 +5,7 @@ import type { Account } from '../src/account.js';
 import { glassTables } from '../src/glass-state.js';
 import { mirrorTables } from '../src/mirror-state.js';
 import { authFixtures } from './auth-fixture.js';
+import { rowsWritten } from './rows-written.js';
 import type { WharfMirrorCall } from '../../../packages/core/src/backend-model.js';
 
 /**
@@ -308,42 +309,18 @@ describe('the waiting relay', () => {
 });
 
 describe('rows written', () => {
-  /**
-   * The rows the account's SQLite writes while `fn` runs, from every
-   * statement's cursor. Durable Objects bill rows_written: the free tier
-   * allows 100,000 a day, and a hosted glass keeps boats polling every 2s.
-   */
-  async function rowsWritten(fn: () => Promise<unknown>): Promise<number> {
-    const cursors: Array<{ rowsWritten: number }> = [];
-    let restore = () => {};
-    await runInDurableObject(env.ACCOUNTS.getByName(account), (_instance: Account, state) => {
-      const sql = state.storage.sql;
-      const exec = sql.exec;
-      sql.exec = function (this: SqlStorage, ...args: Parameters<SqlStorage['exec']>) {
-        const cursor = exec.apply(this, args);
-        cursors.push(cursor);
-        return cursor;
-      } as SqlStorage['exec'];
-      restore = () => { sql.exec = exec; };
-    });
-    try {
-      await fn();
-    } finally {
-      await runInDurableObject(env.ACCOUNTS.getByName(account), () => restore());
-    }
-    return cursors.reduce((n, c) => n + c.rowsWritten, 0);
-  }
+  const written = (fn: () => Promise<unknown>) => rowsWritten(env.ACCOUNTS.getByName(account), fn);
 
   it('writes nothing for a boat’s call poll or a hosted glass’s poll', async () => {
     const north = await enrol('north', ['mirror', 'read']);
     expect((await put(north, snapshot('north'))).status).toBe(200);
-    const written = await rowsWritten(async () => {
+    const rows = await written(async () => {
       for (let i = 0; i < 5; i++) {
         expect((await boatCall(north, 'mirror/calls')).status).toBe(200);
         await list();
       }
     });
-    expect(written).toBe(0);
+    expect(rows).toBe(0);
     // The hosted glass's poll still tells the boat a glass is open.
     const calls = await (await boatCall(north, 'mirror/calls')).json<{ watchedUntil?: string }>();
     expect(Date.parse(calls.watchedUntil ?? '')).toBeGreaterThan(Date.now());
@@ -351,7 +328,7 @@ describe('rows written', () => {
 
   it('writes only the snapshot’s own row for a put', async () => {
     const north = await enrol('north', ['mirror', 'read']);
-    expect(await rowsWritten(async () => expect((await put(north, snapshot('north'))).status).toBe(200))).toBeLessThanOrEqual(2);
+    expect(await written(async () => expect((await put(north, snapshot('north'))).status).toBe(200))).toBeLessThanOrEqual(2);
   });
 
   it('keeps request counts in memory, and still refuses past the minute’s limit', async () => {

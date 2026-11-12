@@ -1,8 +1,10 @@
 import { env, SELF, runInDurableObject } from 'cloudflare:test';
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { digest } from '../src/protocol.js';
 import { boatPermissions } from '../src/permissions.js';
 import type { Account } from '../src/account.js';
+import { IDEM_WINDOW_MS } from '../src/account.js';
+import { rowsWritten } from './rows-written.js';
 import { WharfBackend } from '../../../packages/core/src/wharf-backend.js';
 import { authFixtures } from './auth-fixture.js';
 let key = 0;
@@ -421,4 +423,51 @@ it('cancels queued assistance with its parent and retains late active results', 
   expect(await (await call('dispatches/second-parent')).json()).toMatchObject({ state: 'cancelled' });
   const events = await (await call('events')).json<{ events: Array<{ kind: string }> }>();
   expect(events.events.some((event) => event.kind === 'assistance-retained')).toBe(true);
+});
+
+describe('idem records', () => {
+  const stub = () => env.ACCOUNTS.getByName('a');
+  const sql = <T extends Record<string, SqlStorageValue>>(statement: string, ...bindings: SqlStorageValue[]) =>
+    runInDurableObject(stub(), (_instance: Account, state) => state.storage.sql.exec<T>(statement, ...bindings).toArray());
+  const keys = async () => (await sql<{ key: string }>('SELECT key FROM idem ORDER BY rowid')).map((r) => r.key);
+  const renew = (k: string) => call('helm/renew', {}, pat, k);
+  const expired = Date.now() - IDEM_WINDOW_MS - 1;
+
+  it('replays a retry inside the window: one dispatch, the first result', async () => {
+    const first = await call('dispatches', { id: 'once', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'build' }, pat, 'enqueue-once');
+    const retry = await call('dispatches', { id: 'once', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'build' }, pat, 'enqueue-once');
+    expect(retry.status).toBe(first.status);
+    expect(await retry.json()).toEqual(await first.json());
+    expect(await sql('SELECT id FROM dispatches')).toHaveLength(1);
+    expect((await sql<{ at: number }>("SELECT at FROM idem WHERE key='enqueue-once'"))[0]!.at).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('drops a record past the window, and one from before records had a time, on the next commands', async () => {
+    await sql('DELETE FROM idem');
+    await sql("INSERT INTO idem(actor,key,fingerprint,result) VALUES ('person:a','legacy','f','{}')");
+    expect((await renew('first')).status).toBe(200);
+    expect(await keys()).toEqual(['first']);
+    await sql("UPDATE idem SET at=? WHERE key='first'", expired);
+    expect((await renew('second')).status).toBe(200);
+    expect(await keys()).toEqual(['second']);
+    // A fresh record stays: only what's past the window goes.
+    expect((await renew('third')).status).toBe(200);
+    expect(await keys()).toEqual(['second', 'third']);
+    // Past the window, the same key runs as a new command.
+    await sql("UPDATE idem SET at=? WHERE key='second'", expired);
+    expect((await renew('fourth')).status).toBe(200);
+    expect(await keys()).toEqual(['third', 'fourth']);
+  });
+
+  it('trims a backlog one record per command, each costing at most one more row written', async () => {
+    const burst = async (prefix: string) => rowsWritten(stub(), async () => {
+      for (let i = 0; i < 10; i++) expect((await renew(`${prefix}-${i}`)).status).toBe(200);
+    });
+    await sql('DELETE FROM idem');
+    const fresh = await burst('fresh');
+    await sql('UPDATE idem SET at=?', expired);
+    const trimming = await burst('trim');
+    expect(await keys()).toEqual(Array.from({ length: 10 }, (_, i) => `trim-${i}`));
+    expect(trimming - fresh).toBeLessThanOrEqual(10);
+  });
 });
