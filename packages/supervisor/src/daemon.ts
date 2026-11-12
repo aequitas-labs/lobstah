@@ -450,6 +450,8 @@ export interface DaemonHooks {
   codexClaimWatch?: (now: number, log: (message: string) => void) => void;
   /** Refreshes Codex hook trust when lobstah's Codex plugin changes (see codex-hook-watch). */
   codexHookWatch?: (now: number, log: (message: string) => void) => void;
+  /** Runs the waits other tools registered with a trap's turn end (see turn-waits). */
+  turnWaits?: (now: number, log: (message: string) => void) => void;
   /** CLI-owned asynchronous trap startup; never waits for sign-on in the tick. */
   trapStarts?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
@@ -620,6 +622,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     hooks.codexHookWatch?.(hooks.now?.() ?? Date.now(), log);
   } catch (err) {
     log(`codex hook watch: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    hooks.turnWaits?.(hooks.now?.() ?? Date.now(), log);
+  } catch (err) {
+    log(`turn waits: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {

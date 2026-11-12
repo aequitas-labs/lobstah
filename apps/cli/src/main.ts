@@ -242,6 +242,7 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
+import { createTurnWaits } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
@@ -3987,6 +3988,7 @@ async function mainCli(): Promise<void> {
           runCleanup: createRunCleanup(),
           codexServerWatch: createCodexServerWatch(),
           codexClaimWatch: createCodexClaimWatch(),
+          turnWaits: createTurnWaits().pass,
           codexHookWatch: createCodexHookWatch(),
         });
       } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');

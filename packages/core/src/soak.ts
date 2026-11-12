@@ -23,6 +23,7 @@ import { toolSummary, toolTarget, writeActivity } from './activity.js';
 import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from './trap-names.js';
 import { laneOf } from './worktrees.js';
 import { protectTrapRevision, removeGhostWorktree } from './worktree-safety.js';
+import { claimTurnEnd, releaseTurnEnd } from './turn-owner.js';
 import { readRoster, recordRosterDeparture, recordRosterSignOn } from './roster.js';
 import { readReservation } from './trap-start.js';
 import { loadConfig, DEFAULT_SOAK } from './config.js';
@@ -424,6 +425,9 @@ export function signOnTrap(opts: {
   recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: opts.configured ? undefined : protectTrapRevision(opts.worktree, trapId, now), creationReason: opts.creationReason, startMode: opts.startMode, now });
   // Back within the grace: held messages deliver at the next park.
   releaseSignedOff(trapId);
+  // Lobstah's park owns this session's turn end: other tools register their waits with it.
+  if (prior && prior.sessionId !== opts.sessionId) releaseTurnEnd(prior.sessionId);
+  claimTurnEnd(opts.sessionId, opts.cwd);
   if (!prior) {
     postNotice({
       kind: 'trap-signed-on',
@@ -509,6 +513,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   fs.rmSync(regPath(trapId), { force: true });
   fs.rmSync(beatPath(trapId), { force: true });
   fs.rmSync(prProbePath(trapId), { force: true });
+  releaseTurnEnd(reg.sessionId);
   dropTrapTickets(trapId, 'its trap was stowed');
   clearFinishedTrapCaches(reg, 'signed off');
   postNotice({
@@ -895,6 +900,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     const codexProcess = reg.harness === 'codex' && !reg.codexServer && reg.harnessProcess ? { ...reg.harnessProcess, threadId: reg.sessionId } : undefined;
     actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}), ...(codexProcess ? { codexProcess } : {}) });
     fs.rmSync(regPath(reg.trapId), { force: true });
+    releaseTurnEnd(reg.sessionId);
     fs.rmSync(beatPath(reg.trapId), { force: true });
     fs.rmSync(prProbePath(reg.trapId), { force: true });
     postNotice({
