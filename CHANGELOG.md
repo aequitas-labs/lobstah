@@ -43,15 +43,46 @@ boat on wharf grounds falls back to reading every 30 seconds.
   cards. A report card opens from an arrow at its top right. A trap card shows
   its catches on its repo line. (#458)
 
-### Run cards
+### Dispatch and run cards
 
+- An in-flight dispatch shows its verb as an icon in a small pill: an amber
+  spinner while working, a blue hand when it needs a decision, a red stop sign
+  when blocked, a grey pause, a green check when done and a red X when it
+  failed. Its hover says the verb, how long it has been in it, and what it
+  waits on. (#468)
+- One colour meaning everywhere: amber is in progress, so a working trap is
+  now amber, not green. Green is done or idle and listening, grey is paused,
+  not listening or signed off, red is blocked or failed, and blue needs a
+  decision. Trap chips stay words, in these colours. (#468)
 - Recent runs shows each run's status icon, as the run card does: a check, an
   X, a clock for a timeout, or a square when stopped. (#462)
+
+### Traps, hooks and waits
+
+- A lobstah hook fails open: on any error it writes one line to stderr,
+  records the error, and exits 0, so the turn goes on. `lobstah doctor` fails
+  the hooks row for a hook command this CLI doesn't know, or one that failed
+  since its last run. (#464)
+- `report paused --waiting-on review --link <url>` with a link that isn't a
+  GitHub PR (a plan or spec under review in its own tool) is accepted and
+  wakes nobody: no helm wake, reminder or card. A wait on a person is still
+  `needs-decision`. (#465)
+- Lobstah owns a trap's turn end. Other tools register a wait under
+  `~/.agent-turn/<session>/` instead of adding their own Stop hook, and the
+  daemon runs it and points the trap at what's new. `docs/turn-end.md` is the
+  contract. (#466)
 
 ### Also new
 
 - `lobstah man wait` with a short timeout ends on time: `--timeout 1` takes
   about a second, not 1.7. (#454)
+
+### Docs
+
+- The README's "Choose your approach 🧭" puts the background router and the
+  lobstah man side by side in a table. A new Glass section shows the glass at
+  phone size with On deck in view, and covers the hosted glass. Telemetry is
+  one paragraph, with the full text in `docs/telemetry.md`. (#463, #467)
 
 ### Maintenance
 
