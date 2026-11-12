@@ -129,6 +129,11 @@ function canon(node: Node, skeletonOnly = false): string {
     const el = c as Element;
     if (el.tagName === 'SCRIPT') continue;
     if (el.tagName === 'BUTTON' && el.classList.contains('thumb')) continue;
+    // Menu icons (components/icons.ts) are new beside each view's name; the gear's replaced its ⚙.
+    if (el.tagName.toLowerCase() === 'svg' && el.classList.contains('navicon')) {
+      if (el.parentElement?.id === 'gearbtn') text += '⚙';
+      continue;
+    }
     // Where a link out of the glass opens, and its ↗ mark, are html.ts's rule now; glass-links tests them.
     const external = el.tagName === 'A' && isExternalHref(el.getAttribute('href') ?? '', el.ownerDocument.location.origin);
     // Every button is the Button atom now (components/button.ts): its variant and size classes and its
@@ -255,6 +260,8 @@ function capture(g: GlassDom): Record<string, string> {
   }
   // A closed modal is hidden: the old page left its last markup behind the closed overlay, the new one unmounts it.
   if (g.$('#overlay')!.className !== 'open') out.modalbox = '(closed)';
+  // Settings left the overlay for a dialog (components/dialog.ts); glass-page tests it.
+  if (g.$('.settings-dialog') || (out.modalbox !== '(closed)' && g.$('#modalbox .settings'))) out.modalbox = '(settings in a dialog)';
   const tab = activeTab(g);
   out.tab = tab;
   // The glass intentionally grew a trap-window action in these two views.
@@ -272,6 +279,7 @@ function capture(g: GlassDom): Record<string, string> {
     const el = g.$('#' + id) as HTMLElement | null;
     out[`${id}.display`] = el ? `${el.style.display}|${el.className}` : '<missing>';
   }
+  if (out.modalbox === '(settings in a dialog)') out['overlay.display'] = '(settings in a dialog)';
   for (const id of ['f-lane', 'f-repo', 'f-verb', 'f-kind', 'f-q']) out[`${id}.value`] = (g.$('#' + id) as HTMLInputElement).value;
   out.chain = String((g.$('#f-chain') as HTMLInputElement).checked);
   out.tabs = g.$$('#tabs a, .tabpage').map((a) => `${a.getAttribute('href') ?? a.id}:${a.className}`).join(' ');

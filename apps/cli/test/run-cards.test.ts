@@ -139,7 +139,7 @@ describe('a run card in the glass', () => {
     const run = row.querySelector('.runbtn') as HTMLButtonElement;
     expect(run.disabled).toBe(true);
     expect([...row.children].map((b) => b.textContent?.trim())).toEqual(['Run', '1Decline']);
-    expect(g.$('#doverlay .ddock .runnote')!.textContent).toContain('Set up a passkey in Settings');
+    expect(g.$('#doverlay .ddock .runnote')!.textContent).toContain('Set up a passkey in Configuration');
     expect(g.$$('#doverlay .dopt').map((b) => b.textContent?.trim())).toEqual(['1Decline']);
     // A run card also takes a reply, sent with Send; Decline sends at once.
     expect(g.$('#doverlay .ddock textarea')).toBeTruthy();

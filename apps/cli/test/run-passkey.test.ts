@@ -202,7 +202,7 @@ describe('confirming a Run with the passkey', () => {
   it('asks for a passkey before issuing a run challenge', async () => {
     const res = await runChallenge(runCard());
     expect(res.status).toBe(409);
-    expect(res.json.reason).toContain('Set up a passkey in Settings');
+    expect(res.json.reason).toContain('Set up a passkey in Configuration');
   });
 });
 

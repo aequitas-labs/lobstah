@@ -269,12 +269,13 @@ export function Card(p: CardProps) {
 /**
  * A card with no details page of its own (a grant, a boat): a tap expands it
  * in place to show what left its two lines. Clicks inside what it shows
- * (buttons, a form) leave it open.
+ * (buttons, a form) leave it open. Its actions stay its last line, below
+ * what it shows.
  */
 export function ExpandingCard(p: CardProps & { more: Children }) {
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen(!open);
-  const { more, ...card } = p;
+  const { more, actions, ...card } = p;
   return Card({
     ...card,
     cls: [p.cls, 'gexpand', open && 'open'].filter(Boolean).join(' '),
@@ -291,6 +292,9 @@ export function ExpandingCard(p: CardProps & { more: Children }) {
       },
     },
     onClick: toggle,
-    extra: open && html`<div class="gmore" onClick=${(e: Event) => e.stopPropagation()}>${more}</div>`,
+    extra: [
+      open && html`<div class="gmore" onClick=${(e: Event) => e.stopPropagation()}>${more}</div>`,
+      actions && html`<div class="gline gactions" onClick=${(e: Event) => e.stopPropagation()}>${actions}</div>`,
+    ],
   });
 }

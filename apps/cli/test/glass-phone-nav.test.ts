@@ -103,17 +103,23 @@ describe('the bottom bar', () => {
     expect(item(g, 'Search').className).toContain('on');
   });
 
-  it('Menu lists every view, then the fleet, then ⚙ settings; Escape closes it', async () => {
+  it('Menu lists every view with its icon, then the fleet, then Settings; Escape closes it', async () => {
     const g = await page();
     item(g, 'Menu').click();
     await g.settle();
     const menu = g.$('#phone-menu')!;
     const views = [...menu.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
     expect(views).toEqual(g.$$('#tabs a').map((a) => a.getAttribute('href')));
+    // Each view's icon is the tab bar's: one mapping, the same on a phone and a desktop.
+    const icons = (links: Element[]) => links.map((a) => a.querySelector('svg.navicon')?.innerHTML);
+    expect(icons([...menu.querySelectorAll('nav a')])).toEqual(icons(g.$$('#tabs a')));
+    expect(icons([...menu.querySelectorAll('nav a')]).every(Boolean)).toBe(true);
     expect(text(menu)).toContain('daemon');
-    (([...menu.querySelectorAll('button')].find((b) => text(b) === '⚙ settings')) as HTMLElement).click();
+    const settings = [...menu.querySelectorAll('button')].find((b) => text(b) === 'Settings')!;
+    expect(settings.querySelector('svg.navicon')?.innerHTML).toBe(g.$('#gearbtn svg.navicon')?.innerHTML);
+    (settings as HTMLElement).click();
     await g.settle();
-    expect(g.$('#overlay')!.className).toBe('open');
+    expect(g.$('.settings-dialog')).not.toBeNull();
     expect(g.$('#phone-menu')).toBeNull();
     g.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await g.settle();

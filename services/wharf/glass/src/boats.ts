@@ -21,8 +21,9 @@ function boatState(b: Boat, mirror: MirrorBoatView | undefined, now = Date.now()
 
 /**
  * The Boats tab: one card per boat. Its name and state chip, then its access
- * and how old its mirror (or last check-in) is, with revoke. A tap shows its
- * repos and the trap request.
+ * and how old its mirror (or last check-in) is, then revoke and request trap
+ * on a line of their own. A tap shows its repos and last check-in above
+ * them, and the trap request.
  */
 export function Boats({
   boats,
@@ -64,7 +65,7 @@ export function Boats({
       state=${boatState(b, mirror)}
       context=${[access, ' · ', ...age]}
       contextTitle=${`${access} · last check-in ${when(b.lastCheckIn)}`}
-      action=${revoke}
+      actions=${revoke}
       quiet=${!!b.revoked}
       more=${[
         html`<div>${b.repos.join('') ? LinkedText(b.repos.join(' · ')) : 'no repos checked in'}</div>`,

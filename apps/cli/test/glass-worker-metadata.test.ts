@@ -81,20 +81,54 @@ describe('worker metadata in the glass', () => {
   });
 });
 
-it('keeps full harness names in the chooser and submits the selected harness', async () => {
+it('opens New trap in a dialog, keeps full harness names in the chooser and submits the selected harness', async () => {
   const snapshot = fixture();
   snapshot.focusToken = 'test-page-token';
   snapshot.repoKeys = ['web'];
   g = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#traps', post: () => ({ status: 200, body: { ok: true } }) });
   (g.$('#traps .newtrap button') as HTMLElement).click();
   await g.settle();
-  const choice = g.$('#traps select[name="harness"]') as HTMLSelectElement;
+  const dialog = g.$('.dialog[role="dialog"]')!;
+  expect(dialog.querySelector('h3')?.textContent).toBe('New trap');
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  expect(g.document.activeElement).toBe(dialog);
+  g.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+  expect(g.document.activeElement).toBe(dialog.querySelector('button'));
+  g.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+  expect(g.document.activeElement).toBe(dialog.querySelector('button[type="submit"]'));
+  const choice = dialog.querySelector('select[name="harness"]') as HTMLSelectElement;
   expect([...choice.options].map(option => option.textContent)).toEqual(['Claude', 'Codex']);
   expect(g.$('#traps .newtrap .harness-icon')).toBeNull();
   choice.value = 'codex';
   choice.dispatchEvent(new g.window.Event('change', { bubbles: true }));
   await g.settle();
-  (g.$('#traps .newtrap button[type="submit"]') as HTMLElement).click();
+  (dialog.querySelector('button[type="submit"]') as HTMLElement).click();
   await g.settle();
   expect(g.posts().map(post => JSON.parse(post.body))).toContainEqual({ kind: 'trap-request', payload: { repo: 'web', harness: 'codex' } });
+  // A request sent closes the dialog.
+  expect(g.$('.dialog')).toBeNull();
+});
+
+it('closes New trap on Cancel, Escape or a tap outside it, sending nothing', async () => {
+  const snapshot = fixture();
+  snapshot.repoKeys = ['web'];
+  g = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#traps' });
+  const open = async () => {
+    (g.$('#traps .newtrap button') as HTMLElement).click();
+    await g.settle();
+    expect(g.$('.dialog')).not.toBeNull();
+  };
+  await open();
+  ([...g.$$('.dialog button')].find((b) => b.textContent === 'Cancel') as HTMLElement).click();
+  await g.settle();
+  expect(g.$('.dialog')).toBeNull();
+  await open();
+  g.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await g.settle();
+  expect(g.$('.dialog')).toBeNull();
+  await open();
+  (g.$('.dialog-scrim') as HTMLElement).click();
+  await g.settle();
+  expect(g.$('.dialog')).toBeNull();
+  expect(g.posts()).toEqual([]);
 });
