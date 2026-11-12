@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // What the wharf's Durable Objects cost per UTC day, from Cloudflare's
 // GraphQL Analytics API: billed requests, active seconds, GB-s of duration,
 // SQLite rows written and inbound WebSocket messages. Read-only.
