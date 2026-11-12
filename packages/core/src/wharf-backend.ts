@@ -183,20 +183,6 @@ export class WharfBackend implements CoordinationBackend {
       const e = record(v); return { cursor: string(e.cursor), kind: string(e.kind), at: string(e.at), ...(e.dispatchId ? { dispatchId: string(e.dispatchId) } : {}), ...(e.note ? { note: string(e.note) } : {}), ...(e.boatName ? { boatName: string(e.boatName) } : {}) };
     }) };
   }
-  async wait(after: string | undefined, timeoutMs: number, signal?: AbortSignal): Promise<EventBatch> {
-    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
-    while (!signal?.aborted) {
-      const batch = await this.events(after);
-      if (batch.events.length || Date.now() >= deadline) return batch;
-      await new Promise<void>((resolve) => {
-        const finish = () => { clearTimeout(timer); signal?.removeEventListener('abort', finish); resolve(); };
-        const timer = setTimeout(finish, Math.max(0, Math.min(1000, deadline - Date.now())));
-        signal?.addEventListener('abort', finish, { once: true });
-        if (signal?.aborted) finish();
-      });
-    }
-    throw new BackendError(499, 'wait cancelled');
-  }
   async upload(id: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
     return this.uploadPath(`dispatches/${encodeURIComponent(id)}/files`, name, bytes, key);
   }

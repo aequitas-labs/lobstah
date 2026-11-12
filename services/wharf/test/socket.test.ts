@@ -182,3 +182,46 @@ it('closes a revoked boat’s socket with 1008 before sending it anything more',
   // The revocation's own event never reached the revoked boat.
   expect(kinds(client)).toHaveLength(before);
 });
+
+it('lets a work-only boat listen for work, showing it each event without its note', async () => {
+  const b = await boat(['work']); const client = await connect(b.token);
+  client.socket.send(JSON.stringify({ t: 'resume' }));
+  await next(client, 'hello');
+  expect((await command('helm/take', { session: 'helm' })).status).toBe(200);
+  expect((await command('dispatches', { id: 'job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work' })).status).toBe(200);
+  expect((await command('dispatches/job/cancel', {})).status).toBe(200);
+  const cancelled = await next(client, 'event', (m) => m.events.some((e) => e.kind === 'cancelled'));
+  expect(cancelled.events.find((e) => e.kind === 'cancelled')).toEqual({ cursor: expect.any(String), kind: 'cancelled', dispatchId: 'job', at: expect.any(String) });
+  // A boat with read sees the same event with its note.
+  const reader = await boat(['read']); const watching = await connect(reader.token);
+  watching.socket.send(JSON.stringify({ t: 'resume', after: '0.0' }));
+  await next(watching, 'hello');
+  watching.received.length = 0;
+  watching.socket.send(JSON.stringify({ t: 'resume', after: cancelled.events[0]!.cursor.replace(/\.\d+$/, '.0') }));
+  const full = await next(watching, 'event', (m) => m.events.some((e) => e.kind === 'cancelled'));
+  expect(full.events.find((e) => e.kind === 'cancelled')?.note).toMatch(/^cancelled by /);
+  client.socket.close(); watching.socket.close();
+});
+
+it('keeps a claim’s lease while its boat renews over the socket, with no HTTP request', async () => {
+  const b = await boat(); const client = await connect(b.token);
+  expect((await command('helm/take', { session: 'helm' })).status).toBe(200);
+  expect((await api('workers/sign-on', { worker: 'w1', repo: 'repo', repoRemote: 'github.com/test/repo' }, b.token)).status).toBe(200);
+  expect((await command('dispatches', { id: 'job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work' })).status).toBe(200);
+  expect((await api('claims', { worker: 'w1' }, b.token)).status).toBe(200);
+  await runInDurableObject(stub(), (_instance: Account, state) => { state.storage.sql.exec("UPDATE dispatches SET lease=? WHERE id='job'", Date.now() + 1000); });
+  client.socket.send(JSON.stringify({ t: 'command', id: 'renew-1', method: 'POST', path: 'workers/renew', body: { worker: 'w1' } }));
+  expect(await next(client, 'result', (m) => m.id === 'renew-1')).toMatchObject({ status: 200 });
+  const lease = await runInDurableObject(stub(), (_instance: Account, state) => state.storage.sql.exec<{ lease: number }>("SELECT lease FROM dispatches WHERE id='job'").one().lease);
+  expect(lease).toBeGreaterThan(Date.now() + LEASE_MS - 5000);
+  client.socket.close();
+});
+
+it('answers a boat’s read of its own grants on the socket, and keeps the other private routes HTTP', async () => {
+  const b = await boat(['work']); const client = await connect(b.token);
+  client.socket.send(JSON.stringify({ t: 'command', id: 'own', method: 'GET', path: '_boat' }));
+  expect(await next(client, 'result', (m) => m.id === 'own')).toMatchObject({ status: 200, value: { id: b.id, permissions: ['work'] } });
+  client.socket.send(JSON.stringify({ t: 'command', id: 'claim', method: 'POST', path: '_claim', body: {} }));
+  expect(await next(client, 'result', (m) => m.id === 'claim')).toMatchObject({ status: 400 });
+  client.socket.close();
+});

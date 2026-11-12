@@ -1,6 +1,6 @@
 import { backendScopes } from './backend-scope.js';
 import type { Config } from './config.js';
-import { readHostedViews, DOCUMENTS_EVERY_MS } from './hosted-cache.js';
+import { readHostedViews, USAGE_EVERY_MS } from './hosted-cache.js';
 import { groundsBucket, usageBucket, safeAccess } from './telemetry-usage.js';
 import type { BoatAccess, GroundsBucket, UsageBucket } from './telemetry-usage.js';
 
@@ -25,7 +25,7 @@ export function telemetryContext(config: Config, now: number): TelemetryContext 
   const facts = [...accounts.values()].map((s) => {
     const v = views.find((r) => r.url === s.location.url && r.account === s.location.account)?.usage;
     const age = now - Date.parse(v?.observedAt ?? '');
-    return v && age >= 0 && age < DOCUMENTS_EVERY_MS * 2 ? v : undefined;
+    return v && age >= 0 && age < USAGE_EVERY_MS * 2 ? v : undefined;
   });
   const hosted = remote.some((s) => isHostedWharf(s.location.url)), self = remote.some((s) => !isHostedWharf(s.location.url));
   const access = facts.map((f) => safeAccess(f?.boatAccess));

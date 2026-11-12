@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { checklistSummary } from './checklists.js';
-import { validateAssistanceParent, configuredTrapViews, withConfiguredTrapSlot } from '@lobstah/core';
+import { validateAssistanceParent, configuredTrapViews, withConfiguredTrapSlot, backendScopes, refreshHostedViews } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -3949,9 +3949,22 @@ async function mainCli(): Promise<void> {
             } catch (err) {
               console.log(`wharf mirror: ${err instanceof Error ? err.message : String(err)}`);
             }
+            // One socket per wharf account: the boat reads, claims and renews on what it hears.
+            const { openChannel } = await import('./wharf-channel.js');
+            for (const s of backendScopes(loadConfig())) if (s.kind === 'wharf') openChannel(s);
             const { startWharfBroker, daemonBrokerOptions } = await import('./wharf-trap-broker.js');
             hostedBroker = await startWharfBroker(daemonBrokerOptions(loadConfig));
           },
+          hostedRefresh: (() => {
+            let refresh: import('@lobstah/core').HostedRefresh | undefined;
+            return async () => {
+              const { hostedRefresh, openChannel } = await import('./wharf-channel.js');
+              const config = loadConfig();
+              // A grounds added since the daemon started gets its socket too.
+              for (const s of backendScopes(config)) if (s.kind === 'wharf') openChannel(s);
+              await refreshHostedViews(config, refresh ??= hostedRefresh());
+            };
+          })(),
           hostedPoll: async () => {
             await hostedBroker?.broker.poll();
             // This boat's own glass cards, for the grounds bound to a wharf.

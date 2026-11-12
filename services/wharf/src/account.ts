@@ -15,7 +15,7 @@ import { MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchem
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
 import { ANSWER_INLINE_MAX_BYTES, MINIMUM_SOCKET_CLIENT, PING_TEXT, PONG_TEXT, SOCKET_EVENTS_PER_MESSAGE, WHARF_SOCKET_PROTOCOL, decodeFrame, encodeFrame, offersSocketProtocol, parseClientMessage } from '../../../packages/core/src/wharf-socket.js';
-import type { CallMessage, CommandMessage, ServerSocketMessage, SocketFrame } from '../../../packages/core/src/wharf-socket.js';
+import type { CallMessage, CommandMessage, NudgeMessage, ServerSocketMessage, SocketFrame } from '../../../packages/core/src/wharf-socket.js';
 
 /** How often a boat's snapshot sent on its socket is also stored (its row and R2 copy): every change still reaches the glass at once. */
 const SNAPSHOT_STORE_MS = 60_000;
@@ -81,7 +81,9 @@ export class Account extends DurableObject<Env> {
       const hash = await digest(c.token.startsWith('b.') || c.token.startsWith('d.') ? c.token.split('.').at(-1)! : c.token);
       requireThat(!this.get('deleted'), 410, 'account deleted');
       const actor = this.authenticate(c, hash, Date.now());
-      this.requirePermission(actor, 'read'); this.budget(Date.now());
+      // A work-only boat's socket tells it of work to claim; every other socket needs read.
+      if (!(actor.kind === 'boat' && permits(actor.permissions, 'work'))) this.requirePermission(actor, 'read');
+      this.budget(Date.now());
       requireThat(actor.kind !== 'person' || c.personSessionId && await personSessionLive(this.env, c.account, c.personSessionId), 401, 'session expired');
       requireThat(!this.get('deleted'), 410, 'account deleted');
       // A client from before the socket protocol is told to update, never served the old hints.
@@ -117,7 +119,7 @@ export class Account extends DurableObject<Env> {
     const message = parseClientMessage(data);
     if ('invalid' in message) return void send(socket, { t: 'error', reason: message.invalid });
     if (message.t === 'resume') {
-      this.resume(socket, message.after);
+      this.resume(socket, a, message.after);
       if (a.actor.kind === 'boat') await this.catchUpBoat(socket, a);
       return;
     }
@@ -132,18 +134,36 @@ export class Account extends DurableObject<Env> {
     if (this.ctx.getTags(socket).includes('glass')) this.ctx.waitUntil(this.pushWatch(socket));
   }
   webSocketError(socket: WebSocket) { socket.close(1011, 'socket connection failed'); }
-  /** Whether a socket's credential still holds: a boat not revoked, with read; a person's session still live. */
+  /**
+   * Whether a socket's credential still holds: a boat not revoked, with read
+   * or work (a work-only boat learns of work it may claim); a person's
+   * session still live.
+   */
   private async socketAllowed(a: SocketAttachment): Promise<boolean> {
     if (this.get('deleted')) return false;
-    if (a.actor.kind === 'boat') {
-      const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
-      const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
-      return !!row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], 'read');
-    }
+    if (a.actor.kind === 'boat') return this.boatHolds(a, 'read') || this.boatHolds(a, 'work');
     return a.actor.kind === 'person' && !!a.sessionId && await personSessionLive(this.env, a.account, a.sessionId);
   }
+  /**
+   * The events as this socket may see them. A boat without read sees each
+   * event's kind, job and time, never its note or boat name: enough to know
+   * there is work to claim, as `GET events` would not tell it.
+   */
+  private eventsFor(a: SocketAttachment, events: BackendEvent[]): BackendEvent[] {
+    if (a.actor.kind !== 'boat' || this.boatHolds(a, 'read')) return events;
+    return events.map(({ note: _note, boatName: _boat, ...event }) => event);
+  }
+  /** Tell one boat's sockets to read a route that changed without an event. */
+  private nudgeBoat(boat: string, read: NudgeMessage['read']) {
+    for (const socket of this.ctx.getWebSockets(`boat:${boat}`)) {
+      try {
+        const a = socket.deserializeAttachment() as SocketAttachment | null;
+        if (a?.protocol === WHARF_SOCKET_PROTOCOL && (this.boatHolds(a, 'read') || this.boatHolds(a, 'work'))) send(socket, { t: 'nudge', read });
+      } catch { /* disconnected */ }
+    }
+  }
   /** Send every event after `after`, in messages of at most SOCKET_EVENTS_PER_MESSAGE, then hello with the newest cursor. */
-  private resume(socket: WebSocket, after: string | undefined) {
+  private resume(socket: WebSocket, a: SocketAttachment, after: string | undefined) {
     const generation = this.get('generation')!;
     let seq = 0;
     if (after !== undefined) {
@@ -154,7 +174,7 @@ export class Account extends DurableObject<Env> {
     for (;;) {
       const page = this.eventsAfter(seq, SOCKET_EVENTS_PER_MESSAGE);
       if (!page.events.length) break;
-      send(socket, { t: 'event', events: page.events, cursor: page.cursor });
+      send(socket, { t: 'event', events: this.eventsFor(a, page.events), cursor: page.cursor });
       seq = page.seq;
     }
     send(socket, { t: 'hello', protocol: WHARF_SOCKET_PROTOCOL, cursor: `${generation}.${seq}` });
@@ -163,7 +183,9 @@ export class Account extends DurableObject<Env> {
   private async socketCommand(a: SocketAttachment, m: CommandMessage): Promise<StoredResult> {
     // A glass tab's cookie reaches only the glass's own routes (glass-browser.ts); its socket runs no command until it has the same list.
     if (a.base.token.startsWith('browser:')) return { status: 403, value: { error: 'the glass sends its commands over HTTP' } };
-    if (m.path === 'claims' || m.path === 'boats' || m.path.startsWith('_')) return { status: 400, value: { error: `${m.path} is HTTP only` } };
+    // A boat may read its own grants on the socket; every other private route stays HTTP.
+    const ownBoat = m.path === '_boat' && m.method === 'GET';
+    if (m.path === 'claims' || m.path === 'boats' || (m.path.startsWith('_') && !ownBoat)) return { status: 400, value: { error: `${m.path} is HTTP only` } };
     const c: Command = { ...a.base, method: m.method, path: m.path, key: m.id, body: m.method === 'GET' ? {} : (m.body ?? {}), ...(m.session ? { session: m.session } : {}) };
     try {
       return await this.command(c, a.hash);
@@ -230,7 +252,7 @@ export class Account extends DurableObject<Env> {
     for (const socket of this.ctx.getWebSockets()) {
       try {
         const a = socket.deserializeAttachment() as SocketAttachment | null;
-        if (a?.protocol === WHARF_SOCKET_PROTOCOL && await this.socketAllowed(a)) send(socket, { t: 'event', events: page.events, cursor: page.cursor });
+        if (a?.protocol === WHARF_SOCKET_PROTOCOL && await this.socketAllowed(a)) send(socket, { t: 'event', events: this.eventsFor(a, page.events), cursor: page.cursor });
         else socket.close(1008, 'credential expired or revoked');
       } catch { try { socket.close(1011, 'socket unavailable'); } catch { /* disconnected */ } }
     }
@@ -472,6 +494,11 @@ export class Account extends DurableObject<Env> {
       // Work-only boats run traps, so they hold permission requests: either layer may restate its own cards.
       publish: (a) => requireThat(a.kind === 'boat' && (permits(a.permissions, 'read') || permits(a.permissions, 'work')), 403, 'boat credential required'),
       changed: (cards, now) => this.outbox.mark(cards, now),
+      // After the answer's transaction commits, its boat reads it: an answer raises no event.
+      answered: (source) => {
+        if (!source.startsWith('boat:')) return;
+        this.ctx.waitUntil(Promise.resolve().then(() => this.nudgeBoat(source.slice(5), 'cards/answers')));
+      },
     });
     this.outbox = new SlackOutbox(ctx.storage.sql, {
       glassOrigin: env.GLASS_ORIGIN, card: (seq) => this.cards.store.get(`c${seq}`),

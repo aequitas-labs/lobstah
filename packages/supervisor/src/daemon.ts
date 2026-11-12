@@ -455,6 +455,8 @@ export interface DaemonHooks {
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
   hostedStart?: () => Promise<void>;
   hostedPoll?: () => Promise<void>;
+  /** Refresh the hosted views; the CLI's reads only what its socket to each wharf heard changed. Default: read every tick. */
+  hostedRefresh?: () => Promise<void>;
 }
 
 /** The retention cull runs at most once per this interval. */
@@ -807,7 +809,7 @@ export async function daemon(intervalMs = 5000, log: (m: string) => void = conso
     // Each grounds has its own backend. A slow/unreachable server never holds
     // the local tick or turns cached observations into local authoritative work.
     if (!remoteRead) remoteRead = Promise.resolve().then(async () => {
-      await refreshHostedViews(loadConfig());
+      await (hooks.hostedRefresh ?? (() => refreshHostedViews(loadConfig())))();
       await hooks.hostedPoll?.();
     }).catch((e) => log(`wharf poll: ${e instanceof Error ? e.message : String(e)}`)).finally(() => { remoteRead = undefined; });
     await new Promise<void>((resolve) => {

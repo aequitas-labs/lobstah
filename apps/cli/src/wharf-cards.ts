@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { backendScopes, listNotices, loadConfig, repoKey, standingDecisions, wharfFor } from '@lobstah/core';
+import { backendScopes, listNotices, loadConfig, repoKey, standingDecisions } from '@lobstah/core';
 import type { BackendScope, Config, DecisionMeta, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardLink, Notice, TendAttention } from '@lobstah/core';
 import { buildTendReport } from './tend.js';
 import { isHostedKey } from './hosted-view.js';
 import { applyWharfAnswers } from './wharf-answers.js';
+import { sendCommand } from './wharf-channel.js';
 
 /** The wharf takes at most this many cards from one boat. */
 export const BOAT_CARDS_MAX = 100;
@@ -136,7 +137,8 @@ export async function publishBoatCards(now = Date.now(), log: (m: string) => voi
     const last = restated.get(set.wharf);
     if (last && (now < last.retryAt || (last.hash === hash && now - last.at < CARDS_RESTATE_MS))) continue;
     try {
-      await wharfFor(set.scope).request('cards', { cards: set.cards }, `cards-${randomUUID()}`);
+      // On the boat's socket when it is open: a restatement is no HTTP request.
+      await sendCommand(set.scope as Extract<BackendScope, { kind: 'wharf' }>, 'cards', { cards: set.cards }, `cards-${randomUUID()}`);
       restated.set(set.wharf, { hash, at: now, retryAt: 0 });
     } catch (e) {
       restated.set(set.wharf, { hash: last?.hash ?? '', at: last?.at ?? 0, retryAt: now + CARDS_RETRY_MS });
