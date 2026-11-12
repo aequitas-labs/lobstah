@@ -1,3 +1,4 @@
+/* Throwaway: checks that CI skips Windows for a glass page change (PR 451). */
 /*
  * The spyglass's styles. Design tokens first: every color, the spacing
  * scale, and the card and badge metrics live here as custom properties; the
