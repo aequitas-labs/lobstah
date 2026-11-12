@@ -219,6 +219,8 @@ export class Account extends DurableObject<Env> {
       ${mirrorSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
+    // Request counts and the hosted glass's watch moved to memory; their old rows go (nothing to write once gone).
+    ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
     this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now) });
     this.cards = new Cards(ctx.storage.sql, {
@@ -249,6 +251,23 @@ export class Account extends DurableObject<Env> {
       },
     });
     this.mirrorState = new MirrorState(ctx.storage.sql, { read: (a) => this.requirePermission(a, 'read'), mirror: (a) => this.requirePermission(a, 'mirror') });
+  }
+  /**
+   * Request counts per minute, and until when a hosted glass is open, kept in
+   * this instance's memory, never in SQLite: they change on every request, and
+   * a row written per request (about 3 rows_written each) is what spends the
+   * Durable Objects free tier. An evicted instance starts the minute's count
+   * again, and the next hosted glass poll says it is open again.
+   */
+  private readonly budgets = new Map<'account' | 'mirror', { window: number; count: number }>();
+  private mirrorWatchedUntil = 0;
+  /** Count one request against a per-minute budget, or refuse it. */
+  private spend(which: 'account' | 'mirror', limit: number, now: number, message: string) {
+    const window = Math.floor(now / 60000);
+    const b = this.budgets.get(which);
+    const count = b?.window === window ? b.count : 0;
+    requireThat(count < limit, 429, message);
+    this.budgets.set(which, { window, count: count + 1 });
   }
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
@@ -359,12 +378,7 @@ export class Account extends DurableObject<Env> {
     if (actor.kind !== 'dispatch' && permission) this.requirePermission(actor, permission);
     if (actor.kind === 'dispatch') requireThat(c.path.startsWith(`dispatches/${actor.id}/`) || c.path === `dispatches/${actor.id}`, 403, 'dispatch scope required');
   }
-  private budget(now: number) {
-    const window = Math.floor(now / 60000); const b = JSON.parse(this.get('budget') ?? '{"window":0,"count":0}');
-    if (b.window !== window) { b.window = window; b.count = 0; }
-    requireThat(b.count < Number(this.env.REQUESTS_PER_MINUTE), 429, 'account rate limit');
-    b.count++; this.set('budget', JSON.stringify(b));
-  }
+  private budget(now: number) { this.spend('account', Number(this.env.REQUESTS_PER_MINUTE), now, 'account rate limit'); }
   private capacity() {
     const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
@@ -704,12 +718,7 @@ export class Account extends DurableObject<Env> {
    * The mirror's own rate budget, apart from the account's: a hosted glass
    * polling a mirror boat must never starve the fleet's coordination.
    */
-  private mirrorBudget(now: number) {
-    const window = Math.floor(now / 60000); const b = JSON.parse(this.get('mirror-budget') ?? '{"window":0,"count":0}');
-    if (b.window !== window) { b.window = window; b.count = 0; }
-    requireThat(b.count < 4 * Number(this.env.REQUESTS_PER_MINUTE), 429, 'mirror rate limit');
-    b.count++; this.set('mirror-budget', JSON.stringify(b));
-  }
+  private mirrorBudget(now: number) { this.spend('mirror', 4 * Number(this.env.REQUESTS_PER_MINUTE), now, 'mirror rate limit'); }
   /**
    * Every mirror route. Mirror operations keep no idempotency records: a
    * put replaces the boat's latest snapshot, and a take or an answer
@@ -723,12 +732,15 @@ export class Account extends DurableObject<Env> {
         // A catch's own credential reaches its dispatch only, never a boat's mirror.
         requireThat(!c.token.startsWith('d.'), 403, 'mirror routes take a mirror boat credential or a signed-in person');
         const hash = await digest(c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
+        // A put, an answer or a file runs more than one transaction; the request counts once.
+        let counted = false;
         const run = <T>(fn: (actor: Actor, now: number) => T): T => {
           let cleanup: MirrorCleanup = { keys: [] };
           const result = this.ctx.storage.transactionSync(() => {
             const now = Date.now();
             requireThat(!this.get('deleted'), 410, 'account deleted');
-            const actor = this.authenticate(c, hash, now); this.mirrorBudget(now);
+            const actor = this.authenticate(c, hash, now);
+            if (!counted) { this.mirrorBudget(now); counted = true; }
             this.authorize(c, actor);
             cleanup = this.mirrorState.expire(c.account, now);
             return fn(actor, now);
@@ -781,14 +793,14 @@ export class Account extends DurableObject<Env> {
         const result = run((actor, now) => {
           const r = this.mirrorState.execute(c, actor, now, c.account);
           if (r.watch) {
-            const watched = Number(this.get('mirror-watched') ?? 0) > now;
-            this.set('mirror-watched', String(now + MIRROR_WATCH_MS));
+            const watched = this.mirrorWatchedUntil > now;
+            this.mirrorWatchedUntil = now + MIRROR_WATCH_MS;
             if (!watched) this.ctx.waitUntil(this.mirrorHint('all', { type: 'mirror-watch', until: new Date(now + MIRROR_WATCH_MS).toISOString() }));
           }
           if (r.hint) this.ctx.waitUntil(this.mirrorHint(new Set([r.hint]), { type: 'mirror-call' }));
           // A boat's call list says whether a hosted glass is open, so it knows how often to put.
           if (c.path === 'mirror/calls' && c.method === 'GET' && r.status === 200) {
-            const until = Number(this.get('mirror-watched') ?? 0);
+            const until = this.mirrorWatchedUntil;
             return { status: r.status, value: { ...(r.value as object), ...(until > now ? { watchedUntil: new Date(until).toISOString() } : {}) } };
           }
           return { status: r.status, value: r.value };
