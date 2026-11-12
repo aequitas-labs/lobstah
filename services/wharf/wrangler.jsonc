@@ -38,15 +38,17 @@
 
   // GITHUB_CLIENT_ID is not here: it is a variable on the deployed Worker, set
   // once (dashboard, or `wrangler secret put GITHUB_CLIENT_ID`), and keep_vars
-  // keeps it across deploys.
+  // keeps it across deploys. SLACK_CLIENT_ID is the same: set it once with
+  // `pnpm run deploy -- --var SLACK_CLIENT_ID:<id>` (or the dashboard). Listed
+  // here, even empty, every deploy would blank it.
   // GITHUB_ALLOWLIST holds numeric GitHub account ids (5472765: chrishsu).
   "vars": {
     "GLASS_ORIGIN": "https://glass.lobstah.dev", "API_ORIGIN": "https://api.lobstah.dev",
-    "GITHUB_ALLOWLIST": "[\"5472765\"]", "SLACK_CLIENT_ID": "",
+    "GITHUB_ALLOWLIST": "[\"5472765\"]",
     "MAX_ROWS": "10000", "MAX_FILE_BYTES": "26214400", "MAX_ACCOUNT_BYTES": "104857600", "REQUESTS_PER_MINUTE": "120"
   },
   // Secrets: AUTH_SECRET, GITHUB_CLIENT_SECRET, TOKEN_SECRET (wrangler secret put).
-  // Variables set on the Worker itself (GITHUB_CLIENT_ID) survive a deploy.
+  // Variables set on the Worker itself (GITHUB_CLIENT_ID, SLACK_CLIENT_ID) survive a deploy.
   "keep_vars": true,
 
   // `wrangler dev --env local`: no routes, because wrangler dev sends every
