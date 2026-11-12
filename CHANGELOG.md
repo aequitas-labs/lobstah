@@ -11,13 +11,39 @@
   `lobstah watch add <url>`. (#438, #439)
 - On a phone, the bottom bar shows Reviews and PRs side by side, each with its
   own icon. Search and Menu are icon buttons. The PRs tab counts your open PRs
-  that need you: failed checks, a conflict, or a repair that stopped. (#439)
+  that need you: failed checks, a conflict, or a repair that stopped. In a
+  narrow desktop window, PRs stays in the bar beside On deck and Reviews, in
+  the same order. (#439, #446)
 - Merge when green: each open PR of yours has a button that merges it once its
   checks pass and nothing below it in its stack is open. A PR with a conflict or
   failing checks is repaired first. A PR no dispatch opened gets one repair
   dispatch per head, and a stopped repair sends the helm one notice. The method
   is `[repos.<key>].mergeMethod`, else `[pickup.github.merge].method`, else
   squash. The hosted glass offers it too. (#441)
+- PR and review cards share one layout: the PR icon in the PR's color and the
+  title, then status chips, then a gray line with the repo, age, number, trap
+  and checks, and the card's buttons along the bottom. (#446)
+
+### Run cards
+
+- A run's output shows as a terminal showed it, on the card and in the helm's
+  answer. Carriage returns, colors, erasing and cursor moves are applied, so a
+  spinner or an answered prompt shows once, without escape codes. The raw
+  `output.log` is kept as it was. An emoji in an interactive run is no longer
+  garbled. (#444)
+- A finished run leaves the glass two minutes after it ends. Runs from the last
+  week sit under a closed Recent runs on the deck, each opening its card
+  read-only. The daemon prunes run history older than
+  `[limits].runRetentionDays` (14), and proposals the helm never posted after a
+  day. (#445)
+- A run card shows its status as an icon: a green check, a red X for a failure,
+  a red clock for a timeout, a spinning amber circle while it runs, a grey
+  square when stopped, and a slashed circle when declined. (#448)
+
+### Also in the glass
+
+- Ctrl+Enter, or ⌘+Enter on a Mac, sends from a card's answer box and from the
+  hosted glass's box for messaging the helm. (#448)
 
 ### Reviews judge the code
 
@@ -26,12 +52,24 @@ check, submit or approval label, or CI status that is red, pending or older than
 the head never turns an approve into a comment. The review never mentions one
 or asks for a rerun. A test the change breaks is still a finding. (#432)
 
-### The wharf keeps its Slack client ID
+### The wharf
 
-`SLACK_CLIENT_ID` is set once on the wharf's Worker, like `GITHUB_CLIENT_ID`,
-and kept across deploys. Before, `wrangler.jsonc` listed it empty, so every
-deploy blanked it and the glass offered no Slack link. Set it with
-`pnpm run deploy -- --var SLACK_CLIENT_ID:<id>`. (#442)
+- It no longer writes a SQLite row on every request. Request budgets and the
+  hosted glass's watch are counted in memory, so a poll writes nothing and a
+  snapshot put writes at most two rows. A busy day had come close to the
+  Durable Objects' daily limit, past which the hosted glass breaks. (#447)
+- Its records of retried commands expire after a day, so they no longer count
+  toward an account's row limit. (#450)
+- `SLACK_CLIENT_ID` is set once on the Worker, like `GITHUB_CLIENT_ID`, and
+  kept across deploys. Before, `wrangler.jsonc` listed it empty, so every
+  deploy blanked it and the glass offered no Slack link. (#442)
+- `services/wharf/scripts/deploy-from-main.sh` deploys main: it checks the
+  live version and pending migrations, applies them, deploys, checks health
+  and prints the rollback. `--set-var SLACK_CLIENT_ID` sets that var from
+  stdin. (#449)
+- `lobstah wharf <command>` without `--wharf` acts on the one wharf this Mac's
+  mirror is logged in to, and otherwise says to add `--wharf` with the names.
+  (#449)
 
 ## 0.8.8 — 2026-11-11
 
