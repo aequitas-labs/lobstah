@@ -30,6 +30,8 @@ export interface WharfSocketOptions {
   onMessage?: (message: ServerSocketMessage) => void;
   /** The socket opened (and resumed) or dropped. */
   onState?: (open: boolean) => void;
+  /** A failed connection attempt, without the credential or request headers. */
+  onError?: (error: Error) => void;
   /** The cursor to resume after on the first connect: the helm's `--after`. */
   after?: string;
   /** Jitter source, for tests. */
@@ -56,7 +58,7 @@ export class WharfSocket {
   private readonly results = new Map<string, (result: SocketResult | undefined) => void>();
   constructor(
     private readonly location: BackendLocation,
-    private readonly credential: string,
+    private readonly credential: string | (() => string),
     private readonly options: WharfSocketOptions = {},
   ) {
     this.cursor = options.after;
@@ -156,13 +158,23 @@ export class WharfSocket {
     if (this.stopped || this.socket || this.retry) return;
     const url = new URL(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/wake`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    let credential: string;
+    try {
+      credential = typeof this.credential === 'function' ? this.credential() : this.credential;
+      if (!credential) throw new Error('the wharf boat credential is missing; log in again');
+    } catch (error) {
+      this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      this.scheduleReconnect();
+      return;
+    }
     const socket = new WebSocket(url, WHARF_SOCKET_PROTOCOL, {
-      headers: { Authorization: `Bearer ${this.credential}` },
+      headers: { Authorization: `Bearer ${credential}` },
       followRedirects: false,
       handshakeTimeout: 5000,
       maxPayload: MAX_PAYLOAD_BYTES,
     });
     this.socket = socket;
+    let failed = false;
     socket.on('open', () => {
       this.retryMs = RECONNECT_MIN_MS;
       socket.send(JSON.stringify({ t: 'resume', ...(this.cursor ? { after: this.cursor } : {}), ...(this.options.client ? { client: this.options.client } : {}) }));
@@ -192,14 +204,16 @@ export class WharfSocket {
         this.wake();
       }
     });
-    socket.on('error', () => {
-      /* 'close' follows; the credential is never logged. */
+    socket.on('error', (error) => {
+      failed = true;
+      this.options.onError?.(error);
     });
-    socket.on('close', () => {
+    socket.on('close', (code, reason) => {
       if (this.socket !== socket) return;
       this.socket = undefined;
       this.stopTimers();
       this.settleAll();
+      if (!this.stopped && !failed) this.options.onError?.(new Error(`wharf socket closed (${code})${reason.length ? `: ${reason.toString().slice(0, 200)}` : ''}`));
       this.options.onState?.(false);
       this.wake();
       this.scheduleReconnect();

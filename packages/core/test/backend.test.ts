@@ -8,7 +8,25 @@ import { readStatusLog } from '../src/status.js';
 import { signOnTrap } from '../src/soak.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { backendScopes, eachBackend } from '../src/backend-scope.js';
+import { WharfBackend } from '../src/wharf-backend.js';
 let home: string;
+it('reloads a mirror credential for JSON and binary requests after it changes', async () => {
+  let credential = '';
+  const headers: Array<string | null> = [];
+  const fetched: typeof fetch = async (_input, init) => {
+    headers.push(new Headers(init?.headers).get('Authorization'));
+    return Response.json([]);
+  };
+  const backend = new WharfBackend({ kind: 'wharf', url: 'https://test.invalid', account: 'person', tokenEnv: 'TEST' }, () => credential, { fetch: fetched });
+  await expect(backend.list()).rejects.toThrow('set the credential');
+  expect(headers).toEqual([]);
+  credential = 'first-test-token';
+  await backend.list();
+  credential = 'replacement-test-token';
+  await backend.takeMirrorCall('test-call');
+  await backend.mirrorFile('test-file');
+  expect(headers).toEqual(['Bearer first-test-token', 'Bearer replacement-test-token', 'Bearer replacement-test-token']);
+});
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'backend-')); process.env.LOBSTAH_HOME = home; ensureLayout(); });
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 it('defaults to local and validates explicit remote locations without embedding secrets', () => {
