@@ -97,7 +97,8 @@ it('home and fleet address one old/new helm seat; only an explicit fleet flag pr
     .toEqual(['lobstah: the implicit grounds is now called home; --grounds fleet remains an alias.']);
   expect(alias.stdout).toContain('helm: home');
   expect(fs.existsSync(path.join(home, 'helm', 'home.json'))).toBe(false);
-  const wait = run('man', 'wait', '--session', 'old-session', '--grounds', 'home', '--timeout', '1');
+  // A short quiet wait: the test reads what it prints, not how long it waits.
+  const wait = run('man', 'wait', '--session', 'old-session', '--grounds', 'home', '--timeout', '0.1');
   expect(wait.status, wait.stdout + wait.stderr).toBe(3);
   expect(wait.stdout).toContain('--grounds home');
   expect(wait.stdout).not.toContain('--grounds fleet');
