@@ -73,17 +73,41 @@ export interface CardProps {
   attrs?: Record<string, unknown>;
   /** The person it is about, as an avatar chip at the top right; their name shows only on hover. */
   person?: CardPerson;
+  /** Where the card opens outside the glass, as an arrow at the far right of its top line: a report card's way out. */
+  open?: CardOpen;
 }
+
+/**
+ * A card's way out: a link it opens in a new tab, or a control of its own (a
+ * trap's best route), drawn as the arrow. Either way it sits at the far right
+ * of the top line, the same place on every card, and a click on it never
+ * opens the card.
+ */
+export type CardOpen = { href: string; label: string; onOpen?: () => void } | { control: Children };
 
 /** A pull request, as a small line icon in the text's color. */
 export const PrIcon = html`<svg class="pricon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" /></svg>`;
 
-/** A card's ↗ Open (or other link) at the right of line 2: a new tab, and the card's own click never fires. */
+/** A card's Open button, last in its bottom bar and pushed to its right, the same corner on every card: a new tab, and the card's own click never fires. */
 export const CardLink = ({ href, label = '↗ Open', onOpen }: { href: string; label?: string; onOpen?: () => void }) =>
-  html`<a class="btn open" href=${href} target="_blank" rel="noopener" onClick=${(e: Event) => {
+  html`<a class="btn open gopenbtn" href=${href} target="_blank" rel="noopener" onClick=${(e: Event) => {
     e.stopPropagation();
     onOpen?.();
   }}>${label}</a>`;
+
+/** Opening outside the glass: GitHub's Octicon "link-external" (link-external-16, @primer/octicons, MIT), in the text's color. */
+export const OpenIcon = html`<svg class="openicon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M3.75 2h3.5a.75.75 0 0 1 0 1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2Zm6.854-1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1Z" /></svg>`;
+
+/** A card's open arrow at the far right of its top line: a new tab, and the card's own click never fires. */
+export function OpenArrow({ open }: { open: CardOpen }) {
+  if ('control' in open) return html`<span class="gopen" onClick=${(e: Event) => e.stopPropagation()}>${open.control}</span>`;
+  return html`<a class="gopen" href=${open.href} target="_blank" rel="noopener" title=${open.label} aria-label=${open.label} onClick=${(
+    e: Event,
+  ) => {
+    e.stopPropagation();
+    open.onOpen?.();
+  }}>${OpenIcon}</a>`;
+}
 
 /** A repo, as a small line icon in the text's color: GitHub's Octicon "repo" (repo-16, @primer/octicons, MIT), sized to a 12px subtitle. */
 export const RepoIcon = html`<svg class="repoicon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z" /></svg>`;
@@ -141,7 +165,7 @@ export function Card(p: CardProps) {
     p.state &&
     html`<span class=${(mark === 'chip' ? 'gchip ' : 'gword ') + p.state.tone + (long ? ' long' : '')} title=${long ? p.state.word : undefined}>${p.state.word}</span>`;
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
-    <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}${p.person && html`<${PersonChip} person=${p.person} />`}</div>
+    <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}${p.person && html`<${PersonChip} person=${p.person} />`}${p.open && html`<${OpenArrow} open=${p.open} />`}</div>
     ${p.status && html`<div class="gline gstate">${p.status}</div>`}
     ${(p.context || p.action) && html`<div class="gline gcontext"><span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
     ${p.now && html`<div class="gline gnow dim"><span class="gtext" title=${p.nowTitle}>${p.now}</span></div>`}

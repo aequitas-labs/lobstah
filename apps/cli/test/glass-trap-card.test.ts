@@ -40,10 +40,10 @@ describe('the trap card', () => {
     const word = text(c.querySelector('.gchip'));
     expect(word).toBe('working');
     expect(word).toBe(word.toLowerCase());
-    expect(text(c.querySelector('.gcontext .gtext'))).toBe('aequitas-labs/lobstah');
+    // The catches share the repo's line; the foot names the boat.
+    expect(text(c.querySelector('.gcontext .gtext'))).toBe('aequitas-labs/lobstah · 🦞 36');
     expect(text(c.querySelector('.gnow'))).not.toBe('');
-    expect(text(c.querySelector('.gfoot'))).toContain('⛵ studio');
-    expect(text(c.querySelector('.gfoot'))).toContain('🦞 36');
+    expect(text(c.querySelector('.gfoot'))).toBe('⛵ studio');
   });
 
   it('shows the same card on the deck', async () => {
@@ -56,7 +56,7 @@ describe('the trap card', () => {
     const d = fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' });
     Object.assign(d.traps[0]!, { link: undefined, attachCommand: undefined });
     const { card: c } = await card(d);
-    expect(c.querySelector('.gaction')).toBeNull();
+    expect(c.querySelector('.gopenbtn')).toBeNull();
     expect(text(c)).not.toContain('only reachable');
     expect(text(c)).not.toContain('Running on');
   });
@@ -65,7 +65,8 @@ describe('the trap card', () => {
     const d = fleet({ onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' });
     d.focusToken = 'fixture-token';
     const { card: c } = await card(d);
-    expect(text(c.querySelector('.gaction'))).toBe('↗ Open');
+    // At the right of the bottom bar, where every card's Open sits.
+    expect(text(c.querySelector('.gactions .gopenbtn'))).toBe('↗ Open');
   });
 
   it("leaves the table view's columns as they were", async () => {

@@ -156,7 +156,8 @@ describe('glass: a requested trap, and the start command on a starting card only
       const items = view === 'cards' ? g.$$('#traps .card') : g.$$('#traps tr');
       if (view === 'cards') {
         const requested = items.find((c) => text(c.querySelector('.gchip')) === 'requested')!;
-        expect(text(requested.querySelector('.gcontext'))).toBe('web');
+        // The repo line carries the catches.
+        expect(text(requested.querySelector('.gcontext'))).toBe('web · 🦞 0');
         expect(text(requested.querySelector('.gnow'))).toBe('waiting for the helm');
         expect(requested.querySelector('.gicon .harness-icon')?.getAttribute('aria-label')).toBe('Claude');
         expect(requested.className).toContain('dim');

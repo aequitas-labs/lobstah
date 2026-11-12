@@ -3,7 +3,7 @@ import { reportFrom, reportPageUrl } from '../../src/glass-diff.js';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import { Age, RepoName, TRAP_MARK, Table, ageText } from './common.js';
-import { Card, CardLink } from './card.js';
+import { Card } from './card.js';
 
 /**
  * The Reports tab: every report, newest first regardless of acknowledgment.
@@ -37,7 +37,7 @@ export function reportCard(r: GlassReport) {
     titleAttr=${r.title}
     context=${[r.repo && [RepoName(r.repo), ' · '], from && [r.trap ? `${TRAP_MARK} ${from}` : from, ' · '], Age(r.filedAt), ' ago']}
     contextTitle=${[lead, `${ageText(r.filedAt)} ago`].filter(Boolean).join(' · ')}
-    action=${html`<${CardLink} href=${reportPageUrl(r.key)} />`}
+    open=${{ href: reportPageUrl(r.key), label: 'Open the report' }}
     quiet=${!!r.acked}
     cls=${r.acked ? 'acked' : undefined}
     onClick=${openReport(r)}
