@@ -107,6 +107,25 @@ function writeRecord(r: TurnWaitRecord): void {
 
 const removeRecord = (key: string): void => fs.rmSync(recordPath(key), { force: true });
 
+/** The tools that have ever registered a wait with a trap, for doctor: one name per line. */
+const seenToolsPath = (): string => path.join(turnWaitsDir(), 'tools.seen');
+
+export function readSeenTurnTools(): Set<string> {
+  try {
+    return new Set(fs.readFileSync(seenToolsPath(), 'utf8').split('\n').filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function noteSeenTool(tool: string): void {
+  const seen = readSeenTurnTools();
+  if (seen.has(tool)) return;
+  seen.add(tool);
+  fs.mkdirSync(turnWaitsDir(), { recursive: true });
+  fs.writeFileSync(seenToolsPath(), [...seen].sort().join('\n') + '\n');
+}
+
 /** A dispatch that has finished, or no longer exists. */
 function dispatchEnded(id: string): boolean {
   const lane = laneOf(id);
@@ -134,6 +153,7 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
   for (const [key, w] of registered) {
     const trap = traps.get(w.session);
     if (!trap) continue;
+    noteSeenTool(w.from);
     const existing = readRecord(key);
     const dispatch = hasOpenCatch(trap) ? trap.claimed : existing?.dispatch;
     const changed = !existing || existing.wait !== w.wait || existing.read !== w.read || existing.dispatch !== dispatch;
