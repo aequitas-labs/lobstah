@@ -11,6 +11,8 @@ import type { LobstahHook } from './hook-runs.js';
 import { installedClaudePlugin, installedCodexPlugin, UPDATE_COMMAND } from './plugin-version.js';
 import type { InstalledPlugin } from './plugin-version.js';
 import { liveWatcher } from './watchers.js';
+import { failureSince, knownHookCommand, readHookFailures } from './hook-failures.js';
+import type { HookFailure } from './hook-failures.js';
 
 /** One lobstah hook in one harness, as `lobstah doctor` reports it. */
 export interface HookReadiness {
@@ -27,6 +29,10 @@ export interface HookReadiness {
   enabled: boolean;
   /** The last run lobstah recorded (ISO). */
   lastRun?: string;
+  /** The handler's command, when this CLI doesn't run it as this hook (a plugin newer or older than the CLI). */
+  unknownCommand?: string;
+  /** The hook's last failure, when it is newer than its last run. It failed open. */
+  failure?: HookFailure;
 }
 
 export interface HarnessHooks {
@@ -77,6 +83,20 @@ function lobstahHandler(groups: HookGroups[string] | undefined): [number, number
     if (h >= 0) return [g, h];
   }
   return undefined;
+}
+
+/** The command at `at`, when this CLI doesn't run it as `hook`. */
+function unknownAt(hook: string, groups: HookGroups[string] | undefined, at: [number, number] | undefined): string | undefined {
+  const command = at ? groups?.[at[0]]?.hooks?.[at[1]]?.command : undefined;
+  return command !== undefined && !knownHookCommand(hook, command) ? command.trim() : undefined;
+}
+
+/** The fields every harness's readiness shares: last run, an unknown command, a failure since. */
+function runState(hook: string, harness: 'claude' | 'codex', groups: HookGroups[string] | undefined, at: [number, number] | undefined, runs: Record<string, string>, failures: Record<string, HookFailure>, now: number): Pick<HookReadiness, 'lastRun' | 'unknownCommand' | 'failure'> {
+  const lastRun = runs[`${harness}:${hook}`];
+  const unknownCommand = unknownAt(hook, groups, at);
+  const failure = failureSince(failures, hook, lastRun, now);
+  return { ...(lastRun ? { lastRun } : {}), ...(unknownCommand ? { unknownCommand } : {}), ...(failure ? { failure } : {}) };
 }
 
 /** Extra plugin events also participate in Codex's blocking startup review. */
@@ -147,6 +167,7 @@ export function codexHooks(opts: Opts = {}): HarnessHooks {
   const features = (cfg.features ?? {}) as Record<string, unknown>;
   const declared = pluginHooks(plugin.root);
   const runs = readHookRuns();
+  const failures = readHookFailures();
   const events: CodexHook[] = [...LOBSTAH_HOOKS, ...CODEX_EXTRA_HOOKS.filter((h) => declared?.[h]?.length)];
   const hooks = events.map((hook): HookReadiness => {
     const at = lobstahHandler(declared?.[hook]);
@@ -161,7 +182,7 @@ export function codexHooks(opts: Opts = {}): HarnessHooks {
       installed: at !== undefined,
       trusted: reportedTrust(reported?.trustStatus) ?? (!trustedHash ? 'untrusted' : trustedHash === current ? 'trusted' : 'changed'),
       enabled: entry?.enabled !== false,
-      ...(runs[`codex:${hook}`] ? { lastRun: runs[`codex:${hook}`] } : {}),
+      ...runState(hook, 'codex', declared?.[hook], at, runs, failures, opts.now ?? Date.now()),
     };
   });
   return {
@@ -184,16 +205,12 @@ export function claudeHooks(opts: Opts = {}): HarnessHooks {
   const settings = (readJson(path.join(claudeDir, 'settings.json')) ?? {}) as { disableAllHooks?: boolean; enabledPlugins?: Record<string, boolean> };
   const declared = pluginHooks(plugin.root);
   const runs = readHookRuns();
+  const failures = readHookFailures();
   const pluginOn = settings.enabledPlugins?.['lobstah@lobstah'] !== false;
-  const hooks = LOBSTAH_HOOKS.map(
-    (hook): HookReadiness => ({
-      hook,
-      installed: lobstahHandler(declared?.[hook]) !== undefined,
-      trusted: 'n/a',
-      enabled: pluginOn,
-      ...(runs[`claude:${hook}`] ? { lastRun: runs[`claude:${hook}`] } : {}),
-    }),
-  );
+  const hooks = LOBSTAH_HOOKS.map((hook): HookReadiness => {
+    const at = lobstahHandler(declared?.[hook]);
+    return { hook, installed: at !== undefined, trusted: 'n/a', enabled: pluginOn, ...runState(hook, 'claude', declared?.[hook], at, runs, failures, opts.now ?? Date.now()) };
+  });
   return {
     harness: 'claude',
     plugin,
@@ -219,7 +236,7 @@ const list = (hooks: readonly CodexHook[]) => (hooks.length === 1 ? hooks[0]! : 
 function notReady(h: HarnessHooks, need: readonly CodexHook[]): CodexHook[] {
   return need.filter((n) => {
     const x = h.hooks.find((y) => y.hook === n);
-    return !!h.allOff || !x || !x.installed || !x.enabled || x.trusted === 'untrusted' || x.trusted === 'changed';
+    return !!h.allOff || !x || !x.installed || !!x.unknownCommand || !!x.failure || !x.enabled || x.trusted === 'untrusted' || x.trusted === 'changed';
   });
 }
 
@@ -237,14 +254,20 @@ export function hookRow(h: HarnessHooks, now = Date.now()): { check: string; sta
     const trust = x.trusted === 'n/a' ? 'trust n/a' : x.trusted === 'changed' ? 'changed since trusted' : x.trusted;
     const state = !x.installed ? 'missing' : [x.enabled ? 'installed' : 'installed but disabled', trust].join(', ');
     const run = (LOBSTAH_HOOKS as readonly string[]).includes(x.hook) ? `, ${x.lastRun ? `last run ${ago(x.lastRun, now)}` : 'never run'}` : '';
-    return `${x.hook}: ${state}${run}`;
+    const unknown = x.unknownCommand ? `, runs \`${x.unknownCommand}\`, which this CLI doesn't know` : '';
+    const failed = x.failure ? `, failed ${ago(x.failure.at, now)} (\`lobstah ${x.failure.command}\`: ${x.failure.error})` : '';
+    return `${x.hook}: ${state}${run}${unknown}${failed}`;
   });
+  const unknown = h.hooks.filter((x) => x.installed && x.unknownCommand).map((x) => x.hook);
+  const failed = h.hooks.filter((x) => x.failure).map((x) => x.hook);
   const missing = h.hooks.filter((x) => !x.installed).map((x) => x.hook);
   const untrusted = h.hooks.filter((x) => x.installed && (x.trusted === 'untrusted' || x.trusted === 'changed')).map((x) => x.hook);
   const disabled = h.hooks.filter((x) => x.installed && !x.enabled).map((x) => x.hook);
   const remedies: string[] = [];
   if (h.allOff) remedies.push(`${h.allOff}: turn hooks on`);
   if (missing.length) remedies.push(`the plugin does not declare ${list(missing)}: reinstall it (${UPDATE_COMMAND[h.harness]})`);
+  if (unknown.length) remedies.push(`the plugin and the CLI disagree on ${list(unknown)}, which ${unknown.length > 1 ? 'do' : 'does'} nothing until they match: update both (${UPDATE_COMMAND[h.harness]}, and the CLI)`);
+  if (failed.length) remedies.push(`${list(failed)} failed open since ${failed.length > 1 ? 'their' : 'its'} last good run, so ${failed.length > 1 ? 'they do' : 'it does'} nothing: fix the error shown`);
   if (h.harness === 'codex') {
     if (untrusted.length) remedies.push(`In Codex, open /hooks and trust lobstah's ${list(untrusted)} hook${untrusted.length > 1 ? 's' : ''}`);
     if (disabled.length) remedies.push(`In Codex, open /hooks and enable lobstah's ${list(disabled)} hook${disabled.length > 1 ? 's' : ''}`);

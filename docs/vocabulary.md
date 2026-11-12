@@ -322,9 +322,20 @@ plus Codex's `UserPromptSubmit` and `PermissionRequest` when declared, it says:
   Code has no per-hook trust: `trust n/a`;
 - **last run**: when lobstah last saw the hook run (`never run` when it has
   not). Each hook run stamps `~/.lobstah/hook-runs.json` (`<harness>:<event>`
-  → time; a hook that runs on every tool call stamps at most every 30 s).
+  → time; a hook that runs on every tool call stamps at most every 30 s);
+- **a command the CLI doesn't know**: the plugin's command for the hook is a
+  `lobstah` command this CLI doesn't run as that hook, such as a flag from a
+  newer plugin (`runs \`lobstah hook stop --x\`, which this CLI doesn't
+  know`);
+- **failed**: the hook's last error, when it is newer than its last run.
 
-A hook that is missing, untrusted, or off makes the row `fail`, and the row
+A lobstah hook fails open. `lobstah hook …` never exits 2, which a harness
+reads as "block" and would send the session back to work every turn. On any
+error it writes one line to stderr, records the error in
+`~/.lobstah/hook-failures.json` under its event, and exits 0.
+
+A hook that is missing, untrusted, off, runs a command the CLI doesn't know,
+or failed since its last run makes the row `fail`, and the row
 ends with the step to take, for example `In Codex, open /hooks and trust
 lobstah's Stop and SessionStart hooks.` Doctor reads the harness config and
 never writes it.

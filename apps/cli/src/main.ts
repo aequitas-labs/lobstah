@@ -237,6 +237,7 @@ import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@lobstah/pick';
 import { mergeHaulHook } from './hooks.js';
+import { recordHookFailure } from './hook-failures.js';
 import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from './digest.js';
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
@@ -4423,6 +4424,14 @@ mainCli().catch((err) => {
   // the error, printed raw so it stays readable.
   const msg = err instanceof Error ? err.message : String(err);
   const [first, ...rest] = msg.split('\n');
+  // A hook fails open: a harness reads exit 2 as "block" and exit 1 as an
+  // error it shows every turn. Record it for `lobstah doctor`, say it on
+  // stderr, and let the turn go on.
+  if (process.argv[2] === 'hook') {
+    recordHookFailure(process.argv.slice(3), first ?? '');
+    process.stderr.write(`lobstah hook ${process.argv[3] ?? ''}: ${first} (ignored; \`lobstah doctor\` shows it)\n`);
+    process.exit(0);
+  }
   console.log(toonKV({ error: first }));
   if (rest.length > 0) console.log(rest.join('\n').trimStart());
   process.exit(err instanceof UsageError ? 2 : 1);

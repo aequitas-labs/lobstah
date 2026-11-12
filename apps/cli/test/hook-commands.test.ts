@@ -393,12 +393,13 @@ describe('lobstah hook session-end (alias: stow --quiet)', () => {
 });
 
 describe('lobstah hook', () => {
-  it('bare prints its card; an unknown event is a usage error', () => {
+  it('bare prints its card; an unknown event fails open, with the error on stderr', () => {
     const bare = hook(['hook'], {});
     expect(bare.status).toBe(0);
     expect(bare.stdout).toContain('session-start|user-prompt-submit|stop|post-tool-use|session-end|permission-request|pre-tool-use|grant-check|permission-denied');
     const unknown = hook(['hook', 'pre-compact'], {});
-    expect(unknown.status).toBe(2);
+    expect(unknown.status).toBe(0);
+    expect(unknown.stderr).toContain('lobstah hook pre-compact:');
   });
 
   it("both plugins' hooks.json run the new commands", () => {
