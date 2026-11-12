@@ -404,7 +404,8 @@ describe('glass: cards keep their text inside', () => {
     expect(rule).toMatch(/overflow: hidden;/);
     // A short status word carries no title.
     const short = g.$$('#deck .card .gchip').find((b) => text(b) === 'working');
-    expect(short?.getAttribute('title') ?? null).toBeNull();
+    expect(short).toBeTruthy();
+    expect(short!.getAttribute('title')).toBeNull();
   });
 });
 
@@ -430,15 +431,14 @@ describe('glass: a PR card with a long badge', () => {
 });
 
 describe('glass: short card badges stay whole', () => {
-  it('a done badge beside a long title and a trap harness badge never shrink; only a badge over 12 characters is long', async () => {
+  it('a done icon beside a long title and a trap harness badge never shrink; only a badge over 12 characters is long', async () => {
     const d = everyAttentionFleet();
     d.landed[0] = { ...d.landed[0]!, repo: 'a-repository-name-long-enough-to-crowd-the-badge', verb: 'done', at: ago(60_000) };
     const g = await page(d, { prefs: { view: 'cards' } });
     const style = (el: Element) => g.window.getComputedStyle(el as never);
     const landed = g.$$('#deck .card').find((c) => text(c.querySelector('.gtext')).includes('a-repository-name-long'))!;
-    const done = landed.querySelector('.gchip')!;
-    expect(text(done)).toBe('done');
-    expect(done.getAttribute('title')).toBeNull();
+    const done = landed.querySelector('.verbicon')!;
+    expect(done.getAttribute('aria-label')).toBe('Done · 60s');
     expect(style(done).getPropertyValue('flex')).toBe('0 0 auto');
     const title = landed.querySelector('.gtitle')!;
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');

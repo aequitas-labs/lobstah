@@ -16,8 +16,7 @@ import {
   opener,
   prCell,
   prHeadCell,
-  verbTone,
-  verbWord,
+  verbState,
 } from './common.js';
 import type { OlderControl } from './common.js';
 
@@ -63,7 +62,7 @@ export function dispatchCard(x: GlassDispatchSummary) {
     key=${key}
     title=${x.title || x.id.slice(0, 8)}
     titleAttr=${`${x.id.slice(0, 8)} · ${x.title}`}
-    state=${{ word: verbWord(x.verb), tone: verbTone(x.verb), mark: 'chip' }}
+    state=${verbState(x.verb, x.verbAt, x.waiting?.on)}
     context=${dispatchContext(x.repo, x.for || x.claimedBy, x.verbAt)}
     onClick=${opener('dispatch', key)}
   />`;
