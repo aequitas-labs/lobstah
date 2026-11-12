@@ -288,6 +288,7 @@ import {
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
 import { mergeRequestedPrs } from './pr-merge.js';
+import { createRunCleanup } from './run-cleanup.js';
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
@@ -3969,6 +3970,7 @@ async function mainCli(): Promise<void> {
             stampRepairerBeat(now);
           },
           todoFiring: createTodoFiring(),
+          runCleanup: createRunCleanup(),
           codexServerWatch: createCodexServerWatch(),
           codexClaimWatch: createCodexClaimWatch(),
           codexHookWatch: createCodexHookWatch(),

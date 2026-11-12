@@ -1,6 +1,6 @@
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
-import { configuredTrapViews } from '@lobstah/core';
+import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { reviewTools } from './review-tools.js';
 import { glassSettings } from './glass-settings.js';
@@ -593,6 +593,16 @@ export function serveAttachment(url: string, res: http.ServerResponse): boolean 
   return true;
 }
 
+/** Finished runs whose cards have left the glass; an unreadable run never fails /data. */
+function glassRecentRuns(): Pick<GlassFullSnapshot, 'recentRuns'> {
+  try {
+    const runs = recentRuns();
+    return runs.length ? { recentRuns: runs } : {};
+  } catch {
+    return {};
+  }
+}
+
 /** The helms' open to-dos and their stale note; an unreadable file never fails /data. */
 function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
   try {
@@ -799,6 +809,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
+    ...glassRecentRuns(),
     runPasskeys: { ...runPasskeyStatus(), hosted: runPasskeyStatus(hostedPasskeysFile()).count },
     answerLimits: {
       maxBytes: attachmentLimit(),
@@ -1353,7 +1364,8 @@ export function serveGlass(
           const key = decodeURIComponent(req.url.slice('/data/decision/'.length));
           const meta = readDecision(key) ?? readArchivedDecision(key);
           if (!meta) throw new ChecklistError('Card not found.', 404);
-          value = { ...glassDecisions([meta])[0], readOnly: !readDecision(key) || !!readDecisionAnswer(key) };
+          // A finished run past its grace period has left the glass: its card opens read-only, as a withdrawn one does.
+          value = { ...glassDecisions([meta])[0], readOnly: !readDecision(key) || !!readDecisionAnswer(key) || runCardSettled(meta) };
         }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(value));

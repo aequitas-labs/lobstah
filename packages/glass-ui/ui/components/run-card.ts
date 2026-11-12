@@ -14,6 +14,8 @@ import {
   stopRunCard,
 } from '../actions.js';
 import { useEffect, useState } from 'preact/hooks';
+import { TerminalOutput } from './terminal.js';
+import { RunStatusIcon, runStatus } from './run-status.js';
 
 /**
  * A run card's body in the decision modal: the script in full, with every
@@ -170,18 +172,12 @@ function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; 
     sentSecrets.set(cardKey, [...(sentSecrets.get(cardKey) ?? []), value]);
     setSentCount((n) => n + 1);
   };
-  const ended =
-    view.result &&
-    (view.result.timedOut
-      ? `Failed · timed out · exit 124`
-      : view.result.stopped
-        ? 'Stopped'
-        : `${view.result.exitCode === 0 ? 'Succeeded' : 'Failed'} · exit ${view.result.exitCode}`);
+  const status = runStatus(view.state, view.result, view.busy);
   return html`<div class="runout">
-    <div class="runstate">${view.busy ? html`<span class="warn">Running…</span>` : ended && html`<span class=${view.result!.exitCode === 0 ? 'ok' : 'bad'}>${ended}</span>`}${view.result?.scrubbed ? html`<span class="dim"> · ${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
+    <div class="runstate">${status && html`<${RunStatusIcon} status=${status} result=${view.busy ? undefined : view.result} startedAt=${view.startedAt} />`}${view.result?.scrubbed ? html`<span class="dim">${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
     ${view.startedAt && html`<div class="dim">Started ${new Date(view.startedAt).toLocaleString()}</div>`}
     ${view.finishedAt && html`<div class="dim">Finished ${new Date(view.finishedAt).toLocaleString()}</div>`}
-    ${(view.output || (interactive && view.busy)) && html`<pre class="runscript runlog"><code>${view.output}</code></pre>`}
+    ${(view.output || (interactive && view.busy)) && html`<pre class="runscript runlog"><code><${TerminalOutput} text=${view.output} /></code></pre>`}
     ${sent.length > 0 && html`<ul class="runsent" aria-label="Secret lines sent from this tab">${sent.map((value, i) => html`<${SentSecret} key=${i} value=${value} n=${i + 1} />`)}</ul>`}
     ${interactive && view.busy && html`<${ConsoleLine} cardKey=${cardKey} onSent=${onSent} />`}
     ${view.error && html`<div class="bad">${view.error}</div>`}

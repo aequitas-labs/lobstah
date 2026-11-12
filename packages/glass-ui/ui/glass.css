@@ -30,6 +30,23 @@
   --pr-closed: #da3633;
   /* the lobster's own red (the pet sprite's shell) */
   --lobstah: #eb6644;
+  /* The ANSI palette run output's colors map to: black and white lifted off the dark inset. */
+  --ansi-0: #6e7681;
+  --ansi-1: #ff7b72;
+  --ansi-2: #3fb950;
+  --ansi-3: #d29922;
+  --ansi-4: #58a6ff;
+  --ansi-5: #bc8cff;
+  --ansi-6: #39c5cf;
+  --ansi-7: #b1bac4;
+  --ansi-8: #8b949e;
+  --ansi-9: #ffa198;
+  --ansi-10: #56d364;
+  --ansi-11: #e3b341;
+  --ansi-12: #79c0ff;
+  --ansi-13: #d2a8ff;
+  --ansi-14: #56d4dd;
+  --ansi-15: #f0f6fc;
   /* the Stats heatmap's five steps: none, then the accent at rising strength */
   --heat-0: var(--inset);
   --heat-1: color-mix(in srgb, var(--lobstah) 30%, var(--card));
@@ -227,7 +244,7 @@ h2 {
   color: var(--fg);
 }
 @media (max-width: 899px) {
-  .tabs a:not([data-tab='deck'], [data-tab='reviews']) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='prs']) {
     display: none;
   }
   .nav-toggle {
@@ -928,6 +945,75 @@ tr.rowhead:hover {
 .gchip.dim,
 .gword.dim {
   color: var(--dim);
+}
+/* PR and review cards (components/prs.ts prShapedCard): the PR icon in its state's color, before the title. */
+.prstate {
+  display: inline-flex;
+}
+.prstate.pr-open {
+  color: var(--ok);
+}
+.prstate.pr-draft {
+  color: var(--dim);
+}
+.prstate.pr-merged {
+  color: var(--pr-merged-fg);
+}
+.prstate.pr-closed {
+  color: var(--bad);
+}
+/* A PR's state chip, filled in GitHub's color. */
+.gchip.pr-open,
+.gchip.pr-draft,
+.gchip.pr-merged,
+.gchip.pr-closed {
+  color: var(--on-fill);
+}
+.gchip.pr-open {
+  background: var(--pr-open);
+  border-color: var(--pr-open);
+}
+.gchip.pr-draft {
+  background: var(--pr-draft);
+  border-color: var(--pr-draft);
+}
+.gchip.pr-merged {
+  background: var(--pr-merged);
+  border-color: var(--pr-merged-fg);
+}
+.gchip.pr-closed {
+  background: var(--pr-closed);
+  border-color: var(--pr-closed);
+}
+.prcard .gstate {
+  flex-wrap: wrap;
+}
+.prcard .gtop {
+  align-items: flex-start;
+}
+/* The icon sits on the title's first line. */
+.prcard .gtop .gicon {
+  margin-top: 3px;
+}
+/* The card's buttons, in a bar along its bottom under a thin divider. */
+.gactions {
+  flex-wrap: wrap;
+  margin-top: auto;
+  margin-left: -14px;
+  margin-right: -14px;
+  padding: var(--space-2) 14px 0;
+  border-top: 1px solid var(--line);
+  cursor: default;
+}
+/* In the bar the bar's gap spaces the buttons; Ack drops the margin it has beside a stack heading. */
+.gactions .prack {
+  margin-left: 0;
+}
+/* Asking which merge or which review to post: the buttons may wrap their words, so a phone shows both. */
+.gactions .prmerge.asking .btn,
+.gactions .rv-actions.asking .btn {
+  white-space: normal;
+  text-align: left;
 }
 .harness-icon {
   display: inline-flex;
@@ -2098,6 +2184,26 @@ a.lob {
 .btn.dsend:disabled {
   color: var(--dim);
 }
+/* The send shortcut's hint (send-key.ts), quiet beside Send in the subtitle gray. */
+.sendhint {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.dtools .sendhint {
+  margin-left: auto;
+}
+.dtools .sendhint + .dsend {
+  margin-left: 0;
+}
+/* The helm message's button with its hint. */
+.jobsend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 6px;
+}
 .btn:disabled {
   cursor: default;
   opacity: 0.6;
@@ -2894,6 +3000,44 @@ footer .glass-brand {
   border-color: var(--ok);
   color: var(--ok);
 }
+/* A run's status as an icon (components/run-status.ts), its words in its name and tooltip. */
+.runicon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+.runicon .rundot {
+  display: none;
+}
+.runicon .runspin {
+  transform-origin: 8px 8px;
+  animation: runspin 0.9s linear infinite;
+}
+@keyframes runspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Less motion: a still amber dot instead of the spin. */
+@media (prefers-reduced-motion: reduce) {
+  .runicon .runspin {
+    display: none;
+  }
+  .runicon .rundot {
+    display: inline;
+  }
+}
+.runstate {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* In the card the icon stands in for the status line, so it is a size larger than in a deck row. */
+.runout .runicon svg {
+  width: 20px;
+  height: 20px;
+}
 .runout {
   display: flex;
   flex-direction: column;
@@ -2903,6 +3047,19 @@ footer .glass-brand {
   max-height: 40vh;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* Run output's terminal styles (components/terminal.ts); its colors are the --ansi-<n> palette. */
+.runlog .tb {
+  font-weight: 700;
+}
+.runlog .td {
+  opacity: 0.7;
+}
+.runlog .ti {
+  font-style: italic;
+}
+.runlog .tu {
+  text-decoration: underline;
 }
 a.runbtn {
   text-decoration: none;
@@ -2973,4 +3130,24 @@ a.runbtn {
 .runsentname {
   flex: none;
   white-space: nowrap;
+}
+
+/* Finished runs that left the decisions: closed until opened, and quieter than a standing card. */
+.recent-runs {
+  margin-top: var(--space-2);
+}
+.recent-runs summary {
+  cursor: pointer;
+}
+.recent-run .drow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5em;
+  color: inherit;
+  text-decoration: none;
+}
+.recent-run .dtitle {
+  font-weight: normal;
+  min-width: 0;
 }

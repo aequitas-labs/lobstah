@@ -18,6 +18,7 @@ import {
   readRunOutput,
   readStoredRunScript,
   runOutputTail,
+  terminalText,
   withDirLock,
   writeRequest,
   writeRunAttempt,
@@ -56,13 +57,18 @@ export const RUN_SECRET_LINE_NAME = 'secret';
  * expect(1): it spawns the script under a pseudo-terminal, sends each line
  * of its own stdin to it, copies the terminal's output to stdout, and exits
  * with the script's status. On SIGTERM (the time limit) it kills the script,
- * which runs in its own session, and exits 124.
+ * which runs in its own session, and exits 124. Its channels are binary, so
+ * bytes pass through as they are: expect 5.45 (macOS) otherwise turns each
+ * byte of a 4-byte UTF-8 character, such as an emoji, into a Latin-1 one.
  */
 export const RUN_RELAY_SCRIPT = `log_user 1
 set timeout -1
 trap { catch {exec /bin/kill -KILL -- -[exp_pid]}; exit 124 } {SIGTERM}
 set pidfile [lindex $argv 0]
 spawn -noecho {*}[lrange $argv 1 end]
+fconfigure $spawn_id -encoding binary
+fconfigure exp0 -encoding binary
+fconfigure stdin -encoding binary
 set file [open $pidfile w]
 puts $file [exp_pid]
 close $file
@@ -131,8 +137,12 @@ export function runEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.
 const elapsed = (ms: number): string =>
   ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 
-/** The card's answer: how the run ended, and the scrubbed output's tail unless the card withholds it. */
-export function runAnswerText(card: RunCard, result: RunResult, output: string): string {
+/**
+ * The card's answer: how the run ended, and the scrubbed output's tail unless
+ * the card withholds it. The output reads as a terminal showed it: plain
+ * text, with no escape sequences.
+ */
+export function runAnswerText(card: RunCard, result: RunResult, raw: string): string {
   const head = result.interrupted
     ? `Run failed because the glass stopped (exit ${result.exitCode}).`
     : result.timedOut
@@ -141,6 +151,7 @@ export function runAnswerText(card: RunCard, result: RunResult, output: string):
         ? `Run stopped (exit ${result.exitCode}).`
         : `Ran: exit ${result.exitCode} in ${elapsed(result.durationMs)}.`;
   if (card.output === 'exit') return `${head} Output withheld (--output exit).`;
+  const output = terminalText(raw);
   const tail = output.length > RUN_ANSWER_OUTPUT_MAX ? output.slice(-RUN_ANSWER_OUTPUT_MAX) : output;
   const cut = tail.length < output.length ? `(last ${RUN_ANSWER_OUTPUT_MAX / 1024} KB)\n` : '';
   return `${head}\n\nScrubbed output:\n${cut}\`\`\`\n${tail.replace(/```/g, '`​``')}\n\`\`\``;
@@ -172,7 +183,7 @@ function notifyRunOutcome(meta: DecisionMeta & { run: RunCard }, attempt: RunAtt
         id: attempt.id,
         state: attempt.state,
         exitCode: result.exitCode,
-        tail: meta.run.output === 'exit' ? '' : runOutputTail(output).slice(-RUN_ANSWER_OUTPUT_MAX),
+        tail: meta.run.output === 'exit' ? '' : runOutputTail(terminalText(output)).slice(-RUN_ANSWER_OUTPUT_MAX),
       },
     },
     'glass',
@@ -396,7 +407,12 @@ export class RunRegistry {
         live.dropped += live.output.length - RUN_LIVE_OUTPUT_MAX;
         live.output = live.output.slice(-RUN_LIVE_OUTPUT_MAX);
       }
-      if (all.length > RUN_ANSWER_OUTPUT_MAX * 2) all = all.slice(-RUN_ANSWER_OUTPUT_MAX);
+      // The raw tail the answer renders from. Escape sequences make it longer than the text it renders to, so keep more,
+      // and cut at a line start so no sequence is cut in half.
+      if (all.length > RUN_ANSWER_OUTPUT_MAX * 8) {
+        const from = all.indexOf('\n', all.length - RUN_ANSWER_OUTPUT_MAX * 4);
+        all = from < 0 ? all.slice(-RUN_ANSWER_OUTPUT_MAX * 4) : all.slice(from + 1);
+      }
       if (!persistTimer) persistTimer = setTimeout(persist, 200);
     };
     const done = new Promise<RunResult>((resolve) => {

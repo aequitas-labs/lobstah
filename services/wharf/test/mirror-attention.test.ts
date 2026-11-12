@@ -59,6 +59,8 @@ beforeEach(async () => {
     for (const socket of state.getWebSockets()) socket.close();
     for (const table of ['boats', 'boat_permissions', 'idem', ...mirrorTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
+    // Request counts live in the instance's memory, not in meta.
+    (_instance as unknown as { budgets: Map<string, unknown> }).budgets.clear();
   });
 });
 

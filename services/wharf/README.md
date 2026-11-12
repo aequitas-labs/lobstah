@@ -113,6 +113,11 @@ exist yet. Later deploys need only `pnpm run deploy`: the local file stays on
 the deploying machine, and the Worker keeps its variables and secrets. Coordination uses each
 account's SQLite Durable Object; core does not import this service or Better Auth.
 
+To deploy main from any checkout, run `scripts/deploy-from-main.sh` (or post it as a
+run card). It checks the live version and pending migrations, applies them, deploys,
+checks health and prints the rollback. `--set-var SLACK_CLIENT_ID` also sets that var
+from stdin.
+
 ### Boats
 
 Sign in at `https://glass.lobstah.dev` first. The CLI names the account, and the
@@ -216,9 +221,11 @@ fall back to stored boats. The glass UI/approval page follows next; these APIs
 are currently exercised by local tests.
 
 Limits are configurable non-secret vars: 120 authenticated requests/minute/account,
-10,000 stored rows, 100 MiB account storage, and 25 MiB/file. Limits are abuse caps,
-not paid tiers. JSON bodies are bounded at 64 KiB. Rate limits are durable account
-windows, not IP identities. Store/R2 failure returns an unavailable error; clients
+10,000 stored rows (idempotency records aside: the 24-hour window bounds them), 100 MiB account storage, and 25 MiB/file. Limits are abuse caps,
+not paid tiers. JSON bodies are bounded at 64 KiB. Rate limits are per-account
+minute windows, not IP identities, counted in the account object's memory: a
+counter written to SQLite on every request spent the Durable Objects free tier
+(100,000 rows written a day). An evicted object starts its minute again. Store/R2 failure returns an unavailable error; clients
 must retain results and must not infer success or claim locally during an outage.
 
 ## Permission layers
@@ -269,6 +276,8 @@ until the original deadline. No local-files authorization changes.
 All routes are under `/v1/accounts/<account>/`, authenticated with a bearer token.
 All mutations require `Idempotency-Key` (1–128 identifier characters). Reusing a
 key with a different request fails. Keys are scoped to authenticated principals.
+A key replays its first result for 24 hours; after that the same key runs as a new
+request. Each mutation drops at most one record past that window.
 Helm mutations require a live helm lease and `X-Lobstah-Helm: <session>`; credential
 administration requires `admin`. A different live helm needs explicit takeover.
 

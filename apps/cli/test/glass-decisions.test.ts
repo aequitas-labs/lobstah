@@ -526,6 +526,86 @@ describe('glass: decision hotkeys', () => {
   });
 });
 
+describe('glass: Ctrl+Enter sends from the answer box', () => {
+  type SendKey = { key?: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean; repeat?: boolean };
+  /** A keydown in the answer box; returns the event, to see whether the box kept its newline. */
+  const press = async (g: GlassDom, key: string, opts: SendKey) => {
+    const W = g.window as unknown as { KeyboardEvent: typeof KeyboardEvent };
+    const ev = new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...opts });
+    card(g, key)!.querySelector('textarea')!.dispatchEvent(ev);
+    await g.settle();
+    return ev;
+  };
+  /** The page on a Mac or a PC: the platform decides whether ⌘ sends and what the hint says. */
+  const on = (platform: 'MacIntel' | 'Win32') => ({
+    prepare: (w: unknown) => Object.defineProperty((w as { navigator: object }).navigator, 'platform', { value: platform, configurable: true }),
+  });
+  const sentTexts = (g: GlassDom) => answers(g).map((p) => (JSON.parse(p.body) as { payload: { text?: string } }).payload.text);
+
+  it('on a PC, Ctrl+Enter sends what Send would, once; ⌘+Enter does nothing; the hint says Ctrl+↵', async () => {
+    const g = await page(fleet(), { post: ok, ...on('Win32') });
+    await show(g, Q);
+    expect(text(card(g, Q)!.querySelector('.dtools .sendhint'))).toBe('Ctrl+↵ to send');
+    expect(card(g, Q)!.querySelector('.dsend')!.getAttribute('aria-keyshortcuts')).toBe('Control+Enter');
+    await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
+    expect((await press(g, Q, { metaKey: true })).defaultPrevented).toBe(false);
+    expect(answers(g)).toEqual([]);
+    const ev = await press(g, Q, { ctrlKey: true });
+    expect(ev.defaultPrevented).toBe(true);
+    expect(sentTexts(g)).toEqual(['8080']);
+  });
+
+  it('on a Mac, ⌘+Enter sends and so does Ctrl+Enter; the hint says ⌘↵', async () => {
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      const g = await page(fleet(), { post: ok, ...on('MacIntel') });
+      await show(g, Q);
+      expect(text(card(g, Q)!.querySelector('.dtools .sendhint'))).toBe('⌘↵ to send');
+      await type(g, card(g, Q)!.querySelector('textarea')!, 'port 8080');
+      await press(g, Q, mod);
+      expect(sentTexts(g)).toEqual(['port 8080']);
+    }
+  });
+
+  it('plain Enter, Shift+Enter and Alt+Enter keep their newline and send nothing', async () => {
+    const g = await page(fleet(), { post: ok, ...on('Win32') });
+    await show(g, Q);
+    await type(g, card(g, Q)!.querySelector('textarea')!, 'line one');
+    for (const opts of [{}, { shiftKey: true }, { altKey: true }, { ctrlKey: true, altKey: true }]) {
+      expect((await press(g, Q, opts)).defaultPrevented).toBe(false);
+    }
+    expect(answers(g)).toEqual([]);
+  });
+
+  it('a held key repeats nothing, and a press while Send is busy sends nothing', async () => {
+    let release: () => void = () => {};
+    const g = await page(fleet(), {
+      ...on('Win32'),
+      post: (_url, init) =>
+        (JSON.parse(init.body) as { kind: string }).kind === 'decision-answer' ? new Promise((done) => (release = () => done(ok()))) : ok(),
+    });
+    await show(g, Q);
+    await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
+    await press(g, Q, { ctrlKey: true, repeat: true });
+    expect(answers(g)).toEqual([]);
+    await press(g, Q, { ctrlKey: true });
+    expect(answers(g)).toHaveLength(1);
+    // Send is disabled while the answer is on its way: the shortcut waits with it.
+    expect(card(g, Q)!.querySelector<HTMLButtonElement>('.dsend')!.disabled).toBe(true);
+    await press(g, Q, { ctrlKey: true });
+    expect(answers(g)).toHaveLength(1);
+    release();
+    await g.settle();
+  });
+
+  it('an empty box gets the same answer as Send: nothing sent, and the same reason', async () => {
+    const g = await page(fleet(), { post: ok, ...on('Win32') });
+    await show(g, KEY);
+    await press(g, KEY, { ctrlKey: true });
+    expect(answers(g)).toEqual([]);
+    expect(text(card(g, KEY)!.querySelector('.derr'))).toContain('Choose an option');
+  });
+});
+
 describe('glass: the new-decision alert', () => {
   it('counts the unread decisions on any tab, politely, without taking focus; a click opens the oldest unread', async () => {
     const d = fleet();

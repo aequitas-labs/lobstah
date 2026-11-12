@@ -28,6 +28,16 @@ export type Command = { account: string; helm: boolean; personId?: string; token
   prepared?: { id?: string; hash: string } };
 const HELM_MS = 120_000;
 
+/**
+ * How long a mutation's Idempotency-Key replays its first result. Clients
+ * never retry on their own: a timeout says the state is unknown, and a person
+ * or agent runs the command again with `--request-key` (a multi-step publish
+ * resumes from its base key; a boat reports a card answer under
+ * `answer-<receipt>` each pass until it settles). A day covers a retry after
+ * an outage or in the next session; after it, the same key runs as new.
+ */
+export const IDEM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /** One account's only coordination authority. No alarms, timers or socket pings: Slack deliveries drain after each command. */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
@@ -207,7 +217,7 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS reports (seq INTEGER PRIMARY KEY AUTOINCREMENT, dispatch TEXT NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, dispatch TEXT, at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS event_details (seq INTEGER PRIMARY KEY, note TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS idem (actor TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(actor,key));
+      CREATE TABLE IF NOT EXISTS idem (actor TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, at INTEGER, PRIMARY KEY(actor,key));
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS claims (dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(dispatch,epoch));
       CREATE TABLE IF NOT EXISTS catch_context (dispatch TEXT PRIMARY KEY, claim_helm INTEGER NOT NULL);
@@ -219,6 +229,10 @@ export class Account extends DurableObject<Env> {
       ${mirrorSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
+    // An idem record says when it was made, so it can expire. Records from before then have no time, and go first.
+    if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(idem)').toArray().some((c) => c.name === 'at')) ctx.storage.sql.exec('ALTER TABLE idem ADD COLUMN at INTEGER');
+    // Request counts and the hosted glass's watch moved to memory; their old rows go (nothing to write once gone).
+    ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
     this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now) });
     this.cards = new Cards(ctx.storage.sql, {
@@ -249,6 +263,23 @@ export class Account extends DurableObject<Env> {
       },
     });
     this.mirrorState = new MirrorState(ctx.storage.sql, { read: (a) => this.requirePermission(a, 'read'), mirror: (a) => this.requirePermission(a, 'mirror') });
+  }
+  /**
+   * Request counts per minute, and until when a hosted glass is open, kept in
+   * this instance's memory, never in SQLite: they change on every request, and
+   * a row written per request (about 3 rows_written each) is what spends the
+   * Durable Objects free tier. An evicted instance starts the minute's count
+   * again, and the next hosted glass poll says it is open again.
+   */
+  private readonly budgets = new Map<'account' | 'mirror', { window: number; count: number }>();
+  private mirrorWatchedUntil = 0;
+  /** Count one request against a per-minute budget, or refuse it. */
+  private spend(which: 'account' | 'mirror', limit: number, now: number, message: string) {
+    const window = Math.floor(now / 60000);
+    const b = this.budgets.get(which);
+    const count = b?.window === window ? b.count : 0;
+    requireThat(count < limit, 429, message);
+    this.budgets.set(which, { window, count: count + 1 });
   }
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
@@ -359,14 +390,21 @@ export class Account extends DurableObject<Env> {
     if (actor.kind !== 'dispatch' && permission) this.requirePermission(actor, permission);
     if (actor.kind === 'dispatch') requireThat(c.path.startsWith(`dispatches/${actor.id}/`) || c.path === `dispatches/${actor.id}`, 403, 'dispatch scope required');
   }
-  private budget(now: number) {
-    const window = Math.floor(now / 60000); const b = JSON.parse(this.get('budget') ?? '{"window":0,"count":0}');
-    if (b.window !== window) { b.window = window; b.count = 0; }
-    requireThat(b.count < Number(this.env.REQUESTS_PER_MINUTE), 429, 'account rate limit');
-    b.count++; this.set('budget', JSON.stringify(b));
+  /**
+   * Drop the oldest idem record once it is past the retry window: one row at
+   * most per command, read by rowid (insertion order), so no scan and no
+   * index. Each command adds one record and takes at most one expired one, so
+   * the table settles at a window's worth of commands, and a backlog drains
+   * one row per command.
+   */
+  private trimIdem(now: number) {
+    const oldest = this.ctx.storage.sql.exec<{ id: number; at: number | null }>('SELECT rowid AS id, at FROM idem ORDER BY rowid LIMIT 1').toArray()[0];
+    if (oldest && (oldest.at === null || oldest.at <= now - IDEM_WINDOW_MS)) this.ctx.storage.sql.exec('DELETE FROM idem WHERE rowid=?', oldest.id);
   }
+  private budget(now: number) { this.spend('account', Number(this.env.REQUESTS_PER_MINUTE), now, 'account rate limit'); }
+  /** The account's stored rows, against MAX_ROWS. Idem records are left out: the retry window bounds them (trimIdem). */
   private capacity() {
-    const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables];
+    const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -391,7 +429,10 @@ export class Account extends DurableObject<Env> {
       this.availability(now);
       // The wharf's cards move in the same transaction as the records they show.
       this.cards.project(now);
-      if (c.method !== 'GET') this.ctx.storage.sql.exec('INSERT INTO idem VALUES (?,?,?,?)', `${actor.kind}:${actor.id}`, c.key!, fingerprint, JSON.stringify(result));
+      if (c.method !== 'GET') {
+        this.ctx.storage.sql.exec('INSERT INTO idem(actor,key,fingerprint,result,at) VALUES (?,?,?,?,?)', `${actor.kind}:${actor.id}`, c.key!, fingerprint, JSON.stringify(result), now);
+        this.trimIdem(now);
+      }
       return result;
     });
   }
@@ -704,12 +745,7 @@ export class Account extends DurableObject<Env> {
    * The mirror's own rate budget, apart from the account's: a hosted glass
    * polling a mirror boat must never starve the fleet's coordination.
    */
-  private mirrorBudget(now: number) {
-    const window = Math.floor(now / 60000); const b = JSON.parse(this.get('mirror-budget') ?? '{"window":0,"count":0}');
-    if (b.window !== window) { b.window = window; b.count = 0; }
-    requireThat(b.count < 4 * Number(this.env.REQUESTS_PER_MINUTE), 429, 'mirror rate limit');
-    b.count++; this.set('mirror-budget', JSON.stringify(b));
-  }
+  private mirrorBudget(now: number) { this.spend('mirror', 4 * Number(this.env.REQUESTS_PER_MINUTE), now, 'mirror rate limit'); }
   /**
    * Every mirror route. Mirror operations keep no idempotency records: a
    * put replaces the boat's latest snapshot, and a take or an answer
@@ -723,12 +759,15 @@ export class Account extends DurableObject<Env> {
         // A catch's own credential reaches its dispatch only, never a boat's mirror.
         requireThat(!c.token.startsWith('d.'), 403, 'mirror routes take a mirror boat credential or a signed-in person');
         const hash = await digest(c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
+        // A put, an answer or a file runs more than one transaction; the request counts once.
+        let counted = false;
         const run = <T>(fn: (actor: Actor, now: number) => T): T => {
           let cleanup: MirrorCleanup = { keys: [] };
           const result = this.ctx.storage.transactionSync(() => {
             const now = Date.now();
             requireThat(!this.get('deleted'), 410, 'account deleted');
-            const actor = this.authenticate(c, hash, now); this.mirrorBudget(now);
+            const actor = this.authenticate(c, hash, now);
+            if (!counted) { this.mirrorBudget(now); counted = true; }
             this.authorize(c, actor);
             cleanup = this.mirrorState.expire(c.account, now);
             return fn(actor, now);
@@ -781,14 +820,14 @@ export class Account extends DurableObject<Env> {
         const result = run((actor, now) => {
           const r = this.mirrorState.execute(c, actor, now, c.account);
           if (r.watch) {
-            const watched = Number(this.get('mirror-watched') ?? 0) > now;
-            this.set('mirror-watched', String(now + MIRROR_WATCH_MS));
+            const watched = this.mirrorWatchedUntil > now;
+            this.mirrorWatchedUntil = now + MIRROR_WATCH_MS;
             if (!watched) this.ctx.waitUntil(this.mirrorHint('all', { type: 'mirror-watch', until: new Date(now + MIRROR_WATCH_MS).toISOString() }));
           }
           if (r.hint) this.ctx.waitUntil(this.mirrorHint(new Set([r.hint]), { type: 'mirror-call' }));
           // A boat's call list says whether a hosted glass is open, so it knows how often to put.
           if (c.path === 'mirror/calls' && c.method === 'GET' && r.status === 200) {
-            const until = Number(this.get('mirror-watched') ?? 0);
+            const until = this.mirrorWatchedUntil;
             return { status: r.status, value: { ...(r.value as object), ...(until > now ? { watchedUntil: new Date(until).toISOString() } : {}) } };
           }
           return { status: r.status, value: r.value };

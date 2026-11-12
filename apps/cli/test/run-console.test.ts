@@ -125,6 +125,33 @@ describe.skipIf(process.platform === 'win32' || !fs.existsSync('/usr/bin/expect'
     expect(text).toContain('deployed');
   }, 15_000);
 
+  it('gives the agent what the terminal showed: no escape codes, the prompt answered, the spinner gone, emoji intact', async () => {
+    // A prompt library's shape: a colored question, then cursor up and erase to redraw it answered; then a spinner.
+    const script = [
+      '#!/bin/bash',
+      "printf '\\033[36m?\\033[39m \\033[1mApply 2 migrations?\\033[22m (Y/n) '",
+      'read -r a',
+      "printf '\\033[1A\\033[2K\\033[1G\\033[32m✔\\033[39m Apply 2 migrations? … %s\\n' \"$a\"",
+      "for f in ⠋ ⠙ ⠹; do printf '\\033[1G\\033[0K%s' \"$f\"; done",
+      "printf '\\033[1G\\033[0K🪵 Logs written\\n'",
+      '',
+    ].join('\n');
+    const c = card(script, { interactive: true, output: 'scrubbed' });
+    await run(c);
+    await waitFor(c.key, 'Apply 2 migrations?');
+    expect((await line(c.key, 'yes')).status).toBe(200);
+    await runs.settled();
+    const text = await answer(c.key);
+    expect(text).not.toMatch(/[\x1b\r]/);
+    expect(text).toContain('✔ Apply 2 migrations? … yes\n🪵 Logs written');
+    expect(text).not.toContain('(Y/n)');
+    expect(text).not.toContain('⠙');
+    // The raw stream stays as it was, for the card's view and the output.log.
+    const raw = (await post('run-output', { key: c.key, after: 0 })).json.text as string;
+    expect(raw).toContain('\x1b[32m✔');
+    expect(raw).toContain('🪵');
+  }, 15_000);
+
   it('scrubs a secret line, its echo included, from the card output and the answer', async () => {
     const c = card('#!/bin/bash\nread -r -p "Code: " code\necho "using $code"\n', { interactive: true, output: 'scrubbed' });
     await run(c);
@@ -271,7 +298,7 @@ describe('the eye on a secret line', () => {
       (glass.$('#doverlay .runbtn') as HTMLButtonElement).click();
       const stop = await until(() => glass.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Stop') as HTMLButtonElement | undefined);
       stop.click();
-      await until(() => glass.$('#doverlay .runstate')?.textContent?.includes('Stopped'));
+      await until(() => glass.$('#doverlay .runstate .runicon')?.getAttribute('aria-label')?.startsWith('Stopped'));
       expect(glass.$('#doverlay .runbtn')?.textContent).toBe('Run again');
       expect(glass.$$('#doverlay .runfoot button').some((button) => button.textContent === 'Dismiss')).toBe(true);
     } finally {

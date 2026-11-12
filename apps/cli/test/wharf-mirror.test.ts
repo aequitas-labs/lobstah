@@ -296,6 +296,31 @@ describe('enrolling this machine as a mirror boat', () => {
     await expect(wharfCommand('wharf', ['login'], options({ '--wharf': 'lobstah', '--attention': true }), loadConfig())).rejects.toThrow(/--mirror/);
   });
 
+  it('without --wharf, acts on the one wharf the mirror is logged in to', async () => {
+    fs.mkdirSync(path.join(home, 'credentials'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'credentials', 'wharf-lobstah.json'), JSON.stringify({ url: 'https://api.lobstah.test', account: 'acct', token: BOAT_TOKEN }));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input).endsWith('/v1/accounts/acct/_boat')) return Response.json({ id: 'boat-1', name: 'studio', permissions: ['mirror', 'read'] });
+      throw new Error(`unexpected request ${String(input)}`);
+    }));
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((line: unknown) => { lines.push(String(line)); });
+    const { wharfCommand } = await import('../src/wharf-commands.js');
+    expect(await wharfCommand('wharf', ['whoami'], options({}), loadConfig())).toBe(true);
+    expect(lines.join('\n')).toMatch(/wharf: lobstah/);
+    expect(lines.join('\n')).toMatch(/boat: studio/);
+  });
+
+  it('without --wharf, says to add it and names the wharves when it is logged in to none or several', async () => {
+    const { wharfCommand } = await import('../src/wharf-commands.js');
+    await expect(wharfCommand('wharf', ['whoami'], options({}), loadConfig())).rejects.toThrow('add --wharf <name>: this boat is logged in to none of lobstah');
+    fs.writeFileSync(path.join(home, 'config.toml'), '[wharves.lobstah]\nurl = "https://api.lobstah.test"\naccount = "acct"\ntokenEnv = "LOBSTAH_TEST_WHARF"\n\n[wharves.staging]\nurl = "https://api.staging.test"\naccount = "acct2"\ntokenEnv = "LOBSTAH_TEST_WHARF_2"\n');
+    fs.mkdirSync(path.join(home, 'credentials'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'credentials', 'wharf-lobstah.json'), JSON.stringify({ url: 'https://api.lobstah.test', account: 'acct', token: BOAT_TOKEN }));
+    fs.writeFileSync(path.join(home, 'credentials', 'wharf-staging.json'), JSON.stringify({ url: 'https://api.staging.test', account: 'acct2', token: 'b.acct2.boat-2.abcdefghijklmnopqrstuvwxyz012345' }));
+    await expect(wharfCommand('wharf', ['whoami'], options({}), loadConfig())).rejects.toThrow('add --wharf <name>: this boat is logged in to lobstah, staging');
+  });
+
   it('refuses --wharf login without --mirror, since it has no grounds to work in', async () => {
     const { wharfCommand } = await import('../src/wharf-commands.js');
     await expect(wharfCommand('wharf', ['login'], options({ '--wharf': 'lobstah' }), loadConfig())).rejects.toThrow(/--mirror/);

@@ -5,6 +5,7 @@ import type { Account } from '../src/account.js';
 import { glassTables } from '../src/glass-state.js';
 import { mirrorTables } from '../src/mirror-state.js';
 import { authFixtures } from './auth-fixture.js';
+import { rowsWritten } from './rows-written.js';
 import type { WharfMirrorCall } from '../../../packages/core/src/backend-model.js';
 
 /**
@@ -87,6 +88,8 @@ beforeEach(async () => {
   await runInDurableObject(env.ACCOUNTS.getByName(account), (_instance: Account, state) => {
     for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'claims', 'messages', 'files', ...glassTables, ...mirrorTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
+    // Request counts live in the instance's memory, not in meta.
+    (_instance as unknown as { budgets: Map<string, unknown> }).budgets.clear();
   });
   const stored = await env.FILES.list({ prefix: `${account}/` }); if (stored.objects.length) await env.FILES.delete(stored.objects.map((o) => o.key));
   await env.AUTH_DB.exec('DELETE FROM rateLimit');
@@ -302,5 +305,44 @@ describe('the waiting relay', () => {
     const north = await enrol('north', ['mirror', 'read']);
     expect((await browser('mirror/relay', { body: { id: 'relay-2', boat: north.id, write: { kind: 'focus', payload: {} } } })).status).toBe(403);
     expect((await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls).toEqual([]);
+  });
+});
+
+describe('rows written', () => {
+  const written = (fn: () => Promise<unknown>) => rowsWritten(env.ACCOUNTS.getByName(account), fn);
+
+  it('writes nothing for a boat’s call poll or a hosted glass’s poll', async () => {
+    const north = await enrol('north', ['mirror', 'read']);
+    expect((await put(north, snapshot('north'))).status).toBe(200);
+    const rows = await written(async () => {
+      for (let i = 0; i < 5; i++) {
+        expect((await boatCall(north, 'mirror/calls')).status).toBe(200);
+        await list();
+      }
+    });
+    expect(rows).toBe(0);
+    // The hosted glass's poll still tells the boat a glass is open.
+    const calls = await (await boatCall(north, 'mirror/calls')).json<{ watchedUntil?: string }>();
+    expect(Date.parse(calls.watchedUntil ?? '')).toBeGreaterThan(Date.now());
+  });
+
+  it('writes only the snapshot’s own row for a put', async () => {
+    const north = await enrol('north', ['mirror', 'read']);
+    expect(await written(async () => expect((await put(north, snapshot('north'))).status).toBe(200))).toBeLessThanOrEqual(2);
+  });
+
+  it('keeps request counts in memory, and still refuses past the minute’s limit', async () => {
+    await runInDurableObject(env.ACCOUNTS.getByName(account), (instance: Account, state) => {
+      const spend = (instance as unknown as { spend: (which: 'account' | 'mirror', limit: number, now: number, message: string) => void }).spend.bind(instance);
+      const minute = 60_000 * 29_000_000;
+      spend('mirror', 2, minute, 'mirror rate limit');
+      spend('mirror', 2, minute + 1, 'mirror rate limit');
+      expect(() => spend('mirror', 2, minute + 2, 'mirror rate limit')).toThrow('mirror rate limit');
+      // The account's budget is its own, and the next minute starts again.
+      spend('account', 2, minute + 3, 'account rate limit');
+      spend('mirror', 2, minute + 60_000, 'mirror rate limit');
+      const kept = state.storage.sql.exec<{ key: string }>("SELECT key FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')").toArray();
+      expect(kept).toEqual([]);
+    });
   });
 });

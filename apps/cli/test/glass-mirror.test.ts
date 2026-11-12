@@ -347,6 +347,15 @@ describe('mergeMirror', () => {
     expect(snapshot.todos!.filter((t) => t.done)).toHaveLength(6);
   });
 
+  it("lists both boats' recent runs, each labelled with its boat, and never their finished runs as decisions", () => {
+    const ran = (key: string) => ({ key, title: `Run ${key.slice(-1)}`, state: 'succeeded' as const, exitCode: 0, finishedAt: new Date(NOW - 600_000).toISOString(), repo: 'lobstah' });
+    const withRuns = sources().map((s, i) => ({ ...s, snapshot: { ...s.snapshot, recentRuns: [ran(`decision:0000000${i}`)] } }));
+    const { snapshot, router } = mergeMirror(withRuns, NOW, viewer);
+    expect(snapshot.recentRuns?.map((r) => r.repo)).toEqual(['north · lobstah', 'south · lobstah']);
+    expect(router.resolve('decision:00000001').boat).toBe(SOUTH.boat);
+    expect(snapshot.decisions?.some((d) => d.key === 'decision:00000000' || d.key === 'decision:00000001')).toBe(false);
+  });
+
   it('adds up counts and keeps a PR both boats watch once', () => {
     const { snapshot } = mergeMirror(sources(), NOW, viewer);
     const one = put('n', NORTH);

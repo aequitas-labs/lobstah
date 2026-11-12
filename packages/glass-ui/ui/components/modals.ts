@@ -38,6 +38,7 @@ import {
 } from './common.js';
 import { can, capabilities, fileUrl } from '../backend.js';
 import { getState } from '../store.js';
+import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 import { GrantChip } from './session-grants.js';
 import { reviewModal } from './reviews.js';
 
@@ -158,11 +159,16 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
 /** A job's message-the-helm and cancel controls, for a source that takes them (the wharf). */
 function JobControls({ id }: { id: string }) {
   const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string }>();
-  const send = async (e: Event) => {
-    e.preventDefault();
+  // One message at a time: a second press while the first is on its way sends nothing.
+  const canSend = () => !!message.trim() && !sending;
+  const send = async () => {
+    if (!canSend()) return;
+    setSending(true);
     const refusal = await messageHelm(id, message);
+    setSending(false);
     setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Queued for the helm; it expires in 10 minutes.' });
     if (!refusal) setMessage('');
   };
@@ -173,7 +179,20 @@ function JobControls({ id }: { id: string }) {
   };
   return [
     can('message-helm') &&
-      html`<div class="sec">message the helm</div><form class="jobmsg" onSubmit=${send}><textarea class="danswer" aria-label="message to helm" maxLength="16000" value=${message} onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}></textarea><button class="btn" disabled=${!message.trim()}>Queue message for helm</button></form>`,
+      html`<div class="sec">message the helm</div><form
+        class="jobmsg"
+        onSubmit=${(e: Event) => {
+          e.preventDefault();
+          void send();
+        }}
+      ><textarea
+          class="danswer"
+          aria-label="message to helm"
+          maxLength="16000"
+          value=${message}
+          onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}
+          onKeyDown=${onSendKey(canSend, () => void send())}
+        ></textarea><div class="jobsend"><button class="btn" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()}>Queue message for helm</button>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
     can('cancel') &&
       html`<div class="sec">cancel</div>${
         confirming

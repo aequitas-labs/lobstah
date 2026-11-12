@@ -1,4 +1,5 @@
 import type { ReviewRoundState } from './reviews.js';
+import type { RecentRun } from './run-history.js';
 import type { AttentionKind } from './config.js';
 import type { HelmRegistration } from './helm.js';
 import type { Notice } from './notices.js';
@@ -360,6 +361,8 @@ export interface GlassReview {
   by?: string;
   /** The draft is staged on the PR as the identity's pending review. */
   staged?: boolean;
+  /** The newest round's review job, when one ran: the card names the trap that has it. */
+  dispatch?: string;
 }
 
 export type { ChecklistItem, ChecklistProgress } from './checklist-types.js';
@@ -598,6 +601,8 @@ export interface GlassSnapshot {
   mergeView?: MergeView;
   /** Standing decisions, newest first. The deck's cards join them to `decision` attention items by key. */
   decisions?: GlassDecision[];
+  /** Finished runs whose cards have left the glass, newest first: the deck's Recent runs. */
+  recentRuns?: RecentRun[];
   answerLimits?: GlassAnswerLimits;
 }
 

@@ -64,7 +64,9 @@ async function openRow(g: GlassDom, tab: string, label: string) {
   await click(g, g.$$(`#${tab.slice(1)} tr.rowhead`).find((tr) => text(tr).includes(label)) ?? null);
 }
 const escape = async (g: GlassDom) => {
-  g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
+  g.document.dispatchEvent(
+    new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }),
+  );
   await g.settle();
 };
 /** Record every DOM mutation under the body while fn runs. */
@@ -82,15 +84,34 @@ async function mutations(g: GlassDom, fn: () => Promise<void>): Promise<Mutation
 describe('glass page: tabs and hash routing', () => {
   it('badges open cards from the unfiltered snapshot and clears at zero', async () => {
     const d = emptyFleet();
-    d.attention = [1, 2].map((n) => ({ kind: 'question', key: `work:q${n}`, id: `q${n}`, lane: 'work', verb: 'needs-decision', note: 'Choose', ageSecs: 0, stateHash: String(n) }));
+    d.attention = [1, 2].map((n) => ({
+      kind: 'question',
+      key: `work:q${n}`,
+      id: `q${n}`,
+      lane: 'work',
+      verb: 'needs-decision',
+      note: 'Choose',
+      ageSecs: 0,
+      stateHash: String(n),
+    }));
     const badges: number[] = [];
-    const g = await page(d, { badge: async (n) => { badges.push(n); }, prefs: { repo: 'another-repo' } });
+    const g = await page(d, {
+      badge: async (n) => {
+        badges.push(n);
+      },
+      prefs: { repo: 'another-repo' },
+    });
     expect(badges).toEqual([2]);
-    g.serve(emptyFleet()); await g.poll();
+    g.serve(emptyFleet());
+    await g.poll();
     expect(badges.at(-1)).toBe(0);
   });
   it('keeps updating when the browser refuses an app badge', async () => {
-    const g = await page(emptyFleet(), { badge: async () => { throw new Error('not allowed'); } });
+    const g = await page(emptyFleet(), {
+      badge: async () => {
+        throw new Error('not allowed');
+      },
+    });
     await g.poll();
     expect(g.$('#deck')).toBeTruthy();
     expect(g.fetches()).toBeGreaterThan(1);
@@ -110,7 +131,15 @@ describe('glass page: tabs and hash routing', () => {
     d.dispatches.push(parked);
     const live = d.traps[0]!;
     live.listening = true;
-    const idle = { ...live, trapId: 'idle', label: 'idle trap', claimed: undefined, catches: [], listening: false, heartbeatAt: ago(45 * 60_000) };
+    const idle = {
+      ...live,
+      trapId: 'idle',
+      label: 'idle trap',
+      claimed: undefined,
+      catches: [],
+      listening: false,
+      heartbeatAt: ago(45 * 60_000),
+    };
     const waiting = { ...live, trapId: 'parked', label: 'parked trap', claimed: parked.id, catches: [parked.id] };
     d.traps = [live, idle, waiting];
     const g = await page(d, { hash: '#deck', prefs: { view: 'table' } });
@@ -187,35 +216,44 @@ describe('glass page: tabs and hash routing', () => {
     check(chips(g.$$('#traps .card')));
   });
 
-  it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('copies a signed-off $harness resume command in the modal only, not on $view or deck', async ({ harness, view }) => {
-    const d = acceptanceFleet();
-    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
-    const trap = d.traps.find((t) => t.trapId === 't2')!;
-    trap.harness = harness;
-    trap.sessionId = 'past-session';
-    const command = (harness === 'codex' ? 'codex resume ' : 'claude --resume ') + trap.sessionId;
-    const g = await page(d, { hash: '#traps', prefs: { view } });
-    const writes: string[] = [];
-    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
-    expect(text(g.$('#traps'))).not.toContain(command);
-    expect(g.$$('#traps .cmd')).toHaveLength(0);
-    await g.go('#deck');
-    // Only recently signed-off traps are listed on deck.
-    expect(text(g.$('#deck'))).toContain('wt:t2');
-    expect(text(g.$('#deck'))).not.toContain(command);
-    expect(g.$$('#deck .cmd')).toHaveLength(0);
-    await g.go('#traps');
-    await click(g, g.$$('#traps b').find((el) => text(el).endsWith('wt:t2'))!);
-    const row = g.$$('#modalbox .cmd').find((el) => text(el).includes(command))!;
-    const button = row.querySelector('button')! as HTMLElement;
-    button.click();
-    // Read confirmation before the page harness waits for its one-second reset.
-    for (let i = 0; i < 10 && button.textContent !== '✓'; i++) await new Promise((r) => setTimeout(r, 10));
-    expect(button.textContent).toBe('✓');
-    expect(writes.at(-1)).toBe(command);
-    await g.settle();
-    expect(g.$('#overlay')!.className).toBe('open');
-  }, 15_000);
+  it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))(
+    'copies a signed-off $harness resume command in the modal only, not on $view or deck',
+    async ({ harness, view }) => {
+      const d = acceptanceFleet();
+      d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
+      const trap = d.traps.find((t) => t.trapId === 't2')!;
+      trap.harness = harness;
+      trap.sessionId = 'past-session';
+      const command = (harness === 'codex' ? 'codex resume ' : 'claude --resume ') + trap.sessionId;
+      const g = await page(d, { hash: '#traps', prefs: { view } });
+      const writes: string[] = [];
+      g.window.navigator.clipboard.writeText = async (value: string) => {
+        writes.push(value);
+      };
+      expect(text(g.$('#traps'))).not.toContain(command);
+      expect(g.$$('#traps .cmd')).toHaveLength(0);
+      await g.go('#deck');
+      // Only recently signed-off traps are listed on deck.
+      expect(text(g.$('#deck'))).toContain('wt:t2');
+      expect(text(g.$('#deck'))).not.toContain(command);
+      expect(g.$$('#deck .cmd')).toHaveLength(0);
+      await g.go('#traps');
+      await click(
+        g,
+        g.$$('#traps b').find((el) => text(el).endsWith('wt:t2'))!,
+      );
+      const row = g.$$('#modalbox .cmd').find((el) => text(el).includes(command))!;
+      const button = row.querySelector('button')! as HTMLElement;
+      button.click();
+      // Read confirmation before the page harness waits for its one-second reset.
+      for (let i = 0; i < 10 && button.textContent !== '✓'; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(button.textContent).toBe('✓');
+      expect(writes.at(-1)).toBe(command);
+      await g.settle();
+      expect(g.$('#overlay')!.className).toBe('open');
+    },
+    15_000,
+  );
 
   it.each(['claude', 'codex'])('offers no resume for a live %s trap, and copies the helm resume command', async (harness) => {
     const d = acceptanceFleet();
@@ -224,7 +262,9 @@ describe('glass page: tabs and hash routing', () => {
     d.helms[0]!.harness = harness;
     const g = await page(d, { hash: '#traps' });
     const writes: string[] = [];
-    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+    g.window.navigator.clipboard.writeText = async (value: string) => {
+      writes.push(value);
+    };
     const prefix = harness === 'codex' ? 'codex resume ' : 'claude --resume ';
     await openRow(g, '#traps', 'wt:t1');
     expect(text(g.$('#modalbox'))).not.toContain(prefix);
@@ -235,36 +275,50 @@ describe('glass page: tabs and hash routing', () => {
     expect(writes.at(-1)).toBe(prefix + d.helms[0]!.sessionId);
   });
 
-  it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))('opens a signed-off $harness desktop link from $view and deck, and copies it in the modal only', async ({ harness, view }) => {
-    const d = acceptanceFleet();
-    d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
-    const trap = d.traps.find((t) => t.trapId === 't2')!;
-    Object.assign(trap, { harness, sessionId: 'past-session', link: harness === 'codex' ? 'codex://threads/past-session' : 'claude://claude.ai/past-session', window: { entrypoint: 'claude-desktop' } });
-    const g = await page(d, { hash: '#traps', prefs: { view } });
-    const writes: string[] = [];
-    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
-    const card = async (selector: string) => {
-      const open = g.$$(selector + ' a.btn.open').filter((a) => a.getAttribute('href') === trap.link);
-      expect(open).toHaveLength(1);
-      expect(text(open[0])).toBe('↗ Open');
-      expect(text(g.$(selector))).not.toContain(trap.link!);
-      expect(text(g.$(selector))).not.toContain('desktop thread');
-      expect(g.$$(selector + ' .cmd')).toHaveLength(0);
-      await click(g, open[0]!);
-      expect(g.$('#overlay')!.className).toBe('');
-    };
-    await card('#traps');
-    await g.go('#deck');
-    await card('#deck');
-    await g.go('#traps');
-    await click(g, g.$$('#traps b').find((el) => text(el).endsWith('wt:t2'))!);
-    const row = g.$$('#modalbox .cmd').find((el) => text(el).includes(trap.link!))!;
-    expect(text(row)).toContain('desktop thread:');
-    expect(row.querySelector('a')?.getAttribute('href')).toBe(trap.link);
-    expect(text(g.$('#modalbox'))).not.toContain(harness === 'codex' ? 'codex resume ' : 'claude --resume ');
-    await click(g, row.querySelector('button'));
-    expect(writes.at(-1)).toBe(trap.link);
-  }, 15_000);
+  it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))(
+    'opens a signed-off $harness desktop link from $view and deck, and copies it in the modal only',
+    async ({ harness, view }) => {
+      const d = acceptanceFleet();
+      d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
+      const trap = d.traps.find((t) => t.trapId === 't2')!;
+      Object.assign(trap, {
+        harness,
+        sessionId: 'past-session',
+        link: harness === 'codex' ? 'codex://threads/past-session' : 'claude://claude.ai/past-session',
+        window: { entrypoint: 'claude-desktop' },
+      });
+      const g = await page(d, { hash: '#traps', prefs: { view } });
+      const writes: string[] = [];
+      g.window.navigator.clipboard.writeText = async (value: string) => {
+        writes.push(value);
+      };
+      const card = async (selector: string) => {
+        const open = g.$$(selector + ' a.btn.open').filter((a) => a.getAttribute('href') === trap.link);
+        expect(open).toHaveLength(1);
+        expect(text(open[0])).toBe('↗ Open');
+        expect(text(g.$(selector))).not.toContain(trap.link!);
+        expect(text(g.$(selector))).not.toContain('desktop thread');
+        expect(g.$$(selector + ' .cmd')).toHaveLength(0);
+        await click(g, open[0]!);
+        expect(g.$('#overlay')!.className).toBe('');
+      };
+      await card('#traps');
+      await g.go('#deck');
+      await card('#deck');
+      await g.go('#traps');
+      await click(
+        g,
+        g.$$('#traps b').find((el) => text(el).endsWith('wt:t2'))!,
+      );
+      const row = g.$$('#modalbox .cmd').find((el) => text(el).includes(trap.link!))!;
+      expect(text(row)).toContain('desktop thread:');
+      expect(row.querySelector('a')?.getAttribute('href')).toBe(trap.link);
+      expect(text(g.$('#modalbox'))).not.toContain(harness === 'codex' ? 'codex resume ' : 'claude --resume ');
+      await click(g, row.querySelector('button'));
+      expect(writes.at(-1)).toBe(trap.link);
+    },
+    15_000,
+  );
 
   it('keeps the ↗ Open button on a live desktop trap card and its link in the modal', async () => {
     const d = acceptanceFleet();
@@ -304,7 +358,9 @@ describe('glass page: tabs and hash routing', () => {
     d.traps[0]!.attachCommand = 'tmux -L lobstah attach -t %7';
     const g = await page(d, { hash: '#traps' });
     const writes: string[] = [];
-    g.window.navigator.clipboard.writeText = async (value: string) => { writes.push(value); };
+    g.window.navigator.clipboard.writeText = async (value: string) => {
+      writes.push(value);
+    };
     expect(text(g.$('#traps'))).not.toContain('attach -t');
     await openRow(g, '#traps', 'wt:t1');
     const row = g.$$('#modalbox .cmd').find((el) => text(el).includes('attach -t %7'))!;
@@ -363,7 +419,11 @@ describe('glass page: tabs and hash routing', () => {
       trap.attachCommand = 'ssh studio -t tmux -L lobstah attach -r -t %7';
       await modal();
       trap.attachCommand = undefined;
-      for (const link of ['claude://claude.ai/local_1', 'codex://threads/live-session', 'vscode://anthropic.claude-code/open?session=abc']) {
+      for (const link of [
+        'claude://claude.ai/local_1',
+        'codex://threads/live-session',
+        'vscode://anthropic.claude-code/open?session=abc',
+      ]) {
         Object.assign(trap, { harness: link.startsWith('codex') ? 'codex' : 'claude', link });
         await modal();
       }
@@ -416,14 +476,20 @@ describe('glass page: tabs and hash routing', () => {
     }
 
     it('keeps the rule for what else a phone sees: no attach command or desktop link beside it', async () => {
-      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7', link: 'claude://claude.ai/local_1' });
+      const g = await open(
+        { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' },
+        { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7', link: 'claude://claude.ai/local_1' },
+      );
       expect(links(g)).toHaveLength(1);
       expect(text(g.$('#modalbox'))).not.toContain('attach -r');
       expect(g.$$('#modalbox a[href^="claude:"]')).toHaveLength(0);
     });
 
     it('sits beside the attach command for a desktop off the machine', async () => {
-      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'desktop' }, { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7' });
+      const g = await open(
+        { onMachine: false, windowFocus: false, machine: 'studio', device: 'desktop' },
+        { attachCommand: 'ssh studio -t tmux -L lobstah attach -r -t %7' },
+      );
       expect(links(g)).toHaveLength(1);
       expect(text(g.$('#modalbox'))).toContain('attach -r -t %7');
     });
@@ -444,19 +510,28 @@ describe('glass page: tabs and hash routing', () => {
     });
 
     it('says why when two processes hold the session, with no link to tap', async () => {
-      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { liveLink: undefined, sessionWriters: [6882, 2669] });
+      const g = await open(
+        { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' },
+        { liveLink: undefined, sessionWriters: [6882, 2669] },
+      );
       expect(links(g)).toHaveLength(0);
       expect(text(g.$('#modalbox'))).toContain('Processes 6882 and 2669 both hold this session');
     });
 
     it('gives a signed-off trap no live link', async () => {
-      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { live: false, liveLink: undefined });
+      const g = await open(
+        { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' },
+        { live: false, liveLink: undefined },
+      );
       expect(links(g)).toHaveLength(0);
       expect(text(g.$('#modalbox'))).not.toContain('Opens in the Claude app');
     });
 
     it('offers a Codex trap on a phone no action at all', async () => {
-      const g = await open({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }, { harness: 'codex', liveLink: undefined, link: 'codex://threads/live-session', desktopThread: true });
+      const g = await open(
+        { onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' },
+        { harness: 'codex', liveLink: undefined, link: 'codex://threads/live-session', desktopThread: true },
+      );
       expect(g.$$('#modalbox a[href^="codex:"], #modalbox a[href^="https://chatgpt"], #modalbox button.open')).toHaveLength(0);
       expect(text(g.$('#modalbox'))).toContain('Running on studio, only reachable from there');
       expect(text(g.$('#modalbox'))).not.toContain('open this session');
@@ -518,7 +593,10 @@ describe('glass page: tabs and hash routing', () => {
 
     it("raises the window from the one row button on the trap's Mac, and lists every route in the modal", async () => {
       const d = fleet({ onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' });
-      for (const [view, selector] of [['table', '#traps tr.rowhead'], ['cards', '#traps .card']] as const) {
+      for (const [view, selector] of [
+        ['table', '#traps tr.rowhead'],
+        ['cards', '#traps .card'],
+      ] as const) {
         const g = await page(d, { hash: '#traps', prefs: { view } });
         const row = trapRow(g, selector);
         expect(opens(row).map(text), view).toEqual(['↗ Open']);
@@ -701,7 +779,11 @@ describe('glass page: per-section change detection', () => {
 
   it('ages tick in place without a rewrite', async () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches' });
-    const age = () => g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!.querySelector('[data-age]')!;
+    const age = () =>
+      g
+        .$$('#dispatches tr.rowhead')
+        .find((tr) => text(tr).includes('cccccccc'))!
+        .querySelector('[data-age]')!;
     const el = age();
     expect(el.textContent).toBe('4m');
     (g.window as unknown as { Date: DateConstructor }).Date.now = () => NOW + 60_000;
@@ -743,7 +825,11 @@ describe('glass page: per-section change detection', () => {
 describe('glass page: modals', () => {
   it('shows a send awaiting its reply under the dispatch messages', async () => {
     const d = acceptanceFleet();
-    d.dispatches.find((x) => x.id.startsWith('cccccccc'))!.awaitingReply = { sentAt: ago(300_000), from: 'helm', line: 'start the dev server' };
+    d.dispatches.find((x) => x.id.startsWith('cccccccc'))!.awaitingReply = {
+      sentAt: ago(300_000),
+      from: 'helm',
+      line: 'start the dev server',
+    };
     const g = await page(d);
     await openRow(g, '#dispatches', 'cccccccc');
     const secs = g.$$('#modalbox .sec').map((el) => text(el));
@@ -803,7 +889,10 @@ describe('glass page: modals', () => {
 
   it('a row click opens its dispatch; the modal offers copyable commands, never actions', async () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches' });
-    await click(g, g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!);
+    await click(
+      g,
+      g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!,
+    );
     expect(text(g.$('#modalbox h3'))).toBe('cccccccc needs-decision');
     const cmds = g.$$('#modalbox .cmd code').map(text);
     expect(cmds).toContain('wt:t1');
@@ -820,7 +909,10 @@ describe('glass page: modals', () => {
     expect(box.querySelector('b')?.textContent).toBe('#42');
     expect(g.$$('#modalbox .cmd code').map(text)).toEqual(['eyJoIjoiYWJjIn0-a-long-opaque-cursor']);
     // The chain links open the dispatch modals.
-    await click(g, g.$$('#modalbox a').find((a) => text(a) === 'aaaaaaaa')!);
+    await click(
+      g,
+      g.$$('#modalbox a').find((a) => text(a) === 'aaaaaaaa')!,
+    );
     expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
   });
 
@@ -829,7 +921,8 @@ describe('glass page: modals', () => {
     await click(g, g.$('#gearbtn'));
     expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
     expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
-    const choose = async (setting: string, value: string) => click(g, g.$$(`.settings [aria-label="${setting}"] button`).find(button => text(button) === value) ?? null);
+    const choose = async (setting: string, value: string) =>
+      click(g, g.$$(`.settings [aria-label="${setting}"] button`).find((button) => text(button) === value) ?? null);
     await choose('view', 'cards');
     expect(g.$$('#dispatches .card')).toHaveLength(4);
     await choose('lobs', 'on');
@@ -851,7 +944,7 @@ describe('glass page: modals', () => {
 const cardNumber = (c: Element) => /#\d+/.exec(text(c.querySelector('.gcontext')))?.[0] ?? '';
 
 describe('glass page: PRs', () => {
-  it("edges every PR card with its badge's tone and says its status in lowercase", async () => {
+  it("edges every PR card with its badge's tone, chips its GitHub state, and chips what a badge that is not green says", async () => {
     const d = everyAttentionFleet();
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
     const cards = g.$$('#prs .card');
@@ -859,10 +952,12 @@ describe('glass page: PRs', () => {
     for (const c of cards) {
       const p = d.prs.find((x) => '#' + x.number === cardNumber(c))!;
       expect(c.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
-      expect(text(c.querySelector('.gstate .gword'))).toBe(p.badge.text.toLowerCase());
-      expect(text(c.querySelector('.gaction'))).toBe('↗ Open');
-      // Title, status, context, nothing more: merge readiness, the watch and the gate are in the modal.
-      expect(c.querySelectorAll(':scope > .gline')).toHaveLength(3);
+      const state = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' }[p.badge.state];
+      const chips = [...c.querySelectorAll('.gstate .gchip')].map(text);
+      expect(chips).toEqual(p.badge.state === 'open' && p.badge.tone !== 'ok' ? [state, p.badge.text.toLowerCase()] : [state]);
+      expect(text(c.querySelector('.gactions a.open'))).toBe('↗ Open');
+      // Title, status, meta, buttons, nothing more: merge readiness, the watch and the gate are in the modal.
+      expect(c.querySelectorAll(':scope > .gline')).toHaveLength(4);
     }
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#41 → #42 → #43 · floor main');
     expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#30 · floor main · history');
@@ -891,7 +986,15 @@ describe('glass page: PRs', () => {
     const d = everyAttentionFleet();
     const id = 'pr:acme/web#99';
     d.stacks.unshift({ id, floor: 'main', repo: d.stacks[0]!.repo, numbers: [99], open: true, nextNumber: 99, behind: 0 });
-    d.prs.unshift({ ...d.prs[0]!, key: id, url: 'https://github.com/acme/web/pull/99', number: 99, title: 'fresh', stackId: id, position: 0 });
+    d.prs.unshift({
+      ...d.prs[0]!,
+      key: id,
+      url: 'https://github.com/acme/web/pull/99',
+      number: 99,
+      title: 'fresh',
+      stackId: id,
+      position: 0,
+    });
     g.serve(d);
     await g.poll();
     const after = g.$$('#prs .card');
@@ -1053,16 +1156,7 @@ describe('glass page: On deck', () => {
             ? 'signed off'
             : l.querySelector('.gicon .harness-icon')?.getAttribute('aria-label')?.toLowerCase()
           : (l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')));
-      expect(items.map(harnessOrState)).toEqual([
-        'claude',
-        'claude',
-        'codex',
-        'claude',
-        'claude',
-        'claude',
-        'signed off',
-        'signed off',
-      ]);
+      expect(items.map(harnessOrState)).toEqual(['claude', 'claude', 'codex', 'claude', 'claude', 'claude', 'signed off', 'signed off']);
       // t8 (ghosted 45m ago) is the ninth; t9 stowed two hours ago is off the deck.
       expect(text(traps.querySelector('.deckmore'))).toBe('+1 more →');
       expect(traps.querySelector('.deckmore')!.getAttribute('href')).toBe('#traps');
@@ -1084,7 +1178,7 @@ describe('glass page: On deck', () => {
     const acked = cards.filter((c) => c.className.includes('acked')).map(cardNumber);
     expect(acked).toEqual(['#42']);
     expect(cards.find((c) => cardNumber(c) === '#42')!.className).toContain('quiet');
-    expect(cards.map((c) => text(c.querySelector('.gword')))).toContain('conflicts');
+    expect(cards.flatMap((c) => [...c.querySelectorAll('.gstate .gchip')].map(text))).toContain('conflicts');
   });
 
   it('an empty fleet: every section says it is empty, the daemon is down', async () => {
@@ -1156,7 +1250,9 @@ describe('glass page: lobs', () => {
     // Clicking a question lob goes to its card and hides that lob here.
     await click(g, g.$$('#lobs .lob').find((l) => text(l).includes('question item 0')) ?? null);
     expect(g.$('#overlay')!.className).not.toBe('open');
-    expect(JSON.parse(g.window.localStorage.getItem('spyglass-lob-hidden')!)).toEqual({ 'work:cccccccc-0000-4000-8000-000000000003': 'h0' });
+    expect(JSON.parse(g.window.localStorage.getItem('spyglass-lob-hidden')!)).toEqual({
+      'work:cccccccc-0000-4000-8000-000000000003': 'h0',
+    });
     expect(g.$$('#lobs .lob .bub').map(text).join(' ')).not.toContain('question item 0');
     // A new state hash walks it again.
     const d = everyAttentionFleet();
@@ -1182,7 +1278,11 @@ describe('glass page: a dispatch shows its trap by name', () => {
     const c = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
     c.note = 'claimed by wt:t1';
     c.log = [{ at: ago(4 * 60_000), verb: 'working', note: 'claimed by wt:t1' }];
-    d.dispatches.push({ ...d.dispatches.find((x) => x.id.startsWith('dddddddd'))!, id: 'ffffffff-0000-4000-8000-000000000006', for: 'wt:gone' });
+    d.dispatches.push({
+      ...d.dispatches.find((x) => x.id.startsWith('dddddddd'))!,
+      id: 'ffffffff-0000-4000-8000-000000000006',
+      for: 'wt:gone',
+    });
     return d;
   }
   const row = (g: GlassDom, id: string) => g.$$('#dispatches tr.rowhead').find((tr) => text(tr).startsWith(id))!;

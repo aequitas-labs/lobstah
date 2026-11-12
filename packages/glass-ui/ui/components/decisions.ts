@@ -1,6 +1,6 @@
 import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
-import type { Attachment } from '@lobstah/core';
+import type { Attachment, RecentRun } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
 import { decisionNeighbours } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
@@ -26,7 +26,9 @@ import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
 import { RunCardBody } from './run-card.js';
+import { RUN_DECLINE, RunStatusIcon, runStatus } from './run-status.js';
 import { can, fileUrl } from '../backend.js';
+import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -56,10 +58,6 @@ function attachments(key: string, list: Attachment[]) {
       : html`<div key=${a.name} class="dfile"><span>${a.name}</span> <span class="dim">· ${a.type} · ${a.bytes} bytes · </span><code>${a.path}</code></div>`,
   )}</div>`;
 }
-
-/** A touch screen with no mouse or keyboard to speak of: no hotkey numbers and no keyboard legend. */
-export const touchOnly = (): boolean =>
-  typeof window.matchMedia === 'function' && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
 function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: string) {
   const key = c.key;
@@ -105,6 +103,10 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         setDraft(key, { text: el.value, error: undefined });
       }}
       onPaste=${can('answer-files') ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
+      onKeyDown=${onSendKey(
+        () => !getState().drafts[key]?.sending,
+        () => void sendAnswer(key),
+      )}
     ></textarea></div><div class="dtools">${
       can('answer-files') &&
       html`<label class="btn dattach dicon" title="Attach images or files">${AttachIcon}<input
@@ -120,7 +122,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
             });
           }}
         /></label>`
-    }<button type="button" class="btn dsend dicon" aria-label="Send" title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div></div>`,
+    }${!touch && html`<${SendHint} />`}<button type="button" class="btn dsend dicon" aria-label="Send" aria-keyshortcuts=${sendShortcut()} title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div></div>`,
     !permission &&
       (files.length > 0 || (draft?.error && !(instant && draft.option))) &&
       html`<div class="dfoot">
@@ -174,25 +176,15 @@ function source(c: DecisionCard) {
 function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean, focused: boolean) {
   const state = stateOf(c, draft, viewedHere);
   const run = c.kind === 'decision' ? c.run : undefined;
-  const runState = run?.latest?.state;
-  const runLabel = run
-    ? runState === 'failed'
-      ? `Failed · exit ${run.latest?.result?.exitCode}`
-      : runState === 'succeeded'
-        ? 'Succeeded'
-        : runState === 'stopped'
-          ? 'Stopped'
-          : runState === 'running'
-            ? 'Running'
-            : 'Ready'
-    : undefined;
+  // A run card's status is its icon; one declined from this page shows the declined icon.
+  const runNow = run?.latest && runStatus(run.latest.state, run.latest.result);
+  const runIcon = run && (runNow ?? (state === 'answered' && draft?.option === RUN_DECLINE ? 'declined' : undefined));
   const open = () => openDecision(c.key);
   // The hosted glass names the card's boat; the local glass is on it.
   const boat = run ? (run.boat ?? getState().snapshot?.viewer?.machine) : undefined;
-  const runTone = runState === 'failed' ? 'bad' : runState === 'succeeded' ? 'ok' : 'dim';
   const meta = [c.repo && RepoName(c.repo), [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
-  const status = run?.latest
-    ? html`<span class=${'dsent ' + runTone}>${runLabel}</span>`
+  const status = runIcon
+    ? html`<span class="dsent"><${RunStatusIcon} status=${runIcon} result=${run?.latest?.result} startedAt=${run?.latest?.startedAt} /></span>`
     : state === 'answered' && html`<span class="dsent ok">sent</span>`;
   return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
     <button type="button" class="dopen" onClick=${open} aria-label=${`${STATE_WORD[state]}: ${c.kind === 'decision' ? c.title : c.note}`}>
@@ -205,23 +197,44 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   </li>`;
 }
 
+/** How a finished run ended, as its row's badge says it. */
+const RUN_ENDED: Record<RecentRun['state'], { text: string; tone: string }> = {
+  succeeded: { text: 'succeeded', tone: 'ok' },
+  failed: { text: 'failed', tone: 'bad' },
+  stopped: { text: 'stopped', tone: 'dim' },
+};
+
+/**
+ * Runs that finished and left the decisions, closed until opened. A row opens
+ * its card, read-only, with the run's result.
+ */
+function RecentRuns({ runs }: { runs: RecentRun[] }) {
+  if (!runs.length) return null;
+  return html`<details class="recent-runs"><summary class="dim">Recent runs (${runs.length})</summary><ul class="dlist">${runs.map((r) => {
+    const ended = RUN_ENDED[r.state];
+    return html`<li key=${r.key} class="recent-run"><a class="drow" href=${`#decision/${encodeURIComponent(r.key)}`}><b class="dtitle">${r.title}</b><span class="dmeta dim">${r.repo ? [RepoName(r.repo), ' · '] : ''}${Age(r.finishedAt)} ago${r.exitCode !== undefined ? ` · exit ${r.exitCode}` : ''}</span><span class=${`badge ${ended.tone}`}>${ended.text}</span></a></li>`;
+  })}</ul></details>`;
+}
+
 export function DeckDecisions({
   cards,
   drafts,
   focus,
   viewedHere,
   unread,
+  recentRuns = [],
 }: {
   cards: DecisionCard[];
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
   viewedHere: Record<string, true>;
   unread: number;
+  recentRuns?: RecentRun[];
 }) {
   const body = cards.length
     ? html`<ul class="dlist">${cards.map((c) => row(c, drafts[c.key], !!viewedHere[c.key], c.key === focus))}</ul>`
     : html`<div class="empty">none</div>`;
-  return html`<section class="decisions"><h2>decisions${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`}</h2>${body}</section>`;
+  return html`<section class="decisions"><h2>decisions${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`}</h2>${body}<${RecentRuns} runs=${recentRuns} /></section>`;
 }
 
 /** The modal's key legend: what each key does here. */
@@ -351,7 +364,9 @@ export function DecisionModal({
         : c.kind === 'decision' && c.run && (ran?.busy || ran?.result || c.run.latest)
           ? null
           : draft?.sent
-            ? html`<div class="danswered ok">answered · ${draft.sent}</div>`
+            ? c.kind === 'decision' && c.run && draft.option === RUN_DECLINE
+              ? html`<div class="danswered runstate"><${RunStatusIcon} status="declined" /></div>`
+              : html`<div class="danswered ok">answered · ${draft.sent}</div>`
             : answerForm(c, draft, extensions.join(','));
   const showLegend = !touch && (proposal || !(c.kind === 'decision' && (c.appStart || c.readOnly)));
   return shell(

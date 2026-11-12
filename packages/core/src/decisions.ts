@@ -371,8 +371,30 @@ export function listDecisions(): DecisionMeta[] {
 }
 
 /** Decisions not yet answered, newest first. */
-export function standingDecisions(): DecisionMeta[] {
-  return listDecisions().filter((d) => readDecisionAnswer(d.key) === undefined);
+export function standingDecisions(now = Date.now()): DecisionMeta[] {
+  return listDecisions().filter((d) => readDecisionAnswer(d.key) === undefined && !runCardSettled(d, now));
+}
+
+/** A finished run's card stands this long after its run ends, so its result can be read; then it leaves. */
+export const RUN_DONE_GRACE_MS = 2 * 60_000;
+
+/**
+ * Whether a run card's latest run ended more than the grace period ago. Such
+ * a card no longer stands: the daemon withdraws it (run-history's
+ * retireFinishedRuns), and its result stays in Recent runs.
+ */
+export function runCardSettled(d: Pick<DecisionMeta, 'key' | 'run'>, now = Date.now()): boolean {
+  if (!d.run) return false;
+  const dir = decisionDir(d.key);
+  if (!dir) return false;
+  try {
+    const latest = JSON.parse(fs.readFileSync(path.join(dir, 'run', 'latest.json'), 'utf8')) as { state?: string; finishedAt?: string };
+    if (latest.state === 'running') return false;
+    const ended = Date.parse(latest.finishedAt ?? '');
+    return Number.isFinite(ended) && now - ended >= RUN_DONE_GRACE_MS;
+  } catch {
+    return false;
+  }
 }
 
 export interface AskOptions {

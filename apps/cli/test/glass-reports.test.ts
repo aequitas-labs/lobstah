@@ -118,18 +118,22 @@ describe('glass: the deck reports block', () => {
 });
 
 it('acknowledging a report styles it without moving it in the Reports list or deck', async () => {
-  for (const hash of ['#deck', '#reports']) for (const view of ['cards', 'table']) {
-    const d = everyAttentionFleet(), g = await page(d, { hash, prefs: { view } });
-    const rows = () => hash === '#deck'
-      ? [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')]
-      : g.$$(view === 'cards' ? '#reports .card' : '#reports tr.rowhead');
-    const before = rows();
-    d.reports = d.reports.map((r) => r.key === HELM_KEY ? { ...r, acked: { at: ago(0), by: 'glass' } } : r);
-    g.serve(d); await g.poll();
-    expect(rows()).toEqual(before);
-    expect(rows()[1]!.className).toContain('acked');
-    expect(text(rows()[1])).toContain('Fleet notes');
-  }
+  for (const hash of ['#deck', '#reports'])
+    for (const view of ['cards', 'table']) {
+      const d = everyAttentionFleet(),
+        g = await page(d, { hash, prefs: { view } });
+      const rows = () =>
+        hash === '#deck'
+          ? [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')]
+          : g.$$(view === 'cards' ? '#reports .card' : '#reports tr.rowhead');
+      const before = rows();
+      d.reports = d.reports.map((r) => (r.key === HELM_KEY ? { ...r, acked: { at: ago(0), by: 'glass' } } : r));
+      g.serve(d);
+      await g.poll();
+      expect(rows()).toEqual(before);
+      expect(rows()[1]!.className).toContain('acked');
+      expect(text(rows()[1])).toContain('Fleet notes');
+    }
 });
 
 describe('glass: a report page', () => {
@@ -138,7 +142,10 @@ describe('glass: a report page', () => {
   const reportPage = async (key: string) => {
     const fleet = everyAttentionFleet();
     const row = (fleet.reports ?? []).find((r) => r.key === key)!;
-    return page(fleet, { path: pagePath(key), files: { [md(TRAP_KEY)]: TRAP_MD, [md(HELM_KEY)]: HELM_MD, [meta(key)]: JSON.stringify(row) } });
+    return page(fleet, {
+      path: pagePath(key),
+      files: { [md(TRAP_KEY)]: TRAP_MD, [md(HELM_KEY)]: HELM_MD, [meta(key)]: JSON.stringify(row) },
+    });
   };
 
   it('shows referenced attachments inline at their place and lists only the rest', async () => {
@@ -146,14 +153,37 @@ describe('glass: a report page', () => {
     const base = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
     const file = (name: string, type: string) => ({ name, path: `/tmp/lobstah/attachments/${name}`, bytes: 10, type });
     // shot.png was stored as shot-2.png: a link by its first name still shows it.
-    const row = { ...base, attachments: [file('tray.png', 'image/png'), file('shot-2.png', 'image/png'), file('extra.png', 'image/png'), file('log.txt', 'text/plain')], renamed: { 'shot.png': 'shot-2.png' } };
-    const g = await page(fleet, { path: pagePath(TRAP_KEY), files: { [md(TRAP_KEY)]: '# Tray\n\n![the tray](tray.png)\n\nBetween.\n\n![the shot](shot.png)\n', [meta(TRAP_KEY)]: JSON.stringify(row) } });
+    const row = {
+      ...base,
+      attachments: [
+        file('tray.png', 'image/png'),
+        file('shot-2.png', 'image/png'),
+        file('extra.png', 'image/png'),
+        file('log.txt', 'text/plain'),
+      ],
+      renamed: { 'shot.png': 'shot-2.png' },
+    };
+    const g = await page(fleet, {
+      path: pagePath(TRAP_KEY),
+      files: {
+        [md(TRAP_KEY)]: '# Tray\n\n![the tray](tray.png)\n\nBetween.\n\n![the shot](shot.png)\n',
+        [meta(TRAP_KEY)]: JSON.stringify(row),
+      },
+    });
     const page_ = g.$('.reportview .mdpage')!;
     const k = encodeURIComponent(TRAP_KEY);
-    expect([...page_.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([`/report/${k}/files/tray.png`, `/report/${k}/files/shot.png`]);
+    expect([...page_.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([
+      `/report/${k}/files/tray.png`,
+      `/report/${k}/files/shot.png`,
+    ]);
     expect([...page_.children].map((el) => el.tagName)).toEqual(['H1', 'P', 'P', 'P']);
     expect(g.$$('.reportview .sec').map(text)).toContain('report attachments (2)');
-    expect(g.$$('.reportview .sub').map(text).filter((t) => t.includes(' bytes'))).toEqual(['extra.png · image/png · 10 bytes', 'log.txt · text/plain · 10 bytes']);
+    expect(
+      g
+        .$$('.reportview .sub')
+        .map(text)
+        .filter((t) => t.includes(' bytes')),
+    ).toEqual(['extra.png · image/png · 10 bytes', 'log.txt · text/plain · 10 bytes']);
   });
 
   it("renders a trap's report once: headings, image, table, code, links, byline, and the ack command", async () => {
@@ -204,9 +234,19 @@ describe('glass: a report page', () => {
     const acked = (fleet.reports ?? []).find((r) => r.acked)!;
     const trap = (fleet.reports ?? []).find((r) => r.key === TRAP_KEY)!;
     const ok = () => ({ status: 200, body: { ok: true } });
-    const already = await page(fleet, { path: pagePath(acked.key), files: { [meta(acked.key)]: JSON.stringify(acked), [md(acked.key)]: '# old' }, reportToken: 't', post: ok });
+    const already = await page(fleet, {
+      path: pagePath(acked.key),
+      files: { [meta(acked.key)]: JSON.stringify(acked), [md(acked.key)]: '# old' },
+      reportToken: 't',
+      post: ok,
+    });
     expect(already.posts()).toEqual([]);
-    const noText = await page(fleet, { path: pagePath(TRAP_KEY), files: { [meta(TRAP_KEY)]: JSON.stringify(trap) }, reportToken: 't', post: ok });
+    const noText = await page(fleet, {
+      path: pagePath(TRAP_KEY),
+      files: { [meta(TRAP_KEY)]: JSON.stringify(trap) },
+      reportToken: 't',
+      post: ok,
+    });
     expect(text(noText.$('.reportview .bad'))).toBe('report not found (404)');
     expect(noText.posts()).toEqual([]);
     const gone = await page(fleet, { path: pagePath('report:helm:fleet:ffffffff'), reportToken: 't', post: ok });
@@ -246,7 +286,11 @@ describe('glass: a report page', () => {
     await click(g, g.$$('#dispatches tr.rowhead').find((r) => text(r).includes('cccccccc')) ?? null);
     expect(g.$$('#modalbox .sec').map(text)).toContain('report · Tray findings');
     const link = [...g.$$('#modalbox a')].find((a) => text(a) === 'open the report ↗')!;
-    expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([pagePath(TRAP_KEY), '_blank', 'noopener']);
+    expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([
+      pagePath(TRAP_KEY),
+      '_blank',
+      'noopener',
+    ]);
     expect(g.$('#modalbox .mdpage')).toBeNull();
     expect(g.reportFetches()).toEqual([]);
   });
@@ -255,7 +299,11 @@ describe('glass: a report page', () => {
     const g = await page(everyAttentionFleet());
     const lines = [...reportsSection(g).querySelectorAll('a.deckline')];
     const tray = lines.find((l) => text(l).includes('Tray findings'))!;
-    expect([tray.getAttribute('href'), tray.getAttribute('target'), tray.getAttribute('rel')]).toEqual([pagePath(TRAP_KEY), '_blank', 'noopener']);
+    expect([tray.getAttribute('href'), tray.getAttribute('target'), tray.getAttribute('rel')]).toEqual([
+      pagePath(TRAP_KEY),
+      '_blank',
+      'noopener',
+    ]);
     const cards = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
     const card = [...reportsSection(cards).querySelectorAll('.card')].find((c) => text(c).includes('Fleet notes'))!;
     const open = card.querySelector('.gaction a')!;
@@ -276,7 +324,12 @@ describe('glass: the Reports tab', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
-    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual(['60s ago', '5m ago', 'web · 🪤 kind-crab · 20m ago', 'web · aaaaaaaa · 40m ago']);
+    expect(cards.$$('#reports .card .gcontext .gtext').map(text)).toEqual([
+      '60s ago',
+      '5m ago',
+      'web · 🪤 kind-crab · 20m ago',
+      'web · aaaaaaaa · 40m ago',
+    ]);
     expect(cards.$$('#reports .card').map((c) => c.className.includes('quiet'))).toEqual([true, false, false, false]);
     expect(cards.$$('#reports .badge')).toHaveLength(0);
   });
@@ -297,11 +350,19 @@ describe('glass: the Reports tab', () => {
     expect(g.opened()).toEqual([[`/report/${encodeURIComponent(buildKey)}`, '_blank', 'noopener']]);
     expect(g.$('#overlay')!.className).toBe('');
     const title = g.$$('#reports tr.rowhead td a').find((a) => text(a) === 'Fleet notes')!;
-    expect([title.getAttribute('href'), title.getAttribute('target'), title.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(HELM_KEY)}`, '_blank', 'noopener']);
+    expect([title.getAttribute('href'), title.getAttribute('target'), title.getAttribute('rel')]).toEqual([
+      `/report/${encodeURIComponent(HELM_KEY)}`,
+      '_blank',
+      'noopener',
+    ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     const card = cards.$$('#reports .card').find((c) => text(c).includes('Tray findings'))!;
     const open = card.querySelector('.gaction a')!;
-    expect([open.getAttribute('href'), open.getAttribute('target'), open.getAttribute('rel')]).toEqual([`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']);
+    expect([open.getAttribute('href'), open.getAttribute('target'), open.getAttribute('rel')]).toEqual([
+      `/report/${encodeURIComponent(TRAP_KEY)}`,
+      '_blank',
+      'noopener',
+    ]);
     await click(cards, card);
     expect(cards.opened()).toEqual([[`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']]);
   });
@@ -346,15 +407,15 @@ describe('glass: cards keep their text inside', () => {
 });
 
 describe('glass: a PR card with a long badge', () => {
-  it('keeps the title alone on line 1, and truncates a long status word on its own line, never below 12ch', async () => {
+  it('keeps the title alone on line 1, and truncates a long status chip on its own line, never below 12ch', async () => {
     const d = everyAttentionFleet();
     const p = d.prs.find((x) => x.state === 'OPEN')!;
     p.number = 1826;
-    p.badge = { ...p.badge, text: 'repairing: checks (attempt 1 of 2)' };
+    p.badge = { ...p.badge, tone: 'warn', text: 'repairing: checks (attempt 1 of 2)' };
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
     const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#1826'))!;
-    expect(card.querySelector('.gtop .gword')).toBeNull();
-    const word = card.querySelector('.gstate .gword')!;
+    expect(card.querySelector('.gtop .gword, .gtop .gchip')).toBeNull();
+    const word = [...card.querySelectorAll('.gstate .gchip')].find((c) => text(c).startsWith('repairing'))!;
     expect(word.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
     const style = (el: Element) => g.window.getComputedStyle(el as never);
     expect(word.className).toContain('long');
@@ -382,7 +443,10 @@ describe('glass: short card badges stay whole', () => {
     expect(claude.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
     expect(style(claude).getPropertyValue('flex')).toBe('0 0 auto');
     // Twelve characters is still whole; thirteen is long.
-    for (const [verb, long] of [['twelve-chars', false], ['thirteen-char', true]] as const) {
+    for (const [verb, long] of [
+      ['twelve-chars', false],
+      ['thirteen-char', true],
+    ] as const) {
       const e = everyAttentionFleet();
       e.dispatches.find((v) => v.bucket !== 'done')!.verb = verb as never;
       const p = await page(e, { hash: '#dispatches', prefs: { view: 'cards' } });
@@ -418,7 +482,15 @@ describe('glass: a report lob', () => {
     const items = lobItems(
       [
         { id: '0a1b2c3d', lane: 'work', verb: 'report', kind: 'report', key: HELM_KEY, stateHash: 'r2', note: 'Fleet notes' },
-        { id: 'cccccccc-0000-4000-8000-000000000003', lane: 'work', verb: 'report', kind: 'report', key: TRAP_KEY, stateHash: 'r1', note: 'Tray findings' },
+        {
+          id: 'cccccccc-0000-4000-8000-000000000003',
+          lane: 'work',
+          verb: 'report',
+          kind: 'report',
+          key: TRAP_KEY,
+          stateHash: 'r1',
+          note: 'Tray findings',
+        },
       ],
       { lobs: true, preview: false },
     );
@@ -454,7 +526,10 @@ describe('glass: a block quote', () => {
   });
 
   it('parses a long report with quotes in milliseconds', () => {
-    const report = Array.from({ length: 200 }, (_, i) => `## Part ${i}\n\n> a quoted line ${i}\n> and more\n\n| a | b |\n| - | - |\n| ${i} | x |\n`).join('\n');
+    const report = Array.from(
+      { length: 200 },
+      (_, i) => `## Part ${i}\n\n> a quoted line ${i}\n> and more\n\n| a | b |\n| - | - |\n| ${i} | x |\n`,
+    ).join('\n');
     const t = performance.now();
     expect(parseMarkdown(report).filter((b) => b.t === 'quote')).toHaveLength(200);
     expect(performance.now() - t).toBeLessThan(2000);
@@ -463,18 +538,35 @@ describe('glass: a block quote', () => {
 
 describe('glass: the image policy', () => {
   it('loads https on a card, links it on a report, and refuses every other scheme on both', () => {
-    expect(imageDisplay('https://raw.githubusercontent.com/o/r/pr-assets/a.png', 'card')).toEqual({ kind: 'remote', url: 'https://raw.githubusercontent.com/o/r/pr-assets/a.png' });
-    expect(imageDisplay('https://raw.githubusercontent.com/o/r/pr-assets/a.png', 'report')).toEqual({ kind: 'link', url: 'https://raw.githubusercontent.com/o/r/pr-assets/a.png' });
+    expect(imageDisplay('https://raw.githubusercontent.com/o/r/pr-assets/a.png', 'card')).toEqual({
+      kind: 'remote',
+      url: 'https://raw.githubusercontent.com/o/r/pr-assets/a.png',
+    });
+    expect(imageDisplay('https://raw.githubusercontent.com/o/r/pr-assets/a.png', 'report')).toEqual({
+      kind: 'link',
+      url: 'https://raw.githubusercontent.com/o/r/pr-assets/a.png',
+    });
     for (const surface of ['card', 'report'] as const) {
       expect(imageDisplay('tray.png', surface)).toEqual({ kind: 'attachment', name: 'tray.png' });
-      for (const refused of ['http://example.com/a.png', 'data:image/png;base64,AAAA', 'javascript:alert(1)', 'file:///etc/passwd', '//example.com/a.png', 'https://user:pw@example.com/a.png', 'shots/a.png', '../a.png', 'blob:https://x/1']) {
+      for (const refused of [
+        'http://example.com/a.png',
+        'data:image/png;base64,AAAA',
+        'javascript:alert(1)',
+        'file:///etc/passwd',
+        '//example.com/a.png',
+        'https://user:pw@example.com/a.png',
+        'shots/a.png',
+        '../a.png',
+        'blob:https://x/1',
+      ]) {
         expect(imageDisplay(refused, surface), `${refused} on a ${surface}`).toBeUndefined();
       }
     }
   });
 
   it('lists every image source, in links, lists, quotes, and tables, but not in code', () => {
-    const md = '![a](a.png)\n\n- [![b](b.png)](https://x.example)\n\n> ![c](https://c.example/c.png)\n\n| x |\n|---|\n| ![d](d.png) |\n\n```\n![e](e.png)\n```\n\n`![f](f.png)`\n';
+    const md =
+      '![a](a.png)\n\n- [![b](b.png)](https://x.example)\n\n> ![c](https://c.example/c.png)\n\n| x |\n|---|\n| ![d](d.png) |\n\n```\n![e](e.png)\n```\n\n`![f](f.png)`\n';
     expect(markdownImageSources(parseMarkdown(md))).toEqual(['a.png', 'b.png', 'https://c.example/c.png', 'd.png']);
   });
 });
@@ -538,7 +630,8 @@ describe('glass: the report page route', () => {
     expect(fs.existsSync(path.join(home, 'acks')) ? fs.readdirSync(path.join(home, 'acks')) : []).toEqual([]);
     const metaResponse = await fetch(`${base}/report/${k}/meta`);
     const g = await loadGlass(pageRes.body, emptyFleet(), {
-      now: NOW, path: `/report/${k}`,
+      now: NOW,
+      path: `/report/${k}`,
       files: { [`/report/${k}/meta`]: metaRes.body, [`/report/${k}/md`]: '# Findings\n\n> quoted\n' },
       reportToken: metaResponse.headers.get('x-lobstah-token')!,
       post: async (url, request) => {
@@ -582,7 +675,14 @@ describe('glass: the report endpoint', () => {
     fs.writeFileSync(path.join(src, 'x.svg'), '<svg/>');
     fs.writeFileSync(path.join(home, 'secret.png'), 'SECRET');
     const key = dispatchReportKey('eeeeeeee-0000-4000-8000-000000000005', 'work');
-    fileReport({ key, file: path.join(src, 'r.md'), attach: [path.join(src, 'p.png'), path.join(src, 'x.svg')], fallbackTitle: 'r', author: 'headless', maxBytes: 1_000_000 });
+    fileReport({
+      key,
+      file: path.join(src, 'r.md'),
+      attach: [path.join(src, 'p.png'), path.join(src, 'x.svg')],
+      fallbackTitle: 'r',
+      author: 'headless',
+      maxBytes: 1_000_000,
+    });
     const k = encodeURIComponent(key);
 
     const text_ = get(`/report/${k}/md`)!;

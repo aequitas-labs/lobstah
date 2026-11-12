@@ -164,9 +164,10 @@ function deckStack(
     // An acked PR is greyed, as an acked report is.
     const card = (p: GlassPr) => {
       const kinds = standing.get(p.key) || [];
-      return prCard(p, kinds.length > 0 && kinds.every((a) => a.acked));
+      return prCard(p, { quiet: kinds.length > 0 && kinds.every((a) => a.acked), attention, stack: members.length === 1 ? s : undefined });
     };
-    return html`<div key=${s.id} class="deckstack"><div class="dim">${stackTitle(s)}${chain} · ${nextText}${ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${members.map(card)}</div></div>`;
+    // A lone PR's card has its own Ack; a stack of several keeps Ack stack on its line.
+    return html`<div key=${s.id} class="deckstack"><div class="dim">${stackTitle(s)}${chain} · ${nextText}${members.length > 1 && ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${members.map(card)}</div></div>`;
   }
   const badges = members.flatMap((p) =>
     (standing.get(p.key) || []).map(
@@ -319,6 +320,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
   ];
 }

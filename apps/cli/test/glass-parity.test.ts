@@ -30,6 +30,8 @@ import { pollBody } from '../src/glass-poll.js';
 
 const NOW = Date.parse('2026-10-10T17:05:00Z');
 const DESKTOP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15';
+/** The hosted page's DESKTOP browser is a Mac; the local page gets the same platform, so both name the same send shortcut. */
+const onMac = (w: unknown) => Object.defineProperty((w as { navigator: object }).navigator, 'platform', { value: 'MacIntel', configurable: true });
 
 /** The world both glasses read: the hosted glass's fixture, with a second job, a landing and no attachments (whose URLs are each host's own). */
 const glass = {
@@ -129,7 +131,7 @@ async function hosted(hash: string, respond: (path: string, init?: RequestInit) 
 
 /** The local page's own entry on the wharf's capabilities, reading the same snapshot from /data. */
 async function local(hash: string): Promise<GlassDom> {
-  const g = await loadGlass(reference, expected(), { now: NOW, hash });
+  const g = await loadGlass(reference, expected(), { now: NOW, hash, prepare: onMac });
   locals.push(g);
   return g;
 }
@@ -251,7 +253,7 @@ describe('the hosted glass on one mirror boat renders exactly what the local gla
     return Response.json({ error: 'not found' }, { status: 404 });
   };
   async function localMirror(hash: string): Promise<GlassDom> {
-    const g = await loadGlass(mirrorReference, fleet(), { now: FLEET_NOW, hash, settings, get: (url) => (url === '/data/stats' ? { status: 200, body: stats } : undefined) });
+    const g = await loadGlass(mirrorReference, fleet(), { now: FLEET_NOW, hash, settings, prepare: onMac, get: (url) => (url === '/data/stats' ? { status: 200, body: stats } : undefined) });
     locals.push(g);
     return g;
   }
