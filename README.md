@@ -25,7 +25,7 @@ and recovers each; status and evidence land on disk. Supervision costs
 nothing — no tokens, no attention — so the whole fleet fits in one
 conversation, and **your agents just bring home the lobstahs**.
 
-## Choose your approach
+## Choose your approach 🧭
 
 Both run on the same daemon, so you can start with the router and add a helm
 whenever you like.
@@ -239,7 +239,7 @@ for an answer, PRs and their stacks, reviews, runs and traps.
 `lobstah glass --detach` starts it in the background at
 `http://127.0.0.1:4949` (`lobstah glass` runs it in the foreground).
 
-![The glass's PRs tab: a stack of three PRs, each with Merge when green](docs/assets/glass-prs.png)
+<img src="docs/assets/glass-mobile.png" width="320" alt="The glass on a phone, On deck: three decisions waiting, three dispatches in flight (one needs a decision, two working), and two that landed today">
 
 From the glass you can answer decision and permission cards, run a run card,
 mark a PR to merge when its checks are green, and review a PR. Everything you
