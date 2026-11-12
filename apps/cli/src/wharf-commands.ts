@@ -38,7 +38,11 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   if (cmd === 'goals' && backendScopes(config).some((s) => readBrokerAgent(s.grounds))) throw new Error('a hosted trap cannot write helm goals');
   if (!cmd || GLOBAL.has(cmd)) return false;
   // A mirror is this machine's boat on a wharf, named by --wharf: it has no wharf grounds to scope it.
-  if (cmd === 'wharf' && opts.opt('--wharf') !== undefined) { await mirrorWharfCommand(pos, opts, config); return true; }
+  if (cmd === 'wharf' && opts.opt('--wharf') !== undefined) { await mirrorWharfCommand(pos, opts, config, opts.opt('--wharf')!); return true; }
+  // Without --wharf and with no wharf grounds to choose, `wharf` acts as the mirror boat on the one wharf it's logged in to.
+  if (cmd === 'wharf' && !opts.opt('--grounds') && !process.env.LOBSTAH_GROUNDS && !backendScopes(config).some((s) => s.kind === 'wharf')) {
+    await mirrorWharfCommand(pos, opts, config, soleMirrorWharf(config)); return true;
+  }
   const configuredName = opts.opt('--trap') ?? (opts.opt('--for')?.startsWith('trap:') ? opts.opt('--for')!.slice(5) : cmd === 'man:throw' && pos[0]?.startsWith('trap:') ? pos[0].slice(5) : undefined);
   const configuredProfile = configuredName ? config.traps?.[configuredName] : undefined;
   if (configuredName && !configuredProfile) throw new Error(`unknown configured profile trap:${configuredName}`);
@@ -286,8 +290,27 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
  * mirror boat on that wharf. Login with `--mirror` asks for mirror and read
  * access only. Whoami names the boat and how fresh its mirror is.
  */
-async function mirrorWharfCommand(pos: string[], opts: Options, config: Config): Promise<void> {
-  const wharf = opts.opt('--wharf')!;
+/** The wharves this boat's mirror is logged in to: each configured wharf with a saved boat credential. */
+export function loggedInMirrorWharves(config: Config): string[] {
+  return Object.keys(config.wharves ?? {}).filter((name) => {
+    try {
+      return !!wharfCredential(mirrorScope(config, name));
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** The one wharf `wharf` acts on without --wharf, or why it can't choose. */
+export function soleMirrorWharf(config: Config): string {
+  const names = loggedInMirrorWharves(config);
+  if (names.length === 1) return names[0]!;
+  const configured = Object.keys(config.wharves ?? {});
+  if (!configured.length) throw new Error('no wharf is configured: add one under [wharves.<name>], then lobstah wharf login --wharf <name> --mirror');
+  throw new Error(`add --wharf <name>: ${names.length ? 'this boat is logged in to' : 'this boat is logged in to none of'} ${(names.length ? names : configured).join(', ')}`);
+}
+
+async function mirrorWharfCommand(pos: string[], opts: Options, config: Config, wharf: string): Promise<void> {
   const scope = mirrorScope(config, wharf);
   if (pos.length !== 1) throw new Error('wharf login, logout and whoami --wharf act only as this boat; no positional argument');
   if (pos[0] === 'login' || pos[0] === 'logout') {
