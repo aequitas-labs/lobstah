@@ -17,6 +17,7 @@ export * from './run-cards.js';
 export * from './run-history.js';
 export * from './run-inputs.js';
 export * from './run-scrub.js';
+export * from './terminal-render.js';
 export * from './run-audit.js';
 export * from './grants.js';
 export * from './grant-scope.js';

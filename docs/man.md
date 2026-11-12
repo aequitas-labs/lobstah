@@ -825,7 +825,10 @@ Use `--input NAME:secret` for secrets (values via stdin, never in the script),
 `--timeout` for the time limit, and `--output scrubbed|exit` for the result.
 The person reviews and runs the script from the glass. Scripts read declared
 inputs from stdin, one line each in `--input` order. `scrubbed` returns
-scrubbed output to the helm. `exit` returns only the exit code.
+scrubbed output to the helm. `exit` returns only the exit code. The output
+reads as a terminal showed it: redrawn lines, spinners and answered prompts
+collapse to their final text, and no escape code remains. The card in the
+glass keeps the colors, and the run's `output.log` keeps the raw stream.
 
 From the phone: a Mac that mirrors to a hosted glass runs its cards from
 there too. Run `lobstah run passkey add --hosted` on the Mac, open the link it

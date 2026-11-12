@@ -168,6 +168,30 @@ describe('a run card in the glass', () => {
     expect(g.$('#doverlay .runmeta')!.textContent).toContain('the exit code only');
   });
 
+  it('shows the output as a terminal did: colors as spans, the spinner and the answered prompt collapsed, no escape codes', async () => {
+    const run = glassRun(undefined, { inputs: [], latest: {
+      id: '22222222-2222-4222-8222-222222222222', key: RUN_KEY, scriptSha256: glassRun().scriptSha256,
+      state: 'succeeded', startedAt: new Date(NOW - 2000).toISOString(), finishedAt: new Date(NOW - 1000).toISOString(),
+      result: { exitCode: 0, timedOut: false, durationMs: 1000, outputBytes: 99, scrubbed: 0 },
+    } });
+    const raw = '\x1b[31m✘ \x1b[41;97mERROR\x1b[0m bad\r\n\x1b[36m?\x1b[39m Apply? (Y/n)\x1b[2K\x1b[1G\x1b[32m✔\x1b[39m Apply? … yes\r\n\x1b[1G\x1b[0K⠙\x1b[1G\x1b[0K== Deploying\r\n';
+    const g = await loadGlass(GLASS_PAGE, runCardFleet(run), {
+      now: NOW, host: 'localhost:7777', hash: `#decision/${encodeURIComponent(RUN_KEY)}`,
+      post: (_url, request) => {
+        const { kind } = JSON.parse(request.body) as { kind: string };
+        if (kind === 'run-output') return { status: 200, body: { ok: true, ...run.latest, text: raw, next: raw.length } };
+        return { status: 404, body: { ok: false } };
+      },
+    });
+    open.push(g);
+    const log = g.$('#doverlay .runlog')!;
+    expect(log.textContent).toBe('✘ ERROR bad\n✔ Apply? … yes\n== Deploying');
+    const spans = [...log.querySelectorAll('span')].map((s) => [s.textContent, s.getAttribute('style')]);
+    expect(spans).toContainEqual(['✘ ', 'color: var(--ansi-1);']);
+    expect(spans).toContainEqual(['ERROR', 'color: var(--ansi-15); background: var(--ansi-1);']);
+    expect(spans).toContainEqual(['✔', 'color: var(--ansi-2);']);
+  });
+
   it('reloads a failed run with its output, retry and Dismiss controls', async () => {
     const run = glassRun(undefined, { inputs: [], latest: {
       id: '11111111-1111-4111-8111-111111111111', key: RUN_KEY, scriptSha256: glassRun().scriptSha256,
