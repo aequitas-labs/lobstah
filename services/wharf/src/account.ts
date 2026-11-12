@@ -14,8 +14,8 @@ import { routeSlackMessage } from './slack-routing.js';
 import { MIRROR_WATCH_MS, MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
-import { MINIMUM_SOCKET_CLIENT, PING_TEXT, PONG_TEXT, SOCKET_EVENTS_PER_MESSAGE, WHARF_SOCKET_PROTOCOL, offersSocketProtocol, parseClientMessage } from '../../../packages/core/src/wharf-socket.js';
-import type { CommandMessage, ServerSocketMessage } from '../../../packages/core/src/wharf-socket.js';
+import { ANSWER_INLINE_MAX_BYTES, MINIMUM_SOCKET_CLIENT, PING_TEXT, PONG_TEXT, SOCKET_EVENTS_PER_MESSAGE, WHARF_SOCKET_PROTOCOL, encodeFrame, offersSocketProtocol, parseClientMessage } from '../../../packages/core/src/wharf-socket.js';
+import type { CallMessage, CommandMessage, ServerSocketMessage, SocketFrame } from '../../../packages/core/src/wharf-socket.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 /** What a Slack action came to: done, a form to ask for words first, or why not, said to the person. */
@@ -65,6 +65,8 @@ export class Account extends DurableObject<Env> {
   /** The newest event already pushed to sockets; events after it go out on the next push. */
   private pushedSeq = 0;
   private pushPending = false;
+  /** Relays held open over HTTP, waiting for their call's answer, by call id. */
+  private readonly answerWaiters = new Map<string, Array<() => void>>();
   /** Fetch is only for the private upgrade binding: normal state uses RPC. */
   async fetch(request: Request): Promise<Response> {
     try {
@@ -87,6 +89,8 @@ export class Account extends DurableObject<Env> {
       const attachment: SocketAttachment = { actor, hash, account: c.account, sessionId: c.personSessionId, protocol: WHARF_SOCKET_PROTOCOL,
         base: { account: c.account, helm: c.helm, personId: c.personId, personSessionId: c.personSessionId, token: credentialName(c.token) } };
       pair[1].serializeAttachment(attachment);
+      // A glass tab open is what makes mirror boats put their snapshots at once.
+      if (isGlass(c)) this.ctx.waitUntil(this.mirrorHint('all', { type: 'mirror-watch', until: new Date(Date.now() + MIRROR_WATCH_MS).toISOString() }));
       return new Response(null, { status: 101, webSocket: pair[0], headers: { 'Sec-WebSocket-Protocol': WHARF_SOCKET_PROTOCOL } });
     } catch (e) {
       if (e instanceof ApiError) return Response.json({ error: e.message }, { status: e.status });
@@ -108,6 +112,7 @@ export class Account extends DurableObject<Env> {
     const message = parseClientMessage(data);
     if ('invalid' in message) return void send(socket, { t: 'error', reason: message.invalid });
     if (message.t === 'resume') return void this.resume(socket, message.after);
+    if (message.t === 'call') return void send(socket, { t: 'result', id: message.id, ...await this.socketCall(a, message) });
     send(socket, { t: 'result', id: message.id, ...await this.socketCommand(a, message) });
     await this.afterChange();
   }
@@ -152,6 +157,52 @@ export class Account extends DurableObject<Env> {
       if (e instanceof ApiError) return { status: e.status, value: { error: e.message } };
       throw e;
     }
+  }
+  /**
+   * A glass tab's relayed call: made exactly as the HTTP relay makes it
+   * (`POST mirror/calls`), and answered later by an `answer` frame when the
+   * boat answers. The result says it was accepted (202), or why not; the same
+   * id again is the same call (409 means it already stands).
+   */
+  private async socketCall(a: SocketAttachment, m: CallMessage): Promise<StoredResult> {
+    if (a.actor.kind !== 'person') return { status: 403, value: { error: 'only a signed-in person relays calls' } };
+    const body = { id: m.id, boat: m.boat, ...(m.read !== undefined ? { read: m.read } : {}), ...(m.write !== undefined ? { write: m.write } : {}), ...(m.files ? { files: m.files } : {}) };
+    const c: Command = { ...a.base, method: 'POST', path: 'mirror/calls', body };
+    const created = JSON.parse(await this.mirror(JSON.stringify(c))) as StoredResult;
+    if (created.status === 200 || created.status === 409) return { status: 202, value: { id: m.id } };
+    return created;
+  }
+  /** Send a binary frame to every glass tab whose session still holds. */
+  private async pushFrame(header: SocketFrame, payload?: Uint8Array) {
+    const frame = encodeFrame(header, payload);
+    for (const socket of this.ctx.getWebSockets('glass')) {
+      try {
+        const a = socket.deserializeAttachment() as SocketAttachment | null;
+        if (a?.protocol === WHARF_SOCKET_PROTOCOL && await this.socketAllowed(a)) socket.send(frame);
+        else socket.close(1008, 'credential expired or revoked');
+      } catch { try { socket.close(1011, 'socket unavailable'); } catch { /* disconnected */ } }
+    }
+  }
+  /**
+   * Private binding only: hold an HTTP relay until its call is answered (or
+   * expires), or `ms` passes. The relay then reads the answer once, instead
+   * of polling the call.
+   */
+  async awaitMirrorAnswer(id: string, ms: number): Promise<void> {
+    const call = this.ctx.storage.sql.exec<{ data: string }>('SELECT data FROM mirror_calls WHERE id=?', id).toArray()[0];
+    if (!call) return;
+    const state = (JSON.parse(call.data) as { state: string }).state;
+    if (state === 'answered' || state === 'expired') return;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        const rest = (this.answerWaiters.get(id) ?? []).filter((w) => w !== done);
+        if (rest.length) this.answerWaiters.set(id, rest); else this.answerWaiters.delete(id);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      this.answerWaiters.set(id, [...(this.answerWaiters.get(id) ?? []), done]);
+    });
   }
   /**
    * Push the events after the last pushed one to every socket whose
@@ -949,7 +1000,13 @@ export class Account extends DurableObject<Env> {
           const etag = await digest(json);
           const actor = run((a) => a);
           await this.env.FILES.put(mirrorSnapshotKey(c.account, actor.id), bytes!, { customMetadata: { etag } });
-          return JSON.stringify(run((a, now) => this.mirrorState.recordSnapshot(a, etag, bytes!.byteLength, now)));
+          const recorded = run((a, now) => this.mirrorState.recordSnapshot(a, etag, bytes!.byteLength, now));
+          // Every open glass tab gets the bytes the boat put: it shows them with no request.
+          if (recorded.status === 200) {
+            const boat = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', actor.id).one();
+            this.ctx.waitUntil(this.pushFrame({ t: 'snapshot', boat: actor.id, name: boat.name, at: new Date().toISOString(), etag }, bytes!));
+          }
+          return JSON.stringify(recorded);
         }
         // A boat's walking list: kept when it changed, and the boats granted attention are told.
         if (c.path === 'mirror/attention' && c.method === 'PUT') {
@@ -970,7 +1027,15 @@ export class Account extends DurableObject<Env> {
           requireThat(Number.isInteger(status) && status >= 200 && status <= 599, 400, 'invalid answer status');
           const contentType = text(meta.contentType ?? 'application/octet-stream', 200);
           await this.env.FILES.put(mirrorAnswerKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType } });
-          return JSON.stringify(run((actor, now) => this.mirrorState.recordAnswer(actor, id, { status, contentType, bytes: bytes?.byteLength ?? 0 }, now)));
+          const recorded = run((actor, now) => this.mirrorState.recordAnswer(actor, id, { status, contentType, bytes: bytes?.byteLength ?? 0 }, now));
+          if (recorded.status === 200) {
+            // The tab that asked gets the answer in its frame; one too large to push is read over HTTP.
+            const body = bytes ?? new Uint8Array();
+            const large = body.byteLength > ANSWER_INLINE_MAX_BYTES;
+            this.ctx.waitUntil(this.pushFrame({ t: 'answer', id, status, contentType, ...(large ? { large: true as const } : {}) }, large ? undefined : body));
+            for (const release of this.answerWaiters.get(id) ?? []) release();
+          }
+          return JSON.stringify(recorded);
         }
         if (c.path === 'mirror/files' && c.method === 'POST') {
           const boat = identifier(meta.boat), name = text(meta.name ?? 'attachment', 200);
@@ -990,6 +1055,8 @@ export class Account extends DurableObject<Env> {
           if (r.hint) this.ctx.waitUntil(this.mirrorHint(new Set([r.hint]), { type: 'mirror-call' }));
           // A boat's call list says whether a hosted glass is open, so it knows how often to put.
           if (c.path === 'mirror/calls' && c.method === 'GET' && r.status === 200) {
+            // A glass tab with its socket open watches for as long as it stays connected.
+            if (this.ctx.getWebSockets('glass').length) this.mirrorWatchedUntil = Math.max(this.mirrorWatchedUntil, now + MIRROR_WATCH_MS);
             const until = this.mirrorWatchedUntil;
             return { status: r.status, value: { ...(r.value as object), ...(until > now ? { watchedUntil: new Date(until).toISOString() } : {}) } };
           }
@@ -1065,14 +1132,16 @@ export class Account extends DurableObject<Env> {
 /** Send one protocol message on a socket. */
 function send(socket: WebSocket, message: ServerSocketMessage) { socket.send(JSON.stringify(message)); }
 
+/** Whether a command came from a glass tab's cookie, not a person's CLI bearer. */
+function isGlass(c: Command): boolean { return c.token.startsWith('browser:'); }
+
 /**
  * A socket's tags: what it is (a boat, a glass tab, a person's CLI) and
  * which one, so later pushes can address one kind or one client.
  */
 function socketTags(actor: Actor, c: Command): string[] {
   if (actor.kind === 'boat') return ['boat', `boat:${actor.id}`];
-  const glass = c.token.startsWith('browser:');
-  return [glass ? 'glass' : 'person', ...(c.personSessionId ? [`session:${c.personSessionId}`] : [])];
+  return [isGlass(c) ? 'glass' : 'person', ...(c.personSessionId ? [`session:${c.personSessionId}`] : [])];
 }
 
 /**

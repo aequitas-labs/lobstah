@@ -36,8 +36,9 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   if (slackReturn) return slackConnected(env, url, person);
   const route = url.pathname === '/api/glass' ? 'glass' : url.pathname.slice('/api/glass/'.length);
   if (route === 'slack' || route.startsWith('slack/')) return slackRoute(request, env, route, person);
+  // A relayed call's answer comes on the tab's socket, or with the relay itself: there is no call to poll.
+  if (request.method === 'GET' && /^mirror\/calls\/[A-Za-z0-9_-]+$/.test(route)) return Response.json({ error: 'a relayed call answers on the socket or with its relay; it is not polled' }, { status: 410 });
   const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake', 'mirror', 'mirror/read', 'cards'].includes(route)
-    || /^mirror\/calls\/[A-Za-z0-9_-]+$/.test(route)
     || /^cards\/c\d{1,15}$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
     || /^(documents|dispatches)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));

@@ -20,10 +20,12 @@ import { viewerDevice } from '../../../core/src/viewer-device.js';
 
 /**
  * The hosted glass on mirror boats: each boat's own glass, merged into one
- * fleet (mirror-merge.ts). Reads and writes go to the row's boat through
- * the wharf's relay (`/api/glass/mirror/relay`), which hands the call to
- * the boat and answers with the boat's own response, so every tab and
- * review action works here as it does there. Review settings and helm chat
+ * fleet (mirror-merge.ts). A boat's new snapshot arrives on the page's
+ * socket and shows with no request. Reads and writes go to the row's boat
+ * as relayed calls on the socket, answered there with the boat's own
+ * response, so every tab and review action works here as it does there;
+ * while the socket is down they go through the wharf's HTTP relay
+ * (`/api/glass/mirror/relay`), which waits for the answer. Review settings and helm chat
  * stay read-only. ↗ Open shows only on the trap rows of the boat this browser
  * runs on, found by a probe of that boat's glass over loopback.
  * Jobs on a wharf's own grounds stay as the wharf backend shows them, side
@@ -63,8 +65,44 @@ const WHARF_SOURCE = '@wharf';
 /** Marks the page as able to write; the wharf authorizes each write by its cookie and Origin, so this is never sent. */
 const WRITES_BY_COOKIE = 'wharf-session';
 
-/** How long a write waits for its boat in all, polling past the relay's own wait. */
+/** How long a write waits for its boat's answer on the socket. */
 const WRITE_WAIT_MS = 60_000;
+/** How long a read waits for its boat's answer on the socket: the HTTP relay's own wait. */
+const READ_WAIT_MS = 20_000;
+
+/** One relayed call on the socket: a read of a boat's glass, or a write, with files uploaded first. */
+export interface MirrorCall {
+  id: string;
+  boat: string;
+  read?: string;
+  write?: { kind: string; payload: unknown };
+  files?: string[];
+}
+
+/** A boat's answer as the socket brings it; `large` when it was too big to push and must be read over HTTP. */
+export interface MirrorAnswer {
+  status: number;
+  contentType: string;
+  body: Uint8Array;
+  large?: true;
+}
+
+/** The page's socket to its account, as the mirror backend relays over it. */
+export interface MirrorSocket {
+  /** Whether it is open now. */
+  connected(): boolean;
+  /** Send one call; the boat's answer, or undefined when none came within `waitMs`. */
+  call(call: MirrorCall, waitMs: number): Promise<MirrorAnswer | undefined>;
+}
+
+/** A boat's snapshot as the socket pushed it: who put it, when, its ETag, and the snapshot's JSON. */
+export interface PushedSnapshot {
+  boat: string;
+  name: string;
+  at: string;
+  etag: string;
+  json: string;
+}
 
 /** The probe's answer: the boat this browser runs on, and the token its glass takes for focus. */
 interface Probe {
@@ -82,6 +120,8 @@ export interface MirrorBackendOptions {
   now?: () => number;
   /** Loopback reads, for the focus probe and focus; the page's fetch by default. */
   loopback?: typeof fetch;
+  /** The page's socket: relayed calls go on it while it is open. */
+  socket?: MirrorSocket;
 }
 
 export interface MirrorBackend extends GlassBackend {
@@ -89,6 +129,8 @@ export interface MirrorBackend extends GlassBackend {
   boats(): MirrorBoatView[];
   /** The account, as the wharf backend last read it. */
   account(): WharfGlass | undefined;
+  /** A boat's snapshot pushed on the socket, merged with the rest: the page shows it with no request. */
+  applySnapshot(pushed: PushedSnapshot): GlassSnapshot;
 }
 
 export function createMirrorBackend(options: MirrorBackendOptions): MirrorBackend {
@@ -164,6 +206,11 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
     // The wharf's own grounds show beside the boats only when it holds any of their work.
     wharfPart = wharf.dispatches.length || wharf.reports.length || wharf.decisions?.length ? wharf : undefined;
     await probeBoats();
+    return mergeNow();
+  }
+
+  /** The boats' snapshots held now, and the wharf's own grounds, merged into the page's one fleet. */
+  function mergeNow(): GlassSnapshot {
     const parts: MirrorBoatSnapshot[] = [...sources.values()].sort((a, b) => a.name.localeCompare(b.name));
     if (wharfPart) parts.push({ boat: WHARF_SOURCE, name: 'wharf', at: new Date(now()).toISOString(), etag: '', snapshot: wharfPart });
     const device = viewerDevice(globalThis.navigator?.userAgent ?? '');
@@ -178,32 +225,38 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
 
   /** One relayed call, waited for: the boat's own answer, or the page's refusal when no boat answers. */
   /**
-   * One call to a boat through the wharf's relay, which waits up to 20 s for
-   * the answer. A write, which must not be lost, then keeps polling the call
-   * up to WRITE_WAIT_MS. A read does not (`waitMs` 0): the next poll asks
-   * again, and stacked polls of a slow boat are what ran into the wharf's
-   * limits (429).
+   * One call to a boat. On the socket, the boat's answer comes back on it
+   * (a read waits READ_WAIT_MS, a write WRITE_WAIT_MS); an answer too large
+   * to push is read once more over HTTP. Without the socket, the wharf's
+   * HTTP relay holds the request up to 20 s for the answer. Either way a
+   * boat that does not answer in time gives 202, with no polling.
    */
-  async function relay(boat: string, body: Record<string, unknown>, waitMs: number = WRITE_WAIT_MS): Promise<Response> {
+  async function relay(
+    boat: string,
+    body: { read?: string; write?: MirrorCall['write']; files?: string[] },
+    waitMs: number = WRITE_WAIT_MS,
+  ): Promise<Response> {
     const id = crypto.randomUUID();
-    const send = () =>
-      call('/api/glass/mirror/relay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, boat, ...body }),
+    if (options.socket?.connected()) {
+      const answer = await options.socket.call({ id, boat, ...body }, waitMs);
+      if (!answer) return new Response(null, { status: 202 });
+      if (answer.large && body.read)
+        return call(`/api/glass/mirror/read?boat=${encodeURIComponent(boat)}&path=${encodeURIComponent(body.read)}`);
+      const empty = [204, 205, 304].includes(answer.status) || answer.large;
+      return new Response(empty ? null : (answer.body as BodyInit), {
+        status: answer.status,
+        headers: { 'Content-Type': answer.contentType },
       });
-    let response = await send();
-    const deadline = now() + waitMs;
-    // The relay waits; a boat slower than that is polled until it answers or the call expires.
-    while (response.status === 202 && response.headers.get('X-Lobstah-Mirror-Call') !== 'answered' && now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      response = await call(`/api/glass/mirror/calls/${encodeURIComponent(id)}`);
     }
-    return response;
+    return call('/api/glass/mirror/relay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, boat, ...body }),
+    });
   }
 
   async function relayRead<T>(boat: string, path: string, as: 'json' | 'text' = 'json'): Promise<GlassRead<T>> {
-    const r = await relay(boat, { read: path }, 0);
+    const r = await relay(boat, { read: path }, READ_WAIT_MS);
     if (!r.ok || r.status === 202) return { ok: false, status: r.status === 202 ? 504 : r.status };
     return { ok: true, status: r.status, data: (as === 'json' ? await r.json() : await r.text()) as T };
   }
@@ -269,6 +322,18 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
     pollMs: 2000,
     boats: () => merged?.boats.filter((b) => b.boat !== WHARF_SOURCE) ?? [],
     account: () => options.wharf.account(),
+    applySnapshot(pushed) {
+      const snapshot = JSON.parse(pushed.json) as GlassSnapshot & { mirror?: { port: number; id: string } };
+      sources.set(pushed.boat, {
+        boat: pushed.boat,
+        name: pushed.name,
+        at: pushed.at,
+        etag: pushed.etag,
+        snapshot,
+        ...(snapshot.mirror ? { mirror: snapshot.mirror } : {}),
+      });
+      return mergeNow();
+    },
     async poll() {
       return { kind: 'snapshot', snapshot: await load(), etag: null };
     },
@@ -353,7 +418,7 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
         const { files: _sent, ...rest } = value!;
         value = rest;
       }
-      const response = await relay(r.boat, { write: { kind, payload: value }, ...(files ? { files } : {}) });
+      const response = await relay(r.boat, { write: { kind, payload: value }, ...(files ? { files } : {}) }, WRITE_WAIT_MS);
       if (response.status === 202)
         return { ok: false, status: 504, body: { ok: false, reason: `${name(r.boat)} did not answer; it may be asleep.` } as T };
       if (response.status === 429)

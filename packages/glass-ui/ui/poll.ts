@@ -16,6 +16,8 @@ import { backend } from './backend.js';
 let inflight = false;
 /** Between startPolling and its stop. A timer or hint that fires after the stop reads nothing. */
 let active = false;
+/** A live socket brings every change (the hosted glass): no timer runs while it is open. */
+let live = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let etag: string | null = null;
 
@@ -46,12 +48,26 @@ export async function poll(): Promise<void> {
 }
 
 const startPoll = () => {
-  if (!timer) timer = setInterval(poll, backend().pollMs ?? 2000);
+  if (!timer && !live) timer = setInterval(poll, backend().pollMs ?? 2000);
 };
 const stopPoll = () => {
   if (timer) clearInterval(timer);
   timer = null;
 };
+
+/**
+ * The host's live socket opened or closed. While it is open, changes arrive
+ * on it and the page polls on no timer; when it closes, polling resumes at
+ * once, so a dropped socket loses nothing.
+ */
+export function setLive(open: boolean): void {
+  live = open;
+  if (open) stopPoll();
+  else if (active && !document.hidden) {
+    void poll();
+    startPoll();
+  }
+}
 
 /** First fetch now; poll while the tab is visible, pause while hidden. Returns the stop: no more polls, from any timer or tab change. */
 export function startPolling(): () => void {
