@@ -831,7 +831,7 @@ export function trapOpen(t: GlassTrap, label: Children = '↗ Open'): Children {
   if (t.requested || t.starting) return null;
   if (!t.live) {
     if (!(desktopSession(t) && t.link) || !sessionLinkOpens()) return null;
-    return html`<span class="winaction gopenbtn"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>${label}</a></span>`;
+    return html`<span class="winaction gopenbtn"><a class="btn open" href=${t.link} title="Open this session in its app" aria-label="Open this session in its app" onClick=${stop}>${label}</a></span>`;
   }
   const [best] = trapRoutes(t);
   if (!best) return null;

@@ -29,7 +29,7 @@ import { LinkedText } from './links.js';
 import { can } from '../backend.js';
 import { getState, setState } from '../store.js';
 import type { Children } from '../html.js';
-import { Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
+import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
 import type { CardPerson, CardTone } from './card.js';
 
 /**
@@ -135,8 +135,8 @@ export function MergeWhenGreen({ p }: { p: GlassPr }) {
   const method = p.mergeRequest?.method ?? p.mergeMethod;
   const how = `#${p.number} into ${p.baseRefName ?? 'its base'}${method ? ` as ${METHOD_WORDS[method]}` : ''}`;
   const button = p.mergeRequest
-    ? html`<button class="btn on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} disabled=${busy} onClick=${send(true)}>Cancel merge</button>`
-    : html`<button class="btn" aria-pressed="false" title=${`Merges ${how} once green`} disabled=${busy} onClick=${send(false)}>Merge when green</button>`;
+    ? html`<button class="btn bigbtn on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} disabled=${busy} onClick=${send(true)}>${ActionIcon.merge}Cancel merge</button>`
+    : html`<button class="btn bigbtn" aria-pressed="false" title=${`Merges ${how} once green`} disabled=${busy} onClick=${send(false)}>${ActionIcon.merge}Merge when green</button>`;
   return html`<span class="prmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
@@ -244,9 +244,9 @@ export function prCardPending(p: GlassPr, attention: readonly DeckAttention[], s
  * A PR card (prShapedCard). Its chips are GitHub's state (Open, Draft,
  * Merged, Closed) and, when the badge is not green, what the badge says
  * (failed checks, conflicts, a repair); a checks chip's hover is the checks'
- * breakdown, which the meta line no longer repeats. Its buttons are Merge when
- * green on an open PR of yours, Ack while it has attention to ack, and ↗ Open
- * at the bar's right.
+ * breakdown, which the meta line no longer repeats. Its bar holds Merge when
+ * green on an open PR of yours, and the Open icon at its right. Opening the
+ * card or Open acks what it shows (ackOnOpen): it has no Ack button.
  * Merge readiness, the watch and the gate are in the PR's modal. `quiet`
  * greys an acked one; `stack` is its stack when it is the only PR in it.
  */
@@ -271,14 +271,13 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
     at: p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt,
     trap: dispatchTrap(p.dispatchIds),
     person: prAuthor(p),
-    actions: [
-      html`<${MergeWhenGreen} p=${p} />`,
-      pending.length > 0 && html`<${AckButton} pending=${pending} label="Ack" stack=${opts.stack?.id} />`,
-      html`<${CardLink} href=${reviewLink(p.url)} />`,
-    ],
+    actions: [html`<${MergeWhenGreen} p=${p} />`, html`<${CardLink} href=${reviewLink(p.url)} onOpen=${() => ackOnOpen(pending)} />`],
     quiet: opts.quiet,
     cls: opts.quiet ? 'acked' : undefined,
-    onClick: opener('pr', p.key),
+    onClick: () => {
+      ackOnOpen(pending);
+      opener('pr', p.key)();
+    },
   });
 }
 
@@ -343,7 +342,12 @@ export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]
   const at = stackUpdatedAt(prs);
   const open = stackOpen(s.id);
   const title = s.title || top.title || `#${top.number}`;
-  const toggle = () => toggleStack(s.id);
+  const pending = shownPrAttention(attention, prs, [s]).filter((a) => !a.acked);
+  // Opening the stack acks what it shows; closing it acks nothing.
+  const toggle = () => {
+    if (!open) ackOnOpen(pending);
+    toggleStack(s.id);
+  };
   return Card({
     // A stack with a title of its own carries it as the stack title, as the table and the deck do.
     title: s.title ? html`<span class="stacktitle">${LinkedText(s.title)}</span>` : LinkedText(title),
@@ -354,11 +358,8 @@ export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]
     status: [StatusChip(summary.text, summary.tone), StatusChip(`${members.length} PRs`, 'dim')],
     context: [RepoName(s.repo), at && [' · updated ', Age(at), ' ago']],
     contextTitle: [s.repo, at && `updated ${ageText(at)} ago`].filter(Boolean).join(' · '),
-    // Ack stack while there is something to ack, and ↗ Open (the top of the stack, as GitHub shows a stack) at the bar's right.
-    actions: [
-      shownPrAttention(attention, prs, [s]).some((a) => !a.acked) && html`<${PrAck} stack=${s} prs=${prs} attention=${attention} />`,
-      html`<${CardLink} href=${reviewLink(top.url)} />`,
-    ],
+    // The Open icon (the top of the stack, as GitHub shows a stack) at the bar's right; opening the stack, or Open, acks it.
+    actions: [html`<${CardLink} href=${reviewLink(top.url)} onOpen=${() => ackOnOpen(pending)} />`],
     person: prAuthor(top),
     cls: ['prcard stackcard', open && 'open'].filter(Boolean).join(' '),
     attrs: {
@@ -409,6 +410,16 @@ export function PrAck({ stack, prs, attention }: { stack: GlassStack; prs: Glass
   const pending = shownPrAttention(attention, prs, [stack]).filter((a) => !a.acked);
   if (!pending.length) return null;
   return html`<${AckButton} pending=${pending} label=${prs.length > 1 ? 'Ack stack' : 'Ack'} stack=${stack.id} />`;
+}
+
+/**
+ * Opening a PR or stack card (its modal, the stack opening, or Open) acks
+ * what it showed, as opening a report marks it read. Quiet: a failure leaves
+ * it to ack next time, and a source that can't ack does nothing.
+ */
+export function ackOnOpen(pending: DeckAttention[]): void {
+  if (!pending.length || !can('pr-ack')) return;
+  void ackPrAttention(pending).catch(() => {});
 }
 
 /** Ack these attention items, with the state hashes this page showed. */

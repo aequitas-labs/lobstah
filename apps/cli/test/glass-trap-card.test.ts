@@ -61,12 +61,16 @@ describe('the trap card', () => {
     expect(text(c)).not.toContain('Running on');
   });
 
-  it("keeps ↗ Open on the trap's own machine", async () => {
+  it("keeps Open on the trap's own machine, as its icon at the right of the boat line", async () => {
     const d = fleet({ onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' });
     d.focusToken = 'fixture-token';
     const { card: c } = await card(d);
-    // At the right of the bottom bar, where every card's Open sits.
-    expect(text(c.querySelector('.gactions .gopenbtn'))).toBe('↗ Open');
+    // On the boat's line, at its right: the card has no bar of its own.
+    const open = c.querySelector('.gfoot .gright .gopenbtn button')!;
+    expect(open.getAttribute('aria-label')).toBe("Raise this trap's window on this Mac");
+    expect(open.querySelector('svg.openicon')).toBeTruthy();
+    expect(text(c.querySelector('.gfoot .gtext'))).toBe('⛵ studio');
+    expect(c.querySelector('.gactions')).toBeNull();
   });
 
   it("leaves the table view's columns as they were", async () => {

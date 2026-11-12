@@ -46,6 +46,10 @@ async function page(d: GlassSnapshot, opts: Partial<GlassDomOptions> = {}): Prom
   return g;
 }
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** An Open control as a person reads it: its words in a table or modal, its ↗ icon alone on a card. */
+const openLabel = (el: Element | null | undefined): string => (el?.querySelector('svg.openicon') && !text(el) ? '↗ Open' : text(el));
+/** Whether a section shows an Open control, in words or as a card's icon. */
+const hasOpen = (el: Element | null | undefined): boolean => text(el).includes('↗ Open') || !!el?.querySelector('.btn.open svg.openicon');
 /** A stack heading without its Ack stack control (glass-pr-ack.test.ts tests that). */
 const heading = (el: Element): Element => {
   const copy = el.cloneNode(true) as Element;
@@ -300,7 +304,7 @@ describe('glass page: tabs and hash routing', () => {
       const card = async (selector: string) => {
         const open = g.$$(selector + ' a.btn.open').filter((a) => a.getAttribute('href') === trap.link);
         expect(open).toHaveLength(1);
-        expect(text(open[0])).toBe('↗ Open');
+        expect(openLabel(open[0])).toBe('↗ Open');
         expect(text(g.$(selector))).not.toContain(trap.link!);
         expect(text(g.$(selector))).not.toContain('desktop thread');
         expect(g.$$(selector + ' .cmd')).toHaveLength(0);
@@ -332,8 +336,8 @@ describe('glass page: tabs and hash routing', () => {
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((el) => text(el).includes('wt:t1'))!;
-    // ↗ Open sits at the right of the card's bottom bar.
-    expect(text(card.querySelector('.gactions .gopenbtn'))).toBe('↗ Open');
+    // Open, its icon alone, sits at the right of the boat's line.
+    expect(openLabel(card.querySelector('.gfoot .gopenbtn .btn'))).toBe('↗ Open');
     expect(text(card)).not.toContain('codex://threads/live-session');
     expect(card.querySelectorAll('.cmd')).toHaveLength(0);
     await click(g, card);
@@ -605,7 +609,7 @@ describe('glass page: tabs and hash routing', () => {
       ] as const) {
         const g = await page(d, { hash: '#traps', prefs: { view } });
         const row = trapRow(g, selector);
-        expect(opens(row).map(text), view).toEqual(['↗ Open']);
+        expect(opens(row).map(openLabel), view).toEqual(['↗ Open']);
         expect(opens(row)[0]!.tagName, view).toBe('BUTTON');
         expect(text(row), view).not.toContain('Open live');
         expect(text(row), view).not.toContain('Session link');
@@ -624,7 +628,7 @@ describe('glass page: tabs and hash routing', () => {
       const d = fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' });
       const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
       const card = trapRow(g, '#traps .card');
-      expect(opens(card).map(text)).toEqual(['↗ Open']);
+      expect(opens(card).map(openLabel)).toEqual(['↗ Open']);
       expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
       expect(text(card.querySelector('.gfoot'))).toContain('⛵ studio');
       const modal = await page(d, { hash: '#traps' });
@@ -637,7 +641,7 @@ describe('glass page: tabs and hash routing', () => {
       Object.assign(d.traps[0]!, { link: undefined });
       const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
       const card = trapRow(g, '#traps .card');
-      expect(opens(card).map(text)).toEqual(['↗ Open']);
+      expect(opens(card).map(openLabel)).toEqual(['↗ Open']);
       expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
     });
   });
@@ -666,10 +670,10 @@ describe('glass page: tabs and hash routing', () => {
     expect(text(g.$('#modalbox'))).toContain('Raise window on this Mac');
     await escape(g);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain('↗ Open');
+    expect(hasOpen(g.$('#deck'))).toBe(true);
     await g.go('#traps');
     const cardPage = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
-    expect(text(cardPage.$('#traps'))).toContain('↗ Open');
+    expect(hasOpen(cardPage.$('#traps'))).toBe(true);
   });
   it('opens On deck by default and follows the hash to each tab', async () => {
     const g = await page(acceptanceFleet());
@@ -967,7 +971,7 @@ describe('glass page: PRs', () => {
       const state = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' }[p.badge.state];
       const chips = [...c.querySelectorAll('.gstate .gchip')].map(text);
       expect(chips).toEqual(p.badge.state === 'open' && p.badge.tone !== 'ok' ? [state, p.badge.text.toLowerCase()] : [state]);
-      expect(text(c.querySelector('.gactions a.open'))).toBe('↗ Open');
+      expect(openLabel(c.querySelector('.gactions a.open'))).toBe('↗ Open');
       // Title, status, meta, buttons, nothing more: merge readiness, the watch and the gate are in the modal.
       expect(c.querySelectorAll(':scope > .gline')).toHaveLength(4);
     }

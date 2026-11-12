@@ -527,21 +527,23 @@ describe('glass: short card badges stay whole', () => {
 });
 
 describe('glass: the open-window button', () => {
-  it('is a themed ↗ Open button at the right of the bottom bar, and its click does not open the trap modal', async () => {
+  it("is a themed Open button, its icon at the right of a card's boat line, and its click does not open the trap modal", async () => {
     const d = everyAttentionFleet();
     d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });
-      const button = g.$(view === 'cards' ? '#traps .card .gactions .gopenbtn button' : '#traps tr.rowhead td:last-child button')!;
-      expect(text(button)).toBe('↗ Open');
+      const button = g.$(view === 'cards' ? '#traps .card .gfoot .gopenbtn button' : '#traps tr.rowhead td:last-child button')!;
+      // A card shows the icon alone, named; the table keeps its words.
+      if (view === 'cards') expect([text(button), !!button.querySelector('svg.openicon')]).toEqual(['', true]);
+      else expect(text(button)).toBe('↗ Open');
       expect(button.className).toBe('btn open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
-    const button = deck.$('#deck .card .gactions .gopenbtn button')!;
-    expect(text(button)).toBe('↗ Open');
+    const button = deck.$('#deck .card .gfoot .gopenbtn button')!;
+    expect(button.querySelector('svg.openicon')).toBeTruthy();
     await click(deck, button);
     expect(deck.$('#overlay')!.className).toBe('');
   });
