@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.10 — 2026-11-12
+
+**Upgrade every Mac to 0.8.10 before the wharf is redeployed.** The wharf, the
+hosted glass and the Mac's mirror now talk over one WebSocket (`lobstah.2`).
+Once the new wharf is up, it answers an older CLI's mirror with 426 or 410 and
+the minimum version, and that Mac's fleet stops showing on the hosted glass
+until it upgrades.
+
+### The wharf, the hosted glass and the mirror share one socket
+
+- The wharf speaks one socket protocol, `lobstah.2`, for both the Mac's mirror
+  and the hosted glass. A dropped socket resumes from where it was, so a drop,
+  a deploy or the wharf going idle loses nothing. One alarm replaces the wharf's
+  polling for expired calls and files. (#453)
+- The hosted glass reads its socket: each boat's snapshot is pushed to every
+  open tab, relayed calls and their answers go over the socket, and the page
+  polls nothing while the socket is open. It goes back to polling at once when
+  the socket drops. (#455)
+- The Mac's mirror keeps one socket open to the wharf, instead of polling every
+  two seconds. The wharf pushes the calls addressed to it, when a hosted glass
+  is watching, and the other boats' lists for the pet. While no hosted glass is
+  open, the mirror sends the wharf nothing. (#457)
+
+### The PRs tab
+
+- A stack of several PRs is one card: its title, a summary ("ready to merge",
+  "1 failing", "2 of 3 green"), how many PRs it holds, its repo and last
+  update, and Ack stack. A click opens it to each PR's own card, the bottom of
+  the stack first. A lone PR is an ordinary card. (#456)
+- Every PR, review and stack card has a small avatar chip at its top right: the
+  PR's author, or who asked for the review. The name shows on hover. (#456)
+
+### Also new
+
+- `lobstah man wait` with a short timeout ends on time: `--timeout 1` takes
+  about a second, not 1.7. (#454)
+
 ## 0.8.9 — 2026-11-12
 
 ### The PRs tab leads with yours
