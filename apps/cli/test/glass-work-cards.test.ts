@@ -52,7 +52,7 @@ function review(n: number, over: Partial<GlassReview> = {}): GlassReview {
 }
 
 describe('a PR card', () => {
-  it('shows its title, then its status on a line of its own, then its repo, number, checks and age with ↗ Open, and nothing more', async () => {
+  it('shows its title, then its status on a line of its own, then its repo, number, checks, trap and age with ↗ Open, and nothing more', async () => {
     const d = acceptanceFleet();
     const p = d.prs.find((x) => x.number === 41)!;
     const g = await page(d, '#prs');
@@ -61,7 +61,8 @@ describe('a PR card', () => {
     expect(card.querySelector('.gtop .pricon')).toBeTruthy();
     expect(card.querySelector('.gtop .gword')).toBeNull();
     expect(text(card.querySelector('.gtop + .gstate .gword'))).toBe(p.badge.text.toLowerCase());
-    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^web #41 · 4\/4 passed · \d+\w ago$/);
+    // Its dispatches' trap: the first one a trap was addressed or claimed.
+    expect(text(card.querySelector('.gcontext .gtext'))).toMatch(/^web #41 · 4\/4 passed · 🪤 wt:t1 · \d+\w ago$/);
     expect(card.querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card.querySelectorAll(':scope > .gline')).toHaveLength(3);
     // The gate moved to the modal.
@@ -90,20 +91,38 @@ describe('a report card', () => {
 });
 
 describe('a review card', () => {
-  it('shows its title and status on an edge, then repo#number, what is drafted and age, with Open draft', async () => {
+  it('is a PR card: its title, its verdict or state on a line under it on an edge, then repo #number, trap and age, with Open draft', async () => {
     const d = {
       ...emptyFleet(),
+      dispatches: acceptanceFleet().dispatches,
       reviews: [
-        review(7, { state: 'drafted', verdict: 'approve', staged: true, stagedReviewUrl: 'https://github.com/acme/web/pull/7#pullrequestreview-1' }),
+        review(7, {
+          state: 'drafted',
+          verdict: 'approve',
+          staged: true,
+          stagedReviewUrl: 'https://github.com/acme/web/pull/7#pullrequestreview-1',
+          dispatch: 'cccccccc-0000-4000-8000-000000000003',
+        }),
         review(8, { state: 'drafting', stands: false }),
         review(9, { state: 'posted', stands: false }),
+        review(10, { state: 'drafted', stands: false }),
       ],
     };
     const g = await page(d, '#reviews');
     const card = (n: number) => g.$(`#reviews [data-review="review:acme/web#${n}"]`)!;
     expect(card(7).className).toContain('gcard-edge gedge-bad');
-    expect(text(card(7).querySelector('.gword'))).toBe('drafted');
-    expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web#7 · approval drafted · 60m ago');
+    // The PR card's lines: the title and PR icon alone on line 1, the status word under it, then the gray subtitle.
+    expect(card(7).querySelector('.gtop .pricon')).toBeTruthy();
+    expect(card(7).querySelector('.gtop .gword')).toBeNull();
+    expect(text(card(7).querySelector('.gtop + .gstate .gword'))).toBe('approve');
+    expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web #7 · 🪤 wt:t1 · 60m ago');
+    expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
+    expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(3);
+    expect(text(card(8).querySelector('.gstate'))).toBe('drafting');
+    expect(text(card(9).querySelector('.gstate'))).toBe('posted');
+    expect(text(card(10).querySelector('.gstate'))).toBe('draft');
+    // No trap has a round that ran no job.
+    expect(text(card(8).querySelector('.gcontext .gtext'))).toBe('acme/web #8 · 60m ago');
     const draft = card(7).querySelector('.gaction a')!;
     expect([text(draft), draft.getAttribute('href')]).toEqual(['Open draft', 'https://github.com/acme/web/pull/7#pullrequestreview-1']);
     expect(card(8).className).toContain('gcard-edge gedge-warn');

@@ -9,6 +9,10 @@ import { html } from '../html.js';
 import {
   Age,
   Table,
+  TRAP_MARK,
+  WorkerAddress,
+  ageText,
+  namedText,
   opener,
   prChecks,
   prLink,
@@ -24,7 +28,10 @@ import {
 import type { OlderControl } from './common.js';
 import { LinkedText } from './links.js';
 import { can } from '../backend.js';
+import { getState } from '../store.js';
+import type { Children } from '../html.js';
 import { Card, CardLink, PrIcon } from './card.js';
+import type { CardTone } from './card.js';
 
 /**
  * The PRs tab: Yours first (the stacks holding a PR of the person's own,
@@ -147,28 +154,103 @@ export function MergeWhenGreen({ p }: { p: GlassPr }) {
 const mergeNote = (p: GlassPr) =>
   p.mergeRequest && html`<span class="mergenote" title=${`merges as ${METHOD_WORDS[p.mergeRequest.method]}`}>merges when green</span>`;
 
+/** The trap that has one of these dispatches (addressed to it, else claimed by it), as `wt:<id>`; none for headless work. */
+export function dispatchTrap(ids: readonly (string | undefined)[]): string | undefined {
+  const dispatches = getState().snapshot?.dispatches ?? [];
+  for (const id of ids) {
+    const x = id && dispatches.find((d) => d.id === id);
+    const trap = x && [x.for, x.claimedBy].find((a) => a?.startsWith('wt:'));
+    if (trap) return trap;
+  }
+  return undefined;
+}
+
+/** What a PR-shaped card shows: a PR card, or a review card, which is a PR asking for your review. */
+export interface PrCardParts {
+  key: string;
+  title: Children;
+  titleAttr?: string;
+  /** The status word under the title, on a colored edge: you act on PRs and reviews. */
+  word: string;
+  tone: CardTone;
+  repo: string;
+  number: number;
+  /** After the number: a PR's checks. */
+  detail?: string;
+  /** The trap that has its work, as `wt:<id>`. */
+  trap?: string;
+  at?: string;
+  /** After the age: a standing merge request. */
+  tail?: Children;
+  action: Children;
+  quiet?: boolean;
+  cls?: string;
+  attrs?: Record<string, unknown>;
+  onClick: () => void;
+}
+
 /**
- * A PR card: its title and PR icon; under them its status word on a colored
- * edge (you act on PRs); then repo #number, checks and age, with ↗ Open. Merge readiness,
- * the watch and the gate are in the PR's modal. `quiet` greys an acked one.
+ * The PR card's layout, for PRs and reviews alike: the title and PR icon;
+ * under them the status word on a colored edge; then the gray subtitle, repo
+ * (with its icon) #number · checks · 🪤 trap · age, with the card's action.
+ */
+export function prShapedCard(c: PrCardParts) {
+  const trap = c.trap && [`${TRAP_MARK} `, WorkerAddress(c.trap)];
+  const context = [
+    RepoName(c.repo),
+    ` #${c.number}`,
+    c.detail && ` · ${c.detail}`,
+    trap && [' · ', trap],
+    c.at && [' · ', Age(c.at), ' ago'],
+    c.tail,
+  ];
+  const text = [`${c.repo} #${c.number}`, c.detail, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`, c.at && `${ageText(c.at)} ago`]
+    .filter(Boolean)
+    .join(' · ');
+  return html`<${Card}
+    key=${c.key}
+    title=${c.title}
+    titleAttr=${c.titleAttr}
+    icon=${PrIcon}
+    state=${{ word: c.word, tone: c.tone, mark: 'edge' }}
+    stateBelow
+    context=${context}
+    contextTitle=${text}
+    action=${c.action}
+    quiet=${c.quiet}
+    cls=${c.cls}
+    attrs=${c.attrs}
+    onClick=${c.onClick}
+  />`;
+}
+
+/**
+ * A PR card (prShapedCard): its badge as the status word, its checks, the
+ * trap of its dispatch, and Merge when green on an open PR of yours, else
+ * ↗ Open. Merge readiness, the watch and the gate are in the PR's modal.
+ * `quiet` greys an acked one.
  */
 export function prCard(p: GlassPr, quiet = false) {
-  const at = p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt;
-  const checks = prChecks(p);
-  return html`<${Card}
-    key=${p.key}
-    title=${p.title ? LinkedText(p.title) : '#' + p.number}
-    titleAttr=${p.title || undefined}
-    icon=${PrIcon}
-    state=${{ word: p.badge.text.toLowerCase(), tone: p.badge.tone, mark: 'edge' }}
-    stateBelow
-    context=${[RepoName(p.repo), ` #${p.number} · ${checks} · `, Age(at), ' ago', p.mergeRequest && [' · ', mergeNote(p)]]}
-    contextTitle=${`${p.repo} #${p.number} · ${checks}`}
-    action=${p.mine && p.state === 'OPEN' && can('pr-merge') ? html`<${MergeWhenGreen} p=${p} />` : html`<${CardLink} href=${reviewLink(p.url)} />`}
-    quiet=${quiet}
-    cls=${quiet ? 'acked' : undefined}
-    onClick=${opener('pr', p.key)}
-  />`;
+  return prShapedCard({
+    key: p.key,
+    title: p.title ? LinkedText(p.title) : '#' + p.number,
+    titleAttr: p.title || undefined,
+    word: p.badge.text.toLowerCase(),
+    tone: p.badge.tone,
+    repo: p.repo,
+    number: p.number,
+    detail: prChecks(p),
+    trap: dispatchTrap(p.dispatchIds),
+    at: p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt,
+    tail: p.mergeRequest && [' · ', mergeNote(p)],
+    action:
+      p.mine && p.state === 'OPEN' && can('pr-merge')
+        ? html`<${MergeWhenGreen} p=${p} />`
+        : html`<${CardLink} href=${reviewLink(p.url)} />`,
+    quiet,
+    cls: quiet ? 'acked' : undefined,
+    onClick: opener('pr', p.key),
+  });
 }
 
 function prCards(inp: PrsInputs, older: unknown) {

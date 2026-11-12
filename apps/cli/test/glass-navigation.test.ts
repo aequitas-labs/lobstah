@@ -3,7 +3,8 @@ import { GLASS_TABS, tabFromHash, validShowHash } from '../../../packages/glass-
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
-import { emptyFleet, NOW } from './fixtures/glass-snapshots.js';
+import { acceptanceFleet, emptyFleet, NOW } from './fixtures/glass-snapshots.js';
+import type { Window } from 'happy-dom';
 
 let pages: GlassDom[] = [];
 afterEach(async () => {
@@ -13,9 +14,16 @@ afterEach(async () => {
 async function page(count = 7, hash = '#deck') {
   const d = emptyFleet();
   d.todos = Array.from({ length: count }, (_, i) => ({
-    grounds: 'home', id: i + 1, text: `Task ${i + 1}`, createdAt: new Date(NOW - i * 86400000).toISOString(), done: false, stale: false,
+    grounds: 'home',
+    id: i + 1,
+    text: `Task ${i + 1}`,
+    createdAt: new Date(NOW - i * 86400000).toISOString(),
+    done: false,
+    stale: false,
   }));
-  d.attention = [{ kind: 'question', key: 'work:q', id: 'q', lane: 'work', verb: 'needs-decision', note: 'Choose', ageSecs: 0, stateHash: 'q' }];
+  d.attention = [
+    { kind: 'question', key: 'work:q', id: 'q', lane: 'work', verb: 'needs-decision', note: 'Choose', ageSecs: 0, stateHash: 'q' },
+  ];
   const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash });
   pages.push(g);
   return { g, d };
@@ -53,7 +61,11 @@ describe('TODO preview and page', () => {
     await g.poll();
     const open = (tab: string) => g.$$(`#${tab} .todos > .todo-checklist > .todo-check`);
     expect(open('todos')).toHaveLength(7);
-    expect(open('todos').map((el) => el.textContent).join(' ')).not.toContain('Task 1');
+    expect(
+      open('todos')
+        .map((el) => el.textContent)
+        .join(' '),
+    ).not.toContain('Task 1');
     expect(g.$('#todos .todo-done-today summary')?.textContent).toBe('Done today (1)');
     await g.go('#deck');
     expect(open('deck').some((el) => el.classList.contains('done'))).toBe(false);
@@ -64,7 +76,7 @@ describe('TODO preview and page', () => {
 });
 
 describe('the tab bar and More', () => {
-  it('keeps On deck and Reviews in the bar; More lists the rest, opens with focus, navigates, restores focus and marks where you are', async () => {
+  it('keeps On deck, Reviews and PRs in the bar; More lists the rest, opens with focus, navigates, restores focus and marks where you are', async () => {
     const { g } = await page();
     expect(g.$('#tabs a[data-tab="deck"] .dbadge')?.textContent).toBe('1');
     const toggle = g.$('.nav-toggle')!;
@@ -73,7 +85,9 @@ describe('the tab bar and More', () => {
     expect(toggle.classList.contains('on')).toBe(false);
     await click(g, '.nav-toggle');
     expect(g.$('.nav-toggle')?.getAttribute('aria-expanded')).toBe('true');
-    expect(g.$$('#more-sections a').map((a) => a.getAttribute('data-tab'))).toEqual(GLASS_TABS.filter((t) => t !== 'deck' && t !== 'reviews' && t !== 'boats')); // Boats is the hosted glass's account page
+    expect(g.$$('#more-sections a').map((a) => a.getAttribute('data-tab'))).toEqual(
+      GLASS_TABS.filter((t) => t !== 'deck' && t !== 'reviews' && t !== 'prs' && t !== 'boats'),
+    ); // Boats is the hosted glass's account page
     expect(g.document.activeElement?.getAttribute('data-tab')).toBe('dispatches');
     await click(g, '#more-sections [data-tab="todos"]');
     expect(g.window.location.hash).toBe('#todos');
@@ -83,6 +97,35 @@ describe('the tab bar and More', () => {
     await click(g, '.nav-toggle');
     expect(g.$('#more-sections a[aria-current="page"]')?.getAttribute('data-tab')).toBe('todos');
     expect(g.document.activeElement?.getAttribute('data-tab')).toBe('todos');
+  });
+
+  it('in a narrow desktop window, leads the bar with On deck, Reviews and PRs, the phone bar order, and counts PRs that need you', async () => {
+    const d = emptyFleet();
+    const mine = acceptanceFleet().prs[0]!;
+    d.prs = [{ ...mine, mine: true, state: 'OPEN', badge: { ...mine.badge, tone: 'bad', text: 'checks failed' } }];
+    d.stacks = acceptanceFleet().stacks;
+    // Under glass.css's 900px breakpoint every tab but the pinned ones sits behind More.
+    const narrow = (w: Window) => {
+      (w as unknown as { matchMedia: (q: string) => unknown }).matchMedia = (q: string) => ({
+        matches: false,
+        media: q,
+        addEventListener() {},
+        removeEventListener() {},
+      });
+    };
+    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#deck', prepare: narrow });
+    pages.push(g);
+    expect(
+      g
+        .$$('#tabs a')
+        .slice(0, 3)
+        .map((a) => a.getAttribute('data-tab')),
+    ).toEqual(['deck', 'reviews', 'prs']);
+    expect(g.$('#tabs a[data-tab="prs"] .dbadge')?.getAttribute('aria-label')).toBe('1 of your PRs needs you');
+    // A window wide enough for every tab keeps the tabs' own order.
+    const wide = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#deck' });
+    pages.push(wide);
+    expect(wide.$$('#tabs a').map((a) => a.getAttribute('data-tab'))).toEqual(GLASS_TABS.filter((t) => t !== 'boats'));
   });
 
   it('handles Escape immediately when focus first enters the menu', async () => {

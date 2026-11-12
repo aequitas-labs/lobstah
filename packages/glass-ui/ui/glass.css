@@ -227,7 +227,7 @@ h2 {
   color: var(--fg);
 }
 @media (max-width: 899px) {
-  .tabs a:not([data-tab='deck'], [data-tab='reviews']) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='prs']) {
     display: none;
   }
   .nav-toggle {

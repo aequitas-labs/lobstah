@@ -4,11 +4,12 @@ import type { SectionInputs } from '../../src/glass-diff.js';
 import { dismissReview, reviewRequest, showModal } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
-import { Age, RepoName, Table, ageText } from './common.js';
+import { Age, Table, ageText } from './common.js';
 import { can } from '../backend.js';
 import { getState } from '../store.js';
-import { Card, CardLink, PrIcon } from './card.js';
+import { CardLink } from './card.js';
 import type { CardTone } from './card.js';
+import { dispatchTrap, prShapedCard } from './prs.js';
 
 /**
  * The Reviews tab: one row or card per PR that asked for your review,
@@ -134,8 +135,18 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
   </tr>`;
 }
 
-/** A review's status word: "needs you" when it waits on you, else its round's state. */
-const reviewWord = (r: GlassReview): string => (r.needsYou ? 'needs you' : reviewState(r));
+/** A drafted review's verdict, as its card's status word. */
+const VERDICT_WORD: Record<string, string> = { approve: 'approve', request_changes: 'request changes', comment: 'comment' };
+
+/**
+ * A review's status word: posted once it is; a drafted round's verdict (or
+ * "draft" without one); "needs you" when it waits on you; else its round's state.
+ */
+export function reviewWord(r: Pick<GlassReview, 'state' | 'staged' | 'verdict' | 'needsYou'>): string {
+  if (r.state === 'posted') return 'posted';
+  if (r.state === 'drafted') return (r.verdict && VERDICT_WORD[r.verdict]) || 'draft';
+  return r.needsYou ? 'needs you' : reviewState(r);
+}
 
 /** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
 function reviewTone(r: GlassReview): CardTone {
@@ -145,8 +156,6 @@ function reviewTone(r: GlassReview): CardTone {
   return 'warn';
 }
 
-const DRAFTED: Record<string, string> = { approve: 'approval drafted', request_changes: 'changes drafted', comment: 'comment drafted' };
-
 /** Open the review's modal, and mark it seen. */
 const showReview = (r: GlassReview) => () => {
   void reviewRequest('review-seen', { key: r.key });
@@ -154,27 +163,28 @@ const showReview = (r: GlassReview) => () => {
 };
 
 /**
- * A review card: the PR's title, PR icon and status word on a colored edge;
- * then repo#number, what's drafted, and age, with Open draft (↗ Open before
- * there is one). It opens the review's modal.
+ * A review card, in the PR card's layout (prShapedCard): the PR's title and
+ * PR icon; under them the status word on a colored edge; then repo #number ·
+ * 🪤 the trap drafting it · age, with Open draft (↗ Open before there is one).
+ * It opens the review's modal.
  */
 function card(r: GlassReview) {
-  const drafted = r.verdict ? DRAFTED[r.verdict] : undefined;
-  const lead = [`${r.repo}#${r.number}`, drafted].filter(Boolean).join(' · ');
   const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;
   const open = showReview(r);
-  return html`<${Card}
-    key=${r.key}
-    title=${r.title}
-    titleAttr=${r.title}
-    icon=${PrIcon}
-    state=${{ word: reviewWord(r), tone: reviewTone(r), mark: 'edge' }}
-    context=${[RepoName(`${r.repo}#${r.number}`), drafted && ` · ${drafted}`, ' · ', Age(r.requestedAt), ' ago']}
-    contextTitle=${`${lead} · ${ageText(r.requestedAt)} ago`}
-    action=${html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`}
-    quiet=${!OPEN.has(r.state)}
-    cls=${'rv-card' + (r.seenAt ? ' seen' : '')}
-    attrs=${{
+  return prShapedCard({
+    key: r.key,
+    title: r.title,
+    titleAttr: r.title,
+    word: reviewWord(r),
+    tone: reviewTone(r),
+    repo: r.repo,
+    number: r.number,
+    trap: dispatchTrap([r.dispatch]),
+    at: r.requestedAt,
+    action: html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`,
+    quiet: !OPEN.has(r.state),
+    cls: 'rv-card' + (r.seenAt ? ' seen' : ''),
+    attrs: {
       id: 'review-' + encodeURIComponent(r.key),
       'data-review': r.key,
       role: 'button',
@@ -182,9 +192,9 @@ function card(r: GlassReview) {
       onKeyDown: (e: KeyboardEvent) => {
         if (e.key === 'Enter' && e.target === e.currentTarget) open();
       },
-    }}
-    onClick=${open}
-  />`;
+    },
+    onClick: open,
+  });
 }
 
 /** What leaves a review's card: the asker, findings, reason, pending review and every action. */
