@@ -119,6 +119,19 @@ run card). It checks the live version and pending migrations, applies them, depl
 checks health and prints the rollback. `--set-var SLACK_CLIENT_ID` also sets that var
 from stdin.
 
+### What it costs
+
+`node scripts/wharf-usage.mjs --account <cloudflare account id> [--since YYYY-MM-DD]
+[--until YYYY-MM-DD] [--json]` prints one row per UTC day for the account's Durable
+Objects: billed requests, active seconds, GB-s of duration, SQLite rows written and
+inbound socket messages, from Cloudflare's GraphQL Analytics API. It is read-only. It
+takes the account from `CLOUDFLARE_ACCOUNT_ID` too, and the token from
+`CLOUDFLARE_API_TOKEN` (Analytics read) or else `wrangler auth token`. The range
+defaults to the last seven days; `--namespace <id>` keeps one namespace. Requests are
+the measure that matters: an object that hibernates between messages bills almost no
+duration. On 11 Nov 2026, polling with a hosted glass open four hours billed 32,060
+requests; on sockets the same day should bill under 1,000.
+
 ### Boats
 
 Sign in at `https://glass.lobstah.dev` first. The CLI names the account, and the
