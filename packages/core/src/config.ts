@@ -253,6 +253,11 @@ export interface LimitsConfig {
    */
   exitGraceSecs: number;
   choreRetentionDays: number;
+  /**
+   * How long a run card's history (each run's output and state, a withdrawn
+   * run card) stays on disk before the daemon prunes it. 0 keeps it.
+   */
+  runRetentionDays: number;
   attachmentMaxBytes: number;
   /**
    * The daemon culls finished work dispatches (done and failed) older than
@@ -674,6 +679,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   backgroundWaitSecs: 1800,
   exitGraceSecs: 30,
   choreRetentionDays: 7,
+  runRetentionDays: 14,
   attachmentMaxBytes: 25 * 1024 * 1024,
   retentionDays: 0,
   minFreeGB: 0,

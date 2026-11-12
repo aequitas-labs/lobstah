@@ -1,6 +1,6 @@
 import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
-import type { Attachment } from '@lobstah/core';
+import type { Attachment, RecentRun } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
 import { decisionNeighbours } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
@@ -205,23 +205,44 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   </li>`;
 }
 
+/** How a finished run ended, as its row's badge says it. */
+const RUN_ENDED: Record<RecentRun['state'], { text: string; tone: string }> = {
+  succeeded: { text: 'succeeded', tone: 'ok' },
+  failed: { text: 'failed', tone: 'bad' },
+  stopped: { text: 'stopped', tone: 'dim' },
+};
+
+/**
+ * Runs that finished and left the decisions, closed until opened. A row opens
+ * its card, read-only, with the run's result.
+ */
+function RecentRuns({ runs }: { runs: RecentRun[] }) {
+  if (!runs.length) return null;
+  return html`<details class="recent-runs"><summary class="dim">Recent runs (${runs.length})</summary><ul class="dlist">${runs.map((r) => {
+    const ended = RUN_ENDED[r.state];
+    return html`<li key=${r.key} class="recent-run"><a class="drow" href=${`#decision/${encodeURIComponent(r.key)}`}><b class="dtitle">${r.title}</b><span class="dmeta dim">${r.repo ? [RepoName(r.repo), ' · '] : ''}${Age(r.finishedAt)} ago${r.exitCode !== undefined ? ` · exit ${r.exitCode}` : ''}</span><span class=${`badge ${ended.tone}`}>${ended.text}</span></a></li>`;
+  })}</ul></details>`;
+}
+
 export function DeckDecisions({
   cards,
   drafts,
   focus,
   viewedHere,
   unread,
+  recentRuns = [],
 }: {
   cards: DecisionCard[];
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
   viewedHere: Record<string, true>;
   unread: number;
+  recentRuns?: RecentRun[];
 }) {
   const body = cards.length
     ? html`<ul class="dlist">${cards.map((c) => row(c, drafts[c.key], !!viewedHere[c.key], c.key === focus))}</ul>`
     : html`<div class="empty">none</div>`;
-  return html`<section class="decisions"><h2>decisions${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`}</h2>${body}</section>`;
+  return html`<section class="decisions"><h2>decisions${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`}</h2>${body}<${RecentRuns} runs=${recentRuns} /></section>`;
 }
 
 /** The modal's key legend: what each key does here. */
