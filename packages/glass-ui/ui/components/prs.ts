@@ -170,96 +170,120 @@ export interface PrCardParts {
   key: string;
   title: Children;
   titleAttr?: string;
-  /** The status word under the title, on a colored edge: you act on PRs and reviews. */
-  word: string;
+  /** GitHub's state for the PR, which colors its icon: open green, draft grey, merged purple, closed red. */
+  prState?: 'open' | 'draft' | 'merged' | 'closed';
+  /** The status chips under the title. */
+  status: Children;
+  /** The colored edge: red when it waits on you, amber in progress, green done. */
   tone: CardTone;
   repo: string;
   number: number;
-  /** After the number: a PR's checks. */
-  detail?: string;
+  at?: string;
   /** The trap that has its work, as `wt:<id>`. */
   trap?: string;
-  at?: string;
-  /** After the age: a standing merge request. */
+  /** Last on the meta line: a PR's checks. */
+  detail?: string;
+  /** After the meta line's parts: a standing merge request. */
   tail?: Children;
-  action: Children;
+  /** The bottom bar's buttons: only the ones that apply to this card. */
+  actions: Children;
   quiet?: boolean;
   cls?: string;
   attrs?: Record<string, unknown>;
   onClick: () => void;
 }
 
+/** A status chip: a PR's GitHub state (`pr-open` …, filled in GitHub's color), or a word in a tone. A long one may shrink and carries itself as a title. */
+export const StatusChip = (word: string, cls: string) =>
+  html`<span class=${'gchip ' + cls + (word.length > 12 ? ' long' : '')} title=${word.length > 12 ? word : undefined}>${word}</span>`;
+
 /**
- * The PR card's layout, for PRs and reviews alike: the title and PR icon;
- * under them the status word on a colored edge; then the gray subtitle, repo
- * (with its icon) #number · checks · 🪤 trap · age, with the card's action.
+ * The one layout for PR and review cards:
+ * 1. the PR icon, colored by the PR's state, then the title;
+ * 2. the status chips;
+ * 3. the meta line in the gray subtitle: repo · age · #number · 🪤 trap · checks;
+ * 4. a bar of the card's buttons.
+ * The edge carries the tone. The card itself opens its modal.
  */
 export function prShapedCard(c: PrCardParts) {
   const trap = c.trap && [`${TRAP_MARK} `, WorkerAddress(c.trap)];
-  const context = [
-    RepoName(c.repo),
-    ` #${c.number}`,
-    c.detail && ` · ${c.detail}`,
-    trap && [' · ', trap],
-    c.at && [' · ', Age(c.at), ' ago'],
-    c.tail,
-  ];
-  const text = [`${c.repo} #${c.number}`, c.detail, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`, c.at && `${ageText(c.at)} ago`]
+  const parts: Children[] = [RepoName(c.repo), c.at && [Age(c.at), ' ago'], `#${c.number}`, trap, c.detail].filter(Boolean);
+  const meta = [...parts.flatMap((part, i) => (i ? [' · ', part] : [part])), c.tail];
+  const text = [c.repo, c.at && `${ageText(c.at)} ago`, `#${c.number}`, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`, c.detail]
     .filter(Boolean)
     .join(' · ');
   return html`<${Card}
     key=${c.key}
     title=${c.title}
     titleAttr=${c.titleAttr}
-    icon=${PrIcon}
-    state=${{ word: c.word, tone: c.tone, mark: 'edge' }}
-    stateBelow
-    context=${context}
+    icon=${html`<span class=${'prstate pr-' + (c.prState ?? 'open')}>${PrIcon}</span>`}
+    iconFirst
+    state=${{ word: '', tone: c.tone, mark: 'edge' }}
+    status=${c.status}
+    context=${meta}
     contextTitle=${text}
-    action=${c.action}
+    actions=${c.actions}
     quiet=${c.quiet}
-    cls=${c.cls}
+    cls=${['prcard', c.cls].filter(Boolean).join(' ')}
     attrs=${c.attrs}
     onClick=${c.onClick}
   />`;
 }
 
+const PR_STATE_WORD = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' } as const;
+
+/** What a PR card's Ack acks: its own unacknowledged attention, and its stack's when it is the stack's only PR. */
+export function prCardPending(p: GlassPr, attention: readonly DeckAttention[], stack?: GlassStack): DeckAttention[] {
+  return shownPrAttention(attention, [p], stack ? [stack] : []).filter((a) => !a.acked && (a.key === p.key || !!stack));
+}
+
 /**
- * A PR card (prShapedCard): its badge as the status word, its checks, the
- * trap of its dispatch, and Merge when green on an open PR of yours, else
- * ↗ Open. Merge readiness, the watch and the gate are in the PR's modal.
- * `quiet` greys an acked one.
+ * A PR card (prShapedCard). Its chips are GitHub's state (Open, Draft,
+ * Merged, Closed) and, when the badge is not green, what the badge says
+ * (failed checks, conflicts, a repair). Its buttons are Merge when green on
+ * an open PR of yours, Ack while it has attention to ack, and ↗ Open.
+ * Merge readiness, the watch and the gate are in the PR's modal. `quiet`
+ * greys an acked one; `stack` is its stack when it is the only PR in it.
  */
-export function prCard(p: GlassPr, quiet = false) {
+export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly DeckAttention[]; stack?: GlassStack } = {}) {
+  const state = p.badge.state;
+  const pending = prCardPending(p, opts.attention ?? [], opts.stack);
   return prShapedCard({
     key: p.key,
     title: p.title ? LinkedText(p.title) : '#' + p.number,
     titleAttr: p.title || undefined,
-    word: p.badge.text.toLowerCase(),
+    prState: state,
+    status: [
+      StatusChip(PR_STATE_WORD[state] ?? state, 'pr-' + state),
+      state === 'open' && p.badge.tone !== 'ok' && StatusChip(p.badge.text.toLowerCase(), p.badge.tone),
+    ],
     tone: p.badge.tone,
     repo: p.repo,
     number: p.number,
-    detail: prChecks(p),
-    trap: dispatchTrap(p.dispatchIds),
     at: p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt,
+    trap: dispatchTrap(p.dispatchIds),
+    detail: prChecks(p),
     tail: p.mergeRequest && [' · ', mergeNote(p)],
-    action:
-      p.mine && p.state === 'OPEN' && can('pr-merge')
-        ? html`<${MergeWhenGreen} p=${p} />`
-        : html`<${CardLink} href=${reviewLink(p.url)} />`,
-    quiet,
-    cls: quiet ? 'acked' : undefined,
+    actions: [
+      html`<${MergeWhenGreen} p=${p} />`,
+      pending.length > 0 && html`<${AckButton} pending=${pending} label="Ack" />`,
+      html`<${CardLink} href=${reviewLink(p.url)} />`,
+    ],
+    quiet: opts.quiet,
+    cls: opts.quiet ? 'acked' : undefined,
     onClick: opener('pr', p.key),
   });
 }
 
 function prCards(inp: PrsInputs, older: unknown) {
   const { yours, others } = splitMine(prGroups(inp));
-  const card = (p: GlassPr) => prCard(p);
+  // A lone PR's card acks its stack too; a stack of several keeps Ack stack on its heading.
+  const card = (s: GlassStack, prs: GlassPr[]) => (p: GlassPr) =>
+    prCard(p, { attention: inp.prAttention, stack: prs.length === 1 ? s : undefined });
   const stacksOf = (groups: typeof yours) =>
     groups.map(
       ({ s, prs }) =>
-        html`<${Fragment} key=${'stack:' + s.id}><h2>${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} /></h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${prs.map(card)}</div><//>`,
+        html`<${Fragment} key=${'stack:' + s.id}><h2>${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}${prs.length > 1 && html`<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />`}</h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${prs.map(card(s, prs))}</div><//>`,
     );
   const otherCount = others.reduce((n, g) => n + g.prs.length, 0);
   return [
@@ -278,13 +302,17 @@ function prCards(inp: PrsInputs, older: unknown) {
  * page never acks a newer state. Nothing pending, nothing shown.
  */
 export function PrAck({ stack, prs, attention }: { stack: GlassStack; prs: GlassPr[]; attention: readonly DeckAttention[] }) {
+  const pending = shownPrAttention(attention, prs, [stack]).filter((a) => !a.acked);
+  if (!pending.length) return null;
+  return html`<${AckButton} pending=${pending} label=${prs.length > 1 ? 'Ack stack' : 'Ack'} stack=${stack.id} />`;
+}
+
+/** Ack these attention items, with the state hashes this page showed. */
+function AckButton({ pending, label, stack }: { pending: DeckAttention[]; label: string; stack?: string }) {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('pr-ack')) return null;
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  const pending = shownPrAttention(attention, prs, [stack]).filter((a) => !a.acked);
-  if (!pending.length) return null;
-  const label = prs.length > 1 ? 'Ack stack' : 'Ack';
   const ack = async (e: Event) => {
     e.stopPropagation();
     if (busy) return;
@@ -298,7 +326,7 @@ export function PrAck({ stack, prs, attention }: { stack: GlassStack; prs: Glass
       setBusy(false);
     }
   };
-  return html`<span class="prack" onClick=${(e: Event) => e.stopPropagation()}><button class="btn" data-stack=${stack.id} disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : label}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+  return html`<span class="prack" onClick=${(e: Event) => e.stopPropagation()}><button class="btn" data-stack=${stack} disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : label}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
 export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {

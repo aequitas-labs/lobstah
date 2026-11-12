@@ -9,7 +9,7 @@ import { can } from '../backend.js';
 import { getState } from '../store.js';
 import { CardLink } from './card.js';
 import type { CardTone } from './card.js';
-import { dispatchTrap, prShapedCard } from './prs.js';
+import { StatusChip, dispatchTrap, prShapedCard } from './prs.js';
 
 /**
  * The Reviews tab: one row or card per PR that asked for your review,
@@ -62,20 +62,52 @@ function Dismiss({ r }: { r: GlassReview }) {
   return html`<button class="btn" disabled=${state === 'busy'} onClick=${dismiss}>Dismiss</button>${error && html` <span class="bad" role="alert">${error}</span>`}`;
 }
 
-function Actions({ r, canDraft, publish }: { r: GlassReview; canDraft: boolean; publish: boolean }) {
+/** Sending a drafted review: the request, the button, and what a card's second tap says it posts. */
+const SEND = {
+  approve: { kind: 'review-approve', label: 'Approve', posts: 'approval' },
+  request_changes: { kind: 'review-request-changes', label: 'Request changes', posts: 'changes request' },
+  comment: { kind: 'review-comment', label: 'Publish comment', posts: 'comment' },
+} as const satisfies Record<string, { kind: ReviewRequestKind; label: string; posts: string }>;
+
+/**
+ * The review's actions. On a card (`confirm`), sending the review takes a
+ * second tap that names what it posts, as Merge when green does; the modal
+ * sends on the first, from beside the findings.
+ */
+function Actions({ r, canDraft, publish, confirm = false }: { r: GlassReview; canDraft: boolean; publish: boolean; confirm?: boolean }) {
   // A source without review actions may still dismiss; the hooks below run only with them.
   if (!can('review-request')) return can('review-dismiss') ? html`<${Dismiss} r=${r} />` : null;
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const act = (kind: ReviewRequestKind) => async (e: Event) => {
     e.stopPropagation();
     setBusy(true);
+    setAsking(false);
     setError(await reviewRequest(kind, { key: r.key }));
     setBusy(false);
   };
-  return html`<span class="rv-actions">
+  const send = SEND[r.verdict ?? 'comment'];
+  const sendButton =
+    r.state === 'drafted' &&
+    (confirm && asking
+      ? html`<button class="btn go" disabled=${busy} onClick=${act(send.kind)}>Post ${send.posts} on #${r.number}</button><button class="btn" onClick=${(
+          e: Event,
+        ) => {
+          e.stopPropagation();
+          setAsking(false);
+        }}>Keep</button>`
+      : html`<button class="btn" disabled=${busy} onClick=${
+          confirm
+            ? (e: Event) => {
+                e.stopPropagation();
+                setAsking(true);
+              }
+            : act(send.kind)
+        }>${send.label}</button>`);
+  return html`<span class=${asking ? 'rv-actions asking' : 'rv-actions'}>
     ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<button class="btn" disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}</button>`}
-    ${r.state === 'drafted' && html`<button class="btn" disabled=${busy} onClick=${act(r.verdict === 'approve' ? 'review-approve' : r.verdict === 'request_changes' ? 'review-request-changes' : 'review-comment')}>${r.verdict === 'approve' ? 'Approve' : r.verdict === 'request_changes' ? 'Request changes' : 'Publish comment'}</button>`}
+    ${sendButton}
     ${(OPEN.has(r.state) || r.notification) && html`<button class="btn" disabled=${busy} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub." onClick=${act('review-skip')}>Skip</button>`}
     ${error && html`<span class="bad" role="alert">${error}</span>`}
   </span>`;
@@ -135,17 +167,21 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
   </tr>`;
 }
 
-/** A drafted review's verdict, as its card's status word. */
-const VERDICT_WORD: Record<string, string> = { approve: 'approve', request_changes: 'request changes', comment: 'comment' };
+/** A posted review's verdict, as its card's status. */
+const POSTED: Record<string, string> = { approve: 'approved', request_changes: 'changes requested' };
 
 /**
- * A review's status word: posted once it is; a drafted round's verdict (or
- * "draft" without one); "needs you" when it waits on you; else its round's state.
+ * A review's status, as its card's chip says it: "draft ready" once drafted;
+ * "approved" or "changes requested" once posted with that verdict, else
+ * "posted"; otherwise its round's state (requested, drafting, stale, failed).
  */
-export function reviewWord(r: Pick<GlassReview, 'state' | 'staged' | 'verdict' | 'needsYou'>): string {
-  if (r.state === 'posted') return 'posted';
-  if (r.state === 'drafted') return (r.verdict && VERDICT_WORD[r.verdict]) || 'draft';
-  return r.needsYou ? 'needs you' : reviewState(r);
+export function reviewStatus(r: Pick<GlassReview, 'state' | 'staged' | 'verdict'>): { word: string; tone: CardTone } {
+  if (r.state === 'drafted') return { word: 'draft ready', tone: 'ok' };
+  if (r.state === 'posted')
+    return { word: (r.verdict && POSTED[r.verdict]) || 'posted', tone: r.verdict === 'request_changes' ? 'warn' : 'ok' };
+  if (r.state === 'failed') return { word: 'failed', tone: 'bad' };
+  if (r.state === 'dismissed' || r.state === 'withdrawn') return { word: r.state, tone: 'dim' };
+  return { word: reviewState(r), tone: 'warn' };
 }
 
 /** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
@@ -163,25 +199,30 @@ const showReview = (r: GlassReview) => () => {
 };
 
 /**
- * A review card, in the PR card's layout (prShapedCard): the PR's title and
- * PR icon; under them the status word on a colored edge; then repo #number ·
- * 🪤 the trap drafting it · age, with Open draft (↗ Open before there is one).
- * It opens the review's modal.
+ * A review card, in the PR card's layout (prShapedCard): the PR icon and
+ * title; the review's status chip, and "needs you" when it waits on you;
+ * then repo · age · #number · 🪤 the trap drafting it; then its actions
+ * (draft, send, skip, or dismiss on a wharf) and Open draft (↗ Open before
+ * there is one). Who asked, the findings and the reason are in its modal.
  */
-function card(r: GlassReview) {
+function card(r: GlassReview, canDraft: boolean, publish: boolean) {
   const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;
   const open = showReview(r);
+  const status = reviewStatus(r);
   return prShapedCard({
     key: r.key,
     title: r.title,
     titleAttr: r.title,
-    word: reviewWord(r),
+    status: [StatusChip(status.word, status.tone), r.needsYou && StatusChip('needs you', 'bad')],
     tone: reviewTone(r),
     repo: r.repo,
     number: r.number,
-    trap: dispatchTrap([r.dispatch]),
     at: r.requestedAt,
-    action: html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`,
+    trap: dispatchTrap([r.dispatch]),
+    actions: [
+      html`<${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} confirm />`,
+      html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`,
+    ],
     quiet: !OPEN.has(r.state),
     cls: 'rv-card' + (r.seenAt ? ' seen' : ''),
     attrs: {
@@ -232,7 +273,7 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
     !inp.list.length
       ? html`<div class="empty">no review requests</div>`
       : inp.view === 'cards'
-        ? html`<div class="cards">${inp.list.map(card)}</div>`
+        ? html`<div class="cards">${inp.list.map((r) => card(r, canDraft, publish))}</div>`
         : Table(
             ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
             inp.list.map((r) => row(r, canDraft, publish)),

@@ -70,7 +70,7 @@ describe('the Reviews tab', () => {
     const r = review(7, { state: 'drafted', verdict, needsYou: verdict === 'approve', summary: 'Reviewed summary', blocking: verdict === 'request_changes' ? [{ path: 'src/a.ts', line: 12, body: 'Race condition' }] : [] });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards' }, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g); await g.go('#reviews');
-    if (verdict === 'approve') expect(g.$('#reviews .gword')?.textContent).toBe('needs you');
+    if (verdict === 'approve') expect(g.$$('#reviews .gstate .gchip').map((c) => c.textContent)).toEqual(['draft ready', 'needs you']);
     const box = await openCard(g, 7);
     expect(box.textContent).toContain(label);
     expect(box.textContent).toContain('Reviewed summary');
@@ -102,12 +102,14 @@ describe('the Reviews tab', () => {
     const g = await loadGlass(GLASS_PAGE, d, { now: NOW, prefs: { view: 'cards' } });
     open.push(g);
     await g.go('#reviews');
-    for (const state of REVIEW_ROUND_STATES) expect(g.$$('#reviews .gtop .gword').map((b) => b.textContent)).toContain(state);
+    // A drafted round's chip says its draft is ready; every other state says itself.
+    const chips = g.$$('#reviews .gstate .gchip').map((b) => b.textContent);
+    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'draft ready' : state);
     // The drafted round's card links its pending review; the others open the review tool.
     const drafted = 20 + REVIEW_ROUND_STATES.indexOf('drafted');
-    const draftLink = g.$(`#reviews [data-review="review:acme/web#${drafted}"] .gaction a`)!;
+    const draftLink = g.$(`#reviews [data-review="review:acme/web#${drafted}"] .gactions a`)!;
     expect([draftLink.textContent, draftLink.getAttribute('href')]).toEqual(['Open draft', 'https://github.com/acme/web/pull/22#pullrequestreview-99']);
-    const firstOpen = g.$('#reviews .card .gaction a') as unknown as HTMLElement;
+    const firstOpen = g.$('#reviews .card .gactions a') as unknown as HTMLElement;
     expect(firstOpen.getAttribute('href')).toContain('linear://review/');
     // Who asked, with the avatar, is in the modal.
     const box = await openCard(g, drafted);
