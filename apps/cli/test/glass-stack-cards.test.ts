@@ -172,3 +172,58 @@ describe('the cleaned-up cards', () => {
     }
   });
 });
+
+describe('Merge stack when green', () => {
+  /** The acceptance stack, all the person's own, on a page that can write. */
+  async function mine(over: Partial<GlassFullSnapshot['stacks'][number]> = {}) {
+    const d = fleet();
+    d.focusToken = 'tok';
+    d.prs = d.prs.map((p) => ({ ...p, mine: true, mergeMethod: 'merge' as const }));
+    d.stacks = d.stacks.map((s) => (s.numbers.length > 1 ? { ...s, mine: true, ...over } : s));
+    const g = await loadGlass(GLASS_PAGE, d, {
+      now: NOW,
+      hash: '#prs',
+      prefs: { view: 'cards' },
+      post: () => ({ status: 200, body: { ok: true, method: 'merge' } }),
+    });
+    pages.push(g);
+    return g;
+  }
+  const button = (g: GlassDom) => g.$('#prs .stackcard > .gactions .stackmerge button') as HTMLButtonElement | null;
+
+  it("is the stack card's main action, naming the order and the repo's way on hover", async () => {
+    const g = await mine();
+    const b = button(g)!;
+    expect(text(b)).toBe('Merge stack when green');
+    expect(b.className).toContain('bigbtn');
+    expect(b.getAttribute('title')).toBe('Merges #41, #42 and #43 into main in order, as a merge commit, once all are green');
+    // Open stays last, at the bar's right.
+    expect(g.$('#prs .stackcard > .gactions')!.lastElementChild!.className).toContain('gopenbtn');
+  });
+
+  it('asks in one click and cancels in one, never opening the stack', async () => {
+    const g = await mine();
+    button(g)!.click();
+    await g.settle();
+    expect(JSON.parse(g.posts().at(-1)!.body)).toEqual({ kind: 'stack-merge', payload: { stack: 'pr:acme/web#41' } });
+    expect(g.$('#prs .stackcard')!.getAttribute('aria-expanded')).toBe('false');
+    expect(text(button(g))).toBe('Cancel merge');
+    expect([...g.$$('#prs .stackcard .gstate .gchip')].map(text)).toContain('merges when green');
+    button(g)!.click();
+    await g.settle();
+    expect(JSON.parse(g.posts().at(-1)!.body)).toEqual({ kind: 'stack-merge', payload: { stack: 'pr:acme/web#41', cancel: true } });
+    expect(text(button(g))).toBe('Merge stack when green');
+  });
+
+  it('reads Merging, and cancels nothing, once GitHub has taken the merge', async () => {
+    const g = await mine({ mergeRequest: { at: '2026-09-24T11:00:00.000Z', method: 'merge', merging: true } });
+    expect(text(button(g))).toBe('Merging');
+    expect(button(g)!.disabled).toBe(true);
+    expect([...g.$$('#prs .stackcard .gstate .gchip')].map(text)).toContain('merging');
+  });
+
+  it("is not offered on a stack with someone else's PR in it", async () => {
+    const g = await page(fleet(), '#prs');
+    expect(button(g)).toBeNull();
+  });
+});

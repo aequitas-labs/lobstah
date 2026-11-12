@@ -716,24 +716,12 @@ a.deckline > .dim {
   grid-template-columns: repeat(auto-fill, minmax(min(var(--deck-card-min), 100%), 1fr));
   gap: 10px;
 }
-.deckstack {
-  margin-bottom: 9px;
-}
-.deckstack > .dim {
-  font-size: 11px;
-  margin: 3px 0 5px;
-}
 .stacktitle {
   color: var(--fg);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: normal;
   text-transform: none;
-}
-.deckmember {
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .seg {
   display: inline-flex;

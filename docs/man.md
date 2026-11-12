@@ -513,6 +513,29 @@ Cancel withdraws the request. The method is the repo's
 [`mergeMethod`](configuration.md#reposkey--workspace-definitions), else
 `[pickup.github.merge].method`, else squash.
 
+**Merge stack when green.** A stack card of several PRs, all yours or a
+dispatch's, has Merge stack when green. Hovering names the merge (`Merges
+#41, #42 and #43 into main in order, as a merge commit, once all are
+green`). One tap stores one request for the whole stack on its bottom PR's
+record, and the button then reads Cancel merge. The boat refuses a lone PR
+and a stack with someone else's PR in it. Each PR-watch tick, the daemon
+takes each stack request in turn:
+
+- It waits until every open PR in the stack is green. A red check or a
+  conflict on a PR no dispatch opened gets one repair dispatch per head, as a
+  single PR's merge does.
+- A plain branch stack is linked on GitHub first, with the REST call `gh stack
+  submit` makes (`POST repos/<owner>/<repo>/stacks` with the PR numbers). No
+  branch is checked out, rebased or pushed. A stack GitHub already links
+  skips this.
+- Then one `PUT repos/<owner>/<repo>/pulls/<top>/merge-async` asks GitHub
+  to merge the top PR and everything under it, in order, the repo's way, on
+  the head that was checked. `gh pr merge` refuses a PR in a linked stack.
+- Once GitHub has taken it, the card reads Merging and it can't be cancelled.
+  The request clears when every PR has merged. A refused merge, a stack
+  GitHub won't link, or a PR closed unmerged gives the helm one
+  `stack-stopped` notice and clears the request.
+
 An observed PR joins tend's attention list by kind. `pr:ready` needs a
 mergeable, non-draft PR with no failed, pending, or unknown current checks.
 `pr:conflict` and `pr:checks` appear for an owned PR only when repair is off,

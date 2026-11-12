@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import type { PrMergeRequest } from './pr-merge.js';
+import type { PrMergeRequest, StackMergeRequest } from './pr-merge.js';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { withDirLock } from './dir-lock.js';
@@ -55,6 +55,8 @@ export interface PrRecord extends PrEvidence {
   repairCooldown?: { dispatchId: string; endedAt?: string; released?: true };
   /** "Merge when green" from the glass (pr-merge.ts), until the PR merges, closes, or it's cancelled. */
   mergeRequest?: PrMergeRequest;
+  /** "Merge stack when green" for the stack this PR is the bottom of (pr-merge.ts StackMergeRequest). */
+  stackMergeRequest?: StackMergeRequest;
 }
 
 export interface RepairStreak {

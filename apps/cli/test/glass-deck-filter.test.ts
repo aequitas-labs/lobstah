@@ -109,7 +109,7 @@ describe('deck repo filter', () => {
     filter.value = 'empty';
     filter.dispatchEvent(new g.window.Event('change'));
     await g.settle();
-    expect(g.$$('#deck .empty')).toHaveLength(6);
+    expect(g.$$('#deck .empty')).toHaveLength(5);
     expect(g.$$('#deck .deckmore, #deck .dbadge, #tabs .dbadge, .dalert')).toHaveLength(0);
   });
 });

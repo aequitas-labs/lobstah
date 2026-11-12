@@ -611,6 +611,41 @@ export async function requestPrMerge(key: string, cancel = false): Promise<void>
   }
 }
 
+/**
+ * Ask the boat to merge a whole stack of your PRs once every one is green,
+ * or cancel that. The snapshot shows the request from the next poll; this
+ * marks it at once.
+ */
+export async function requestStackMerge(stack: string, cancel = false): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) throw new Error('Reload the glass before merging.');
+  const response = await backend().request<{ ok: boolean; reason?: string; method?: 'merge' | 'squash' | 'rebase' }>(
+    'stack-merge',
+    { stack, ...(cancel ? { cancel: true } : {}) },
+    token,
+  );
+  const result = response.body;
+  if (!response.ok || !result.ok)
+    throw new Error(result.reason ?? (cancel ? 'Could not cancel the merge.' : 'Could not ask for the merge.'));
+  const snapshot = getState().snapshot;
+  if (snapshot) {
+    const at = new Date().toISOString();
+    setState({
+      snapshot: {
+        ...snapshot,
+        stacks: snapshot.stacks.map((s) => {
+          if (s.id !== stack) return s;
+          if (cancel) {
+            const { mergeRequest: _gone, ...rest } = s;
+            return rest;
+          }
+          return { ...s, mergeRequest: { at, method: result.method ?? 'squash' } };
+        }),
+      },
+    });
+  }
+}
+
 /** Acknowledge the attention states this page showed, and mark them acked in the snapshot it holds. */
 async function ackAttention(kind: 'pr-ack' | 'attention-ack', items: Array<{ key: string; stateHash: string }>): Promise<void> {
   const token = getState().snapshot?.focusToken;

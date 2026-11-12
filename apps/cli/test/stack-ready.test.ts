@@ -228,12 +228,18 @@ describe('stack watch discovery and shared presentation', () => {
     const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), attention: report.attention, notices: report.notices, now: new Date(now).toISOString() };
     const g = await loadGlass(GLASS_PAGE, d, { now, prefs: { view: viewMode } });
     try {
-      expect(g.$$('details.deckstack')).toHaveLength(0);
-      const stackRows = g.$$('.deckgrid .deckline, .deckgrid .deckstack')
-        .filter((el) => el.textContent?.includes('3 PRs, all green'));
-      expect(stackRows).toHaveLength(1);
+      // PRs live on the PRs tab: the deck shows no stack.
+      expect(g.$$('.deckgrid .deckline, .deckgrid .deckstack, .deckgrid .stackcard').filter((el) => el.textContent?.includes('3 PRs'))).toHaveLength(0);
       expect(g.$$('.lob')).toHaveLength(1);
       expect(g.$('.lob')?.getAttribute('href')).toBe(view(3).url);
+      // One stack state on the PRs tab: the table's stack heading, or the stack card's summary.
+      await g.go('#prs');
+      if (viewMode === 'cards') {
+        expect(g.$$('#prs .stackcard')).toHaveLength(1);
+        expect(g.$('#prs .stackcard .gstate')?.textContent).toContain('ready to merge');
+      } else {
+        expect(g.$$('#prs th[colspan]').filter((el) => el.textContent?.includes('3 PRs, all green'))).toHaveLength(1);
+      }
       await g.go('#notices');
       expect(g.$$('#notices tbody tr').filter((el) => el.textContent?.includes('stack ready to merge:'))).toHaveLength(1);
     } finally { await g.close(); }
@@ -298,17 +304,21 @@ describe('stack watch discovery and shared presentation', () => {
       putTitled(); syncStackReadiness(undefined, now);
       const g = await loadGlass(GLASS_PAGE, snapshot(), { now, prefs: { view: viewMode } });
       try {
-        const deck = g.$$('.deckgrid .deckline, .deckgrid .deckstack').find((el) => el.textContent?.includes('Add the heavy line'))!;
-        expect(deck.querySelector('.stacktitle')?.textContent).toBe('Add the heavy line');
-        expect(deck.textContent).toContain('3 PRs, all green');
-        expect(deck.textContent).not.toContain('stack ready to merge');
+        // On the PRs tab: the table's stack heading, or the stack card, opened to its PRs.
+        await g.go('#prs');
+        const stack = viewMode === 'cards' ? g.$('#prs .stackcard')! : g.$$('#prs th[colspan]').find((el) => el.textContent?.includes('Add the heavy line'))!;
+        if (viewMode === 'cards') {
+          (stack as HTMLElement).click();
+          await g.settle();
+        }
+        expect(stack.querySelector('.stacktitle')?.textContent).toBe('Add the heavy line');
+        expect(stack.textContent).toContain(viewMode === 'cards' ? 'ready to merge' : '3 PRs, all green');
+        expect(stack.textContent).not.toContain('stack ready to merge');
         // A row names each PR as "#n title"; a card puts the title on line 1 and the number on line 2.
         const names = viewMode === 'cards'
-          ? [...deck.querySelectorAll('.card')].map((c) => `${/#\d+/.exec(c.querySelector('.gcontext')?.textContent ?? '')?.[0]} ${c.querySelector('.gtitle')?.textContent}`)
-          : [...deck.querySelectorAll('.prname')].map((e) => e.textContent);
+          ? [...g.$$('#prs .stackmembers .card')].map((c) => `${/#\d+/.exec(c.querySelector('.gcontext')?.textContent ?? '')?.[0]} ${c.querySelector('.gtitle')?.textContent}`)
+          : [...g.$$('#prs tr.rowhead')].map((r) => `${r.children[0]?.textContent?.trim()} ${r.children[1]?.textContent?.trim()}`);
         for (const n of [1, 2, 3]) expect(names).toContain(`#${n} ${titles[n]}`);
-        await g.go('#prs');
-        expect(g.$('#prs .stacktitle')?.textContent).toBe('Add the heavy line');
       } finally { await g.close(); }
     });
     it('the glass falls back to the numbers when no PR has a title', async () => {

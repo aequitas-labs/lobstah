@@ -1039,7 +1039,8 @@ describe('glass page: PRs', () => {
   });
 
   it('titles: a PR card leads with its title and puts the number on line 2; no title shows the number alone', async () => {
-    for (const hash of ['#deck', '#prs']) {
+    // PR cards live on the PRs tab; the deck has none.
+    for (const hash of ['#prs']) {
       const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
       if (hash === '#prs') await openStacks(g);
       const cards = g.$$(`${hash} .card:not(.stackcard)`).filter((c) => c.querySelector('.pricon'));
@@ -1063,9 +1064,6 @@ describe('glass page: PRs', () => {
     const head = heading(table.$$('#prs th[colspan]').find((h) => text(h).startsWith('#41'))!);
     expect(text(head)).toBe('#41 → #42 → #43 · floor main · open');
     expect(titled([...head.querySelectorAll('span')])).toEqual(want);
-    const deck = await page(everyAttentionFleet());
-    const line = deck.$$('#deck .deckline').find((l) => text(l).startsWith('#41 →'))!;
-    expect(titled([...line.querySelectorAll('b > span')])).toEqual(want);
     const modal = await page(acceptanceFleet());
     await openRow(modal, '#prs', '#42');
     const nums = [...modal.$('#modalbox')!.querySelectorAll('[title]')].filter((e) => /^#\d+$/.test(text(e)));
@@ -1095,20 +1093,20 @@ describe('glass page: PRs', () => {
 });
 
 describe('glass page: On deck', () => {
-  it('shows decisions (no pr:* kinds), in flight, landed, reports, traps, and PR stacks as six full-width sections', async () => {
+  it('shows decisions (no pr:* kinds), in flight, landed, reports and traps as five full-width sections, and no PRs', async () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
     // The decisions heading carries the unread count as a badge.
     const heading = (s: Element) => text(s.querySelector('h2')).replace(/\d+$/, '');
-    expect(sections.map(heading)).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
+    expect(sections.map(heading)).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →']);
     // Only raw questions (and framed decisions) are rows; PR kinds stay with the PRs.
     const rows = [...sections[0]!.querySelectorAll('.drow')];
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.querySelector('.badge'))).toBe(true);
     expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(String(rows.length));
-    // PR standing rides the stack line.
-    expect(text(sections[5]!)).toContain('#41 → #42 → #43 · next #41');
-    expect(text(sections[5]!.querySelector('.deckmore'))).toBe('+1 more →');
+    // PRs live on the PRs tab, as stack cards: the deck shows none.
+    expect(g.$$('#deck .prcard, #deck .stackcard')).toHaveLength(0);
+    expect(text(g.$('#deck'))).not.toContain('#41 → #42 → #43');
   });
 
   it('a queued in-flight row shows the queued badge, its queue time, and its trap address', async () => {
@@ -1183,19 +1181,16 @@ describe('glass page: On deck', () => {
     expect(text(g.$$('#deck section')[2]!.querySelector('.empty'))).toBe('none');
   });
 
-  it('cards view: acked PR standing dims its card', async () => {
+  it('cards view: shows no PR cards; the PRs tab has them', async () => {
     const g = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
-    const prs = g.$$('#deck section')[5]!;
-    const cards = [...prs.querySelectorAll('.card')];
-    const acked = cards.filter((c) => c.className.includes('acked')).map(cardNumber);
-    expect(acked).toEqual(['#42']);
-    expect(cards.find((c) => cardNumber(c) === '#42')!.className).toContain('quiet');
-    expect(cards.flatMap((c) => [...c.querySelectorAll('.gstate .gchip')].map(text))).toContain('conflicts');
+    expect(g.$$('#deck .prcard, #deck .stackcard')).toHaveLength(0);
+    await g.go('#prs');
+    expect(g.$$('#prs .stackcard').length).toBeGreaterThan(0);
   });
 
   it('an empty fleet: every section says it is empty, the daemon is down', async () => {
     const g = await page(emptyFleet());
-    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'none', 'none']);
+    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'none']);
     expect(text(g.$('#chips'))).toBe('daemon down');
   });
 });
