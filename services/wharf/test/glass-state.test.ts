@@ -17,6 +17,8 @@ beforeEach(async () => {
   await runInDurableObject(env.ACCOUNTS.getByName('a'), (_instance: Account, state) => {
     for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
+    // Request counts live in the instance's memory, not in meta.
+    (_instance as unknown as { budgets: Map<string, unknown> }).budgets.clear();
   });
   const objects = await env.FILES.list({ prefix: 'a/' }); if (objects.objects.length) await env.FILES.delete(objects.objects.map((o) => o.key));
 });

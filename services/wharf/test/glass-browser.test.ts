@@ -36,6 +36,8 @@ beforeEach(async () => {
   await runInDurableObject(env.ACCOUNTS.getByName(account), (_instance: Account, state) => {
     for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
+    // Request counts live in the instance's memory, not in meta.
+    (_instance as unknown as { budgets: Map<string, unknown> }).budgets.clear();
   });
   await env.AUTH_DB.exec('DELETE FROM rateLimit');
   await env.AUTH_DB.batch(['slackLinkGround', 'slackConnectGround', 'slackLink', 'slackConnect', 'slackInstallation'].map((table) => env.AUTH_DB.prepare(`DELETE FROM ${table}`)));

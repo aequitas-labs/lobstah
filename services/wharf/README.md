@@ -217,8 +217,10 @@ are currently exercised by local tests.
 
 Limits are configurable non-secret vars: 120 authenticated requests/minute/account,
 10,000 stored rows, 100 MiB account storage, and 25 MiB/file. Limits are abuse caps,
-not paid tiers. JSON bodies are bounded at 64 KiB. Rate limits are durable account
-windows, not IP identities. Store/R2 failure returns an unavailable error; clients
+not paid tiers. JSON bodies are bounded at 64 KiB. Rate limits are per-account
+minute windows, not IP identities, counted in the account object's memory: a
+counter written to SQLite on every request spent the Durable Objects free tier
+(100,000 rows written a day). An evicted object starts its minute again. Store/R2 failure returns an unavailable error; clients
 must retain results and must not infer success or claim locally during an outage.
 
 ## Permission layers

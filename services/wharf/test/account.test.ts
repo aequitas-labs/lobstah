@@ -47,6 +47,8 @@ beforeEach(async () => {
   await runInDurableObject(stub, async (_instance: Account, state) => {
     for (const table of ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'event_details', 'dispatches', 'reports', 'events', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files']) state.storage.sql.exec(`DELETE FROM ${table}`);
     state.storage.sql.exec("DELETE FROM meta WHERE key!='generation'");
+    // Request counts live in the instance's memory, not in meta.
+    (_instance as unknown as { budgets: Map<string, unknown> }).budgets.clear();
     state.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
   });
   expect((await call('helm/take', { session: 'helm' })).status).toBe(200);
