@@ -47,7 +47,7 @@ function message(socket: WebSocket, ms = 3000): Promise<string> {
   });
 }
 async function socketOf(boat: Boat): Promise<WebSocket> {
-  const r = await SELF.fetch(`https://state.test/v1/accounts/${ACCOUNT}/wake`, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${boat.token}` } });
+  const r = await SELF.fetch(`https://state.test/v1/accounts/${ACCOUNT}/wake`, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${boat.token}`, 'Sec-WebSocket-Protocol': 'lobstah.2' } });
   expect(r.status).toBe(101);
   r.webSocket!.accept();
   return r.webSocket!;

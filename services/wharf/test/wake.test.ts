@@ -17,7 +17,7 @@ async function boat(permissions = ['work', 'helm']) {
   expect(result.status).toBe(201); return result.value as { id: string; token: string };
 }
 const connect = (token: string, account = 'wake', headers: Record<string, string> = {}) => SELF.fetch(`https://state.test/v1/accounts/${account}/wake`, {
-  headers: { Upgrade: 'websocket', Authorization: `Bearer ${token}`, ...headers },
+  headers: { Upgrade: 'websocket', Authorization: `Bearer ${token}`, 'Sec-WebSocket-Protocol': 'lobstah.2', ...headers },
 });
 function message(socket: WebSocket): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -52,9 +52,9 @@ it('hibernates an idle connected account, restores its socket, and catches up af
     expect(state.getWebSockets()).toHaveLength(1);
     expect(state.getWebSockets()[0].deserializeAttachment().actor.id).toBe(b.id);
   });
-  const hint = message(socket);
+  const pushed = message(socket);
   expect((await command('helm/take', { session: 'helm' })).status).toBe(200);
-  expect(await hint).toBe('{"type":"wake"}');
+  expect(JSON.parse(await pushed)).toMatchObject({ t: 'event', events: [{ kind: 'helm-taken' }] });
   const read = await api('events', undefined, b.token); expect(read.status).toBe(200);
   const cursor = (await read.json<{ cursor: string }>()).cursor;
   expect(cursor).not.toBe(''); socket.close();
@@ -76,21 +76,22 @@ it('rejects wrong-account, work-only and dispatch tokens; never trusts a supplie
   expect((await connect(b.token, 'wake', { Origin: 'https://evil.test' })).status).toBe(403);
   expect((await connect(b.token, 'wake', { Cookie: 'session=anything' })).status).toBe(401);
 });
-it('closes revoked sockets and caps simultaneous connections without timers', async () => {
+it('closes revoked sockets, and holds more than the old 32 connections', async () => {
   const b = await boat(); const sockets: WebSocket[] = [];
-  for (let n = 0; n < 32; n++) { const r = await connect(b.token); expect(r.status).toBe(101); r.webSocket!.accept(); sockets.push(r.webSocket!); }
-  expect((await connect(b.token)).status).toBe(429);
+  for (let n = 0; n < 33; n++) { const r = await connect(b.token); expect(r.status).toBe(101); r.webSocket!.accept(); sockets.push(r.webSocket!); }
   const closed = new Promise((resolve) => sockets[0].addEventListener('close', resolve, { once: true }));
   await command(`boats/${b.id}/revoke`, {}); await closed;
   expect(sockets[0].readyState).not.toBe(WebSocket.OPEN);
   expect((await connect(b.token)).status).toBe(401);
   sockets.forEach((s) => s.close());
 });
-it('a socket cannot mutate state or renew leases', async () => {
+it('a message that is not a protocol command changes nothing and is answered with an error', async () => {
   const b = await boat(); const r = await connect(b.token); expect(r.status).toBe(101);
   const socket = r.webSocket!; socket.accept();
-  const closed = new Promise((resolve) => socket.addEventListener('close', resolve, { once: true }));
+  const answer = message(socket);
   socket.send(JSON.stringify({ path: 'helm/take', body: { session: 'intruder' } }));
-  await closed;
+  expect(JSON.parse(await answer)).toMatchObject({ t: 'error', reason: 'unknown message type' });
+  expect(socket.readyState).toBe(WebSocket.OPEN);
   expect(await runInDurableObject(stub(), (_instance: Account, state) => state.storage.sql.exec("SELECT * FROM meta WHERE key='helm'").toArray())).toEqual([]);
+  socket.close();
 });

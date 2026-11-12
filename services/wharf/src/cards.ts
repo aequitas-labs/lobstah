@@ -343,6 +343,12 @@ export class Cards {
     return changed;
   }
   /** Answers no boat took in time expire before anyone reads them: a boat is never handed a stale one. */
+  /** When the oldest answer still waiting for its boat expires; none when no answer waits. */
+  nextExpiry(now: number): number | undefined {
+    const row = this.sql.exec<{ at: string | null }>("SELECT min(json_extract(data,'$.at')) AS at FROM card_answers WHERE json_extract(data,'$.state')='pending'").toArray()[0];
+    if (!row?.at) return undefined;
+    return Math.max(Date.parse(row.at) + ANSWER_RECEIPT_MS, now);
+  }
   private expireAnswers(now: number, changed: GlassCard[]) {
     for (const row of this.sql.exec<{ id: string; card: number; data: string }>("SELECT id,card,data FROM card_answers WHERE json_extract(data,'$.state')='pending'").toArray()) {
       const r = JSON.parse(row.data) as CardAnswerReceipt;

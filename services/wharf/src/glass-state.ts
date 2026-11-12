@@ -76,6 +76,11 @@ export class GlassState {
     const ack = this.get<WharfAck & { status: string }>('dispatch_acks', id);
     return ack && ack.status === statusAt ? ack : undefined;
   }
+  /** When the next open human request reaches its expiry; none when no request is open. */
+  nextExpiry(now: number): number | undefined {
+    const row = this.sql.exec<{ at: string | null }>("SELECT min(json_extract(data,'$.expiresAt')) AS at FROM human_requests WHERE json_extract(data,'$.state') IN ('queued','received','authorized') AND json_extract(data,'$.expiresAt')>?", new Date(now).toISOString()).toArray()[0];
+    return row?.at ? Date.parse(row.at) : undefined;
+  }
   expire(now: number) {
     for (const row of this.sql.exec<{ id: string; data: string }>("SELECT * FROM human_requests WHERE json_extract(data,'$.state') IN ('queued','received','authorized') AND json_extract(data,'$.expiresAt')<=?", new Date(now).toISOString()).toArray()) {
       const r = JSON.parse(row.data) as WharfHumanRequest; r.state = 'expired'; this.put('human_requests', row.id, r);
