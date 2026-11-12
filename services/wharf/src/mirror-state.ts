@@ -1,5 +1,5 @@
 import { MIRROR_ATTENTION_MAX_BYTES, MIRROR_ATTENTION_MAX_ITEMS, MIRROR_CALL_MS, mirrorReadAllowed, mirrorWriteAllowed } from '../../../packages/core/src/backend-model.js';
-import type { WharfMirrorCall, WharfMirrorCallInput, WharfMirrorSnapshot } from '../../../packages/core/src/backend-model.js';
+import type { WharfAttentionList, WharfMirrorCall, WharfMirrorCallInput, WharfMirrorSnapshot } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
 
@@ -109,6 +109,22 @@ export class MirrorState {
     }
     return { keys };
   }
+  /** Every other mirror boat's walking list, as a boat granted attention gets it on its socket. */
+  attentionLists(except: string): WharfAttentionList[] {
+    return this.sql.exec<{ boat: string; name: string; at: string; etag: string; data: string }>(`SELECT a.boat,b.name,a.at,a.etag,a.data FROM mirror_attention a JOIN boats b ON b.id=a.boat
+      JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND a.boat<>? AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY b.name LIMIT 100`, except).toArray()
+      .map((r) => ({ boat: r.boat, name: r.name, at: r.at, etag: r.etag, attention: JSON.parse(r.data) as unknown[] }));
+  }
+  /** The calls waiting for one boat, oldest first: what its socket gets when it resumes. */
+  queuedCalls(boat: string): WharfMirrorCall[] {
+    return this.sql.exec<{ data: string }>(`SELECT data FROM mirror_calls WHERE boat=? AND json_extract(data,'$.state')='queued' ORDER BY rowid LIMIT ${MIRROR_CALL_LIMIT}`, boat).toArray()
+      .map((r) => JSON.parse(r.data) as WharfMirrorCall);
+  }
+  /** One call as stored. */
+  stored(id: string): WharfMirrorCall | undefined {
+    const row = this.sql.exec<{ data: string }>('SELECT data FROM mirror_calls WHERE id=?', id).toArray()[0];
+    return row ? (JSON.parse(row.data) as WharfMirrorCall) : undefined;
+  }
   /** A revoked boat mirrors nothing: its snapshot and calls go with it. */
   forget(account: string, boat: string): MirrorCleanup {
     const keys = [mirrorSnapshotKey(account, boat)];
@@ -174,7 +190,7 @@ export class MirrorState {
    * The routes in this transaction. `watch` is set when a person reads the
    * mirror list: the boats are told a hosted glass is open.
    */
-  execute(c: Command, actor: Actor, now: number, account: string): Result & { watch?: boolean; hint?: string } {
+  execute(c: Command, actor: Actor, now: number, account: string): Result & { hint?: string } {
     const parts = c.path.split('/');
     const ok = (value: unknown = {}) => ({ status: 200, value });
     // The hosted glass's list: every mirror boat's latest snapshot, with its name, time and ETag.
@@ -183,14 +199,6 @@ export class MirrorState {
       const boats = this.sql.exec<{ boat: string; name: string; at: string; etag: string; bytes: number }>(`SELECT s.boat,b.name,s.at,s.etag,s.bytes FROM mirror_snapshots s JOIN boats b ON b.id=s.boat
         JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY b.name LIMIT 100`).toArray()
         .map((s): MirrorListing => ({ boat: s.boat, name: s.name, at: s.at, etag: s.etag, bytes: s.bytes, key: mirrorSnapshotKey(account, s.boat) }));
-      return { ...ok({ boats }), watch: true };
-    }
-    // Every other mirror boat's walking list, for a boat granted attention (permissions.ts checks the grant).
-    if (c.path === 'mirror/attention' && c.method === 'GET') {
-      const boat = this.boat(actor);
-      const boats = this.sql.exec<{ boat: string; name: string; at: string; etag: string; data: string }>(`SELECT a.boat,b.name,a.at,a.etag,a.data FROM mirror_attention a JOIN boats b ON b.id=a.boat
-        JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND a.boat<>? AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY b.name LIMIT 100`, boat).toArray()
-        .map((r) => ({ boat: r.boat, name: r.name, at: r.at, etag: r.etag, attention: JSON.parse(r.data) as unknown[] }));
       return ok({ boats });
     }
     // Ask the boat that owns an item to acknowledge it: one relayed attention-ack call, as a hosted glass click makes.
@@ -222,12 +230,6 @@ export class MirrorState {
         const stored: WharfMirrorCall = { ...call, at: new Date(now).toISOString(), expiresAt: new Date(now + MIRROR_CALL_MS).toISOString(), state: 'queued', by: actor.id };
         this.save(stored);
         return { ...ok(stored), hint: call.boat };
-      }
-      if (parts.length === 2 && c.method === 'GET') {
-        const boat = this.boat(actor);
-        const calls = this.sql.exec<{ data: string }>(`SELECT data FROM mirror_calls WHERE boat=? AND json_extract(data,'$.state')='queued' ORDER BY rowid LIMIT ${MIRROR_CALL_LIMIT}`, boat).toArray()
-          .map((r) => JSON.parse(r.data) as WharfMirrorCall);
-        return ok({ calls });
       }
       const call = this.call(parts[2]!);
       if (parts.length === 3 && c.method === 'GET') {

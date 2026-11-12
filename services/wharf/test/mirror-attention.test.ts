@@ -3,13 +3,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Account } from '../src/account.js';
 import { mirrorTables } from '../src/mirror-state.js';
 import { authFixtures } from './auth-fixture.js';
-import type { WharfMirrorCall } from '../../../packages/core/src/backend-model.js';
+import { MINIMUM_SOCKET_CLIENT } from '../../../packages/core/src/wharf-socket.js';
+import type { ServerSocketMessage } from '../../../packages/core/src/wharf-socket.js';
 
 /**
- * Attention lists: each mirror boat puts the items its pet walks, and a boat
- * granted `attention` reads every other boat's, so its pet walks them too.
- * Reading one never counts as a hosted glass being open. An ack of another
- * boat's item is relayed to that boat as one attention-ack call.
+ * Attention lists, on the boats' sockets: each mirror boat sends the items
+ * its pet walks when they change, and a boat granted `attention` gets every
+ * other boat's list pushed, so its pet walks them too. An ack of another
+ * boat's item is relayed to that boat as one attention-ack call, pushed to
+ * its socket.
  */
 
 const ACCOUNT = 'attention';
@@ -29,28 +31,30 @@ const api = (boat: Boat, path: string, init: { method?: string; body?: unknown }
   ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
 });
 const item = (key: string, note: string) => ({ key, kind: 'question', stateHash: `${key}-1`, id: key, lane: 'work', verb: 'needs-decision', note });
-async function putList(boat: Boat, attention: unknown[]) {
-  const r = await api(boat, 'mirror/attention', { method: 'PUT', body: { attention } });
-  expect(r.status, await r.clone().text()).toBe(200);
-  return r.json<{ etag: string; at: string; changed: boolean }>();
-}
-type Listed = { boat: string; name: string; etag: string; at: string; attention?: unknown[]; unchanged?: true };
-async function lists(boat: Boat, known = ''): Promise<Listed[]> {
-  const r = await api(boat, `mirror/attention${known ? `?known=${encodeURIComponent(known)}` : ''}`);
-  expect(r.status, await r.clone().text()).toBe(200);
-  return (await r.json<{ boats: Listed[] }>()).boats;
-}
-function message(socket: WebSocket, ms = 3000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('no hint')), ms);
-    socket.addEventListener('message', (e) => { clearTimeout(timeout); resolve(String(e.data)); }, { once: true });
-  });
-}
-async function socketOf(boat: Boat): Promise<WebSocket> {
+
+/** A boat's open socket, and every message it has received. */
+type BoatSocket = { socket: WebSocket; received: ServerSocketMessage[] };
+async function socketOf(boat: Boat): Promise<BoatSocket> {
   const r = await SELF.fetch(`https://state.test/v1/accounts/${ACCOUNT}/wake`, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${boat.token}`, 'Sec-WebSocket-Protocol': 'lobstah.2' } });
   expect(r.status).toBe(101);
-  r.webSocket!.accept();
-  return r.webSocket!;
+  const socket = r.webSocket!; socket.accept();
+  const received: ServerSocketMessage[] = [];
+  socket.addEventListener('message', (e) => { if (typeof e.data === 'string' && e.data !== 'pong') received.push(JSON.parse(e.data)); });
+  return { socket, received };
+}
+/** Wait until a message matches; `ms` with none is a timeout. */
+async function next(b: BoatSocket, match: (m: ServerSocketMessage) => boolean, ms = 3000): Promise<ServerSocketMessage> {
+  for (const deadline = Date.now() + ms; Date.now() < deadline; await new Promise((r) => setTimeout(r, 10))) {
+    const found = b.received.find(match);
+    if (found) return found;
+  }
+  throw new Error(`no matching message; got ${JSON.stringify(b.received)}`);
+}
+const lists = (m: ServerSocketMessage) => (m.t === 'attention' ? m.boats : undefined);
+/** Send a boat's list on its socket, and let the wharf take it. */
+async function sendList(b: BoatSocket, attention: unknown) {
+  b.socket.send(JSON.stringify({ t: 'attention', attention }));
+  await new Promise((r) => setTimeout(r, 100));
 }
 
 beforeEach(async () => {
@@ -65,47 +69,72 @@ beforeEach(async () => {
 });
 
 describe('attention lists', () => {
-  it("reads every other mirror boat's list, never its own, and holds back a list it already has", async () => {
-    const reader = await enrol(['mirror', 'attention', 'read']);
-    const north = await enrol(['mirror', 'read']), south = await enrol(['mirror', 'read']);
-    await putList(reader, [item('work:r', 'mine')]);
-    await putList(north, [item('work:n', 'Which port?')]);
-    await putList(south, []);
-    const first = await lists(reader);
-    expect(new Map(first.map((b) => [b.boat, b.attention]))).toEqual(new Map<string, unknown[]>([[north.id, [item('work:n', 'Which port?')]], [south.id, []]]));
-    const known = first.map((b) => `${b.boat}:${b.etag}`).join(',');
-    expect((await lists(reader, known)).map((b) => [b.boat, b.unchanged, b.attention])).toEqual(first.map((b) => [b.boat, true, undefined]));
+  it("pushes every other mirror boat's list to a boat granted attention, never its own, and nothing to a boat without the grant", async () => {
+    const readerBoat = await enrol(['mirror', 'attention', 'read']);
+    const northBoat = await enrol(['mirror', 'read']), southBoat = await enrol(['mirror', 'read']);
+    const reader = await socketOf(readerBoat), north = await socketOf(northBoat), south = await socketOf(southBoat);
+    await sendList(reader, [item('work:r', 'mine')]);
+    await sendList(north, [item('work:n', 'Which port?')]);
+    await sendList(south, []);
+    const latest = await next(reader, (m) => (lists(m) ?? []).length === 2);
+    expect(new Map(lists(latest)!.map((b) => [b.boat, b.attention]))).toEqual(new Map<string, unknown[]>([[northBoat.id, [item('work:n', 'Which port?')]], [southBoat.id, []]]));
+    // The reader's own list never comes back to it; a boat without the grant gets no lists.
+    expect(reader.received.flatMap((m) => lists(m) ?? []).some((b) => b.boat === readerBoat.id)).toBe(false);
+    expect(north.received.some((m) => m.t === 'attention')).toBe(false);
+    reader.socket.close(); north.socket.close(); south.socket.close();
   });
 
-  it('keeps an unchanged list as it was, and says when one changed', async () => {
-    const north = await enrol(['mirror', 'read']);
-    const first = await putList(north, [item('work:n', 'Which port?')]);
-    expect(first.changed).toBe(true);
-    const again = await putList(north, [item('work:n', 'Which port?')]);
-    expect(again).toEqual({ ...first, changed: false });
-    expect((await putList(north, [])).changed).toBe(true);
+  it('passes on a changed list only: an unchanged one is not pushed again', async () => {
+    const reader = await socketOf(await enrol(['mirror', 'attention', 'read'])), north = await socketOf(await enrol(['mirror', 'read']));
+    await sendList(north, [item('work:n', 'Which port?')]);
+    await next(reader, (m) => m.t === 'attention');
+    const pushes = () => reader.received.filter((m) => m.t === 'attention').length;
+    const before = pushes();
+    await sendList(north, [item('work:n', 'Which port?')]);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(pushes()).toBe(before);
+    await sendList(north, []);
+    await next(reader, (m) => m.t === 'attention' && pushes() > before);
+    reader.socket.close(); north.socket.close();
   });
 
-  it('refuses a boat without the attention grant, and the grant without mirror', async () => {
-    const north = await enrol(['mirror', 'read']), worker = await enrol(['work', 'read']);
-    expect((await api(north, 'mirror/attention')).status).toBe(403);
-    expect((await api(north, 'mirror/attention/acks', { body: { boat: worker.id, key: 'work:x', stateHash: 'h' } })).status).toBe(403);
-    expect((await api(worker, 'mirror/attention', { method: 'PUT', body: { attention: [] } })).status).toBe(403);
+  it('refuses a list from a boat that does not mirror, and the attention grant without mirror', async () => {
+    const north = await enrol(['mirror', 'read']), workerBoat = await enrol(['work', 'read']);
+    const worker = await socketOf(workerBoat);
+    await sendList(worker, []);
+    expect(await next(worker, (m) => m.t === 'error')).toMatchObject({ reason: 'only a mirror boat sends its list' });
+    expect((await api(north, 'mirror/attention/acks', { body: { boat: workerBoat.id, key: 'work:x', stateHash: 'h' } })).status).toBe(403);
     expect((await command('boats', { name: 'loose', permissions: ['attention', 'read'] })).status).toBe(400);
+    worker.socket.close();
   });
 
   it('refuses a list that is not a list of items, or too long', async () => {
-    const north = await enrol(['mirror', 'read']);
-    expect((await api(north, 'mirror/attention', { method: 'PUT', body: { attention: 'x' } })).status).toBe(400);
-    expect((await api(north, 'mirror/attention', { method: 'PUT', body: { attention: [1] } })).status).toBe(400);
-    expect((await api(north, 'mirror/attention', { method: 'PUT', body: { attention: Array.from({ length: 501 }, (_, i) => item(`work:${i}`, 'q')) } })).status).toBe(400);
+    const north = await socketOf(await enrol(['mirror', 'read']));
+    for (const attention of ['x', [1], Array.from({ length: 501 }, (_, i) => item(`work:${i}`, 'q'))]) {
+      north.received.length = 0;
+      await sendList(north, attention);
+      await next(north, (m) => m.t === 'error');
+    }
+    north.socket.close();
   });
 
-  it('drops a revoked boat’s list', async () => {
-    const reader = await enrol(['mirror', 'attention', 'read']), north = await enrol(['mirror', 'read']);
-    await putList(north, [item('work:n', 'Which port?')]);
-    expect((await command(`boats/${north.id}/revoke`, {})).status).toBe(200);
-    expect(await lists(reader)).toEqual([]);
+  it('drops a revoked boat’s list: a reader resuming gets none', async () => {
+    const readerBoat = await enrol(['mirror', 'attention', 'read']), northBoat = await enrol(['mirror', 'read']);
+    const north = await socketOf(northBoat);
+    await sendList(north, [item('work:n', 'Which port?')]);
+    expect((await command(`boats/${northBoat.id}/revoke`, {})).status).toBe(200);
+    const reader = await socketOf(readerBoat);
+    reader.socket.send(JSON.stringify({ t: 'resume' }));
+    expect(lists(await next(reader, (m) => m.t === 'attention'))).toEqual([]);
+    reader.socket.close();
+  });
+
+  it('answers 410 with the minimum client version to the list routes boats used to poll', async () => {
+    const north = await enrol(['mirror', 'attention', 'read']);
+    for (const r of [await api(north, 'mirror/attention'), await api(north, 'mirror/attention', { method: 'PUT', body: { attention: [] } })]) {
+      expect(r.status).toBe(410);
+      expect(await r.json()).toMatchObject({ minimumClient: MINIMUM_SOCKET_CLIENT });
+    }
   });
 });
 
@@ -117,47 +146,20 @@ describe('the attention grant', () => {
     expect(permits(['mirror', 'read'], 'attention')).toBe(false);
     expect(permits(['admin'], 'attention')).toBe(false);
     expect(permits(['mirror', 'attention', 'read'], 'helm')).toBe(false);
-    expect(requiredPermission('mirror/attention', 'PUT')).toBe('mirror');
-    expect(requiredPermission('mirror/attention', 'GET')).toBe('attention');
     expect(requiredPermission('mirror/attention/acks', 'POST')).toBe('attention');
   });
 });
 
-describe('attention hints', () => {
-  it('tells the boats granted attention when another boat’s list changed, and nobody when it did not', async () => {
-    const reader = await enrol(['mirror', 'attention', 'read']), north = await enrol(['mirror', 'read']);
-    const readerSocket = await socketOf(reader), northSocket = await socketOf(north);
-    const told = message(readerSocket);
-    const putterTold = message(northSocket, 500).then(() => true, () => false);
-    await putList(north, [item('work:n', 'Which port?')]);
-    expect(await told).toBe('{"type":"attention"}');
-    expect(await putterTold).toBe(false);
-    const again = message(readerSocket, 500).then(() => true, () => false);
-    await putList(north, [item('work:n', 'Which port?')]);
-    expect(await again).toBe(false);
-    readerSocket.close(); northSocket.close();
-  });
-
-  it('never counts a boat’s read as a hosted glass being open', async () => {
-    const reader = await enrol(['mirror', 'attention', 'read']), north = await enrol(['mirror', 'read']);
-    await lists(reader);
-    const calls = await (await api(north, 'mirror/calls')).json<{ watchedUntil?: string }>();
-    expect(calls.watchedUntil).toBeUndefined();
-  });
-});
-
 describe('relayed acks', () => {
-  it("queues one attention-ack call for the boat that owns the item, and wakes it", async () => {
-    const reader = await enrol(['mirror', 'attention', 'read']), north = await enrol(['mirror', 'read']);
-    const northSocket = await socketOf(north);
-    const woke = message(northSocket);
-    const r = await api(reader, 'mirror/attention/acks', { body: { boat: north.id, key: 'work:n', stateHash: 'work:n-1' } });
+  it('queues one attention-ack call for the boat that owns the item, and pushes it to that boat', async () => {
+    const reader = await enrol(['mirror', 'attention', 'read']), northBoat = await enrol(['mirror', 'read']);
+    const north = await socketOf(northBoat);
+    const r = await api(reader, 'mirror/attention/acks', { body: { boat: northBoat.id, key: 'work:n', stateHash: 'work:n-1' } });
     expect(r.status, await r.clone().text()).toBe(200);
-    expect(await woke).toBe('{"type":"mirror-call"}');
-    const { calls } = await (await api(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>();
-    expect(calls).toEqual([expect.objectContaining({ boat: north.id, by: reader.id, state: 'queued',
-      write: { kind: 'attention-ack', payload: { items: [{ key: 'work:n', stateHash: 'work:n-1' }] } } })]);
-    northSocket.close();
+    const pushed = await next(north, (m) => m.t === 'call');
+    expect(pushed).toMatchObject({ t: 'call', call: { boat: northBoat.id, by: reader.id, state: 'queued',
+      write: { kind: 'attention-ack', payload: { items: [{ key: 'work:n', stateHash: 'work:n-1' }] } } } });
+    north.socket.close();
   });
 
   it("refuses an ack of the reader's own items, of a boat that does not mirror, and any other field", async () => {

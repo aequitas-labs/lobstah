@@ -1,4 +1,4 @@
-import type { BackendEvent } from './backend-model.js';
+import type { BackendEvent, WharfAttentionList, WharfMirrorCall } from './backend-model.js';
 
 /**
  * The wharf's live channel: one hibernatable WebSocket per boat and per
@@ -64,7 +64,13 @@ export interface CallMessage {
   files?: string[];
 }
 
-export type ClientSocketMessage = ResumeMessage | CommandMessage | CallMessage;
+/** A mirror boat's own walking list, sent when it changed; the wharf keeps the latest and passes it to the boats granted attention. */
+export interface AttentionMessage {
+  t: 'attention';
+  attention: unknown[];
+}
+
+export type ClientSocketMessage = ResumeMessage | CommandMessage | CallMessage | AttentionMessage;
 
 /** New events, in order; `cursor` is the newest one's. */
 export interface EventMessage {
@@ -95,7 +101,25 @@ export interface ErrorMessage {
   id?: string;
 }
 
-export type ServerSocketMessage = EventMessage | HelloMessage | ResultMessage | ErrorMessage;
+/** To a mirror boat: whether a glass tab is open on the account now. While one is, the boat sends its snapshot when it changes. */
+export interface WatchMessage {
+  t: 'watch';
+  on: boolean;
+}
+
+/** To a mirror boat: a relayed call addressed to it, to carry out against its own glass and answer with an `answer` frame. */
+export interface CallPushMessage {
+  t: 'call';
+  call: WharfMirrorCall;
+}
+
+/** To a boat granted attention: every other mirror boat's walking list, as it stands now. */
+export interface AttentionListsMessage {
+  t: 'attention';
+  boats: WharfAttentionList[];
+}
+
+export type ServerSocketMessage = EventMessage | HelloMessage | ResultMessage | ErrorMessage | WatchMessage | CallPushMessage | AttentionListsMessage;
 
 /**
  * A boat's new glass snapshot, pushed to glass tabs as a binary frame whose
@@ -186,6 +210,10 @@ export function parseClientMessage(text: string): ClientSocketMessage | { invali
       ...(m.body !== undefined ? { body: m.body } : {}),
       ...(m.session !== undefined ? { session: m.session as string } : {}),
     };
+  }
+  if (m.t === 'attention') {
+    if (!Array.isArray(m.attention)) return { invalid: 'attention must be a list' };
+    return { t: 'attention', attention: m.attention };
   }
   if (m.t === 'call') {
     if (typeof m.id !== 'string' || !COMMAND_ID.test(m.id)) return { invalid: 'call id must match the Idempotency-Key alphabet' };

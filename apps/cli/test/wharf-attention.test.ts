@@ -7,19 +7,19 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { BackendError, appendStatus, claimNext, enqueue, ensureLayout, loadConfig, writeMirrorStatus } from '@lobstah/core';
-import type { MirrorStatus, WharfAttentionList, WharfMirrorCall } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, loadConfig, writeMirrorStatus } from '@lobstah/core';
+import type { ClientSocketMessage, MirrorStatus, WharfAttentionList, WharfMirrorCall } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
-import { MIRROR_ATTENTION_OFF_MS, MIRROR_ATTENTION_READ_MS, WharfMirror, loopbackGlass } from '../src/wharf-mirror.js';
-import type { MirrorWharf } from '../src/wharf-mirror.js';
+import { WharfMirror, loopbackGlass } from '../src/wharf-mirror.js';
+import type { MirrorChannel, MirrorWharf } from '../src/wharf-mirror.js';
 import { otherBoatsAttention, otherBoatsPath, readOtherBoats, writeOtherBoats } from '../src/wharf-attention.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
- * Every boat's items on this Mac's pet: the mirror puts this boat's walking
- * list when it changes and reads the other boats' lists on a hint (or every
- * five minutes), `attention --json` walks them with their boat's name, and
- * an ack of one goes through the wharf to the boat that owns it.
+ * Every boat's items on this Mac's pet: the mirror sends this boat's walking
+ * list on its socket when it changes and keeps the other boats' lists the
+ * wharf pushes to it, `attention --json` walks them with their boat's name,
+ * and an ack of one goes through the wharf to the boat that owns it.
  */
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -29,33 +29,25 @@ let wharfServer: Server | undefined;
 let port: number;
 let now: number;
 
-/** A wharf that records the lists the mirror puts and answers its reads from `others`. */
-class FakeWharf implements MirrorWharf {
-  attentionPuts: unknown[][] = [];
-  reads: Array<Record<string, string>> = [];
-  others: WharfAttentionList[] = [];
-  refuse?: number;
-  refusePut?: number;
-  queued: WharfMirrorCall[] = [];
+/** A wharf and its socket: the lists the mirror sends, and the calls it answers. */
+class FakeWharf implements MirrorWharf, MirrorChannel {
+  attentionSends: unknown[][] = [];
   answered: string[] = [];
-  async putMirrorSnapshot(gzip: Uint8Array) { return { etag: 'e'.repeat(64), bytes: gzip.byteLength, at: new Date(now).toISOString() }; }
-  async mirrorCalls(): Promise<{ calls: WharfMirrorCall[] }> { const calls = this.queued; this.queued = []; return { calls }; }
+  /** Whether the socket is open: a closed one sends nothing. */
+  open = true;
+  connected() { return this.open; }
+  send(message: ClientSocketMessage) {
+    if (!this.open) return false;
+    if (message.t === 'attention') this.attentionSends.push(message.attention);
+    return true;
+  }
+  sendFrame() { return this.open; }
   async takeMirrorCall() {}
   async answerMirrorCall(id: string) { this.answered.push(id); }
   async mirrorFile() { return { name: 'x', bytes: new Uint8Array() }; }
-  async putMirrorAttention(attention: unknown[]) {
-    if (this.refusePut) throw new BackendError(this.refusePut, 'route not found');
-    this.attentionPuts.push(attention);
-    return { etag: 'a'.repeat(64), at: new Date(now).toISOString(), changed: true };
-  }
-  async mirrorAttention(known: Record<string, string> = {}) {
-    if (this.refuse) throw new BackendError(this.refuse, 'attention permission required');
-    this.reads.push(known);
-    return this.others.map((b) => (known[b.boat] === b.etag ? { boat: b.boat, name: b.name, at: b.at, etag: b.etag, unchanged: true as const } : b));
-  }
 }
 const mirror = (wharf: FakeWharf) =>
-  new WharfMirror({ wharf: 'lobstah', backend: wharf, glass: loopbackGlass(port), now: () => now, writeStatus: (_s: MirrorStatus) => {} });
+  new WharfMirror({ wharf: 'lobstah', backend: wharf, channel: wharf, glass: loopbackGlass(port), now: () => now, writeStatus: (_s: MirrorStatus) => {} });
 
 const Q = '11111111-1111-1111-1111-111111111111';
 function question(note: string): void {
@@ -89,75 +81,57 @@ afterEach(async () => {
   delete process.env.LOBSTAH_HOME;
 });
 
-describe("the mirror puts this boat's list", () => {
+describe("the mirror sends this boat's list", () => {
   it('without ages, and again only when an item changes', async () => {
     question('Which port?');
     const wharf = new FakeWharf();
     const m = mirror(wharf);
-    await m.pass();
-    await m.pass();
-    expect(wharf.attentionPuts).toHaveLength(1);
-    expect(wharf.attentionPuts[0]).toEqual([expect.objectContaining({ key: `work:${Q}`, kind: 'question', note: 'Which port?' })]);
-    expect(wharf.attentionPuts[0]![0]).not.toHaveProperty('ageSecs');
+    await m.read();
+    await m.read();
+    expect(wharf.attentionSends).toHaveLength(1);
+    expect(wharf.attentionSends[0]).toEqual([expect.objectContaining({ key: `work:${Q}`, kind: 'question', note: 'Which port?' })]);
+    expect(wharf.attentionSends[0]![0]).not.toHaveProperty('ageSecs');
     appendStatus(Q, 'work', 'needs-decision', 'Which port, 80 or 443?');
-    await m.pass();
-    expect(wharf.attentionPuts).toHaveLength(2);
+    await m.read();
+    expect(wharf.attentionSends).toHaveLength(2);
   });
 
-  it('waits half an hour before putting again on a wharf without the route', async () => {
+  it('sends it once the socket is back, and again after a reconnect', async () => {
     question('Which port?');
-    const wharf = Object.assign(new FakeWharf(), { refusePut: 404 });
+    const wharf = Object.assign(new FakeWharf(), { open: false });
     const m = mirror(wharf);
-    await m.pass();
-    wharf.refusePut = undefined;
-    await m.pass();
-    expect(wharf.attentionPuts).toHaveLength(0);
-    now += MIRROR_ATTENTION_OFF_MS;
-    await m.pass();
-    expect(wharf.attentionPuts).toHaveLength(1);
+    await m.read();
+    expect(wharf.attentionSends).toHaveLength(0);
+    wharf.open = true;
+    await m.read();
+    expect(wharf.attentionSends).toHaveLength(1);
+    // A reconnect may have lost what the wharf held: the next read sends it again.
+    m.onReconnect();
+    await m.read();
+    expect(wharf.attentionSends).toHaveLength(2);
   });
 });
 
-describe('a failing list', () => {
+describe('a list that cannot go out', () => {
   it('never holds a relayed call', async () => {
     question('Which port?');
-    const wharf = Object.assign(new FakeWharf(), { refusePut: 500, refuse: 500 });
-    wharf.queued = [{ id: 'call-1', boat: 'me', read: '/data/stats', at: new Date(now).toISOString(), expiresAt: new Date(now + 600_000).toISOString(), state: 'queued', by: 'person' } as WharfMirrorCall];
-    await mirror(wharf).pass({ attention: true });
+    const wharf = Object.assign(new FakeWharf(), { open: false });
+    const m = mirror(wharf);
+    await m.read();
+    await m.onCall({ id: 'call-1', boat: 'me', read: '/data/stats', at: new Date(now).toISOString(), expiresAt: new Date(now + 600_000).toISOString(), state: 'queued', by: 'person' } as WharfMirrorCall);
+    // With the socket down the answer goes over HTTP.
     expect(wharf.answered).toEqual(['call-1']);
   });
 });
 
-describe("the mirror reads the other boats' lists", () => {
-  it('at once, then on a hint or every five minutes, keeping the lists it already holds', async () => {
+describe("the other boats' lists", () => {
+  it('are kept as the wharf pushes them, each push replacing the last', () => {
     const wharf = new FakeWharf();
-    wharf.others = [list('boat-n', 'north', [item('work:n')])];
     const m = mirror(wharf);
-    await m.pass();
+    m.onAttention([list('boat-n', 'north', [item('work:n')])]);
     expect(readOtherBoats()?.boats).toEqual([expect.objectContaining({ boat: 'boat-n', name: 'north', attention: [item('work:n')] })]);
-    await m.pass();
-    expect(wharf.reads).toHaveLength(1);
-    await m.pass({ attention: true });
-    expect(wharf.reads[1]).toEqual({ 'boat-n': 'boat-n-1' });
-    expect(readOtherBoats()?.boats[0]?.attention).toEqual([item('work:n')]);
-    now += MIRROR_ATTENTION_READ_MS;
-    wharf.others = [list('boat-n', 'north', [], 'boat-n-2')];
-    await m.pass();
+    m.onAttention([list('boat-n', 'north', [], 'boat-n-2')]);
     expect(readOtherBoats()?.boats[0]?.attention).toEqual([]);
-  });
-
-  it.each([403, 404])('removes the lists and waits half an hour when the wharf answers %i', async (status) => {
-    writeOtherBoats({ wharf: 'lobstah', at: new Date(now).toISOString(), boats: [{ ...list('boat-n', 'north', [item('work:n')]), attention: [item('work:n')] }] });
-    const wharf = Object.assign(new FakeWharf(), { refuse: status });
-    const m = mirror(wharf);
-    await m.pass({ attention: true });
-    expect(fs.existsSync(otherBoatsPath())).toBe(false);
-    wharf.refuse = undefined;
-    await m.pass({ attention: true });
-    expect(wharf.reads).toHaveLength(0);
-    now += MIRROR_ATTENTION_OFF_MS;
-    await m.pass();
-    expect(wharf.reads).toHaveLength(1);
   });
 });
 

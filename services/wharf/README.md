@@ -311,8 +311,8 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Addressed work boat | GET requests/starts; POST requests/:id/start | Read only its helm-authorized trap starts; consume once or record repo refusal before expiry |
 | Signed-in person | POST requests (kind `review-dismiss`) | Ask the boat that published a review to dismiss it (deleting the pending draft); authorized at once and addressed to that boat, no helm and no event. Sending a review happens in the review tool |
 | Addressed work boat | GET requests/reviews; POST requests/:id/start | Read the review requests addressed to it; mark each done or refused before expiry. The boat acts on GitHub with its own token |
-| Mirror boat | PUT mirror/snapshot | Replace this boat's latest glass snapshot: gzip, at most 2 MB, never carrying the page token |
-| Mirror boat | GET mirror/calls; POST mirror/calls/:id/take, answer | The calls addressed to it (and `watchedUntil` while a hosted glass is open); take one, then answer it with the local glass's status, type and body |
+| Mirror boat | PUT mirror/snapshot | Replace this boat's latest glass snapshot: gzip, at most 2 MB, never carrying the page token. A boat with its socket open sends it as a `snapshot` frame instead |
+| Mirror boat | POST mirror/calls/:id/take, answer | Take a pushed call, then answer it with the local glass's status, type and body; a boat with its socket open answers with an `answer` frame instead. `GET mirror/calls` is 410: calls are pushed, never polled |
 | Mirror boat | GET mirror/files/:file | A file the person attached to a relayed answer for this boat |
 | Signed-in person | GET mirror; POST mirror/calls; POST mirror/files | The hosted glass's side: see Mirror boats. `GET mirror/calls/:id` is 410: a call is never polled |
 | Signed-in person | POST mirror/relay; GET mirror/read?boat=&path= | One call, held open until the boat answers (no polling), or 202 after 20 seconds. Posting the same id again waits on the same call. `read` is a relayed read in one GET, for an image's `src`. A tab with its socket open relays on the socket instead |
@@ -439,9 +439,12 @@ each boat's latest snapshot and calls in transit, never a second record.
   glass's own reads and writes are its `POST /requests` kinds, from
   `MIRROR_READ_PATHS` and `MIRROR_WRITE_KINDS` in
   `packages/core/src/backend-model.ts`. Focus is never relayed. The boat checks
-  the same lists again before it runs a call. A new call sends that boat's
-  sockets `{ "type": "mirror-call" }`; the boat takes it, runs it against its
-  local glass over loopback, and answers. A glass tab sends its call on its
+  the same lists again before it runs a call. A new call is pushed whole to
+  that boat's socket (`{"t":"call","call"}`), and a boat that resumes gets
+  every call still queued for it; the boat runs it against its local glass
+  over loopback and answers with a binary `answer` frame (the call's id, the
+  status and type, then the body), which takes and answers it in one. A boat
+  without its socket takes and answers over HTTP. A glass tab sends its call on its
   socket (`{"t":"call","id","boat","read"|"write","files"}`), is answered
   `result` 202 once the call stands, and gets the boat's answer pushed as a
   binary `answer` frame: the boat's status, type and body (up to 1 MiB; a
@@ -454,23 +457,28 @@ each boat's latest snapshot and calls in transit, never a second record.
   `POST /api/glass/mirror/files` (`X-File-Name`, `X-Mirror-Boat`) and waits ten
   minutes for its boat's `GET mirror/files/:file`.
 - **Watching.** A glass tab with its socket open is watching, for as long as
-  it stays connected; reading the mirror list also marks it for 30 seconds.
-  The boats hear `{ "type": "mirror-watch", "until": … }` when a tab connects,
-  and `GET mirror/calls` carries `watchedUntil`, so a boat puts often only while
-  someone is looking. A tab hidden for a minute closes its socket.
-- **Pushed snapshots.** Each snapshot a boat puts is pushed to every open glass
-  tab as a binary `snapshot` frame (`boat`, `name`, `at`, `etag`, then the gzip
-  the boat put). The tab shows it with no request, and polls on no timer while
-  its socket is open.
-- **Attention lists.** Each mirror boat also puts the items its pet walks,
-  without ages, with `PUT mirror/attention` (`{ attention: [...] }`, at most 500
-  items and 256 KB). An unchanged list keeps its time. A changed one sends
-  `{ "type": "attention" }` to the sockets of the other boats granted
-  `attention`, never to the boat that put it. A boat granted `attention` (asked
-  for with the device request's `attention: true`, beside `mirror: true`) reads
-  every other unrevoked mirror boat's list with `GET mirror/attention`, which
-  takes the same `?known=` as the hosted glass's list. Its read never marks a
-  hosted glass as open. `POST mirror/attention/acks` (`{ boat, key, stateHash }`)
+  it stays connected. Each mirror boat hears `{"t":"watch","on":true}` when the
+  first tab connects and `{"t":"watch","on":false}` when the last one closes,
+  and the current state on every resume. A watched boat reads its local glass
+  every two seconds and sends a snapshot when it changed; an unwatched one
+  sends nothing to the wharf at all (it still reads every 30 seconds, on
+  loopback, for its walking list). A tab hidden for a minute closes its socket.
+- **Pushed snapshots.** Each snapshot a boat sends is pushed to every open
+  glass tab as a binary `snapshot` frame (`boat`, `name`, `at`, `etag`, then the
+  gzip the boat put). The tab shows it with no request, and polls on no timer
+  while its socket is open. A snapshot sent on the boat's socket is stored (its
+  row and its R2 object, which `GET mirror` and a reopened tab read) at most
+  once a minute; the pushes between go out unstored. A put over HTTP is always
+  stored.
+- **Attention lists.** Each mirror boat also sends the items its pet walks,
+  without ages, on its socket when they change (`{"t":"attention","attention":
+  [...]}`, at most 500 items and 256 KB), and again after a reconnect. An
+  unchanged list keeps its time. A changed one is pushed, as every other
+  unrevoked mirror boat's list (`{"t":"attention","boats":[...]}`), to the
+  sockets of the other boats granted `attention`, never to the boat that sent
+  it; a boat granted `attention` (asked for with the device request's
+  `attention: true`, beside `mirror: true`) also gets the lists on every
+  resume. `GET` and `PUT mirror/attention` are 410. `POST mirror/attention/acks` (`{ boat, key, stateHash }`)
   queues one `attention-ack` call for the boat that owns the item, as a hosted
   glass click does; a boat may not use it for its own items. The grant reads
   only these lists: no snapshot, brief, log, setting or file of another boat.

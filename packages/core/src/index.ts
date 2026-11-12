@@ -3,6 +3,7 @@ export * from './backend.js';
 export * from './repo-identity.js';
 export * from './backend-scope.js';
 export * from './wharf-backend.js';
+export * from './wharf-socket.js';
 export * from './hosted-cache.js';
 export * from './stats.js';
 export * from './attachments.js';
