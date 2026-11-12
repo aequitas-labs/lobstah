@@ -71,6 +71,10 @@ boat on wharf grounds falls back to reading every 30 seconds.
   `~/.agent-turn/<session>/` instead of adding their own Stop hook, and the
   daemon runs it and points the trap at what's new. `docs/turn-end.md` is the
   contract. (#466)
+- `lobstah doctor` has a `turn waits` row. It lists every other Stop hook a
+  harness loads, warns about a long one whose tool never registered a wait,
+  and shows the waits lobstah runs, warning about one that keeps failing.
+  (#469)
 
 ### Also new
 
