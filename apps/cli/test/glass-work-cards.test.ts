@@ -100,7 +100,7 @@ describe('a PR card', () => {
     expect([...card(41).querySelectorAll('.gstate .gchip')].map(text)).toEqual(['Open', 'conflicts']);
     // One main action, a big button with its icon; no Ack: opening the card acks it.
     expect([...card(41).querySelectorAll('.gactions button')].map(text)).toEqual(['Merge when green']);
-    expect(card(41).querySelector('.gactions .bigbtn svg.acticon')).toBeTruthy();
+    expect(card(41).querySelector('.gactions .btn-primary svg.acticon')).toBeTruthy();
     expect([...card(42).querySelectorAll('.gactions button')].map(text)).toEqual([]);
     expect([...card(42).querySelectorAll('.gactions a')].map((a) => a.getAttribute('aria-label'))).toEqual(['Open']);
     // ↗ Open sits at the bar's right on every card.
@@ -139,7 +139,7 @@ describe('a PR card', () => {
       expect(style(b).getPropertyValue('font-size'), b.className).toBe('12px');
     }
     for (const bar of g.$$('#prs .card .gactions')) expect(style(bar).getPropertyValue('gap')).toBe('6px');
-    for (const open of g.$$('#prs .card .gactions .ibtn')) expect(style(open).getPropertyValue('min-width')).toBe('32px');
+    for (const open of g.$$('#prs .card .gactions .btn-icon')) expect(style(open).getPropertyValue('min-width')).toBe('32px');
     // Open stays pushed to the bar's right, whatever the one size sets.
     for (const open of g.$$('#prs .card .gactions .gopenbtn')) expect(style(open).getPropertyValue('margin-left')).toBe('auto');
   });
@@ -264,6 +264,7 @@ describe('a review card', () => {
     expect(text(box.querySelector('.sub'))).toContain('the head moved');
     expect(text(box.querySelector('.rv-person'))).toContain('maya');
     expect(text(box.querySelector('.rv-staged'))).toBe('Open pending review');
-    expect([...box.querySelectorAll('button')].map(text)).toEqual(['Redraft', 'Skip']);
+    // Its actions; the modal's close is a button too.
+    expect([...box.querySelectorAll('button:not(.x)')].map(text)).toEqual(['Redraft', 'Skip']);
   });
 });

@@ -8,6 +8,7 @@ import { ReportSection } from './report.js';
 import { LinkedText } from './links.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { closeReportSheet } from '../actions.js';
+import { buttonClass } from './button.js';
 
 /**
  * A report on its own page (`/report/<key>`): fetched once and rendered
@@ -58,7 +59,7 @@ export function ReportSheet({ reportKey }: { reportKey: string | null }) {
   const title =
     view.state === 'ready' ? view.report.title : (getState().snapshot?.reports?.find((r) => r.key === reportKey)?.title ?? 'Report');
   return html`<div class="rsheet" role="dialog" aria-modal="true" aria-labelledby="rsheet-title">
-    <div class="rbar"><button type="button" class="btn rback" ref=${back} onClick=${closeReportSheet}>‹ Back</button><b id="rsheet-title" class="rbartitle">${LinkedText(title)}</b></div>
+    <div class="rbar"><button type="button" class=${buttonClass('secondary', 'md', 'rback')} ref=${back} onClick=${closeReportSheet}>‹ Back</button><b id="rsheet-title" class="rbartitle">${LinkedText(title)}</b></div>
     <div class="rbody"><${ReportView} view=${view} /></div>
   </div>`;
 }

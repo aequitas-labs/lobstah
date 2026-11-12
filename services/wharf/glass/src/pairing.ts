@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { HttpError, json } from './api.js';
 import { html } from './common.js';
 import logo from '../../../../docs/assets/favicon.png';
+import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
 
 /**
  * Pairing a phone's passkey with a boat (ume 2ec9c88b-193, intent
@@ -116,9 +117,9 @@ export function PasskeyPairing({ signedOut }: { signedOut: (status: 401 | 403) =
   const copy = COPY[step];
   const body =
     step === 'ready'
-      ? html`<div class="auth-consent-actions"><button class="auth-github auth-consent-primary" onClick=${() => void start()}>Make a passkey</button></div>`
+      ? html`<div class="auth-consent-actions"><${Button} variant="primary" size="lg" class="auth-consent-primary" onClick=${() => void start()}>Make a passkey<//></div>`
       : step === 'failed'
-        ? html`<div class="auth-consent-actions"><button class="auth-github auth-consent-primary" onClick=${() => void start()}>Try again</button></div>`
+        ? html`<div class="auth-consent-actions"><${Button} variant="primary" size="lg" class="auth-consent-primary" onClick=${() => void start()}>Try again<//></div>`
         : step === 'paired'
           ? html`<a class="auth-consent-link" href="/">Open the glass</a>`
           : null;

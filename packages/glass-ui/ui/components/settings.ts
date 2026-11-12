@@ -3,6 +3,7 @@ import { html } from '../html.js';
 import { can, capabilities } from '../backend.js';
 import { passkeysWorkHere, registerRunPasskey, runPasskeyUrl } from '../actions.js';
 import type { GlassState } from '../store.js';
+import { Button } from './button.js';
 
 /**
  * A repo's traps in use beside its cap, `3 of 5 traps in use`, then the stowed
@@ -52,7 +53,7 @@ export function RunPasskeySettings({
     <div class=${count ? 'ok' : 'dim'}>${count ? `${count} passkey${count === 1 ? '' : 's'} registered${passkeys?.newestAt ? `, newest ${new Date(passkeys.newestAt).toLocaleString()}` : ''}. Run asks for one each time; another needs one of these and the macOS password.` : 'No passkey yet: register one to run cards. Registering asks for the macOS password; Run asks for the passkey (Touch ID) each time.'}</div>
     ${
       passkeysWorkHere()
-        ? html`<div class="runfoot"><button type="button" class="btn runregister" disabled=${!!passkey?.busy} onClick=${() => void registerRunPasskey()}>${passkey?.busy ? 'Registering…' : count ? 'Register another passkey' : 'Register a passkey'}</button></div>`
+        ? html`<div class="runfoot"><${Button} class="runregister" disabled=${!!passkey?.busy} onClick=${() => void registerRunPasskey()}>${passkey?.busy ? 'Registering…' : count ? 'Register another passkey' : 'Register a passkey'}<//></div>`
         : html`<div class="dim">Passkeys work from <a href=${runPasskeyUrl('#settings')}>${runPasskeyUrl().replace(/\/$/, '')}</a>: register one there.</div>`
     }
     ${passkey?.done && html`<div class="ok">${passkey.done}</div>`}

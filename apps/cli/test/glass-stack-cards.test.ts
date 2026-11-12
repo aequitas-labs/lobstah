@@ -195,7 +195,7 @@ describe('Merge stack when green', () => {
     const g = await mine();
     const b = button(g)!;
     expect(text(b)).toBe('Merge stack when green');
-    expect(b.className).toContain('bigbtn');
+    expect(b.className).toContain('btn-primary');
     expect(b.getAttribute('title')).toBe('Merges #41, #42 and #43 into main in order, as a merge commit, once all are green');
     // Open stays last, at the bar's right.
     expect(g.$('#prs .stackcard > .gactions')!.lastElementChild!.className).toContain('gopenbtn');

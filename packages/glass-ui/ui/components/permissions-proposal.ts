@@ -4,6 +4,7 @@ import type { DecisionCard } from '../../src/glass-diff.js';
 import { selectProposalRule, sendPermissionsProposal, setDraft } from '../actions.js';
 import { html } from '../html.js';
 import type { DecisionDraft } from '../store.js';
+import { Button } from './button.js';
 
 type ProposalCard = Extract<DecisionCard, { kind: 'decision' }>;
 
@@ -40,9 +41,9 @@ export function PermissionsProposalCard({ card, draft }: { card: ProposalCard; d
       </details>
     </div>
     <div class="doptions">
-      <button type="button" class="btn dopt proposal-approve" disabled=${busy || !selected.length || !reviewed} onClick=${() => void sendPermissionsProposal(card.key, 'Approve')}><span class="dlabel">${draft?.sending ? 'Applying…' : 'Approve'}</span></button>
-      <button type="button" class="btn dopt proposal-reject" disabled=${busy} onClick=${() => void sendPermissionsProposal(card.key, 'Reject')}><span class="dlabel">Reject</span></button>
-      <button type="button" class="btn dopt proposal-edit" aria-pressed=${editing ? 'true' : 'false'} disabled=${busy} onClick=${() => setDraft(card.key, { proposalEditing: true })}><span class="dlabel">Edit</span></button>
+      <${Button} size="lg" class="dopt proposal-approve" disabled=${busy || !selected.length || !reviewed} onClick=${() => void sendPermissionsProposal(card.key, 'Approve')}><span class="dlabel">${draft?.sending ? 'Applying…' : 'Approve'}</span><//>
+      <${Button} size="lg" class="dopt proposal-reject" disabled=${busy} onClick=${() => void sendPermissionsProposal(card.key, 'Reject')}><span class="dlabel">Reject</span><//>
+      <${Button} size="lg" class="dopt proposal-edit" aria-pressed=${editing ? 'true' : 'false'} disabled=${busy} onClick=${() => setDraft(card.key, { proposalEditing: true })}><span class="dlabel">Edit</span><//>
     </div>
     ${draft?.error && html`<div class="bad derr">${draft.error}</div>`}
   </div>`;

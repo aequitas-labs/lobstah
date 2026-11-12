@@ -537,7 +537,7 @@ describe('glass: the open-window button', () => {
       // A card shows the icon alone, named; the table keeps its words.
       if (view === 'cards') expect([text(button), !!button.querySelector('svg.openicon')]).toEqual(['', true]);
       else expect(text(button)).toBe('↗ Open');
-      expect(button.className).toBe('btn open');
+      expect(button.className).toBe('btn btn-secondary open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }

@@ -5,6 +5,7 @@ import { html } from '../html.js';
 import { Age, lastPassText } from './common.js';
 import { LinkedText } from './links.js';
 import { can } from '../backend.js';
+import { Button } from './button.js';
 
 /** The times the box offers in one click. They go through the same parser as anything typed. */
 const SCHEDULE_PRESETS: ReadonlyArray<{ label: string; until: string }> = [
@@ -50,7 +51,7 @@ function TodoSchedule({ todo }: { todo: TodoView }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const label = todo.dueAt || todo.overdue ? 'Snooze' : 'Set a time';
   if (!open)
-    return html`<button class="btn todo-schedule-open" type="button" onClick=${() => (setRefusal(null), setOpen(true))}>${label}</button>`;
+    return html`<${Button} class="todo-schedule-open" type="button" onClick=${() => (setRefusal(null), setOpen(true))}>${label}<//>`;
   const save = async (e: Event) => {
     e.preventDefault();
     const reason = await scheduleTodo(todo.groundsKey, todo.id, until);
@@ -62,10 +63,10 @@ function TodoSchedule({ todo }: { todo: TodoView }) {
   };
   return html`<form class="todo-schedule" onSubmit=${save}>
     <label class="dim">${label} #${todo.id} until</label>
-    ${SCHEDULE_PRESETS.map((preset) => html`<button class="btn" type="button" onClick=${() => setUntil(preset.until)}>${preset.label}</button>`)}
+    ${SCHEDULE_PRESETS.map((preset) => html`<${Button} type="button" onClick=${() => setUntil(preset.until)}>${preset.label}<//>`)}
     <input type="text" name="until" placeholder="thu 14:00" aria-label=${`${label} todo ${todo.id} until`} value=${until} onInput=${(e: Event) => setUntil((e.target as HTMLInputElement).value)} />
-    <button class="btn" type="submit" disabled=${!until.trim()}>Save</button>
-    <button class="btn" type="button" onClick=${() => setOpen(false)}>Cancel</button>
+    <${Button} type="submit" disabled=${!until.trim()}>Save<//>
+    <${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//>
     ${refusal && html`<span class="bad">${refusal}</span>`}
   </form>`;
 }

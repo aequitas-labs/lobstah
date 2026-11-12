@@ -5,6 +5,7 @@ import { closeModal, reviewRequest } from '../actions.js';
 import { ExpandingCard } from './card.js';
 import { RepoName, TRAP_MARK } from './common.js';
 import type { Children } from '../html.js';
+import { Button } from './button.js';
 
 export function activeSessionGrants(grants: Grant[], now = Date.now()): Grant[] {
   return grants.filter((g) => g.mode === 'session' && !g.revokedAt && !!g.expiresAt && Date.parse(g.expiresAt) > now);
@@ -56,10 +57,10 @@ const midLine = (text: string): string => text.charAt(0).toLowerCase() + text.sl
 
 /** Revoke, at the right of a grant card's line 2: it never expands the card. */
 const revokeButton = (busy: boolean, revoke: () => void) =>
-  html`<button class="btn" disabled=${busy} onClick=${(e: Event) => {
+  html`<${Button} disabled=${busy} onClick=${(e: Event) => {
     e.stopPropagation();
     revoke();
-  }}>Revoke</button>`;
+  }}>Revoke<//>`;
 
 const usesText = (uses: number) => `${uses} ${uses === 1 ? 'use' : 'uses'}`;
 

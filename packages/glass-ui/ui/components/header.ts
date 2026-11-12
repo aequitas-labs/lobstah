@@ -10,6 +10,7 @@ import { capabilities, visibleTabs } from '../backend.js';
 import { host } from '../host.js';
 import { getState } from '../store.js';
 import { prsNeedingYou } from './prs.js';
+import { Button } from './button.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -295,7 +296,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
       html`<button key=${repo || '*'} type="button" class=${'repochip' + (st.repo === repo ? ' on' : '')} aria-pressed=${st.repo === repo} onClick=${() => setPrefs({ repo })}>${label}</button>`;
     return html`<div class="bottombar searching" ref=${root}>
       <div class="repochips" aria-label="repos">${chip('', 'all repos')}${repos.map((r) => chip(r, r))}</div>
-      <div class="bbrow"><input ref=${search} type="search" aria-label="search" placeholder="search id · note · brief" value=${st.q} onInput=${(e: Event) => setPrefs({ q: value(e) })} /><button type="button" class="bbclose" aria-label="close search" onClick=${() => setMode('bar')}>✕</button></div>
+      <div class="bbrow"><input ref=${search} type="search" aria-label="search" placeholder="search id · note · brief" value=${st.q} onInput=${(e: Event) => setPrefs({ q: value(e) })} /><${Button} variant="icon" class="bbclose" label="close search" onClick=${() => setMode('bar')}>✕<//></div>
     </div>`;
   }
   const tabs = visibleTabs();
@@ -311,10 +312,10 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
         <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${() => setMode('bar')}>${TAB_LABEL[t]}</a>`)}</nav>
         ${fleet && html`<div class="pmsec">fleet</div><div class="pmchips">${fleet}</div>`}
         <div class="pmsec">you</div>
-        <div class="pmyou"><button type="button" class="btn" role="menuitem" onClick=${() => {
+        <div class="pmyou"><${Button} role="menuitem" onClick=${() => {
           setMode('bar');
           showModal('settings', 'browser');
-        }}>⚙ settings</button>${host().signOut && html`<button type="button" class="btn" role="menuitem" onClick=${() => host().signOut!()}>Sign out</button>`}</div>
+        }}>⚙ settings<//>${host().signOut && html`<${Button} role="menuitem" onClick=${() => host().signOut!()}>Sign out<//>`}</div>
       </div>`
     }
     <nav class="bbrow" aria-label="Spyglass">
@@ -344,7 +345,7 @@ export function Header({
   unread?: number;
 }) {
   return [
-    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1>${d && inp && html`<span class="phone-helm"><${HelmPill} inp=${inp.chips} /></span>`}<span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
+    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1>${d && inp && html`<span class="phone-helm"><${HelmPill} inp=${inp.chips} /></span>`}<span id="settings-slot"><${Button} variant="icon" id="gearbtn" label="settings" onClick=${() => showModal('settings', 'browser')}>⚙<//></span></div>`,
     d && inp && html`<${Strip} d=${d} inp=${inp.chips} />`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<${Navigation} d=${d} tab=${tab} unread=${unread} />`,

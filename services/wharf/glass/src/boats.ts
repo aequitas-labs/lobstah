@@ -10,6 +10,7 @@ import { ExpandingCard } from '../../../../packages/glass-ui/ui/components/card.
 import type { CardState } from '../../../../packages/glass-ui/ui/components/card.js';
 import { MIRROR_STALE_MS } from '../../../../packages/glass-ui/ui/mirror-merge.js';
 import type { MirrorBoatView } from '../../../../packages/glass-ui/ui/mirror-merge.js';
+import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
 
 /** online, asleep or revoked, from its mirror snapshot's age where it mirrors, else its last check-in. */
 function boatState(b: Boat, mirror: MirrorBoatView | undefined, now = Date.now()): CardState {
@@ -51,10 +52,10 @@ export function Boats({
     const revoke =
       !b.revoked &&
       (confirmation === b.id
-        ? html`<button class="btn" onClick=${stop(async () => {
+        ? html`<${Button} variant="danger" onClick=${stop(async () => {
             if (await action(`boats/${b.id}/revoke`, {})) setConfirmation('');
-          })}>revoke ${b.name}</button><button class="btn" onClick=${stop(() => setConfirmation(''))}>keep ${b.name}</button>`
-        : html`<button class="btn" onClick=${stop(() => setConfirmation(b.id))}>revoke…</button>`);
+          })}>revoke ${b.name}<//><${Button} onClick=${stop(() => setConfirmation(''))}>keep ${b.name}<//>`
+        : html`<${Button} onClick=${stop(() => setConfirmation(b.id))}>revoke…<//>`);
     return html`<${ExpandingCard}
       key=${b.id}
       cls="boat-card"
@@ -69,19 +70,19 @@ export function Boats({
         html`<div>${b.repos.join('') ? LinkedText(b.repos.join(' · ')) : 'no repos checked in'}</div>`,
         html`<div class="dim">last check-in ${when(b.lastCheckIn)}</div>`,
         !b.revoked &&
-          html`<div><button class="btn" onClick=${() => {
+          html`<div><${Button} onClick=${() => {
             setConfirmation('request:' + b.id);
             setRepo(b.repos[0] ?? '');
-          }}>request trap…</button></div>`,
+          }}>request trap…<//></div>`,
         confirmation === 'request:' + b.id &&
           html`<form onSubmit=${async (e: Event) => {
             e.preventDefault();
             if (await action('requests', { id: crypto.randomUUID(), kind: 'trap-request', boat: b.id, repo })) setConfirmation('');
-          }}><label>repo remote <input aria-label="trap request repo" value=${repo} maxLength="256" onInput=${(e: Event) => setRepo(value(e))} /></label><button class="btn" disabled=${!repo}>queue trap request</button><div class="dim">Waits for helm; only opted-in boats can fulfill it. Expires in 10 minutes.</div></form>`,
+          }}><label>repo remote <input aria-label="trap request repo" value=${repo} maxLength="256" onInput=${(e: Event) => setRepo(value(e))} /></label><${Button} type="submit" disabled=${!repo}>queue trap request<//><div class="dim">Waits for helm; only opted-in boats can fulfill it. Expires in 10 minutes.</div></form>`,
       ]}
     />`;
   };
   return html`<div class="sub">Enroll or change a boat's name/access with <code>lobstah wharf login</code> on that boat, then approve here. No browser edit or grants.</div><div class="cards">${boats.map(card)}</div>
     <${SlackLinkSection} />
-    <div class="sec">account</div>${confirmation === 'account' ? html`<div class="bad">Delete this account's dispatches, messages, files, boats and sign-in data? This cannot be undone.<button class="btn" onClick=${deleteAccount}>confirm delete account</button><button class="btn" onClick=${() => setConfirmation('')}>keep account</button></div>` : html`<button class="btn" onClick=${() => setConfirmation('account')}>delete account…</button>`}`;
+    <div class="sec">account</div>${confirmation === 'account' ? html`<div class="bad">Delete this account's dispatches, messages, files, boats and sign-in data? This cannot be undone.<${Button} variant="danger" onClick=${deleteAccount}>confirm delete account<//><${Button} onClick=${() => setConfirmation('')}>keep account<//></div>` : html`<${Button} onClick=${() => setConfirmation('account')}>delete account…<//>`}`;
 }

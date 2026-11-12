@@ -42,15 +42,16 @@ import { getState } from '../store.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 import { GrantChip } from './session-grants.js';
 import { reviewModal } from './reviews.js';
+import { Button } from './button.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
 
-const close = html`<span class="x" onClick=${closeModal}>×</span>`;
+const close = html`<${Button} variant="icon" class="x" label="close" onClick=${closeModal}>×<//>`;
 
 /** Browser display preferences are editable; configuration and helm values stay read-only. */
 function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
-  const viewOptions = html`<span class="seg" role="group" aria-label="view">${(['table', 'cards'] as const).map((view) => html`<button type="button" class=${view === prefs.view ? 'on' : ''} aria-pressed=${view === prefs.view} onClick=${() => setPrefs({ view })}>${view}</button>`)}</span>`;
-  const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<button type="button" class=${lobs === prefs.lobs ? 'on' : ''} aria-pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}</button>`)}</span>`;
+  const viewOptions = html`<span class="seg" role="group" aria-label="view">${(['table', 'cards'] as const).map((view) => html`<${Button} pressed=${view === prefs.view} onClick=${() => setPrefs({ view })}>${view}<//>`)}</span>`;
+  const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<${Button} pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}<//>`)}</span>`;
   const kinds = item.attentionError ? item.attentionError : (item.attentionKinds || []).join(' · ');
   return [
     close,
@@ -193,12 +194,12 @@ function JobControls({ id }: { id: string }) {
           value=${message}
           onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}
           onKeyDown=${onSendKey(canSend, () => void send())}
-        ></textarea><div class="jobsend"><button class="btn" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()}>Queue message for helm</button>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
+        ></textarea><div class="jobsend"><${Button} type="submit" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()}>Queue message for helm<//>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
     can('cancel') &&
       html`<div class="sec">cancel</div>${
         confirming
-          ? html`<div>Cancel this dispatch? Its agent stops. <button class="btn" onClick=${cancel}>Cancel dispatch</button> <button class="btn" onClick=${() => setConfirming(false)}>Keep dispatch</button></div>`
-          : html`<button class="btn" onClick=${() => setConfirming(true)}>Cancel dispatch…</button>`
+          ? html`<div>Cancel this dispatch? Its agent stops. <${Button} onClick=${cancel}>Cancel dispatch<//> <${Button} onClick=${() => setConfirming(false)}>Keep dispatch<//></div>`
+          : html`<${Button} onClick=${() => setConfirming(true)}>Cancel dispatch…<//>`
       }`,
     result && html`<div class=${result.ok ? 'ok' : 'bad'} role=${result.ok ? 'status' : 'alert'}>${result.text}</div>`,
   ];

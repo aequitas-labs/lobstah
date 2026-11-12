@@ -20,6 +20,7 @@ import { can, fileUrl } from '../backend.js';
 import { ageText } from './age.js';
 import { VERB_TONE, VerbIcon, isIconVerb } from './run-status.js';
 import type { VerbTone } from './run-status.js';
+import { Button } from './button.js';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
@@ -135,7 +136,7 @@ export function DesktopStartAction({ url, decision = false }: { url: string; dec
   return html`<div class="desktop-start" onClick=${stop}>
     ${
       sessionLinkOpens()
-        ? html`<a class="btn dopt open" href=${url}>Open Claude Code</a>`
+        ? html`<${Button} class="dopt open" href=${url}>Open Claude Code<//>`
         : html`<div class="dim">${decision ? 'Open this start card on the Mac to open Claude Code' : 'Open Claude Code on the Mac to sign on'}</div>`
     }
     ${decision && html`<div class="dim">The card clears after the configured session signs on and parks.</div>`}
@@ -196,7 +197,7 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
       name: 'Raise window',
       where: 'on this Mac',
       control: (text) =>
-        html`<button class="btn open" title="Raise this trap's window on this Mac" aria-label="Raise this trap's window on this Mac" onClick=${clicked}>${text}</button>`,
+        html`<${Button} class="open" title="Raise this trap's window on this Mac" aria-label="Raise this trap's window on this Mac" onClick=${clicked}>${text}<//>`,
     });
   }
   if (t.liveLink) {
@@ -206,7 +207,7 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
       name: 'Open live in Claude',
       where: 'any device',
       control: (text) =>
-        html`<a class="btn open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" aria-label="Open this live session in Claude" onClick=${stop}>${text}</a>`,
+        html`<${Button} class="open" href=${href} target="_blank" rel="noopener noreferrer" title="Open this live session in Claude" aria-label="Open this live session in Claude" onClick=${stop}>${text}<//>`,
     });
   }
   if (t.link && !desktopSession(t) && here && sessionLinkOpens()) {
@@ -216,7 +217,7 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
       name: 'Session link',
       where: 'opens its app on this Mac',
       control: (text) =>
-        html`<a class="btn open" href=${href} title="Open this session's link in its app" aria-label="Open this session's link in its app" onClick=${stop}>${text}</a>`,
+        html`<${Button} class="open" href=${href} title="Open this session's link in its app" aria-label="Open this session's link in its app" onClick=${stop}>${text}<//>`,
     });
   }
   return routes;
@@ -270,7 +271,7 @@ export function windowAction(t: GlassTrap): Children {
   if (!t.live) {
     if (!(desktopSession(t) && t.link) || !sessionLinkOpens()) return null;
     // The server focuses live traps only; a signed-off app session opens its stored link.
-    return html`<span class="winaction"><a class="btn open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open</a></span>`;
+    return html`<span class="winaction"><${Button} class="open" href=${t.link} title="Open this session in its app" onClick=${stop}>↗ Open<//></span>`;
   }
   const [best] = trapRoutes(t);
   if (!best) return noRouteNote(t);
@@ -308,9 +309,9 @@ export function ShowOlder({ kind, more }: { kind: GlassOlderKind; more: OlderCon
   if (!can('older') || (!more.left && !more.error)) return null;
   return html`<div class="older">${
     more.left > 0 &&
-    html`<button class="btn" disabled=${more.loading} onClick=${() => void loadOlder(kind)}>${
+    html`<${Button} disabled=${more.loading} onClick=${() => void loadOlder(kind)}>${
       more.loading ? 'loading…' : `show ${Math.min(more.left, 50)} older (of ${more.left})`
-    }</button>`
+    }<//>`
   }${more.error && html` <span class="bad">${more.error}</span>`}</div>`;
 }
 
@@ -328,7 +329,7 @@ function CmdRow({ text, label, href }: { text: string; label?: string; href?: st
     href
       ? html`<code><a href=${href} onClick=${stop}>${text}</a></code>`
       : html`<code class=${copied === 'code' ? 'copied' : undefined} title="click to copy" onClick=${copy('code')}>${text}</code>`,
-    html`<button title="copy" onClick=${copy('button')}>${copied === 'button' ? '✓' : '⧉'}</button>`,
+    html`<${Button} variant="icon" label="copy" onClick=${copy('button')}>${copied === 'button' ? '✓' : '⧉'}<//>`,
   ];
   return label ? html`<span class="cmd inline">${content}</span>` : html`<div class="cmd">${content}</div>`;
 }
@@ -831,7 +832,7 @@ export function trapOpen(t: GlassTrap, label: Children = '↗ Open'): Children {
   if (t.requested || t.starting) return null;
   if (!t.live) {
     if (!(desktopSession(t) && t.link) || !sessionLinkOpens()) return null;
-    return html`<span class="winaction gopenbtn"><a class="btn open" href=${t.link} title="Open this session in its app" aria-label="Open this session in its app" onClick=${stop}>${label}</a></span>`;
+    return html`<span class="winaction gopenbtn"><${Button} class="open" href=${t.link} title="Open this session in its app" aria-label="Open this session in its app" onClick=${stop}>${label}<//></span>`;
   }
   const [best] = trapRoutes(t);
   if (!best) return null;
@@ -910,12 +911,12 @@ export function NewTrap() {
     if (!error) setOpen(false);
   };
   if (!open)
-    return html`<span class="newtrap"><button class="btn" onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap</button></span>`;
+    return html`<span class="newtrap"><${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//></span>`;
   return html`<form class="newtrap" onClick=${stop} onSubmit=${submit}>
     <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
     <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
-    <button class="btn" type="submit" disabled=${!chosen}>Request</button>
-    <button class="btn" type="button" onClick=${() => setOpen(false)}>Cancel</button>
+    <${Button} type="submit" disabled=${!chosen}>Request<//>
+    <${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//>
     ${result && html`<span class="bad">${result}</span>`}
   </form>`;
 }
