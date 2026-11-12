@@ -1695,6 +1695,13 @@ a.lob {
 .drow .dsent {
   flex: 0 0 auto;
 }
+/* A run card's terminal, before its title (components/run-status.ts RunKindIcon). */
+.drow .runkind {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-self: center;
+  color: var(--dim);
+}
 /* A dispatch on the deck's list view: two lines, the same parts as its card. */
 .deckrow {
   display: flex;
@@ -3005,11 +3012,38 @@ footer .glass-brand {
   max-width: 420px;
   box-sizing: border-box;
 }
+/* A run card's actions in the dock: why Run waits, if it does, then one row of large buttons. */
 .runfoot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+.runnote {
+  font-size: 12px;
+}
+.runactions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+.runactions .btn,
+.runactions .btn.dopt {
+  flex: 1 1 0;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+  white-space: nowrap;
+  text-align: center;
+  text-decoration: none;
+}
+/* Decline keeps its number key's hint, quietly. */
+.runactions .btn.dopt .dkey {
+  font-size: 11px;
 }
 .runbtn:not([disabled]) {
   border-color: var(--ok);
