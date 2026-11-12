@@ -1,5 +1,110 @@
 # Changelog
 
+## 0.8.8 — 2026-11-11
+
+### Run cards
+
+The helm can hand a person a command to run as a run card:
+`lobstah man ask --run <script>`, with `--input NAME:secret`, `--interactive`,
+`--cwd`, `--timeout` and `--output scrubbed|exit`. The glass shows the whole
+script. The person confirms it with a passkey on this Mac, and the glass runs
+it here with its inputs on stdin and its output scrubbed of every secret. An
+interactive card takes answers to its prompts from a console on the card. Each
+attempt is kept, with Stop, Run again and Dismiss, and prev and next still work
+after a run ends. The helm's brief tells it to offer a run card whenever a
+person must run something on the machine. (#376, #379–#381, #390, #392, #427)
+
+### Run cards from the phone
+
+A phone can run this Mac's cards from the hosted glass. Pair it once with
+`lobstah run passkey add --hosted`, which prints a link to open on the phone.
+One passkey confirmation covers 15 minutes of runs on that page. Secret inputs
+are sealed to the Mac's key in the page, so the wharf only relays sealed
+values. Stop, Run again and Dismiss work there too. An interactive card can be
+answered from the phone: each line is sealed to the Mac and signed by the page
+that started the run, so the wharf can't read, forge or replay one. (#411–#414,
+#428, #429)
+
+### Cards in Slack
+
+The wharf carries a person's cards into their Slack DM. A person links their
+own Slack from the signed-in glass. A link serves the grounds they choose. The
+wharf keeps one card per glass item and sends it through a durable outbox, and
+a boat restates its own cards (permission requests, local decisions, PR
+attention, notices) to the wharf of their grounds. From the DM a person can ask
+for work, which the helm answers, and answer a card with its buttons. A boat
+applies a Slack answer once, only while its card still stands as answered.
+Allow from Slack is on for each enrolled boat, and
+`[wharves.<name>] remoteAnswers = false` keeps Allow in the boat's own glass.
+(#301, #303, #305, #307–#311, #398)
+
+### The glass on a phone
+
+- Every glass draws the same short cards for traps, dispatches, decisions, PRs,
+  reviews, reports, grants and boats. (#400, #401, #403, #404)
+- On a phone the header is one line, the views move to a bottom bar, and
+  decision and run cards open as a full page. (#405, #406)
+- Approving a boat opens its own page. Signed out, it shows the sign-in card
+  alone, then a large code. (#393, #407)
+- The decision dock is one composer, with attach and Send as icon buttons.
+  Decisions are single clickable rows, and titles drop their leading #.
+  (#423, #424)
+- Cards show a PR's status under its title, gray subtitles, and trap and repo
+  icons. A dispatch card shows the PR of its current work, not the first one it
+  reported. (#391, #436)
+- Links that leave the glass open in a new tab, marked ↗. (#422)
+- The todo count counts open todos only. Today's done todos are a quiet line on
+  the deck and a closed Done today section on the TODO page. (#435)
+- Plain words on the glass and the wharf, and one name for a dispatch. (#409,
+  #410)
+
+### The hosted glass
+
+- Its configuration stays read-only, as on the local glass. (#396)
+- A boat's report opens on its own page, the Reviews tab shows each asker's
+  avatar, and ↗ Open shows on the traps of the boat the browser runs on. (#397)
+- Opening a job no longer stacks relayed reads into a 429. (#425)
+- With the `attention` grant, the pet walks every mirror boat's items, as the
+  hosted glass shows them. The glass's lobs and the pet walk the same list, and
+  clicking a lob acknowledges it everywhere. (#399, #420, #421)
+
+### Reviews
+
+- A finished review draft waits on the Reviews page, outside the helm's
+  decisions. (#418)
+- Turning on automatic reviews no longer starts jobs for old requests, a mode
+  change takes effect on rounds in flight, and cancelling a review reaches its
+  trap without waiting for it to park. (#394)
+- Review feedback is no longer held behind a round paused on its reviewers.
+  (#430)
+- The daily cap (`[reviews].maxPerDay`) stops only automatic reviews. A review a
+  person asks for always runs. (#431)
+
+### Traps
+
+- A Codex trap that claims work and goes silent is woken after
+  `[soak].codexClaimWakeSecs` (120), and its work goes back to the queue after
+  `[soak].codexClaimReleaseSecs` (600), with one notice to the helm. Hook trust
+  is refreshed when the Codex plugin changes. `man throw` won't start a second
+  Codex on a trap's conversation, and `man throw --stop-stale` stops the one
+  holding it. `lobstah man tidy-panes [--apply]` closes dead, duplicate and
+  leftover Codex panes. (#433)
+- A repo's trap cap counts only traps in use. Stowed and ghosted traps show
+  apart, and a trap never parks on its own PR's CI or review. (#434)
+- A permission card retires when its tool call ends, and a late answer makes no
+  grant. (#415)
+
+### Also new
+
+- Dispatch progress (queued too long, stalled, idle while working) walks on the
+  pet and the glass only when `attentionKinds` names `dispatch-progress`. The
+  helm always gets it. (#426)
+- Stacks merge into the repository's default branch, and every dispatch PR
+  stays tracked through retargets. (#388)
+- A notice nobody owns is consumed without replaying later events. (#389)
+- Contributors: agents read the writing skills before product text, and the
+  wharf's wrangler wrapper runs without `--`. (#384, #385, #395)
+
 ## 0.8.7 — 2026-11-10
 
 ### The hosted glass shows this machine's fleet
