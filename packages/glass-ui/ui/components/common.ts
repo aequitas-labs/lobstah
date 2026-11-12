@@ -441,6 +441,7 @@ export const verbWord = (verb: string): string => verb.replace(/-/g, ' ');
  * decision, red blocked or failed, grey paused, green done, grey queued or unknown.
  */
 export function verbTone(verb: string): VerbTone {
+  if (verb === 'limited') return 'bad';
   return isIconVerb(verb) ? VERB_TONE[verb] : 'dim';
 }
 
@@ -745,6 +746,7 @@ export function trapRow(t: GlassTrap): TrapRowView {
 
 /** A trap's state: starting, start failed, signed off, idle (listening or not), parked on a wait, or working a catch. */
 type TrapState =
+  | { kind: 'limited'; reason: string; resetAt?: string }
   | { kind: 'requested'; helmOn: boolean }
   | { kind: 'starting'; deadline: string }
   | { kind: 'start failed'; reason: string }
@@ -754,6 +756,7 @@ type TrapState =
   | { kind: 'working'; current: GlassDispatchSummary };
 
 function trapState(t: GlassTrap): TrapState {
+  if (t.usageLimit) return { kind: 'limited', reason: t.usageLimit.reason, resetAt: t.usageLimit.resetAt };
   if (t.requested) return { kind: 'requested', helmOn: !!getState().snapshot?.helmOn };
   if (t.starting)
     return t.starting.failedAt
@@ -774,6 +777,7 @@ function trapState(t: GlassTrap): TrapState {
  */
 export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   const s = trapState(t);
+  if (s.kind === 'limited') return 'bad';
   if (s.kind === 'working' || s.kind === 'starting') return 'warn';
   if (s.kind === 'idle' && s.listening) return 'ok';
   if (s.kind === 'start failed') return 'bad';
@@ -789,6 +793,8 @@ export function trapStatus(t: GlassTrap): { word: string; tone: 'ok' | 'warn' | 
 /** What a trap is doing now, without its state word: its card's third line. */
 export function trapWork(t: GlassTrap): Children {
   const s = trapState(t);
+  if (s.kind === 'limited')
+    return html`<span class="bad">Usage limit${s.resetAt ? ` · resets ${new Date(s.resetAt).toLocaleString()}` : ` · ${s.reason}`}</span>`;
   if (s.kind === 'requested') return s.helmOn ? 'waiting for the helm' : 'waiting for a helm';
   if (s.kind === 'starting') return 'waiting for its session to sign on';
   if (s.kind === 'start failed') return html`<span class="bad">${LinkedText(s.reason)}</span>`;
@@ -807,6 +813,7 @@ export function trapWork(t: GlassTrap): Children {
 /** trapWork as plain text: the hover title of its line. */
 export function trapWorkText(t: GlassTrap): string {
   const s = trapState(t);
+  if (s.kind === 'limited') return `${s.reason}${s.resetAt ? ` · resets ${s.resetAt}` : ''}`;
   if (s.kind === 'requested') return s.helmOn ? 'waiting for the helm' : 'waiting for a helm';
   if (s.kind === 'starting') return `waiting for its session to sign on by ${s.deadline}`;
   if (s.kind === 'start failed') return s.reason;
@@ -861,6 +868,7 @@ const workTitle = (c: GlassDispatchSummary) => c.title.slice(0, 40) || '(no titl
 export function trapNow(t: GlassTrap): Children {
   const s = trapState(t);
   const dot = html`<span class=${'dot trapdot ' + trapDotTone(t)}></span>`;
+  if (s.kind === 'limited') return [dot, html`<span class="bad">limited</span>`, ' · ', trapWork(t)];
   if (s.kind === 'requested') return [dot, html`<span class="dim">${requestedText(t, s.helmOn)}</span>`];
   if (s.kind === 'starting') return [dot, 'starting · waiting for its session to sign on'];
   if (s.kind === 'start failed') return [dot, html`<span class="bad">start failed</span>`, ' · ', LinkedText(s.reason)];
@@ -930,6 +938,7 @@ export function NewTrap() {
 /** trapNow as plain text: the hover title of a clamped meta line. */
 export function trapNowText(t: GlassTrap): string {
   const s = trapState(t);
+  if (s.kind === 'limited') return `limited · ${trapWorkText(t)}`;
   if (s.kind === 'requested') return requestedText(t, s.helmOn);
   if (s.kind === 'starting') return `starting · sign-on due by ${s.deadline}`;
   if (s.kind === 'start failed') return `start failed · ${s.reason}`;

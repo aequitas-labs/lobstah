@@ -23,6 +23,9 @@ import { withDirLock } from './dir-lock.js';
  * of consumption so nothing is ever invisible.
  */
 export type NoticeKind =
+  | 'usage-limit'
+  | 'usage-limit-warning'
+  | 'usage-limit-reset'
   | 'trap-profile-missing'
   | 'assistance-result'
   | 'trap-signed-on'

@@ -81,6 +81,8 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
+  // Provider-limited workers add a filter state the frozen page did not have.
+  for (const option of g.$$('#f-verb option')) if (option.textContent === 'limited') option.remove();
   for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar')) el.remove();
   // The phone's header parts are new (glass-phone-nav.test.ts tests them); the filter row now names its tab for them.
   const controls = g.$('.controls');

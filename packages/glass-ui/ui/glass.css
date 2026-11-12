@@ -3001,6 +3001,15 @@ footer .glass-brand {
   margin: 4px 0 0;
   padding-left: 18px;
 }
+.usage-limit-banner {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
 .runmeta {
   display: flex;
   flex-wrap: wrap;

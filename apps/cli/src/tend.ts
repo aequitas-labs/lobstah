@@ -103,6 +103,7 @@ import { worktreeView } from './worktree-view.js';
 import { backendViews, hostedAttention, hostedDecisionFrames } from './hosted-view.js';
 import { otherBoatsAttention } from './wharf-attention.js';
 import { livenessView } from './liveness-view.js';
+import { dispatchUsageLimit } from '@lobstah/core';
 import { deriveGlassPrs } from './glass-prs.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
@@ -209,7 +210,7 @@ export interface TendTrap {
   /** never | now (parked) | <age>s ago | starting (due in <n>s) | start failed */
   listening: string;
   /** Set for a reserved trap no session has signed on as yet. */
-  state?: 'starting' | 'start-failed' | 'stowed' | 'ghosted';
+  state?: 'limited' | 'starting' | 'start-failed' | 'stowed' | 'ghosted';
 }
 
 export interface TendAwaiting {
@@ -678,7 +679,8 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
   // A trap's claim with no report yet is `working`, dated from the claim.
   const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
   const held = bucket === 'queued' ? heldReason(id, lane) : undefined;
-  const state = held
+  const limited = dispatchUsageLimit(id, lane);
+  const state = limited ? 'limited' : held
     ? 'held'
     : bucket === 'queued'
       ? 'queued'
@@ -697,7 +699,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     bucket,
     state,
     ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
-    note: held ?? last?.note,
+    note: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : held ?? last?.note,
     ...(bucket === 'queued' && descriptor ? { queueReason: dispatchQueueReason(descriptor, lane) } : {}),
     // Queued work has no log yet; its time is when it entered the queue.
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),

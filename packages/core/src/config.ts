@@ -309,6 +309,8 @@ export interface HeavyRepoConfig {
 }
 
 export interface SoakConfig {
+  /** Move limited CLI catches to the other available harness; never enabled implicitly. */
+  swapOnLimit: boolean;
   /** Sign-on and first-park window for Codex throws; --timeout overrides it. */
   codexStartSecs: number;
   /** This boat may fulfill helm-approved wharf trap-start requests. Default off. */
@@ -583,6 +585,7 @@ function parseSoak(raw: unknown): SoakConfig {
     if (!Number.isInteger(soak[key]) || soak[key] < 1) throw new Error(`soak.${key} must be a positive whole number`);
   }
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
+  if (typeof soak.swapOnLimit !== 'boolean') throw new Error('soak.swapOnLimit must be true or false');
   if (typeof soak.codexRemoteControl !== 'boolean') throw new Error('soak.codexRemoteControl must be true or false');
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm' && soak.terminal !== 'tmux') {
     throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal", "iterm" or "tmux"`);
@@ -624,6 +627,7 @@ function parseMergeMethod(value: unknown, key: string): 'merge' | 'squash' | 're
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
+  swapOnLimit: false,
   codexStartSecs: 600,
   acceptWharfStarts: false,
   deferSecs: 90,

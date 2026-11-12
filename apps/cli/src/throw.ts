@@ -15,6 +15,7 @@ import {
   configPermissionMode,
   normalizePermissionMode,
   rosterByAddress,
+  setRosterProfile,
   shellQuote,
   terminalAppName,
   isTerminalApp,
@@ -263,6 +264,8 @@ type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'term
 /** What every throw takes. */
 export interface ThrowOptions {
   cfg: Config;
+  /** An explicit named throw changes the saved launch harness and starts cold across harnesses. */
+  harness?: string;
   by?: string;
   timeoutSecs?: number;
   adapter?: (app: TerminalApp) => TerminalAdapter;
@@ -422,8 +425,8 @@ async function launchAndWait(
  */
 export async function throwTrap(opts: ThrowOptions & { address: string }): Promise<ThrowResult> {
   const started = Date.now();
-  let [row] = planThrow(opts.cfg, { names: [opts.address] });
-  const entry = rosterByAddress(opts.address);
+  let [row] = planThrow(opts.cfg, { names: [opts.address] }, { harness: opts.harness });
+  let entry = rosterByAddress(opts.address);
   if (!row || !entry) throw new Error(`no roster record for ${opts.address} — \`lobstah man roster\` lists the traps a throw can bring back`);
   const label = trapLabel(entry);
   if (row.sessionHeld && opts.stopStale && entry.harness === 'codex' && entry.sessionId) {
@@ -431,12 +434,16 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     const stopped = await (opts.stopStaleWriters ?? stopStaleCodexWriters)(entry.sessionId);
     const survived = stopped.filter((s) => s.ending === 'survived').map((s) => s.pid);
     if (survived.length) throw new Error(`not throwing ${label}: Codex process ${survived.join(', ')} still holds its thread after SIGKILL`);
-    [row] = planThrow(opts.cfg, { names: [opts.address] });
+    [row] = planThrow(opts.cfg, { names: [opts.address] }, { harness: opts.harness });
     if (!row) throw new Error(`no roster record for ${opts.address}`);
   }
   if (row.sessionHeld) throw new Error(`not throwing ${label}: ${row.why}`);
   if (row.action === 'skip') throw new TrapStartingError(`not throwing ${label}: ${row.why}`);
   if (row.action === 'unresolved') throw new Error(`cannot throw ${label}: ${row.why}`);
+  if (opts.harness) {
+    if (!['claude', 'codex'].includes(opts.harness)) throw new Error('--harness takes claude or codex');
+    entry = setRosterProfile(entry.trapId, { harness: opts.harness }) ?? entry;
+  }
   const terminal = row.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, label, row.terminalFrom ?? 'default');
   const repo = opts.cfg.repos[entry.repo!]!;

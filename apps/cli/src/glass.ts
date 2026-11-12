@@ -2,6 +2,7 @@ import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
 import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
+import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
@@ -349,6 +350,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
   const log = readStatusLog(id, r.lane);
   const last = log.at(-1);
   const claim = r.bucket === 'active' ? readSessionClaim(id, r.lane) : undefined;
+  const usageLimit = dispatchUsageLimit(id, r.lane);
   const evidence = readEvidence(id, r.lane);
   const inboxDir = path.join(laneDirs(r.lane).inbox, id);
   return {
@@ -367,13 +369,13 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     // is the queue time.
     // An active dispatch a trap claimed, with no log, is working since
     // the claim.
-    verb:
+    verb: usageLimit ? 'limited' :
       r.bucket === 'queued' && log.length === 0
         ? ('queued' as const)
         : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
     ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
     // Held for free space: the note carries the reason.
-    note: (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
+    note: (usageLimit ? `Waiting on ${usageLimit.account} usage limit${usageLimit.resetAt ? ` · resets ${usageLimit.resetAt}` : ''}` : undefined) ?? (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
       ? `repair chore waits for ${r.d.for} until ${r.d.systemRepair.trapWaitUntil}` : undefined) ??
       (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
     verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
@@ -732,6 +734,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       ...(registered && harness === 'claude' ? trapLiveView(t, claudeProcesses()) : {}),
       sessionId,
       harness,
+      usageLimit: harness ? trapUsageLimit({ harness, window, link, configured: roster?.configured }) : undefined,
       desktopThread: (harness === 'codex' && !!sessionId && !!codexDesktopThread(sessionId)) || undefined,
       live: registered,
       listening,
@@ -773,6 +776,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const attention = attentionSnapshot();
   return {
     now: new Date().toISOString(),
+    usageLimits: usageLimitGroups(),
     goals: visibleGoals(cfg),
     helmPasses: helmPassViews(cfg),
     version: lobstahVersion(),
