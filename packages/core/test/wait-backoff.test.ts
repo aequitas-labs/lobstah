@@ -21,6 +21,21 @@ function quiet(session = 'helm', count = 7): void {
   }
 }
 
+describe('idle waiter polling', () => {
+  it('sleeps until the deadline when it is nearer than the poll interval, so a short wait ends on time', () => {
+    const wait = new IdleWait(undefined, DEFAULT_WAIT, '1', 0);
+    expect(wait.pollMs(1500, 0)).toBe(1000);
+    expect(wait.pollMs(1500, 900)).toBe(100);
+    // At the deadline it still sleeps a moment, never zero (no busy loop).
+    expect(wait.pollMs(1500, 1000)).toBe(1);
+    expect(new IdleWait(undefined, DEFAULT_WAIT, '60', 0).pollMs(1500, 0)).toBe(1500);
+  });
+
+  it('polls a probe (--timeout 0, no deadline) at the interval', () => {
+    expect(new IdleWait(undefined, DEFAULT_WAIT, '0', 0).pollMs(1500, 0)).toBe(1500);
+  });
+});
+
 describe('idle waiter history', () => {
   it('persists three base waits, then doubles to the cap across process re-arms', () => {
     const timeouts: number[] = [];

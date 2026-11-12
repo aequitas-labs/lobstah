@@ -2921,7 +2921,7 @@ async function mainCli(): Promise<void> {
           break;
         }
         while (idle.probe || !idle.expired()) {
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, idle.pollMs(1500)));
           if (callerHelm && currentChat() !== chatAtWait) {
             consumeHelmChatChange(callerHelm.grounds);
             console.log(toonKV({ event: 'helm-chat', chat: currentChat() }));
@@ -3270,7 +3270,7 @@ async function mainCli(): Promise<void> {
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (!idle.expired()) {
-            await new Promise((r) => setTimeout(r, 1500));
+            await new Promise((r) => setTimeout(r, idle.pollMs(1500)));
             if (helm && helmChat(helmOf(helm.sessionId)) !== chatAtPark) {
               consumeHelmChatChange(helm.grounds);
               emit(`Helm chat: ${helmChat(helmOf(helm.sessionId))}. Use the current mode; the Stop hook re-parks at turn end.`);
