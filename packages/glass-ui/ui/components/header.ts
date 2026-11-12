@@ -6,6 +6,7 @@ import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { GrantChip } from './session-grants.js';
 import { Age, Harness, opener } from './common.js';
+import { LinkedText } from './links.js';
 import { capabilities, visibleTabs } from '../backend.js';
 import { host } from '../host.js';
 import { getState } from '../store.js';
@@ -28,7 +29,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   stats: 'Stats',
   settings: 'Settings',
 };
-const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'unknown'];
+const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'limited', 'done', 'failed', 'unknown'];
 
 /** An emoji standing in for a word: screen readers and hover still say the word. */
 const icon = (glyph: string, word: string) => html`<span role="img" aria-label=${word} title=${word}>${glyph}</span>`;
@@ -346,6 +347,10 @@ export function Header({
 }) {
   return [
     html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1>${d && inp && html`<span class="phone-helm"><${HelmPill} inp=${inp.chips} /></span>`}<span id="settings-slot"><${Button} variant="icon" id="gearbtn" label="settings" onClick=${() => showModal('settings', 'browser')}>⚙<//></span></div>`,
+    d?.usageLimits?.map(
+      (limit) =>
+        html`<div class="usage-limit-banner" role="status"><b>${limit.account} limited</b> · ${limit.traps.length} traps · ${limit.resetAt ? `resets ${new Date(limit.resetAt).toLocaleString()}` : 'reset time unknown'}${limit.waiting.length ? ` · ${limit.waiting.length} catches waiting` : ' · pickup waits'}<details><summary>Limit details</summary>${LinkedText(limit.reason)}${limit.waiting.length > 0 && html`<ul>${limit.waiting.map((id) => html`<li>${d.dispatches.find((dispatch) => dispatch.id === id)?.title || id}</li>`)}</ul>`}</details></div>`,
+    ),
     d && inp && html`<${Strip} d=${d} inp=${inp.chips} />`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<${Navigation} d=${d} tab=${tab} unread=${unread} />`,

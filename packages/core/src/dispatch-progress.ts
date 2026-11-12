@@ -16,12 +16,17 @@ import { readHold, holdReason } from './disk.js';
 import { postNotice } from './notices.js';
 import { trapCapacityReason } from './trap-availability.js';
 import type { Descriptor, Lane } from './types.js';
+import { dispatchUsageLimit, trapUsageLimit } from './usage-limits.js';
 
 /** Observational only: never reroute sticky work or acquire a worker slot. */
 export function dispatchQueueReason(d: Descriptor, lane: Lane, cfg = loadConfig(), now = Date.now()): string {
   if (d.for) {
+    const limited = dispatchUsageLimit(d.id, lane);
+    if (limited) return `waiting on ${limited.account} usage limit${limited.resetAt ? ` until ${limited.resetAt}` : ''}`;
     const trap = trapByAddress(d.for);
     if (!trap) return `addressed to trap ${d.for}, which is not signed on`;
+    const limit = trapUsageLimit(trap);
+    if (limit) return `addressed to ${trapRepoLabel(trap)}, waiting on ${limit.account} usage limit${limit.resetAt ? ` until ${limit.resetAt}` : ''}`;
     if (hasOpenCatch(trap)) return `addressed to ${trapRepoLabel(trap)}, busy on dispatch ${trap.claimed}`;
     if (now - Date.parse(trap.heartbeatAt) > cfg.soak.ttlSecs * 1000) return `addressed to ${trapRepoLabel(trap)}, which is no longer answering`;
     return `addressed to ${trapRepoLabel(trap)}, waiting for its session to take the brief`;
@@ -88,6 +93,7 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): 
         text: `queued-too-long ${id} (${ageLabel(ageSecs * 1000)}): ${dispatchQueueReason(d, lane, cfg, now)}. Cancel and re-dispatch unaddressed, or cancel and re-address to another trap.` });
     }
     for (const id of activeIds(lane)) {
+      if (dispatchUsageLimit(id, lane)) continue; // A provider quota is already explained by the fleet limit notice.
       if (cancelRequested(id, lane)) continue;
       const last = readStatusLog(id, lane).at(-1);
       if (last && ['done', 'failed', 'paused', 'needs-decision', 'blocked'].includes(last.verb)) continue;

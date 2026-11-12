@@ -231,7 +231,7 @@ export interface GlassDispatchSummary {
   followUp?: string;
   /** The brief's first line. */
   title: string;
-  verb: Verb | 'unknown' | 'queued';
+  verb: Verb | 'unknown' | 'queued' | 'limited';
   /** A budget stop: work is saved for continuation, distinct from a worker failure. */
   outOfTimeWorkSaved?: boolean;
   /** The last note; in /data, cut to NOTE_MAX characters. */
@@ -404,6 +404,8 @@ export interface GlassMessage {
 
 /** A trap: live (a registration) or historical (only receipts, mail, and notices survive). */
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
+  /** Provider quota state takes precedence over a stale catch or heartbeat. */
+  usageLimit?: import('./usage-limits.js').UsageLimitGroup;
   desktopThread?: boolean;
   /** The Claude Remote Control URL Claude emitted for this live session. It opens on any device the owner is signed in on. */
   liveLink?: string;
@@ -531,6 +533,8 @@ export interface GlassHeavy {
 }
 
 export interface GlassSnapshot {
+  /** One banner per provider account and limit, shared by desktop and phone. */
+  usageLimits?: import('./usage-limits.js').UsageLimitGroup[];
   helmPasses?: HelmPassView[];
   goals?: Array<{ grounds: string; date: string; lines: string[] }>;
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;

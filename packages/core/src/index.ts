@@ -76,6 +76,7 @@ export * from './roster.js';
 export * from './throw-plan.js';
 export * from './trap-availability.js';
 export * from './activity.js';
+export * from './usage-limits.js';
 export * from './dispatch-progress.js';
 export * from './session-watcher.js';
 export * from './trap-turn.js';

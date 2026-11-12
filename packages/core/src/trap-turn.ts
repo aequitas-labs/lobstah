@@ -5,6 +5,7 @@ import { hasOpenCatch, readSessionClaim, type TrapRegistration } from './soak.js
 import { laneOf } from './worktrees.js';
 import { readStatusLog } from './status.js';
 import { readSessionWatcher } from './session-watcher.js';
+import { trapUsageLimit } from './usage-limits.js';
 
 interface TrapTurn { sessionId: string; dispatchId: string; report: string; idleSince?: string }
 const fileFor = (trapId: string) => path.join(lobstahHome(), 'trap-turns', `${encodeURIComponent(trapId)}.json`);
@@ -68,6 +69,7 @@ export function resumeTrapTurn(reg: TrapRegistration, newUserTurn = false): void
 }
 
 export function idleWorkingTrap(reg: TrapRegistration, now = Date.now()): { since: string; note: string } | undefined {
+  if (trapUsageLimit(reg)) return undefined;
   const w = working(reg);
   const state = read(reg);
   if (!w || !same(state, reg, w) || !state?.idleSince || !Number.isFinite(Date.parse(state.idleSince)) || trapHasBackgroundWait(reg, now)) return undefined;

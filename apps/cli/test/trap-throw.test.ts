@@ -136,6 +136,17 @@ describe('man throw <name>', () => {
     expect(launchNotice).toContain('launch-only trust');
   });
 
+  processTest('a named harness override starts cold on Codex and persists for later throws', async () => {
+    const reg = stowedTrap(); stow(reg, true);
+    claudeTranscript(reg.worktree, SESSION);
+    const seen: TerminalLaunch[] = [];
+    const result = await throwTrap({ address: 'amber-gull', harness: 'codex', cfg: loadConfig(), adapter: fakeTerminal(OTHER, seen), pollMs: 50, timeoutSecs: 30 });
+    expect(result.harness).toBe('codex');
+    expect(seen[0]!.argv[0]).toBe('codex');
+    expect(seen[0]!.argv).not.toContain('--resume');
+    expect(readRoster(reg.trapId)?.profile?.harness).toBe('codex');
+  });
+
   for (const action of ['cold', 'resume'] as const) {
     processTest(`uses repo+harness permission defaults for a ${action} throw and its displayed mode`, async () => {
       const reg = stowedTrap(); stow(reg, true);
