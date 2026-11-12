@@ -42,7 +42,7 @@ the live Worker has no `GITHUB_CLIENT_ID`. Neither prints an id.
 | `AUTH_SECRET` | secret | random, at least 32 characters: Better Auth signing and the encryption of stored GitHub tokens |
 | `TOKEN_SECRET` | secret | random, separate: signs retryable dispatch capabilities. Rotating it stops old claim responses from being rebuilt; issued token hashes stay valid until their leases end |
 | `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app's client secret |
-| `SLACK_CLIENT_ID` | var | the private Slack app's public client ID. Empty, the glass offers no Slack link |
+| `SLACK_CLIENT_ID` | Worker var, not in `wrangler.jsonc` | the private Slack app's public client ID, set once with `pnpm run deploy -- --var SLACK_CLIENT_ID:<id>` (or in the dashboard); `keep_vars` keeps it across deploys. Unset, the glass offers no Slack link |
 | `SLACK_CLIENT_SECRET` | secret, optional | the Slack app's client secret. With the client ID, a person can link their own Slack from the boat list |
 | `SLACK_SIGNING_SECRET` | secret, optional | the Slack app's signing secret. Unset, the API host answers no Slack call |
 | `ACCOUNTS` | Durable Object | SQLite class `Account`, migration `v1`, made by the first deploy |
