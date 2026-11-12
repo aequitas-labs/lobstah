@@ -6,7 +6,8 @@
 hosted glass and the Mac's mirror now talk over one WebSocket (`lobstah.2`).
 Once the new wharf is up, it answers an older CLI's mirror with 426 or 410 and
 the minimum version, and that Mac's fleet stops showing on the hosted glass
-until it upgrades.
+until it upgrades. Deploy the new wharf the same day: until it is up, a 0.8.10
+boat on wharf grounds falls back to reading every 30 seconds.
 
 ### The wharf, the hosted glass and the mirror share one socket
 
@@ -22,6 +23,9 @@ until it upgrades.
   two seconds. The wharf pushes the calls addressed to it, when a hosted glass
   is watching, and the other boats' lists for the pet. While no hosted glass is
   open, the mirror sends the wharf nothing. (#457)
+- A boat on wharf grounds, a hosted trap and a waiting helm learn of work from
+  events the wharf pushes on the socket, instead of polling it, and read over
+  HTTP only when something changed. (#459)
 
 ### The PRs tab
 
@@ -31,11 +35,28 @@ until it upgrades.
   the stack first. A lone PR is an ordinary card. (#456)
 - Every PR, review and stack card has a small avatar chip at its top right: the
   PR's author, or who asked for the review. The name shows on hover. (#456)
+- A PR's "checks 3/4" chip shows the checks' breakdown on hover, and the card no
+  longer repeats it. (#458)
+- Merge when green is one click to ask and one to cancel ("Cancel merge"). It
+  always merges the repo's way, which its hover names. (#458)
+- ↗ Open sits at the right of the bottom bar on PR, stack, review and trap
+  cards. A report card opens from an arrow at its top right. A trap card shows
+  its catches on its repo line. (#458)
+
+### Run cards
+
+- Recent runs shows each run's status icon, as the run card does: a check, an
+  X, a clock for a timeout, or a square when stopped. (#462)
 
 ### Also new
 
 - `lobstah man wait` with a short timeout ends on time: `--timeout 1` takes
   about a second, not 1.7. (#454)
+
+### Maintenance
+
+- CI runs the Windows tests only when a change can affect Windows; a push to
+  main always runs them. (#451)
 
 ## 0.8.9 — 2026-11-12
 
