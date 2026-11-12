@@ -140,7 +140,7 @@ export function MergeWhenGreen({ p }: { p: GlassPr }) {
           stop(e);
           setConfirming(true);
         }}>Merge when green</button>`;
-  return html`<span class="prmerge" onClick=${stop}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+  return html`<span class=${confirming && !p.mergeRequest ? 'prmerge asking' : 'prmerge'} onClick=${stop}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
 /** What a standing merge request says on the row's status line. */
