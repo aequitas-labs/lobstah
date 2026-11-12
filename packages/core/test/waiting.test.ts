@@ -12,6 +12,7 @@ import {
   parseUntil,
   pausedWaiting,
   pendingIds,
+  quietWait,
   readStatusLog,
   readTrap,
   signOnTrap,
@@ -72,12 +73,25 @@ describe('paused --waiting-on: the status entry says what it waits on', () => {
     expect(parseUntil('2026-10-01T09:00Z', now)).toBe('2026-10-01T09:00:00.000Z');
   });
 
-  it('refuses human pauses before writing, but accepts the same needs-decision', () => {
-    for (const waiting of [{ waitingOn: 'person' }, { waitingOn: 'review', link: 'https://ume.example.com/s/abc' }]) {
-      expect(() => appendStatus('human', 'work', 'paused', 'please look', undefined, waiting)).toThrow('report needs-decision with the question or the thing to look at');
-      expect(readStatusLog('human', 'work')).toEqual([]);
-      expect(appendStatus('question', 'work', 'needs-decision', 'please look', undefined, waiting).verb).toBe('needs-decision');
-    }
+  it('refuses a pause on a person before writing, but accepts the same needs-decision', () => {
+    const waiting = { waitingOn: 'person' };
+    expect(() => appendStatus('human', 'work', 'paused', 'please look', undefined, waiting)).toThrow('report needs-decision with the question or the thing to look at');
+    expect(readStatusLog('human', 'work')).toEqual([]);
+    expect(appendStatus('question', 'work', 'needs-decision', 'please look', undefined, waiting).verb).toBe('needs-decision');
+  });
+
+  it('accepts a pause on a document review in its own tool, and it is quiet', () => {
+    const entry = appendStatus('plan', 'work', 'paused', 'plan is up', undefined, { waitingOn: 'review', link: 'https://ume.example.com/s/abc' });
+    expect(entry).toMatchObject({ verb: 'paused', waitingOn: 'review', link: 'https://ume.example.com/s/abc' });
+    expect(quietWait(entry)).toBe(true);
+  });
+
+  it('quietWait: heavy and a non-PR review are quiet; a PR review, a bare review and a deploy are not', () => {
+    expect(quietWait({ waitingOn: 'heavy' })).toBe(true);
+    expect(quietWait({ waitingOn: 'review', link: 'https://ume.example.com/s/abc' })).toBe(true);
+    expect(quietWait({ waitingOn: 'review', link: 'https://github.com/acme/web/pull/7' })).toBe(false);
+    expect(quietWait({ waitingOn: 'review' })).toBe(false);
+    expect(quietWait({ waitingOn: 'deploy', link: 'https://ume.example.com/s/abc' })).toBe(false);
   });
 
   it('paused without --waiting-on is not a wait on something external', () => {

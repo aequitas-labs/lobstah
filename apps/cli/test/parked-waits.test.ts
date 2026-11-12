@@ -303,9 +303,10 @@ describe('a parked dispatch releases on whichever PR lobstah knows for it', () =
     const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
     parked('d1', { waitingOn: 'review', noPr: true });
     const run = (...args: string[]) => spawnSync(process.execPath, [cli, 'report', 'd1', 'paused', ...args], { env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8' });
-    const human = run('in review', '--waiting-on', 'review', '--link', 'https://example.com/review/1');
-    expect(human.status).toBe(2);
-    expect(human.stdout).toContain('report needs-decision');
+    // A document under review in its own tool is a quiet wait, with no PR to warn about.
+    const document = run('in review', '--waiting-on', 'review', '--link', 'https://example.com/review/1');
+    expect(document.status, document.stderr).toBe(0);
+    expect(document.stdout).not.toContain('warning');
     const none = run('in review', '--waiting-on', 'review');
     expect(none.status, none.stderr).toBe(0);
     expect(none.stdout).toContain('warning: "no PR known for this wait');

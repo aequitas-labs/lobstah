@@ -69,10 +69,21 @@ export function waitingFields(verb: Verb, w: WaitingFields, now = Date.now()): P
     out.link = url.href;
   }
   if (w.until !== undefined) out.until = parseUntil(w.until, now);
-  if (verb === 'paused' && (out.waitingOn === 'person' || (out.waitingOn === 'review' && out.link && !parsePrRef(out.link)))) {
+  if (verb === 'paused' && out.waitingOn === 'person') {
     throw new Error('Waiting on a human requires needs-decision: report needs-decision with the question or the thing to look at.');
   }
   return out;
+}
+
+/**
+ * Whether a waiting entry wakes nobody. A push in the heavy line is routine.
+ * A review of a document that lives in its own tool (a plan or spec, linked by
+ * a URL that is not a GitHub PR) is that tool's to show the person and to wake
+ * the worker on; the helm hears nothing until the worker reports again.
+ */
+export function quietWait(entry: Pick<StatusEntry, 'waitingOn' | 'link'>): boolean {
+  if (entry.waitingOn === 'heavy') return true;
+  return entry.waitingOn === 'review' && entry.link !== undefined && !parsePrRef(entry.link);
 }
 
 /** The write path IS the validation: anything outside the verb set is rejected. */

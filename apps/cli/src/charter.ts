@@ -7,6 +7,8 @@ export const CARD_RULE = 'Every question, choice or action for the human (answer
 export const RUN_CARD_RULE = 'Offer `lobstah man ask --run <script>` when the human must run a command on this machine. Use plain cards for steps the glass cannot run, such as app clicks or phone sign-ins. Use `--input NAME:secret` for secrets (values via stdin, never in the script), `--interactive` for logins/prompts, `--cwd`, `--timeout`, `--output scrubbed|exit`.';
 /** Review drafts have their own human posting surface in both glasses. Said once, in the charter at sign-on, never in a per-turn reminder. */
 export const REVIEW_DRAFT_RULE = 'Review drafts live on the glass Reviews page for the person to post. Do not put them on decision cards.';
+/** Said once, at sign-on: a document under review in its own tool is that tool's to show, so it gets no card. */
+export const DOCUMENT_REVIEW_RULE = 'A document under review in its own tool, such as a plan (a worker paused --waiting-on review with its link), is not a card: that tool shows it to the person and wakes the worker.';
 export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${RUN_CARD_RULE} ${CARD_LINK_RULE}`;
 /** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
 export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
@@ -50,6 +52,7 @@ Role:
 - ${TODO_COMMITMENT_RULE}
 - ${WITHDRAW_CARD_RULE}
 - ${REVIEW_DRAFT_RULE}
+- ${DOCUMENT_REVIEW_RULE}
 - Resolve queued-too-long and stalled notices at once after a dispatch or send. Never report work as under way before it is claimed.
 - When you relay a worker's round to the human, put the question the worker is waiting on onto a card. Read a quiet trap's last note before you call it working.
 - Read each pause and decide if the human needs to act.

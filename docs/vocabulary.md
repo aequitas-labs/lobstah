@@ -55,7 +55,7 @@ lobstah report <id> paused "<note>" --waiting-on <kind> [--link <url>] [--until 
 
 | Kind | Meaning |
 | --- | --- |
-| `review` | A human review of an artifact (a ume plan or result). |
+| `review` | A human review: of a PR (with a PR `--link`, or the dispatch's own PR), or of a document in its own tool, such as a ume plan (with its `--link`). A document review wakes nobody: its tool shows it to the person and wakes the worker. |
 | `pr` | A pull request review or merge. |
 | `deploy` | A deploy or release to finish. |
 | `person` | A named person to act. |
@@ -91,6 +91,11 @@ Effects of `paused` with `--waiting-on`:
   dispatch's own PR when it has none, and the daemon reads a waited-on PR
   that no live dispatch-owned watch observes. When no PR is known, the
   report prints a `warning`.
+- With `--waiting-on review` and a `--link` that is not a GitHub PR (a
+  document in its own tool, such as a ume plan): the pause wakes nobody, as
+  a `heavy` wait doesn't, and prints no PR warning. The document's tool shows
+  it to the person and wakes the worker; the helm hears the worker's next
+  report.
 - No attention, no notice, no pet. It is a state, not a question.
 
 Source of truth: `WAITING_ON` in `packages/core/src/types.ts`.

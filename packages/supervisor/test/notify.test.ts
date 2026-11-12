@@ -76,6 +76,18 @@ describe('notifications', () => {
     expect(pendingNotifications('in-line', 'work')).toEqual([]);
   });
 
+  it('a review of a document in its own tool wakes nobody; a review of a PR still wakes once', () => {
+    fs.mkdirSync(path.join(home, 'active', 'plan'));
+    appendStatus('plan', 'work', 'working');
+    const baseline = captureWaitBaseline();
+    appendStatus('plan', 'work', 'paused', 'plan is up', undefined, { waitingOn: 'review', link: 'https://ume.example.com/s/abc' });
+    expect(freshWakeEvents(baseline)).toEqual([]);
+    expect(attentionNow(false, 1, Date.now() + 86400_000)).toEqual([]);
+    expect(pendingNotifications('plan', 'work')).toEqual([]);
+    appendStatus('plan', 'work', 'paused', 'waiting on the API change', undefined, { waitingOn: 'review', link: 'https://github.com/acme/api/pull/9' });
+    expect(freshWakeEvents(baseline)).toMatchObject([{ entry: { waitingOn: 'review', link: 'https://github.com/acme/api/pull/9' } }]);
+  });
+
   it('emits only wake-worthy verbs, once each', () => {
     appendStatus('n1', 'work', 'working');
     appendStatus('n1', 'work', 'needs-decision', 'which db?');

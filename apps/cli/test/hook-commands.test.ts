@@ -18,6 +18,7 @@ import {
   HELM_STOP_REMINDER,
   RUN_CARD_RULE,
   REVIEW_DRAFT_RULE,
+  DOCUMENT_REVIEW_RULE,
   PARKED_TODO_RULE,
   TODO_COMMITMENT_RULE,
   WITHDRAW_CARD_RULE,
@@ -223,6 +224,9 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(HELM_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
     expect(HELM_STOP_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
     expect(charter({ name: 'fleet', repos: ['web'] }).split(REVIEW_DRAFT_RULE)).toHaveLength(2);
+    // So is the document-review rule.
+    expect(HELM_REMINDER).not.toContain(DOCUMENT_REVIEW_RULE);
+    expect(charter({ name: 'fleet', repos: ['web'] }).split(DOCUMENT_REVIEW_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] }).split(CARD_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] })).not.toContain('any question or choice for the human');
   });
