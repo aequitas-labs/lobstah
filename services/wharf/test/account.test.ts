@@ -100,7 +100,7 @@ it('lists unservable repos and records one event per availability transition, in
   const cursor = (await (await call('events')).json<{ cursor: string }>()).cursor;
   expect((await (await call(`events?after=${cursor}`)).json<{ events: unknown[] }>()).events).toEqual([]);
 });
-it('local Workers end-to-end: helm enqueues, boat claims, agent renews/uploads/reports, helm wait wakes', async () => {
+it('local Workers end-to-end: helm enqueues, boat claims, agent renews/uploads/reports, the helm reads the events after its cursor', async () => {
   const location = { kind: 'wharf' as const, url: 'https://state.test', account: 'a', tokenEnv: 'TEST_TOKEN' };
   const transport: typeof fetch = (input, init) => SELF.fetch(input, init);
   const helm = new WharfBackend(location, pat, { session: 'helm', fetch: transport });
@@ -115,9 +115,9 @@ it('local Workers end-to-end: helm enqueues, boat claims, agent renews/uploads/r
   await agent.receipt('e2e', message.id, 'receipt');
   const file = await agent.upload('e2e', 'report.md', new TextEncoder().encode('# Result\n\nBuilt safely.'), 'upload');
   const cursor = (await helm.events()).cursor;
-  const wait = helm.wait(cursor, 5000);
   await agent.report('e2e', { verb: 'done', note: 'finished', evidence: { files: [file], prUrls: ['https://github.com/test/repo/pull/1'] } }, 'finish');
-  const wake = await wait; expect(wake.events.some((e) => e.kind === 'done' && e.dispatchId === 'e2e')).toBe(true);
+  // The helm's wait hears this on its socket; here, the events after its cursor.
+  const wake = await helm.events(cursor); expect(wake.events.some((e) => e.kind === 'done' && e.dispatchId === 'e2e')).toBe(true);
   const [view] = await helm.list(); expect(view.state).toBe('done'); expect(view.status?.evidence?.files).toEqual([file]);
 });
 it('a paused deadline holds the catch through missing signal; expiry is unknown, never completion', async () => {
