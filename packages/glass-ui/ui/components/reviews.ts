@@ -7,8 +7,8 @@ import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
 import { can } from '../backend.js';
 import { getState } from '../store.js';
-import { CardLink } from './card.js';
-import type { CardTone } from './card.js';
+import { Avatar, CardLink, githubAvatarUrl } from './card.js';
+import type { CardPerson, CardTone } from './card.js';
 import { StatusChip, dispatchTrap, prShapedCard } from './prs.js';
 
 /**
@@ -118,25 +118,17 @@ const badge = (r: GlassReview) =>
 const findings = (r: GlassReview) =>
   html`${r.summary && html`<details onClick=${(e: Event) => e.stopPropagation()}><summary>Summary</summary><div class="rv-reason">${r.summary}</div></details>`}${r.blocking?.map((b) => html`<div class="rv-reason bad">${b.path}:${b.line} · ${b.body}</div>`)}`;
 
-/** A name's initials, at most two: "Dana Developer" is DD, "dana" is D. */
-export const initials = (name: string): string =>
-  name
-    .split(/[\s._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]!.toUpperCase())
-    .join('');
+export { initials } from './card.js';
 
-/**
- * The asker's avatar; one that can't load (offline, or blocked) shows their
- * initials instead. It remembers which url failed rather than resetting in
- * an effect: a page's Content-Security-Policy refuses an image before the
- * first effect runs, and a reset there would bring the broken image back.
- */
-function Avatar({ url, name }: { url: string; name: string }) {
-  const [failedUrl, setFailedUrl] = useState<string>();
-  if (failedUrl === url) return html`<span class="rv-initials" aria-hidden="true">${initials(name)}</span>`;
-  return html`<img src=${url} alt="" width="24" height="24" loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailedUrl(url)} />`;
+/** Who asked for a review, as its card's avatar chip shows them. */
+export function reviewPerson(r: GlassReview): CardPerson {
+  const login = r.asker ?? r.requestedBy ?? r.author;
+  return {
+    login,
+    ...(r.askerName ? { name: r.askerName } : {}),
+    ...(r.askerAvatarUrl ? { avatarUrl: r.askerAvatarUrl } : githubAvatarUrl(login) ? { avatarUrl: githubAvatarUrl(login) } : {}),
+    role: 'requested by',
+  };
 }
 
 const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?? r.requestedBy ?? r.author}>
@@ -219,6 +211,7 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
     number: r.number,
     at: r.requestedAt,
     trap: dispatchTrap([r.dispatch]),
+    person: reviewPerson(r),
     actions: [
       html`<${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} confirm />`,
       html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : '↗ Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`,

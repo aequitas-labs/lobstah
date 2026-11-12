@@ -289,9 +289,12 @@ async function control(g: GlassDom, id: string, value: string | boolean, type = 
 }
 async function openRow(g: GlassDom, tab: string, label: string) {
   await g.go('#' + tab);
+  // A stack of PRs is one card that opens to its members' cards (prs.ts StackCard): open each before looking for a PR's card.
+  for (const stack of g.$$(`#${tab} .stackcard[aria-expanded="false"]`)) await click(g, stack);
   await click(
     g,
-    g.$$(`#${tab} tr.rowhead`).find((tr) => text(tr.querySelector('td')).includes(label)) ?? g.$$(`#${tab} .card`).find((card) => text(card).includes(label)),
+    g.$$(`#${tab} tr.rowhead`).find((tr) => text(tr.querySelector('td')).includes(label)) ??
+      g.$$(`#${tab} .card:not(.stackcard)`).find((card) => text(card).includes(label)),
   );
 }
 

@@ -22,6 +22,11 @@ const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace
 async function page(d: GlassFullSnapshot, hash: string, post?: () => { status: number; body: unknown }) {
   const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash, prefs: { view: 'cards' }, ...(post ? { post } : {}) });
   open.push(g);
+  // On the PRs tab a stack shows its PRs' cards once open (prs.ts StackCard): open them, as clicks would.
+  if (hash === '#prs') {
+    for (const s of g.$$('#prs .stackcard[aria-expanded="false"]')) (s as HTMLElement).click();
+    await g.settle();
+  }
   return g;
 }
 

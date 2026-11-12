@@ -53,6 +53,11 @@ const heading = (el: Element): Element => {
   return copy;
 };
 const shown = (g: GlassDom, id: string) => (g.$('#' + id) as HTMLElement).style.display !== 'none';
+/** Open every closed stack card on the PRs tab, as clicks would: a stack shows its PRs' cards only once open. */
+const openStacks = async (g: GlassDom) => {
+  for (const s of g.$$('#prs .stackcard[aria-expanded="false"]')) (s as HTMLElement).click();
+  await g.settle();
+};
 const click = async (g: GlassDom, el: Element | null) => {
   expect(el).toBeTruthy();
   (el as HTMLElement).click();
@@ -947,7 +952,13 @@ describe('glass page: PRs', () => {
   it("edges every PR card with its badge's tone, chips its GitHub state, and chips what a badge that is not green says", async () => {
     const d = everyAttentionFleet();
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
-    const cards = g.$$('#prs .card');
+    // The stack of #41–#43 is one card, closed, with no number chain or floor: its summary and how many PRs it holds.
+    const stack = g.$('#prs .stackcard')!;
+    expect(stack.getAttribute('aria-expanded')).toBe('false');
+    expect([...stack.querySelectorAll('.gstate .gchip')].map(text)).toContain('3 PRs');
+    expect(text(stack)).not.toContain('floor');
+    await openStacks(g);
+    const cards = g.$$('#prs .card:not(.stackcard)');
     expect(cards.map(cardNumber).sort()).toEqual(d.prs.map((p) => '#' + p.number).sort());
     for (const c of cards) {
       const p = d.prs.find((x) => '#' + x.number === cardNumber(c))!;
@@ -959,8 +970,6 @@ describe('glass page: PRs', () => {
       // Title, status, meta, buttons, nothing more: merge readiness, the watch and the gate are in the modal.
       expect(c.querySelectorAll(':scope > .gline')).toHaveLength(4);
     }
-    expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#41 → #42 → #43 · floor main');
-    expect(g.$$('#prs h2').map((h) => text(heading(h)))).toContain('#30 · floor main · history');
   });
 
   it('a poll with new observation times keeps every PR row node in its place and the open modal', async () => {
@@ -977,12 +986,9 @@ describe('glass page: PRs', () => {
     expect(g.$('#modalbox')).toBe(modal);
   });
 
-  it('cards: a new stack at the top keeps every existing stack heading and card node', async () => {
+  it('cards: a new stack at the top keeps every existing stack and PR card node', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
     const cards = g.$$('#prs .card');
-    // Stack headings only: not Yours, nor the Other PRs summary, whose counts change.
-    const stackHeads = () => g.$$('#prs h2:not(.yourshead)').filter((h) => h.parentElement?.tagName !== 'SUMMARY');
-    const heads = stackHeads();
     const d = everyAttentionFleet();
     const id = 'pr:acme/web#99';
     d.stacks.unshift({ id, floor: 'main', repo: d.stacks[0]!.repo, numbers: [99], open: true, nextNumber: 99, behind: 0 });
@@ -1000,7 +1006,6 @@ describe('glass page: PRs', () => {
     const after = g.$$('#prs .card');
     expect(text(after[0]!.querySelector('.gtitle'))).toBe('fresh');
     expect(after.slice(1)).toEqual(cards);
-    expect(stackHeads().slice(1)).toEqual(heads);
   });
 
   it('the PRs table groups by stack and never shows a watch cursor', async () => {
@@ -1031,7 +1036,8 @@ describe('glass page: PRs', () => {
   it('titles: a PR card leads with its title and puts the number on line 2; no title shows the number alone', async () => {
     for (const hash of ['#deck', '#prs']) {
       const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
-      const cards = g.$$(`${hash} .card`).filter((c) => c.querySelector('.pricon'));
+      if (hash === '#prs') await openStacks(g);
+      const cards = g.$$(`${hash} .card:not(.stackcard)`).filter((c) => c.querySelector('.pricon'));
       const byNumber = Object.fromEntries(cards.map((c) => [cardNumber(c), c.querySelector('.gtitle')!]));
       expect(text(byNumber['#41'])).toBe(PR_TITLES[41]);
       expect(byNumber['#41']!.getAttribute('title')).toBe(PR_TITLES[41]);
@@ -1047,9 +1053,10 @@ describe('glass page: PRs', () => {
       ['#42', PR_TITLES[42]],
       ['#43', null],
     ];
-    const cards = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'cards' } });
-    const head = heading(cards.$$('#prs h2').find((h) => text(h).startsWith('#41'))!);
-    expect(text(head)).toBe('#41 → #42 → #43 · floor main');
+    // The PRs table's stack heading; as cards, a stack is one card titled by its top PR or its own title.
+    const table = await page(everyAttentionFleet(), { hash: '#prs', prefs: { view: 'table' } });
+    const head = heading(table.$$('#prs th[colspan]').find((h) => text(h).startsWith('#41'))!);
+    expect(text(head)).toBe('#41 → #42 → #43 · floor main · open');
     expect(titled([...head.querySelectorAll('span')])).toEqual(want);
     const deck = await page(everyAttentionFleet());
     const line = deck.$$('#deck .deckline').find((l) => text(l).startsWith('#41 →'))!;
