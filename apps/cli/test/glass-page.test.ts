@@ -926,11 +926,16 @@ describe('glass page: modals', () => {
     expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
   });
 
-  it('⚙ edits browser display preferences while helm settings stay read-only', async () => {
+  it('the gear opens Settings, this device and this view only; Configuration has the helm chat', async () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'table', lobs: false } });
     await click(g, g.$('#gearbtn'));
-    expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
-    expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
+    const dialog = g.$('.settings-dialog')!;
+    expect(text(dialog.querySelector('h3'))).toBe('Settings');
+    expect(g.$('#overlay')!.className).not.toBe('open');
+    // Attention kinds and helm chat are lobstah's settings: Configuration's, nowhere else.
+    expect(text(dialog)).not.toContain('question · landed · pr:draft');
+    expect(dialog.querySelector('[data-helm-chat]')).toBeNull();
+    expect(text(dialog.querySelector('.settings-config a'))).toBe('Configuration');
     const choose = async (setting: string, value: string) =>
       click(g, g.$$(`.settings [aria-label="${setting}"] button`).find((button) => text(button) === value) ?? null);
     await choose('view', 'cards');
@@ -942,8 +947,15 @@ describe('glass page: modals', () => {
     await choose('lobs', 'off');
     expect(g.$$('#dispatches tr.rowhead')).toHaveLength(4);
     expect(g.$$('#lobs .lob')).toHaveLength(0);
-    expect(g.$$('[data-helm-chat] button, [data-helm-chat] input, [data-helm-chat] select')).toEqual([]);
     expect(g.posts()).toEqual([]);
+    // Its link goes to Configuration, which shows each helm's chat as a value.
+    await click(g, g.$('.settings-config a'));
+    await g.go('#settings');
+    expect(g.$('.settings-dialog')).toBeNull();
+    expect(text(g.$('#settings .pagetitle'))).toBe('Configuration');
+    expect(text(g.$('#settings [data-helm-chat="fleet"]'))).toContain('full');
+    expect(g.$$('[data-helm-chat] button, [data-helm-chat] input, [data-helm-chat] select')).toEqual([]);
+    expect(text(g.$('#tabs a[data-tab="settings"]'))).toBe('Configuration');
     const reloaded = await page(acceptanceFleet(), { hash: '#dispatches', prefs: JSON.parse(g.window.localStorage.getItem('spyglass')!) });
     expect(reloaded.$$('#dispatches tr.rowhead')).toHaveLength(4);
     expect(reloaded.$$('#lobs .lob')).toHaveLength(0);
@@ -1201,7 +1213,8 @@ describe('glass page: header', () => {
     d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     const g = await page(d);
     const chip = g.$('#chips .chip.click')!;
-    expect(text(chip)).toBe('⛵ claude @ web helm fleet · chat full 30s ago');
+    // The helm's chat is Configuration's, not the chip's.
+    expect(text(chip)).toBe('⛵ claude @ web helm fleet 30s ago');
     expect(chip.querySelector('.ok')).toBeTruthy();
     await click(g, chip);
     expect(text(g.$('#modalbox h3'))).toBe('⛵ claude @ web');

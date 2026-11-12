@@ -368,7 +368,7 @@ describe('the Settings tab', () => {
   it('says when the settings could not be read', async () => {
     const g = await open();
     try {
-      expect(g.$('#settings')?.textContent).toContain('Settings could not be read');
+      expect(g.$('#settings')?.textContent).toContain('Configuration could not be read');
     } finally {
       await g.close();
     }

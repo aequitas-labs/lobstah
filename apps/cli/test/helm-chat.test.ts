@@ -192,10 +192,9 @@ it('glass shows helm chat as text and refuses settings writes with a valid page 
   const snapshot = async () => (await (await fetch(`${base}/data`)).json());
   const initial = await snapshot();
   page = await loadGlass(GLASS_PAGE, initial, { now: Date.now() });
-  (page.$('#gearbtn') as HTMLElement).click(); await page.settle();
-  expect(page.$('[data-helm-chat="home"]')?.textContent).toContain('brief');
+  await page.go('#settings');
+  expect(page.$('#settings [data-helm-chat="home"]')?.textContent).toContain('brief');
   expect(page.$$('[data-helm-chat] input, [data-helm-chat] select, [data-helm-chat] button')).toEqual([]);
-  expect(page.$$('.settings .seg button')).toHaveLength(4);
   expect(page.posts()).toEqual([]);
   const before = readHelm('fleet');
   for (const chat of ['full', 'brief', 'quiet']) {
