@@ -76,3 +76,21 @@ not move what `read` shows the agent: the agent reads it later.
   the last error line. A later exit is a quiet timeout, and it runs again.
 - A record ends when its registration file is removed while the trap is
   live, or when its dispatch finishes.
+
+## Doctor
+
+`lobstah doctor` has a `turn waits` row. It names no tool:
+
+- It lists every Stop hook a harness loads that isn't lobstah's: from Claude
+  Code's `settings.json` and its other enabled plugins, and from Codex's
+  `hooks.json` and its other enabled plugins (the newest cached version),
+  each with its timeout.
+- A Stop hook longer than 60 seconds, or with no timeout, whose program has
+  never registered a wait with a trap makes the row `warn`: in a trap it may
+  hold the turn end beside lobstah's park. The program is the command's
+  first word, matched against the `from` of every registration lobstah has
+  seen (`~/.lobstah/turn-waits/tools.seen`).
+- It shows each wait lobstah runs, and makes the row `warn` when one has
+  failed three times in a row.
+
+It only reports and changes nothing.
