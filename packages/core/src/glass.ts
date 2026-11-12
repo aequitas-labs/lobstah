@@ -180,6 +180,10 @@ export interface GlassPr {
   author?: string;
   /** The person's own PR: authored by the login gh signs in as, or opened by a dispatch and not known to be another author's. The PRs tab's Yours. */
   mine?: boolean;
+  /** "Merge when green" stands on this PR: asked when, and the method it merges with. */
+  mergeRequest?: { at: string; method: 'merge' | 'squash' | 'rebase' };
+  /** How Merge when green would merge this open PR of yours: its repo's method. */
+  mergeMethod?: 'merge' | 'squash' | 'rebase';
 }
 
 export interface GlassStack {

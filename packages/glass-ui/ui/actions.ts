@@ -577,6 +577,40 @@ export async function copyText(text: string): Promise<boolean> {
 /** Acknowledge the PR/stack states one stack group showed, using the guarded request path. */
 export const ackPrAttention = (items: Array<{ key: string; stateHash: string }>): Promise<void> => ackAttention('pr-ack', items);
 
+/**
+ * Ask the boat to merge one of your PRs once it's green, or cancel that.
+ * The snapshot shows the request from the next poll; this marks it at once.
+ */
+export async function requestPrMerge(key: string, cancel = false): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) throw new Error('Reload the glass before merging.');
+  const response = await backend().request<{ ok: boolean; reason?: string; method?: 'merge' | 'squash' | 'rebase' }>(
+    'pr-merge',
+    { key, ...(cancel ? { cancel: true } : {}) },
+    token,
+  );
+  const result = response.body;
+  if (!response.ok || !result.ok)
+    throw new Error(result.reason ?? (cancel ? 'Could not cancel the merge.' : 'Could not ask for the merge.'));
+  const snapshot = getState().snapshot;
+  if (snapshot) {
+    const at = new Date().toISOString();
+    setState({
+      snapshot: {
+        ...snapshot,
+        prs: snapshot.prs.map((p) => {
+          if (p.key !== key) return p;
+          if (cancel) {
+            const { mergeRequest: _gone, ...rest } = p;
+            return rest;
+          }
+          return { ...p, mergeRequest: { at, method: result.method ?? 'squash' } };
+        }),
+      },
+    });
+  }
+}
+
 /** Acknowledge the attention states this page showed, and mark them acked in the snapshot it holds. */
 async function ackAttention(kind: 'pr-ack' | 'attention-ack', items: Array<{ key: string; stateHash: string }>): Promise<void> {
   const token = getState().snapshot?.focusToken;

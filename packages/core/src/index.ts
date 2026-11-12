@@ -56,6 +56,7 @@ export * from './sent.js';
 export * from './compiled.js';
 export * from './pr.js';
 export * from './prs.js';
+export * from './pr-merge.js';
 export * from './chain-pr.js';
 export * from './pushes.js';
 export * from './pr-repair.js';

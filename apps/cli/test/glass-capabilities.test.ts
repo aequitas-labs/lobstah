@@ -115,6 +115,10 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(MIRROR_CAPABILITIES.actions.has('review-request')).toBe(true);
     for (const kind of ['review-mode', 'helm-chat']) expect(mirrorWriteAllowed(kind), kind).toBe(false);
   });
+  it('relays Merge when green to a mirror boat, which checks the PR is yours', () => {
+    expect(mirrorWriteAllowed('pr-merge')).toBe(true);
+    expect(MIRROR_CAPABILITIES.actions.has('pr-merge')).toBe(true);
+  });
   it("runs a card from the local glass or a mirror boat's hosted glass, where the boat checks a phone's passkey", () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);
     expect(MIRROR_CAPABILITIES.actions.has('run')).toBe(true);

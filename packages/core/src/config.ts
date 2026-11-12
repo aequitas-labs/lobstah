@@ -85,6 +85,8 @@ export interface RepoConfig {
   pushEarly?: boolean;
   draftPr?: boolean;
   checkpointOnStop?: boolean;
+  /** How "Merge when green" merges this repo's PRs: merge, squash or rebase. Else `[pickup.github].merge.method`, else squash. */
+  mergeMethod?: 'merge' | 'squash' | 'rebase';
   /**
    * Check names that fail until a person approves. They never start a PR
    * repair or a CI-fix continuation. `*` matches any run of characters.
@@ -611,6 +613,11 @@ function parseHeavy(raw: unknown): HeavyConfig {
   return heavy;
 }
 
+function parseMergeMethod(value: unknown, key: string): 'merge' | 'squash' | 'rebase' {
+  if (value === 'merge' || value === 'squash' || value === 'rebase') return value;
+  throw new Error(`repos.${key}.mergeMethod must be "merge", "squash" or "rebase"`);
+}
+
 export const DEFAULT_SOAK: SoakConfig = {
   codexStartSecs: 600,
   acceptWharfStarts: false,
@@ -756,6 +763,7 @@ export function loadConfig(): Config {
       pushEarly: r.pushEarly === undefined ? undefined : Boolean(r.pushEarly),
       draftPr: r.draftPr === undefined ? undefined : Boolean(r.draftPr),
       checkpointOnStop: r.checkpointOnStop === undefined ? undefined : Boolean(r.checkpointOnStop),
+      ...(r.mergeMethod !== undefined ? { mergeMethod: parseMergeMethod(r.mergeMethod, key) } : {}),
       humanGateChecks: Array.isArray(r.humanGateChecks) ? r.humanGateChecks.map(String).filter(Boolean) : undefined,
       ...(parseBriefHooks((r.hooks as Record<string, unknown> | undefined)?.brief) ? { hooks: { brief: parseBriefHooks((r.hooks as Record<string, unknown>).brief) } } : {}),
       poolKeep: Array.isArray(r.poolKeep) ? r.poolKeep.map(String).filter(Boolean) : undefined,

@@ -101,6 +101,7 @@ export function deriveGlassPrs(
         ? { repairWait: { heldBy: pr.repair.heldBy ?? 'held', reason: pr.repair.reason ?? '', ...(pr.repair.until ? { until: pr.repair.until } : {}) } }
         : {}),
       ...(pr.author ? { author: pr.author } : {}),
+      ...(record?.mergeRequest && pr.state === 'OPEN' ? { mergeRequest: { at: record.mergeRequest.at, method: record.mergeRequest.method } } : {}),
       // The same line automatic watching draws: the person's, or a dispatch's, never a known other author's.
       mine: mayAutoWatch(prAuthorship({ author: pr.author, dispatches: ids }, viewer)),
     });
