@@ -6,10 +6,11 @@ import { answerKey } from './decision-answer.js';
 import { applyPermissionAnswer } from './grants-cli.js';
 import { writeAck } from './acks.js';
 import { buildTendReport } from './tend.js';
+import { channelFor, sendCommand } from './wharf-channel.js';
 
 /** What this boat says became of a person's answer to one of its cards. */
 export interface ReceiptOutcome { state: 'applied' | 'refused'; outcome: string }
-/** How often the daemon asks each wharf for answers to this boat's cards. */
+/** How often the daemon asks a wharf with no socket open for answers to this boat's cards; with one, it asks when the wharf says an answer came. */
 export const ANSWERS_CHECK_MS = 10_000;
 /** What a boat with `remoteAnswers = false` says to an Allow from its wharf. */
 export const ALLOW_HERE_ONLY = 'This boat takes Allow only in its own glass';
@@ -83,24 +84,29 @@ export function applyReceipt(cfg: Pick<Config, 'wharfRemoteAnswers'>, wharf: str
 
 let checkedAt = 0;
 /**
- * The daemon's remote poll: take the answers people gave this boat's cards
- * on each wharf, apply each, and tell the wharf what became of it. Returns
- * how many it applied, so the boat can restate its cards at once.
+ * The daemon's remote check: take the answers people gave this boat's cards
+ * on each wharf, apply each, and tell the wharf what became of it. A wharf
+ * whose socket is open is read when it says an answer came (and when the
+ * socket reopens); one without is read each ANSWERS_CHECK_MS. Returns how
+ * many it applied, so the boat can restate its cards at once.
  */
 export async function applyWharfAnswers(now = Date.now(), log: (m: string) => void = () => {}): Promise<number> {
-  if (now - checkedAt < ANSWERS_CHECK_MS) return 0;
-  checkedAt = now;
+  const timed = now - checkedAt >= ANSWERS_CHECK_MS;
+  if (timed) checkedAt = now;
   const cfg = loadConfig();
-  const byWharf = new Map<string, BackendScope>();
+  const byWharf = new Map<string, Extract<BackendScope, { kind: 'wharf' }>>();
   for (const s of backendScopes(cfg)) if (s.kind === 'wharf' && !byWharf.has(s.wharf!)) byWharf.set(s.wharf!, s);
   let attention: TendAttention[] | undefined;
   let applied = 0;
   for (const [wharf, scope] of byWharf) {
+    const channel = channelFor(scope), reader = `answers:${wharf}`;
+    if (channel ? !channel.due('answers', reader) : !timed) continue;
     const backend = wharfFor(scope);
     let receipts: CardAnswerReceipt[];
     try {
       receipts = await backend.request('cards/answers') as CardAnswerReceipt[];
     } catch (e) {
+      channel?.forget('answers', reader);
       // An older wharf has no answers to give.
       if (!(e instanceof BackendError && e.status === 404)) log(`wharf ${wharf} answers: ${e instanceof Error ? e.message : String(e)}`);
       continue;
@@ -111,7 +117,7 @@ export async function applyWharfAnswers(now = Date.now(), log: (m: string) => vo
       if (outcome.state === 'applied') applied++;
       try {
         // The receipt's own id keys the report: a retried report is the same report.
-        await backend.request(`cards/answers/${encodeURIComponent(r.id)}`, outcome, `answer-${r.id}`);
+        await sendCommand(scope, `cards/answers/${encodeURIComponent(r.id)}`, outcome, `answer-${r.id}`);
       } catch (e) {
         log(`wharf ${wharf} answer ${r.id}: ${e instanceof Error ? e.message : String(e)}`);
       }

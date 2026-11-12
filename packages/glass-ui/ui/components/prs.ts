@@ -108,15 +108,16 @@ const YOURS_EMPTY = 'no PRs of yours are watched: a trap’s PR shows here, and 
 const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', rebase: 'rebased commits' } as const;
 
 /**
- * Merge when green, on a row of yours: the button, then a second tap that
- * names what happens, then Cancel while the request stands. A PR repair
- * works a failing or conflicting PR back to green first (the boat's pass).
+ * Merge when green, on a PR of yours: one click asks for it, and the button
+ * then reads Cancel merge, one click to stop. It merges the way the repo is
+ * set to (`[repos.<key>].mergeMethod`, else the pickup's method), never a
+ * choice made here; the hover text names it. A PR repair works a failing or
+ * conflicting PR back to green first (the boat's pass).
  */
 export function MergeWhenGreen({ p }: { p: GlassPr }) {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('pr-merge') || !p.mine || p.state !== 'OPEN') return null;
-  const [confirming, setConfirming] = useState(false),
-    [busy, setBusy] = useState(false),
+  const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const send = (cancel: boolean) => async (e: Event) => {
     e.stopPropagation();
@@ -125,28 +126,18 @@ export function MergeWhenGreen({ p }: { p: GlassPr }) {
     setError('');
     try {
       await requestPrMerge(p.key, cancel);
-      setConfirming(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not ask for the merge.');
     } finally {
       setBusy(false);
     }
   };
-  const stop = (e: Event) => e.stopPropagation();
+  const method = p.mergeRequest?.method ?? p.mergeMethod;
+  const how = `#${p.number} into ${p.baseRefName ?? 'its base'}${method ? ` as ${METHOD_WORDS[method]}` : ''}`;
   const button = p.mergeRequest
-    ? html`<button class="btn" disabled=${busy} onClick=${send(true)}>Cancel</button>`
-    : confirming
-      ? html`<button class="btn go" disabled=${busy} onClick=${send(false)}>Merge #${p.number} into ${p.baseRefName ?? 'its base'}${p.mergeMethod ? ` as ${METHOD_WORDS[p.mergeMethod]}` : ''}</button><button class="btn" onClick=${(
-          e: Event,
-        ) => {
-          stop(e);
-          setConfirming(false);
-        }}>Keep</button>`
-      : html`<button class="btn" onClick=${(e: Event) => {
-          stop(e);
-          setConfirming(true);
-        }}>Merge when green</button>`;
-  return html`<span class=${confirming && !p.mergeRequest ? 'prmerge asking' : 'prmerge'} onClick=${stop}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+    ? html`<button class="btn on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} disabled=${busy} onClick=${send(true)}>Cancel merge</button>`
+    : html`<button class="btn" aria-pressed="false" title=${`Merges ${how} once green`} disabled=${busy} onClick=${send(false)}>Merge when green</button>`;
+  return html`<span class="prmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
 /** What a standing merge request says on the row's status line. */
@@ -180,8 +171,7 @@ export interface PrCardParts {
   at?: string;
   /** The trap that has its work, as `wt:<id>`. */
   trap?: string;
-  /** Last on the meta line: a PR's checks. */
-  detail?: string;
+
   /** After the meta line's parts: a standing merge request. */
   tail?: Children;
   /** The bottom bar's buttons: only the ones that apply to this card. */
@@ -194,9 +184,13 @@ export interface PrCardParts {
   onClick: () => void;
 }
 
-/** A status chip: a PR's GitHub state (`pr-open` …, filled in GitHub's color), or a word in a tone. A long one may shrink and carries itself as a title. */
-export const StatusChip = (word: string, cls: string) =>
-  html`<span class=${'gchip ' + cls + (word.length > 12 ? ' long' : '')} title=${word.length > 12 ? word : undefined}>${word}</span>`;
+/**
+ * A status chip: a PR's GitHub state (`pr-open` …, filled in GitHub's color),
+ * or a word in a tone. A long one may shrink and carries itself as a title;
+ * `hover` replaces that title with more than the word says.
+ */
+export const StatusChip = (word: string, cls: string, hover?: string) =>
+  html`<span class=${'gchip ' + cls + (word.length > 12 ? ' long' : '')} title=${hover ?? (word.length > 12 ? word : undefined)}>${word}</span>`;
 
 /**
  * The one layout for PR and review cards:
@@ -208,9 +202,9 @@ export const StatusChip = (word: string, cls: string) =>
  */
 export function prShapedCard(c: PrCardParts) {
   const trap = c.trap && [`${TRAP_MARK} `, WorkerAddress(c.trap)];
-  const parts: Children[] = [RepoName(c.repo), c.at && [Age(c.at), ' ago'], `#${c.number}`, trap, c.detail].filter(Boolean);
+  const parts: Children[] = [RepoName(c.repo), c.at && [Age(c.at), ' ago'], `#${c.number}`, trap].filter(Boolean);
   const meta = [...parts.flatMap((part, i) => (i ? [' · ', part] : [part])), c.tail];
-  const text = [c.repo, c.at && `${ageText(c.at)} ago`, `#${c.number}`, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`, c.detail]
+  const text = [c.repo, c.at && `${ageText(c.at)} ago`, `#${c.number}`, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`]
     .filter(Boolean)
     .join(' · ');
   return html`<${Card}
@@ -249,8 +243,10 @@ export function prCardPending(p: GlassPr, attention: readonly DeckAttention[], s
 /**
  * A PR card (prShapedCard). Its chips are GitHub's state (Open, Draft,
  * Merged, Closed) and, when the badge is not green, what the badge says
- * (failed checks, conflicts, a repair). Its buttons are Merge when green on
- * an open PR of yours, Ack while it has attention to ack, and ↗ Open.
+ * (failed checks, conflicts, a repair); a checks chip's hover is the checks'
+ * breakdown, which the meta line no longer repeats. Its buttons are Merge when
+ * green on an open PR of yours, Ack while it has attention to ack, and ↗ Open
+ * at the bar's right.
  * Merge readiness, the watch and the gate are in the PR's modal. `quiet`
  * greys an acked one; `stack` is its stack when it is the only PR in it.
  */
@@ -264,7 +260,10 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
     prState: state,
     status: [
       StatusChip(PR_STATE_WORD[state] ?? state, 'pr-' + state),
-      state === 'open' && p.badge.tone !== 'ok' && StatusChip(p.badge.text.toLowerCase(), p.badge.tone),
+      // A checks chip ("checks 3/4") carries the breakdown as its hover; the meta line no longer repeats it.
+      state === 'open' &&
+        p.badge.tone !== 'ok' &&
+        StatusChip(p.badge.text.toLowerCase(), p.badge.tone, /^checks\b/.test(p.badge.text) ? prChecks(p) : undefined),
     ],
     tone: p.badge.tone,
     repo: p.repo,
@@ -272,8 +271,6 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
     at: p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt,
     trap: dispatchTrap(p.dispatchIds),
     person: prAuthor(p),
-    detail: prChecks(p),
-    tail: p.mergeRequest && [' · ', mergeNote(p)],
     actions: [
       html`<${MergeWhenGreen} p=${p} />`,
       pending.length > 0 && html`<${AckButton} pending=${pending} label="Ack" stack=${opts.stack?.id} />`,
@@ -357,10 +354,11 @@ export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]
     status: [StatusChip(summary.text, summary.tone), StatusChip(`${members.length} PRs`, 'dim')],
     context: [RepoName(s.repo), at && [' · updated ', Age(at), ' ago']],
     contextTitle: [s.repo, at && `updated ${ageText(at)} ago`].filter(Boolean).join(' · '),
-    // The bar only when there is something to ack: a stack has no action of its own beyond Ack stack.
-    ...(shownPrAttention(attention, prs, [s]).some((a) => !a.acked)
-      ? { actions: html`<${PrAck} stack=${s} prs=${prs} attention=${attention} />` }
-      : {}),
+    // Ack stack while there is something to ack, and ↗ Open (the top of the stack, as GitHub shows a stack) at the bar's right.
+    actions: [
+      shownPrAttention(attention, prs, [s]).some((a) => !a.acked) && html`<${PrAck} stack=${s} prs=${prs} attention=${attention} />`,
+      html`<${CardLink} href=${reviewLink(top.url)} />`,
+    ],
     person: prAuthor(top),
     cls: ['prcard stackcard', open && 'open'].filter(Boolean).join(' '),
     attrs: {

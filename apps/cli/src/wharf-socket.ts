@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { PING_TEXT, PONG_TEXT, SOCKET_PING_MS, SOCKET_SILENCE_MS, WHARF_SOCKET_PROTOCOL } from '@lobstah/core';
-import type { BackendLocation, ClientSocketMessage, ServerSocketMessage } from '@lobstah/core';
+import type { BackendLocation, ClientSocketMessage, CommandMessage, ServerSocketMessage } from '@lobstah/core';
 
 /**
  * A boat's or a helm's socket to its wharf account (lobstah.2), bearer in
@@ -12,6 +12,7 @@ import type { BackendLocation, ClientSocketMessage, ServerSocketMessage } from '
  *
  * `onMessage` hears every message. `wait`/`heard` serve a loop that sleeps
  * until a message of one of `kinds` arrives (the helm's wait hears `event`).
+ * `command` runs one route on the socket and resolves with its result.
  */
 
 /** The first reconnect waits this long, doubling after each failure up to RECONNECT_MAX_MS. */
@@ -29,8 +30,16 @@ export interface WharfSocketOptions {
   onMessage?: (message: ServerSocketMessage) => void;
   /** The socket opened (and resumed) or dropped. */
   onState?: (open: boolean) => void;
+  /** The cursor to resume after on the first connect: the helm's `--after`. */
+  after?: string;
   /** Jitter source, for tests. */
   random?: () => number;
+}
+
+/** A command's outcome on the socket: the status and body its HTTP route would give. */
+export interface SocketResult {
+  status: number;
+  value: unknown;
 }
 
 export class WharfSocket {
@@ -44,11 +53,14 @@ export class WharfSocket {
   private pending = false;
   private finish?: () => void;
   private readonly received = new Set<string>();
+  private readonly results = new Map<string, (result: SocketResult | undefined) => void>();
   constructor(
     private readonly location: BackendLocation,
     private readonly credential: string,
     private readonly options: WharfSocketOptions = {},
-  ) {}
+  ) {
+    this.cursor = options.after;
+  }
 
   /** Connect now and keep the socket open until `close`. */
   start(): void {
@@ -72,6 +84,30 @@ export class WharfSocket {
     if (!this.connected()) return false;
     this.socket!.send(frame);
     return true;
+  }
+
+  /**
+   * Run one route on the socket, as its HTTP route would, under this
+   * socket's credential. `id` is the idempotency key, so a caller that
+   * gets undefined (the socket is down, or no result within `timeoutMs`)
+   * may send the same command over HTTP with the same key.
+   */
+  command(command: Omit<CommandMessage, 't'>, timeoutMs = 10_000): Promise<SocketResult | undefined> {
+    if (!this.send({ t: 'command', ...command })) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => settle(undefined), timeoutMs);
+      const settle = (result: SocketResult | undefined) => {
+        clearTimeout(timer);
+        this.results.delete(command.id);
+        resolve(result);
+      };
+      this.results.set(command.id, settle);
+    });
+  }
+
+  /** The newest cursor this socket has heard. */
+  lastCursor(): string | undefined {
+    return this.cursor;
   }
 
   /** Wait up to `milliseconds`, or until a message of one of `kinds` arrives (or one arrived since the last wait). */
@@ -106,8 +142,14 @@ export class WharfSocket {
     if (this.retry) clearTimeout(this.retry);
     this.stopTimers();
     this.finish?.();
+    this.settleAll();
     this.socket?.terminate();
     this.socket = undefined;
+  }
+
+  /** Commands in flight end without a result when their socket goes. */
+  private settleAll(): void {
+    for (const settle of [...this.results.values()]) settle(undefined);
   }
 
   private connect(): void {
@@ -143,6 +185,7 @@ export class WharfSocket {
         return;
       }
       if (message.t === 'event' || message.t === 'hello') this.cursor = message.cursor;
+      if (message.t === 'result') this.results.get(message.id)?.(message);
       this.options.onMessage?.(message);
       if (this.options.kinds?.includes(message.t)) {
         this.received.add(message.t);
@@ -156,6 +199,7 @@ export class WharfSocket {
       if (this.socket !== socket) return;
       this.socket = undefined;
       this.stopTimers();
+      this.settleAll();
       this.options.onState?.(false);
       this.wake();
       this.scheduleReconnect();

@@ -26,6 +26,19 @@ export interface HostedView {
   usage?: WharfUsageSnapshot;
 }
 export const DOCUMENTS_EVERY_MS = 30_000;
+/** How often a daemon on the wharf's socket reads the coarse usage facts: they change with the roster and the helm seat, never per job. */
+export const USAGE_EVERY_MS = 3_600_000;
+/**
+ * The daemon's say over one refresh, from what its socket to each wharf
+ * heard: which parts of a grounds' view to read now, and whether its socket
+ * is open (a view on an open socket stays current with no read).
+ */
+export interface HostedRefresh {
+  due: (scope: BackendScope, part: 'dispatches' | 'documents' | 'usage') => boolean;
+  live: (scope: BackendScope) => boolean;
+  /** Read one route, on the socket when it is open: the usage reads, so an idle boat sends no HTTP. */
+  read?: (scope: BackendScope, path: string) => Promise<unknown>;
+}
 function cachePath() { return path.join(lobstahHome(), 'hosted-snapshots.json'); }
 export function readHostedViews(config: Config, now = Date.now()): HostedView[] {
   let rows: HostedView[];
@@ -44,21 +57,35 @@ export function wharfFor(scope: BackendScope, options: { session?: string; worke
   if (scope.kind !== 'wharf') throw new Error('this grounds uses local files');
   return new WharfBackend(scope.location, wharfCredential(scope), options);
 }
-/** The local daemon's existing cadence drives independent remote snapshots. */
-export async function refreshHostedViews(config: Config): Promise<void> {
+/**
+ * Read each wharf grounds' jobs, documents and usage into the cache the
+ * glass and `ls` show. A one-shot command reads everything (documents and
+ * usage at most every DOCUMENTS_EVERY_MS). The daemon passes `refresh`: it
+ * reads only the parts its socket says changed, and a grounds whose socket
+ * is open and heard nothing is marked checked with no request.
+ */
+export async function refreshHostedViews(config: Config, refresh?: HostedRefresh): Promise<void> {
   const known = readHostedViews(config);
+  const scopes = backendScopes(config).filter((s) => s.kind === 'wharf');
   const usageReads = new Map<string, Promise<WharfUsageSnapshot | undefined>>();
   const usage = (scope: BackendScope): Promise<WharfUsageSnapshot | undefined> => {
     const key = JSON.stringify(scope.location), prior = known.find((v) => v.url === scope.location?.url && v.account === scope.location?.account)?.usage;
-    if (prior && Date.now() - Date.parse(prior.observedAt) < DOCUMENTS_EVERY_MS) return Promise.resolve(prior);
-    if (!usageReads.has(key)) usageReads.set(key, readWharfUsage(wharfFor(scope)));
+    const fresh = refresh ? !refresh.due(scope, 'usage') : Date.now() - Date.parse(prior?.observedAt ?? '') < DOCUMENTS_EVERY_MS;
+    if (prior && fresh) return Promise.resolve(prior);
+    const wharf = wharfFor(scope);
+    if (!usageReads.has(key)) usageReads.set(key, readWharfUsage(refresh?.read ? (path) => refresh.read!(scope, path) : (path) => wharf.request(path)));
     return usageReads.get(key)!;
   };
-  const usageRows = await Promise.all(backendScopes(config).filter((s) => s.kind === 'wharf').map(async (s) => ({ grounds: s.grounds, value: await usage(s) })));
-  const rows = await eachBackend(backendScopes(config).filter((s) => s.kind === 'wharf'), async (s) => {
+  const usageRows = await Promise.all(scopes.map(async (s) => ({ grounds: s.grounds, value: await usage(s) })));
+  // Asked once per grounds: asking marks a part read.
+  const parts = new Map(scopes.map((s) => [s.grounds, refresh ? { dispatches: refresh.due(s, 'dispatches'), documents: refresh.due(s, 'documents') } : undefined]));
+  const quiet = (s: BackendScope) => { const p = parts.get(s.grounds); return !!p && !p.dispatches && !p.documents; };
+  const rows = await eachBackend(scopes.filter((s) => !quiet(s)), async (s) => {
     const wharf = wharfFor(s); const listed = await wharf.list(); const dispatches = listed.filter((d) => (d.target ? d.target.grounds === s.grounds : !!d.repo && s.repos.includes(d.repo)));
     const readAt = Date.parse(known.find((v) => v.grounds === s.grounds)?.documentsAt ?? '');
-    if (Date.now() - readAt < DOCUMENTS_EVERY_MS) return { dispatches, glass: wharf.glass };
+    // Never read (NaN) is due too.
+    const documentsDue = parts.get(s.grounds)?.documents ?? !(Date.now() - readAt < DOCUMENTS_EVERY_MS);
+    if (!documentsDue) return { dispatches, glass: wharf.glass };
     let documents: WharfDocumentSummary[];
     // A wharf from before documents has no such route: it has none to show, and its jobs still read.
     try { documents = await wharf.documents(); }
@@ -69,6 +96,14 @@ export async function refreshHostedViews(config: Config): Promise<void> {
   });
   // Read again now: an ack this boat recorded while the wharf was answering is in the cache, not in that answer.
   const old = readHostedViews(config);
+  const kept = scopes.filter(quiet).map((scope): HostedView | undefined => {
+    const before = old.find((v) => v.grounds === scope.grounds);
+    if (!before?.observedAt) return undefined;
+    // Nothing changed on an open socket: the view is current as it stands. With the socket down it ages, as an unread one does.
+    const { unavailable: _unavailable, ...view } = before;
+    return { ...view, ...(refresh!.live(scope) ? { checkedAt: new Date().toISOString() } : {}),
+      usage: usageRows.find((r) => r.grounds === scope.grounds)?.value ?? before.usage };
+  }).filter((v): v is HostedView => !!v);
   const views = rows.map(({ scope, value, unavailable }): HostedView => {
     const before = old.find((v) => v.grounds === scope.grounds);
     const jobAck = (d: DispatchView) => before?.dispatches.find((x) => x.id === d.id)?.ack;
@@ -83,20 +118,20 @@ export async function refreshHostedViews(config: Config): Promise<void> {
       ...(documents ? { documents, documentsAt: new Date().toISOString() }
         : before?.documents ? { documents: before.documents, documentsAt: before.documentsAt } : {}) };
   });
-  if (!rows.length) return;
-  writeCache(views);
+  if (!rows.length && !kept.length) return;
+  writeCache([...views, ...kept]);
 }
 /** Existing routes only. Work-only boats can read their grants, not the roster or helm seat. */
-async function readWharfUsage(wharf: WharfBackend): Promise<WharfUsageSnapshot> {
+async function readWharfUsage(read: (path: string) => Promise<unknown>): Promise<WharfUsageSnapshot> {
   const unknown = (): WharfUsageSnapshot => ({ boats: null, boatAccess: { ...UNKNOWN_ACCESS }, helmLive: null, observedAt: new Date().toISOString() });
   try {
-    const own = await wharf.request('_boat') as { permissions?: unknown };
+    const own = await read('_boat') as { permissions?: unknown };
     if (!Array.isArray(own.permissions) || own.permissions.some((p) => !['work', 'read', 'helm', 'admin'].includes(p))) return unknown();
     const boatAccess = accessFlags(own.permissions);
     let boats: number | null = null, helmLive: boolean | null = null;
     if (boatAccess.read) {
       try {
-        const glass = await wharf.request('glass') as { boats?: unknown; helmLive?: unknown };
+        const glass = await read('glass') as { boats?: unknown; helmLive?: unknown };
         if (Array.isArray(glass.boats) && glass.boats.length <= 100) boats = Math.max(1, glass.boats.filter((b) => b && typeof b === 'object' && b.revoked === 0).length);
         if (typeof glass.helmLive === 'boolean') helmLive = glass.helmLive;
       } catch { /* No read, old wharf, or unavailable: unknown. */ }

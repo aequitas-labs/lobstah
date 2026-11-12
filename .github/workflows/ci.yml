@@ -6,26 +6,65 @@ on:
   pull_request:
 
 jobs:
+  changes:
+    name: Decide whether Windows runs
+    runs-on: ubuntu-latest
+    outputs:
+      windows: ${{ steps.decide.outputs.windows }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request checks out its merge commit: its first parent is the base it merges into.
+          fetch-depth: 2
+      - name: Check the changed paths (scripts/ci-windows.mjs)
+        id: decide
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Not a pull request: Windows runs."
+            echo "windows=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          # Anything unexpected runs Windows.
+          node scripts/ci-windows.mjs "$RUNNER_TEMP/changed.txt" >> "$GITHUB_OUTPUT" || echo "windows=true" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: changes
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # The main ruleset requires `test (windows-latest)`, so Windows always runs this job:
+    # when nothing changed can affect Windows, its steps skip and it passes in seconds.
+    env:
+      RUN_TESTS: ${{ matrix.os != 'windows-latest' || needs.changes.outputs.windows == 'true' }}
     steps:
+      - name: Skip Windows (no change here can affect it)
+        if: env.RUN_TESTS != 'true'
+        shell: bash
+        run: echo "Every changed path is glass page, Worker, site or docs code. See the 'Decide whether Windows runs' job."
       - uses: actions/checkout@v4
+        if: env.RUN_TESTS == 'true'
       - run: git --version
+        if: env.RUN_TESTS == 'true'
       - uses: pnpm/action-setup@v4
+        if: env.RUN_TESTS == 'true'
         with:
           version: 10
       - uses: actions/setup-node@v4
+        if: env.RUN_TESTS == 'true'
         with:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: env.RUN_TESTS == 'true'
       - run: pnpm build
+        if: env.RUN_TESTS == 'true'
       # The fast run first. A failed Windows run is retried once on one worker
       # (vitest.config.ts), which is slower but keeps the worker RPC channel up.
       - name: pnpm test
+        if: env.RUN_TESTS == 'true'
         shell: bash
         run: |
           if pnpm test; then exit 0; fi
@@ -34,7 +73,10 @@ jobs:
           LOBSTAH_TEST_WORKERS=1 pnpm test
       # Exercise the Worker's SQL tests on both OSes (Node 20 has no node:sqlite).
       - uses: actions/setup-node@v4
+        if: env.RUN_TESTS == 'true'
         with:
           node-version: 24
       - run: pnpm exec vitest run services/telemetry/test/worker.test.ts
+        if: env.RUN_TESTS == 'true'
       - run: pnpm --filter @lobstah/wharf test
+        if: env.RUN_TESTS == 'true'

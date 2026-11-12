@@ -330,7 +330,11 @@ export class CardStore {
 }
 
 /** `changed` hears every card that moved, inside the same transaction: where cards are shown follows. */
-type Hooks = { read: (actor: Actor) => void; publish: (actor: Actor) => void; changed: (cards: GlassCard[], now: number) => void };
+type Hooks = {
+  read: (actor: Actor) => void; publish: (actor: Actor) => void; changed: (cards: GlassCard[], now: number) => void;
+  /** A person answered a boat's card: that boat (`boat:<id>`) is told to read its answers. */
+  answered?: (source: GlassCardSource) => void;
+};
 /** The account's card routes: read the cards, and a boat's restatement of its own. */
 export class Cards {
   readonly store: CardStore;
@@ -375,6 +379,7 @@ export class Cards {
       action, ...(words ? { text: words } : {}), by: person, at, state: 'pending' };
     this.sql.exec('INSERT INTO card_answers VALUES (?,?,?,?)', receipt.id, seq, card.source, JSON.stringify(receipt));
     this.hooks.changed([this.store.setRelay(card, { state: 'awaiting boat', answer: answerLabel(action, words), at })], now);
+    this.hooks.answered?.(card.source);
     return { done: true };
   }
   /** A receipt's end, and the card's relay with it while the card is about the state answered. */

@@ -142,3 +142,33 @@ describe('the avatar chip', () => {
     expect(githubAvatarUrl('renovate[bot]')).toBeUndefined();
   });
 });
+
+describe('the cleaned-up cards', () => {
+  it("keeps a PR's checks chip, with the breakdown on hover and nowhere else", async () => {
+    const g = await page(fleet(), '#prs');
+    (g.$('#prs .stackcard') as HTMLElement).click();
+    await g.settle();
+    const card = g.$$('#prs .stackmembers .card').find((c) => text(c.querySelector('.gcontext')).includes('#42'))!;
+    const chip = [...card.querySelectorAll('.gstate .gchip')].find((c) => text(c).startsWith('checks'))!;
+    expect(text(chip)).toBe('checks 3/4');
+    expect(chip.getAttribute('title')).toBe('3/4 passed · 1 pending');
+    expect(text(card.querySelector('.gcontext'))).not.toMatch(/passed|pending/);
+  });
+
+  it('puts ↗ Open last in the bottom bar of PR and stack cards, and the arrow only on report cards', async () => {
+    const g = await page(fleet(), '#prs');
+    const stack = g.$('#prs .stackcard')!;
+    const stackOpen = stack.querySelector(':scope > .gactions')!.lastElementChild!;
+    expect(stackOpen.className).toContain('gopenbtn');
+    expect(stackOpen.getAttribute('href')).toContain('/pull/43');
+    (stack as HTMLElement).click();
+    await g.settle();
+    for (const member of g.$$('#prs .stackmembers .card')) expect(member.querySelector('.gactions')!.lastElementChild!.className).toContain('gopenbtn');
+    expect(g.$$('#prs .gopen')).toHaveLength(0);
+    const reports = await page(acceptanceFleet(), '#reports');
+    for (const card of reports.$$('#reports .card')) {
+      expect(card.querySelector('.gtop')!.lastElementChild!.className).toBe('gopen');
+      expect(card.querySelector('.gopenbtn')).toBeNull();
+    }
+  });
+});

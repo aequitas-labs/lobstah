@@ -11,14 +11,30 @@ import { wharfRepoIdentity } from './wharf-repo.js';
 import { createSoakWorktree } from './soak-worktree.js';
 import { inspectSoakSite } from './soak-site.js';
 import { freshProfile, harnessCommand, macTerminalAdapter, tmuxTerminalAdapter } from './throw.js';
+import { channelFor, type ChannelTopic } from './wharf-channel.js';
 
 type Scope = Extract<BackendScope, { kind: 'wharf' }>;
 type Remote = Pick<WharfBackend, 'request' | 'claim'>;
 type Ticket = { token: string; scope: Scope; repo?: string; configured?: ConfiguredTrapLocation; trap: string; name: string; request: string; until: number; used: boolean; worktree: string; origin?: string };
 /** A one-use boat-local sign-on ticket; configured tickets carry no repository. */
 export interface BrokerTicket { ticket: string; trap: string; name: string; grounds: string; worktree: string; request: string; expiresAt: string; repo?: string; configured?: ConfiguredTrapLocation }
-type Session = { agent: BrokerAgent; scope: Scope; name: string; pid: number; seen: number; current: ClaimReceipt | null; reported: boolean; tail: Promise<unknown> };
+type Session = { agent: BrokerAgent; scope: Scope; name: string; pid: number; seen: number; current: ClaimReceipt | null; reported: boolean; tail: Promise<unknown>; renewedAt: number };
 export const BROKER_LIVENESS_MS = 30_000;
+/** With the boat's socket, a live session's worker is renewed this often: well inside the wharf's 90 s lease. */
+export const RENEW_EVERY_MS = 30_000;
+/**
+ * What the boat's socket heard, for the broker: it claims when there is new
+ * work, reads a job's inbox when a message came, checks a claim when its job
+ * was cancelled or lost, takes trap starts when one was authorized, and
+ * renews on the socket. Without signals it reads on every poll, as a boat
+ * with no socket must.
+ */
+export interface BrokerSignals {
+  due(scope: Scope, topic: ChannelTopic, reader: string): boolean;
+  forget(scope: Scope, topic: ChannelTopic, reader: string): void;
+  /** Renew one worker on the socket; false when the socket could not, and the broker renews over HTTP. */
+  renew(scope: Scope, worker: string): Promise<boolean>;
+}
 const secret = () => randomBytes(32).toString('hex');
 const id = (v: unknown) => {
   if (typeof v !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(v)) throw new Error('invalid broker identifier');
@@ -32,6 +48,7 @@ export interface BrokerOptions {
   identity?: (repo: string) => string;
   inbox?: (scope: Scope, claim: ClaimReceipt) => Promise<BackendMessage[]>;
   validateClaim?: (scope: Scope, claim: ClaimReceipt) => Promise<void>;
+  signals?: BrokerSignals;
 }
 /** Boat authority lives here, never in the trap's session or local response. */
 export class WharfTrapBroker {
@@ -108,7 +125,7 @@ export class WharfTrapBroker {
         ...(typeof body.tmuxPane === 'string' && /^%[0-9]+$/.test(body.tmuxPane) ? { tmuxPane: body.tmuxPane } : {}) }, randomUUID());
       if (!this.alive(pid)) throw new Error('trap session process is gone');
       const agent: BrokerAgent = { grounds: t.scope.grounds, ...(t.configured ? { configured: t.configured } : { repo: t.repo }), trap: t.name, session, capability: secret(), worktree: t.worktree, ...(t.origin ? { origin: t.origin } : {}) };
-      this.sessions.set(agent.capability, { agent, scope: t.scope, name: t.name, pid, seen: this.now(), current: null, reported: false, tail: Promise.resolve() });
+      this.sessions.set(agent.capability, { agent, scope: t.scope, name: t.name, pid, seen: this.now(), current: null, reported: false, tail: Promise.resolve(), renewedAt: -Infinity });
       return agent;
     } catch (error) { if (t.configured && readTrap(t.trap)?.sessionId === session) stowTrap(t.trap, 'hosted sign-on failed'); throw error; } finally { this.signingOn.delete(ownershipKey); }
   }
@@ -121,19 +138,35 @@ export class WharfTrapBroker {
     const result = s.tail.catch(() => {}).then(work); s.tail = result; return result;
   }
   private live(s: Session) { return this.sessions.get(s.agent.capability) === s && this.alive(s.pid) && this.now() - s.seen < BROKER_LIVENESS_MS; }
+  /** Whether a topic is due for this session; always, without signals. */
+  private due(s: Session, topic: ChannelTopic): boolean {
+    return this.options.signals?.due(s.scope, topic, s.agent.capability) ?? true;
+  }
+  /** A job this session no longer holds: its topics are read fresh if it ever comes back. */
+  private release(s: Session, job: string) {
+    for (const topic of [`job:${job}`, `messages:${job}`] as const) this.options.signals?.forget(s.scope, topic, s.agent.capability);
+  }
   private async renew(s: Session) {
     if (!this.live(s)) throw new Error('trap session is gone');
-    if (s.current) {
+    // A held claim is checked when its job was cancelled, lost or claimed elsewhere (or the socket reopened), not on every poll.
+    if (s.current && this.due(s, `job:${s.current.dispatch.id}`)) {
       const validate = this.options.validateClaim ?? ((scope: Scope, claim: ClaimReceipt) => new WharfBackend(scope.location, claim.token!).heartbeat(claim.dispatch.id, randomUUID()));
       try { await validate(s.scope, s.current); }
       catch (e) {
         if (!(e instanceof BackendError) || ![401, 403, 409].includes(e.status)) throw e;
-        s.current = null; s.reported = false; // Never hand a stale epoch back to the session.
+        this.release(s, s.current.dispatch.id); s.current = null; s.reported = false; // Never hand a stale epoch back to the session.
       }
     }
     const registration = s.agent.configured ? trapBySession(s.agent.session) : undefined;
     if (registration) { heartbeatTrap(registration.trapId); if (s.current && registration.hostedCatch) renewDesktopLease(registration); }
-    if (this.live(s)) await this.remote(s.scope, s.agent.trap).request('workers/renew', { worker: s.agent.trap }, randomUUID());
+    if (!this.live(s)) return;
+    const signals = this.options.signals;
+    if (signals) {
+      if (this.now() - s.renewedAt < RENEW_EVERY_MS) return;
+      if (await signals.renew(s.scope, s.agent.trap)) { s.renewedAt = this.now(); return; }
+    }
+    await this.remote(s.scope, s.agent.trap).request('workers/renew', { worker: s.agent.trap }, randomUUID());
+    s.renewedAt = this.now();
   }
   async handle(route: string, body: Record<string, unknown>): Promise<unknown> {
     if (route === 'ticket') return this.ticket(body.grounds, body.repo, randomUUID(), typeof body.cwd === 'string' ? body.cwd : undefined, undefined, typeof body.profile === 'string' ? body.profile : undefined);
@@ -151,7 +184,7 @@ export class WharfTrapBroker {
     return this.serial(s, async () => {
       if (!this.live(s)) throw new Error('trap session is gone');
       if (route === 'finish') {
-        if (s.current?.dispatch.id === body.dispatch) { s.current = null; s.reported = false; const registration = trapBySession(s.agent.session); if (s.agent.configured && registration) { releaseDesktopLease(registration.trapId); heartbeatTrap(registration.trapId, { claimed: null, hostedCatch: null }); } }
+        if (s.current && s.current.dispatch.id === body.dispatch) { this.release(s, s.current.dispatch.id); s.current = null; s.reported = false; const registration = trapBySession(s.agent.session); if (s.agent.configured && registration) { releaseDesktopLease(registration.trapId); heartbeatTrap(registration.trapId, { claimed: null, hostedCatch: null }); } }
         return { finished: true };
       }
       if (route === 'progress') {
@@ -165,18 +198,26 @@ export class WharfTrapBroker {
       await this.renew(s);
       const registration = s.agent.configured ? trapBySession(s.agent.session) : undefined;
       if (registration && route === 'poll') heartbeatTrap(registration.trapId, { parked: true });
-      if (route === 'poll' && !s.current && this.live(s) && (!registration || acquireDesktopLease(registration))) {
-        s.current = await backend.claim(randomUUID());
+      // A claim is tried when the socket says there is work (queued, requeued or servable), or on a socket's reopen.
+      if (route === 'poll' && !s.current && this.live(s) && this.due(s, 'claim') && (!registration || acquireDesktopLease(registration))) {
+        try { s.current = await backend.claim(randomUUID()); }
+        catch (error) { this.options.signals?.forget(s.scope, 'claim', s.agent.capability); throw error; }
+        // A fresh claim is known good: its job's first check waits for news of it.
+        if (s.current) this.due(s, `job:${s.current.dispatch.id}`);
         if (registration) { if (s.current) heartbeatTrap(registration.trapId, { claimed: s.current.dispatch.id, hostedCatch: s.current.dispatch.id }); else releaseDesktopLease(registration.trapId); }
       }
       if (route === 'poll' && s.current && s.reported) {
+        const job = s.current.dispatch.id;
+        // The inbox is read when a message came for this job, not on every poll.
+        if (!this.due(s, `messages:${job}`)) return { claim: null, dispatch: job, messages: [] };
         const inbox = this.options.inbox ?? ((scope: Scope, claim: ClaimReceipt) => new WharfBackend(scope.location, claim.token!).messages(claim.dispatch.id));
-        return { claim: null, dispatch: s.current.dispatch.id, messages: (await inbox(s.scope, s.current)).filter((m) => !m.received) };
+        try { return { claim: null, dispatch: job, messages: (await inbox(s.scope, s.current)).filter((m) => !m.received) }; }
+        catch (error) { this.options.signals?.forget(s.scope, `messages:${job}`, s.agent.capability); throw error; }
       }
       return { claim: s.current };
     });
   }
-  /** Existing daemon cadence only; a vanished session receives no further renewals. */
+  /** The daemon's tick: renew live sessions (on the socket, each RENEW_EVERY_MS), and take authorized trap starts; a vanished session receives no further renewals. */
   async poll(): Promise<void> {
     const cfg = this.options.config();
     for (const [key, t] of this.tickets) if (t.until <= this.now()) this.tickets.delete(key);
@@ -187,8 +228,12 @@ export class WharfTrapBroker {
     if (!cfg.soak.acceptWharfStarts) return;
     for (const scope of backendScopes(cfg)) {
       if (scope.kind !== 'wharf') continue;
+      // Starts are read when the glass authorized one (or the socket reopened).
+      if (this.options.signals && !this.options.signals.due(scope, 'starts', `broker:${scope.grounds}`)) continue;
       const backend = this.remote(scope);
-      const requests = await backend.request('requests/starts') as Array<{ id: string; repo: string; expiresAt: string }>;
+      let requests: Array<{ id: string; repo: string; expiresAt: string }>;
+      try { requests = await backend.request('requests/starts') as typeof requests; }
+      catch (error) { this.options.signals?.forget(scope, 'starts', `broker:${scope.grounds}`); throw error; }
       for (const r of requests) {
         if (this.starts.has(r.id) || !Number.isFinite(Date.parse(r.expiresAt)) || Date.parse(r.expiresAt) <= this.now()) continue;
         this.starts.add(r.id);
@@ -229,8 +274,34 @@ export async function startWharfBroker(options: BrokerOptions) {
   } };
 }
 
+/** How often a grounds with no socket open reads a topic, in place of the socket's news. */
+const UNSOCKETED_READ_MS = 5_000;
+/** The broker's signals from the daemon's channels; a grounds without one reads every UNSOCKETED_READ_MS. */
+export function channelSignals(now: () => number = Date.now): BrokerSignals {
+  const last = new Map<string, number>();
+  return {
+    due(scope, topic, reader) {
+      const channel = channelFor(scope);
+      if (channel) return channel.due(topic, reader);
+      const key = JSON.stringify([scope.grounds, topic, reader]), at = last.get(key);
+      if (at !== undefined && now() - at < UNSOCKETED_READ_MS) return false;
+      last.set(key, now()); return true;
+    },
+    forget(scope, topic, reader) {
+      channelFor(scope)?.forget(topic, reader);
+      last.delete(JSON.stringify([scope.grounds, topic, reader]));
+    },
+    async renew(scope, worker) {
+      const result = await channelFor(scope)?.command('POST', 'workers/renew', { worker });
+      if (!result) return false;
+      if (result.status >= 400) throw new BackendError(result.status, String((result.value as { error?: unknown })?.error ?? 'renew refused'));
+      return true;
+    },
+  };
+}
+
 export function daemonBrokerOptions(config: () => Config): BrokerOptions {
-  return { config, identity: (repo) => wharfRepoIdentity(config(), repo),
+  return { config, identity: (repo) => wharfRepoIdentity(config(), repo), signals: channelSignals(),
     async prepare(repo, trap, request, cwd) {
       const cfg = config(), site = cwd ? inspectSoakSite(cwd, cfg.repos) : undefined;
       if (cwd && (!site || site.repoKey !== repo)) throw new Error('soak directory is not the configured repo');

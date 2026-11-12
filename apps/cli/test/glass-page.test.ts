@@ -332,7 +332,8 @@ describe('glass page: tabs and hash routing', () => {
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((el) => text(el).includes('wt:t1'))!;
-    expect(text(card.querySelector('.gaction'))).toBe('↗ Open');
+    // ↗ Open sits at the right of the card's bottom bar.
+    expect(text(card.querySelector('.gactions .gopenbtn'))).toBe('↗ Open');
     expect(text(card)).not.toContain('codex://threads/live-session');
     expect(card.querySelectorAll('.cmd')).toHaveLength(0);
     await click(g, card);

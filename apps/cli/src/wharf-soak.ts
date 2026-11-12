@@ -15,6 +15,8 @@ export function lobstahTmuxPane(env: NodeJS.ProcessEnv = process.env): string | 
   const socket = env.TMUX?.split(',')[0];
   return env.TMUX_PANE && socket && path.basename(socket) === TMUX_SOCKET ? env.TMUX_PANE : undefined;
 }
+/** How often a waiting hosted trap asks the boat's broker for work: a job queued is claimed within about a second. */
+export const BROKER_POLL_MS = 1_000;
 export const brokerBody = (a: BrokerAgent) => ({ grounds: a.grounds, session: a.session, capability: a.capability });
 export async function endBrokerAgent(a: BrokerAgent) {
   try { await brokerRequest('end', brokerBody(a)); }
@@ -29,7 +31,8 @@ export async function waitBrokerAgent(a: BrokerAgent, seconds?: number): Promise
     const p = await brokerRequest<BrokerPoll>('poll', brokerBody(a));
     if (p.claim || p.messages?.length) { idle.woke(); return p; }
     if (!idle.probe && idle.expired()) break;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(5000, idle.probe ? 5000 : idle.remainingMs())));
+    // The broker is on loopback and asks the wharf only when its socket heard of work, so a second's wait costs nothing remote.
+    await new Promise((resolve) => setTimeout(resolve, Math.min(BROKER_POLL_MS, idle.probe ? BROKER_POLL_MS : idle.remainingMs())));
   } while (idle.probe || !idle.expired());
   idle.timedOut();
   return { claim: null };

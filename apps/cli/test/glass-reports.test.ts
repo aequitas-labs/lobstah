@@ -95,7 +95,9 @@ describe('glass: the deck reports block', () => {
       if (view === 'cards') {
         expect(rows[0]!.className).toContain('quiet');
         expect(rows[1]!.className).not.toContain('quiet');
-        expect(rows.map((r) => text(r.querySelector('.gaction')))).toEqual(Array(4).fill('↗ Open'));
+        // No Open button: the arrow at each card's top right opens the report.
+        expect(rows.map((r) => r.querySelector('.gtop a.gopen')?.getAttribute('aria-label'))).toEqual(Array(4).fill('Open the report'));
+        expect(rows.some((r) => r.querySelector('.gopenbtn'))).toBe(false);
       }
     }
   });
@@ -306,7 +308,7 @@ describe('glass: a report page', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
     const card = [...reportsSection(cards).querySelectorAll('.card')].find((c) => text(c).includes('Fleet notes'))!;
-    const open = card.querySelector('.gaction a')!;
+    const open = card.querySelector('.gtop a.gopen')!;
     expect([open.getAttribute('href'), open.getAttribute('target')]).toEqual([pagePath(HELM_KEY), '_blank']);
   });
 });
@@ -357,7 +359,7 @@ describe('glass: the Reports tab', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     const card = cards.$$('#reports .card').find((c) => text(c).includes('Tray findings'))!;
-    const open = card.querySelector('.gaction a')!;
+    const open = card.querySelector('.gtop a.gopen')!;
     expect([open.getAttribute('href'), open.getAttribute('target'), open.getAttribute('rel')]).toEqual([
       `/report/${encodeURIComponent(TRAP_KEY)}`,
       '_blank',
@@ -460,20 +462,20 @@ describe('glass: short card badges stay whole', () => {
 });
 
 describe('glass: the open-window button', () => {
-  it('is a themed ↗ Open button at the end of the foot line, and its click does not open the trap modal', async () => {
+  it('is a themed ↗ Open button at the right of the bottom bar, and its click does not open the trap modal', async () => {
     const d = everyAttentionFleet();
     d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });
-      const button = g.$(view === 'cards' ? '#traps .card .gaction button' : '#traps tr.rowhead td:last-child button')!;
+      const button = g.$(view === 'cards' ? '#traps .card .gactions .gopenbtn button' : '#traps tr.rowhead td:last-child button')!;
       expect(text(button)).toBe('↗ Open');
       expect(button.className).toBe('btn open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
-    const button = deck.$('#deck .card .gaction button')!;
+    const button = deck.$('#deck .card .gactions .gopenbtn button')!;
     expect(text(button)).toBe('↗ Open');
     await click(deck, button);
     expect(deck.$('#overlay')!.className).toBe('');
