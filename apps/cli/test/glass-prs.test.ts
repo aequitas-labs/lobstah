@@ -154,3 +154,30 @@ describe('glass PR order: a refresh never reorders', () => {
     }
   });
 });
+
+describe("the person's own PRs (the PRs tab's Yours)", () => {
+  const viewer = () => 'chrishsu';
+  const mine = (recs: PrRecord[]) => Object.fromEntries(deriveGlassPrs([], [], recs, {}, viewer).prs.map((p) => [p.number, p.mine]));
+
+  it('marks a watched PR authored by the login gh signs in as, in any case', () => {
+    expect(mine([rec(40, 'main', 'a', { author: 'ChrisHsu' })])).toEqual({ 40: true });
+  });
+
+  it('marks a PR a dispatch opened, even with no author recorded yet', () => {
+    expect(mine([rec(41, 'main', 'b', { dispatches: ['dispatch-41'] })])).toEqual({ 41: true });
+  });
+
+  it("never marks another author's PR, whether watched by hand or recorded by a dispatch", () => {
+    expect(mine([rec(42, 'main', 'c', { author: 'basetim' }), rec(43, 'main', 'd', { author: 'basetim', dispatches: ['review-43'] })])).toEqual({ 42: false, 43: false });
+  });
+
+  it('keeps the author on the row, and leaves an unknown, undispatched PR unmarked', () => {
+    const { prs } = deriveGlassPrs([], [], [rec(44, 'main', 'e', { author: 'basetim' }), rec(45, 'main', 'f')], {}, viewer);
+    expect(prs.map((p) => [p.number, p.author, p.mine])).toEqual(expect.arrayContaining([[44, 'basetim', false], [45, undefined, false]]));
+  });
+
+  it('still lists a dispatch-reported PR with its dispatch ids', () => {
+    const { prs } = deriveGlassPrs([row(46, 'main', 'g')], [], [], {}, viewer);
+    expect(prs[0]).toMatchObject({ number: 46, dispatchIds: ['dispatch-46'], mine: true });
+  });
+});

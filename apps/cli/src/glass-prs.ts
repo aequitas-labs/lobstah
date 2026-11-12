@@ -1,4 +1,5 @@
 import { derivePrStacks, identifyPrStacks, parsePrRef, prBadge, prNewestFirst, prStackTitle, orderedDispatchPrUrls } from '@lobstah/core';
+import { mayAutoWatch, prAuthorship } from './pr-ownership.js';
 import type { GlassDispatchSummary, GlassPr, GlassPrWatch, GlassStack, PrEvidence, PrRecord } from '@lobstah/core';
 
 /**
@@ -17,11 +18,17 @@ export interface GlassPrDispatch {
 
 export type { GlassPr, GlassPrWatch, GlassStack } from '@lobstah/core';
 
+/**
+ * `viewer` is the login gh signs in as (githubViewer), asked only for a PR
+ * whose author is known: a PR is the person's (`mine`) when that login
+ * authored it or a dispatch opened it.
+ */
 export function deriveGlassPrs(
   dispatches: readonly GlassPrDispatch[],
   watches: readonly GlassPrWatch[] = [],
   records: readonly PrRecord[] = [],
   stackOptions: Parameters<typeof derivePrStacks>[1] = {},
+  viewer: () => string | undefined = () => undefined,
 ): { prs: GlassPr[]; stacks: GlassStack[] } {
   const byId = new Map(dispatches.map((d) => [d.id, d]));
   const rootOf = (id: string): string => {
@@ -93,6 +100,9 @@ export function deriveGlassPrs(
       ...(pr.state === 'OPEN' && pr.repair?.status === 'waiting' && pr.repair.headSha === pr.headSha
         ? { repairWait: { heldBy: pr.repair.heldBy ?? 'held', reason: pr.repair.reason ?? '', ...(pr.repair.until ? { until: pr.repair.until } : {}) } }
         : {}),
+      ...(pr.author ? { author: pr.author } : {}),
+      // The same line automatic watching draws: the person's, or a dispatch's, never a known other author's.
+      mine: mayAutoWatch(prAuthorship({ author: pr.author, dispatches: ids }, viewer)),
     });
   }
 
