@@ -266,7 +266,7 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
     tail: p.mergeRequest && [' · ', mergeNote(p)],
     actions: [
       html`<${MergeWhenGreen} p=${p} />`,
-      pending.length > 0 && html`<${AckButton} pending=${pending} label="Ack" />`,
+      pending.length > 0 && html`<${AckButton} pending=${pending} label="Ack" stack=${opts.stack?.id} />`,
       html`<${CardLink} href=${reviewLink(p.url)} />`,
     ],
     quiet: opts.quiet,
