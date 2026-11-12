@@ -289,7 +289,7 @@ import {
   runPrCheck,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
-import { mergeRequestedPrs } from './pr-merge.js';
+import { mergeRequestedPrs, mergeRequestedStacks } from './pr-merge.js';
 import { createRunCleanup } from './run-cleanup.js';
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
@@ -3982,6 +3982,8 @@ async function mainCli(): Promise<void> {
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
             // "Merge when green" from the glass: merge, repair, or tell the helm it's stuck.
             mergeRequestedPrs(log);
+            // "Merge stack when green": repair, link on GitHub, then one merge for the whole stack.
+            mergeRequestedStacks(log);
             stampRepairerBeat(now);
           },
           todoFiring: createTodoFiring(),

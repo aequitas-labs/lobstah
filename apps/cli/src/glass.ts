@@ -108,7 +108,7 @@ import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrHead, dispatchPrList } from './glass-prs.js';
 import { githubViewer } from './pr-ownership.js';
-import { PrMergeRefused, cancelPrMerge, prMergeMethod, requestPrMerge } from './pr-merge.js';
+import { PrMergeRefused, cancelPrMerge, cancelStackMerge, prMergeMethod, requestPrMerge, requestStackMerge } from './pr-merge.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -174,6 +174,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['review-draft', 1024],
   ['pr-ack', 256 * 1024],
   ['pr-merge', 1024],
+  ['stack-merge', 1024],
   ['attention-ack', 1024],
 ]);
 
@@ -1192,6 +1193,24 @@ export function serveGlass(
             } catch (error) {
               if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
               return reply(500, { ok: false, reason: 'The merge request could not be stored.' });
+            }
+          }
+          case 'stack-merge': {
+            const payload = body.payload as { stack?: unknown; cancel?: unknown } | undefined;
+            const stack = payload?.stack;
+            if (typeof stack !== 'string' || !/^pr:[^\s]{1,300}$/.test(stack)) return reply(400, { ok: false, reason: 'A stack is required.' });
+            if (payload?.cancel === true) {
+              const cancelled = cancelStackMerge(stack);
+              return cancelled === 'merging'
+                ? reply(409, { ok: false, reason: "GitHub is already merging it, so it can't be cancelled." })
+                : reply(200, { ok: true, stack, cancelled: cancelled === 'cancelled' });
+            }
+            try {
+              const request = requestStackMerge(stack, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass');
+              return reply(200, { ok: true, stack, method: request.method });
+            } catch (error) {
+              if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
+              return reply(500, { ok: false, reason: 'The stack merge request could not be stored.' });
             }
           }
           case 'pr-ack':

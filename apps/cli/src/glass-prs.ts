@@ -159,9 +159,13 @@ export function deriveGlassPrs(
       }
     });
     const open = ordered.filter((p) => p.state === 'OPEN');
+    // "Merge stack when green" lives on the bottom PR's record (pr-merge.ts requestStackMerge).
+    const merge = recordByUrl.get(root.url)?.stackMergeRequest;
     stacks.push({ id, floor: root.baseRefName ?? '?', repo: root.repo,
       numbers: ordered.map((p) => p.number), open: open.length > 0,
-      nextNumber: eligible?.number, behind: eligible ? open.filter((p) => p.position > eligible.position).length : 0 });
+      nextNumber: eligible?.number, behind: eligible ? open.filter((p) => p.position > eligible.position).length : 0,
+      ...(open.length > 0 && open.every((p) => p.mine) ? { mine: true } : {}),
+      ...(merge ? { mergeRequest: { at: merge.at, method: merge.method, ...(merge.merging ? { merging: true } : {}) } } : {}) });
     const status = readiness.find((s) => s.members.some((p) => members.some((m) => p.url === m.url)));
     if (status) stacks.at(-1)!.readiness = {
       id: status.id, url: status.members.at(-1)!.url,

@@ -70,11 +70,8 @@ const click = async (g: GlassDom, stack: string) => {
 const sent = (g: GlassDom, i = -1) => (JSON.parse(g.posts().at(i)!.body).payload.items as Array<{ key: string; stateHash: string }>).map((a) => a.key).sort();
 
 describe('glass PR Ack stack', () => {
-  // The tables keep their Ack buttons; a card acks by opening (below).
-  it.each([
-    ['#prs', 'table'],
-    ['#deck', 'table'],
-  ])('on %s (%s) acks one stack, leaving the other stack and the lone PR, and stands again for a new state', async (hash, view) => {
+  // The PRs table keeps its Ack buttons; a card acks by opening (below). The deck shows no PRs.
+  it.each([['#prs', 'table']])('on %s (%s) acks one stack, leaving the other stack and the lone PR, and stands again for a new state', async (hash, view) => {
     const d = fleet();
     const g = await page(d, { hash, prefs: { view }, post: acking(d) });
     expect(g.$$('button').some((b) => b.textContent === 'Ack all')).toBe(false);
@@ -140,15 +137,4 @@ describe('glass PR Ack stack', () => {
     expect(g.posts()).toHaveLength(2);
   });
 
-  it('does not open the PR when the deck line is clicked through its Ack stack', async () => {
-    const d = fleet();
-    const g = await page(d, { hash: '#deck', post: acking(d) });
-    await click(g, B);
-    expect(g.posts()).toHaveLength(1);
-    expect(g.$('#modalbox h3')).toBeNull();
-    // The line itself still opens its PR.
-    (g.$$('.deckline').find((l) => l.textContent?.includes('#70')) as HTMLElement).click();
-    await g.settle();
-    expect(g.$('#modalbox h3')).not.toBeNull();
-  });
 });

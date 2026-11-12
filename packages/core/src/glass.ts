@@ -199,6 +199,10 @@ export interface GlassStack {
   title?: string;
   /** Shared stack readiness, absent for a lone PR or an incomplete chain. `state` leaves out what the heading says. */
   readiness?: { id: string; url: string; ready: number; total: number; allReady: boolean; text: string; state: string };
+  /** "Merge stack when green", while it stands: how it merges, and whether GitHub has taken the merge (it can't be cancelled then). */
+  mergeRequest?: { at: string; method: 'merge' | 'squash' | 'rebase'; merging?: boolean };
+  /** Whether every PR in it is the person's own or a dispatch's, so the glass may offer to merge the whole stack. */
+  mine?: boolean;
 }
 
 /** The evidence fields a dispatch's row shows: where it went and its PRs. */
