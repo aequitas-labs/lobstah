@@ -30,6 +30,23 @@
   --pr-closed: #da3633;
   /* the lobster's own red (the pet sprite's shell) */
   --lobstah: #eb6644;
+  /* The ANSI palette run output's colors map to: black and white lifted off the dark inset. */
+  --ansi-0: #6e7681;
+  --ansi-1: #ff7b72;
+  --ansi-2: #3fb950;
+  --ansi-3: #d29922;
+  --ansi-4: #58a6ff;
+  --ansi-5: #bc8cff;
+  --ansi-6: #39c5cf;
+  --ansi-7: #b1bac4;
+  --ansi-8: #8b949e;
+  --ansi-9: #ffa198;
+  --ansi-10: #56d364;
+  --ansi-11: #e3b341;
+  --ansi-12: #79c0ff;
+  --ansi-13: #d2a8ff;
+  --ansi-14: #56d4dd;
+  --ansi-15: #f0f6fc;
   /* the Stats heatmap's five steps: none, then the accent at rising strength */
   --heat-0: var(--inset);
   --heat-1: color-mix(in srgb, var(--lobstah) 30%, var(--card));
@@ -2903,6 +2920,19 @@ footer .glass-brand {
   max-height: 40vh;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* Run output's terminal styles (components/terminal.ts); its colors are the --ansi-<n> palette. */
+.runlog .tb {
+  font-weight: 700;
+}
+.runlog .td {
+  opacity: 0.7;
+}
+.runlog .ti {
+  font-style: italic;
+}
+.runlog .tu {
+  text-decoration: underline;
 }
 a.runbtn {
   text-decoration: none;
