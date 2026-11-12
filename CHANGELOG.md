@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.8.9 — 2026-11-12
+
+### The PRs tab leads with yours
+
+- The PRs tab puts your PRs first, under Yours, and a stack stays together if
+  any PR in it is yours. Every other watched PR sits under Other PRs, closed
+  until you open it. A watched PR is yours when `gh` says you wrote it, or a
+  dispatch opened it. A PR you opened by hand joins with
+  `lobstah watch add <url>`. (#438, #439)
+- On a phone, the bottom bar shows Reviews and PRs side by side, each with its
+  own icon. Search and Menu are icon buttons. The PRs tab counts your open PRs
+  that need you: failed checks, a conflict, or a repair that stopped. (#439)
+- Merge when green: each open PR of yours has a button that merges it once its
+  checks pass and nothing below it in its stack is open. A PR with a conflict or
+  failing checks is repaired first. A PR no dispatch opened gets one repair
+  dispatch per head, and a stopped repair sends the helm one notice. The method
+  is `[repos.<key>].mergeMethod`, else `[pickup.github.merge].method`, else
+  squash. The hosted glass offers it too. (#441)
+
+### Reviews judge the code
+
+A drafted review's verdict is about the code alone. A merge gate, required
+check, submit or approval label, or CI status that is red, pending or older than
+the head never turns an approve into a comment. The review never mentions one
+or asks for a rerun. A test the change breaks is still a finding. (#432)
+
+### The wharf keeps its Slack client ID
+
+`SLACK_CLIENT_ID` is set once on the wharf's Worker, like `GITHUB_CLIENT_ID`,
+and kept across deploys. Before, `wrangler.jsonc` listed it empty, so every
+deploy blanked it and the glass offered no Slack link. Set it with
+`pnpm run deploy -- --var SLACK_CLIENT_ID:<id>`. (#442)
+
 ## 0.8.8 — 2026-11-11
 
 ### Run cards
