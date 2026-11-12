@@ -2964,6 +2964,11 @@ footer .glass-brand {
   align-items: center;
   gap: var(--space-2);
 }
+/* In the card the icon stands in for the status line, so it is a size larger than in a deck row. */
+.runout .runicon svg {
+  width: 20px;
+  height: 20px;
+}
 .runout {
   display: flex;
   flex-direction: column;
