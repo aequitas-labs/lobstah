@@ -38,6 +38,7 @@ export * from './github-budget.js';
 export * from './pr-poll.js';
 export * from './dir-lock.js';
 export * from './heavy.js';
+export * from './heavy-waits.js';
 export * from './heavy-hooks.js';
 export * from './heavy-reminder.js';
 export * from './watch.js';

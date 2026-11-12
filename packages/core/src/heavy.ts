@@ -10,6 +10,7 @@ import type { GlassHeavy, GlassHeavyTicket } from './glass.js';
 import { postNotice } from './notices.js';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 import type { Lane } from './types.js';
+import { wakeHeavyWait, wakeHeavyWaits } from './heavy-waits.js';
 
 /**
  * One line per machine for commands heavy enough to overload it, kept as
@@ -37,6 +38,8 @@ export interface HeavyTicket {
   label?: string;
   repo?: string;
   command: string;
+  /** Output retained for a paused owner's completion wake. */
+  log?: string;
   joinedAt: string;
   runningAt?: string;
   /** Running time that counts against the limit: sleep does not. */
@@ -49,7 +52,22 @@ export interface HeavyTicket {
   reason?: string;
 }
 
-export type HeavyJoin = Pick<HeavyTicket, 'pid' | 'session' | 'dispatch' | 'lane' | 'trap' | 'label' | 'repo' | 'command'>;
+export type HeavyJoin = Pick<HeavyTicket, 'pid' | 'session' | 'dispatch' | 'lane' | 'trap' | 'label' | 'repo' | 'command' | 'log'>;
+
+/** A finished command, including records written before ticket ids and logs were retained. */
+export interface HeavyRun {
+  seq?: number;
+  repo?: string;
+  command: string;
+  trap?: string;
+  dispatch?: string;
+  lane?: Lane;
+  log?: string;
+  joinedAt: string;
+  runningAt?: string;
+  endedAt: string;
+  exit?: number;
+}
 
 export type HeavyStep =
   | { kind: 'run'; slot: number; slots: number }
@@ -209,7 +227,7 @@ function recordRun(t: HeavyTicket, exit: number | undefined, now: number): void 
   try {
     const file = path.join(heavyDir(), 'history.jsonl');
     const line = JSON.stringify({
-      repo: t.repo, command: t.command, trap: t.trap, dispatch: t.dispatch,
+      seq: t.seq, repo: t.repo, command: t.command, trap: t.trap, dispatch: t.dispatch, lane: t.lane, log: t.log,
       joinedAt: t.joinedAt, runningAt: t.runningAt, endedAt: new Date(now).toISOString(),
       activeMs: t.activeMs, overLimit: t.state === 'over', ...(exit === undefined ? {} : { exit }),
     });
@@ -357,12 +375,14 @@ export function tickHeavyTicket(seq: number, now = Date.now()): boolean {
 
 /** The command ended: free its slot and keep its run time. */
 export function releaseHeavyTicket(seq: number, exit?: number, now = Date.now()): void {
-  withLine(() => {
+  const ticket = withLine(() => {
     const t = readTicket(seq);
     if (!t) return;
     if (t.state === 'running' || t.state === 'over') recordRun(t, exit, now);
     removeTicket(seq);
+    return t;
   });
+  if (ticket?.dispatch && ticket.lane) wakeHeavyWait(ticket.dispatch, ticket.lane, now);
 }
 
 /**
@@ -399,13 +419,8 @@ export function liveHeavyTickets(match: { dispatch?: string; trap?: string }, no
 /** How much of the run history's end `lastHeavyRunEnd` reads: recent runs are at the end. */
 const HISTORY_TAIL_BYTES = 64 * 1024;
 
-/**
- * When the latest finished run of a dispatch or trap ended, from the run
- * history, or undefined when it has none there. A trap that went quiet while
- * its command ran in the line counts its idle time from this moment, not from
- * when its turn ended.
- */
-export function lastHeavyRunEnd(match: { dispatch?: string; trap?: string }): number | undefined {
+/** Read the bounded end of run history, accepting records from older versions. */
+export function recentHeavyRuns(): HeavyRun[] {
   let text: string;
   try {
     const file = path.join(heavyDir(), 'history.jsonl');
@@ -420,21 +435,29 @@ export function lastHeavyRunEnd(match: { dispatch?: string; trap?: string }): nu
       fs.closeSync(fd);
     }
   } catch {
-    return undefined;
+    return [];
   }
-  let latest: number | undefined;
+  const runs: HeavyRun[] = [];
   for (const line of text.split('\n')) {
-    let run: { dispatch?: unknown; trap?: unknown; endedAt?: unknown };
+    let run: Partial<HeavyRun>;
     try {
       run = JSON.parse(line) as typeof run;
     } catch {
       continue; // The tail's cut first line, or a torn write.
     }
-    const mine = (match.dispatch !== undefined && run.dispatch === match.dispatch) || (match.trap !== undefined && run.trap === match.trap);
-    const ended = mine && typeof run.endedAt === 'string' ? Date.parse(run.endedAt) : NaN;
-    if (Number.isFinite(ended) && (latest === undefined || ended > latest)) latest = ended;
+    if (run && typeof run.endedAt === 'string' && Number.isFinite(Date.parse(run.endedAt))) {
+      runs.push({ ...run, endedAt: run.endedAt, joinedAt: run.joinedAt ?? run.endedAt, command: run.command ?? 'heavy command' });
+    }
   }
-  return latest;
+  return runs;
+}
+
+/** The latest recorded finish for this dispatch or trap, including legacy history. */
+export function lastHeavyRunEnd(match: { dispatch?: string; trap?: string }): number | undefined {
+  const ends = recentHeavyRuns()
+    .filter(run => (match.dispatch !== undefined && run.dispatch === match.dispatch) || (match.trap !== undefined && run.trap === match.trap))
+    .map(run => Date.parse(run.endedAt));
+  return ends.length ? Math.max(...ends) : undefined;
 }
 
 /**
@@ -446,6 +469,7 @@ export function lastHeavyRunEnd(match: { dispatch?: string; trap?: string }): nu
 export function heavyDaemonPass(now = Date.now()): void {
   const cfg = settings();
   const line = withLine(() => settle(cfg.holdLimitMins * 60_000, now));
+  wakeHeavyWaits(now);
   for (const t of line) {
     if (t.state !== 'over' || t.reason) continue;
     postNotice({

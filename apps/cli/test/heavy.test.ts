@@ -5,10 +5,11 @@ import os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { laneDirs, worktreeLockFile } from '@lobstah/core';
+import { appendStatus, claimBait, enqueue, ensureLayout, heavyDaemonPass, laneDirs, signOnTrap, unhandled, worktreeLockFile } from '@lobstah/core';
 import { stopChildren } from '../../../test/child-process.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 import { windowsCommand } from '../src/heavy.js';
+import { liveWatcher } from '../src/watchers.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
 const unix = process.platform !== 'win32';
@@ -27,8 +28,8 @@ function env(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 /** Start `lobstah heavy -- node -e <script>`. */
-function start(script: string, extra: NodeJS.ProcessEnv = {}): { child: ChildProcess; output: () => string; done: Promise<number | null> } {
-  const child = spawn(process.execPath, [cli, 'heavy', '--', process.execPath, '-e', script], { env: env(extra), cwd: home, stdio: ['ignore', 'pipe', 'pipe'] });
+function start(script: string, extra: NodeJS.ProcessEnv = {}, cwd = home): { child: ChildProcess; output: () => string; done: Promise<number | null> } {
+  const child = spawn(process.execPath, [cli, 'heavy', '--', process.execPath, '-e', script], { env: env(extra), cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
   let out = '';
   child.stdout!.on('data', (d) => (out += String(d)));
@@ -53,6 +54,21 @@ const tickets = () => {
 };
 const setSlots = (n: number) => fs.writeFileSync(path.join(home, 'config.toml'), `[heavy]\nslots = ${n}\n`);
 const sleeper = (ms: number, file?: string) => `${file ? `require('fs').writeFileSync(${JSON.stringify(file)},'');` : ''}setTimeout(()=>{},${ms})`;
+
+/** A claimed trap that has reported, ready to park for its heavy command. */
+function claimHeavyTrap(): { id: string; session: string; worktree: string } {
+  ensureLayout();
+  const worktree = path.join(home, 'trap-worktree');
+  fs.mkdirSync(worktree);
+  const session = 'heavy-wake-session';
+  const signed = signOnTrap({ worktree, cwd: worktree, repo: 'r', harness: 'codex', sessionId: session, ttlMs: 60_000 });
+  if (!('ok' in signed)) throw new Error('could not sign on');
+  const id = 'heavy-wake-work';
+  enqueue({ id, repo: 'r', brief: 'Check the release' });
+  claimBait(signed.ok);
+  appendStatus(id, 'work', 'working', 'Started', undefined, undefined, true);
+  return { id, session, worktree };
+}
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-heavy-cli-'));
@@ -90,6 +106,56 @@ describe('starting a command on Windows', () => {
 });
 
 describe('lobstah heavy', () => {
+  it('a foreground run wakes its paused trap through the real park and retains its output', async () => {
+    setSlots(1);
+    const { id, session, worktree } = claimHeavyTrap();
+    const holding = path.join(home, 'holding');
+    const release = path.join(home, 'release');
+    const run = start(`const fs=require('fs');fs.writeFileSync(${JSON.stringify(holding)},'');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(timer);console.log('retained check output');process.exitCode=4}},25)`, {}, worktree);
+    await until(() => fs.existsSync(holding));
+    appendStatus(id, 'work', 'paused', 'Check in progress', undefined, { waitingOn: 'heavy' });
+    expect(unhandled(id, 'work')).toEqual([]);
+    const park = spawn(process.execPath, [cli, 'soak', '--wait', '--timeout', '10', '--session', session], { env: env(), cwd: worktree, stdio: ['ignore', 'pipe', 'pipe'] });
+    children.push(park);
+    let output = '';
+    park.stdout!.on('data', chunk => { output += String(chunk); });
+    const parked = new Promise<number | null>(resolve => park.once('close', resolve));
+    await until(() => liveWatcher(session, 'trap') !== undefined);
+    fs.writeFileSync(release, '');
+    expect(await run.done).toBe(4);
+    expect(await parked, output).toBe(0);
+    expect(output).toContain(`inbox ${id}`);
+    const [message] = unhandled(id, 'work');
+    expect(message!.text).toContain('exited 4');
+    const log = /^log: (.+)$/m.exec(message!.text)![1]!;
+    expect(fs.readFileSync(log, 'utf8')).toContain('retained check output');
+    expect(run.output()).toContain('retained check output');
+    heavyDaemonPass();
+    expect(unhandled(id, 'work')).toHaveLength(1);
+  }, TEST_MS);
+
+  it('a background holder and the daemon share one completion receipt for a heavy pause', async () => {
+    setSlots(1);
+    const { id, worktree } = claimHeavyTrap();
+    const holding = path.join(home, 'holding');
+    const release = path.join(home, 'release');
+    const script = `const fs=require('fs');fs.writeFileSync(${JSON.stringify(holding)},'');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(timer);console.log('background result');process.exitCode=6}},25)`;
+    const launch = spawnSync(process.execPath, [cli, 'heavy', '--bg', '--', process.execPath, '-e', script], { env: env(), cwd: worktree, encoding: 'utf8' });
+    expect(launch.status, launch.stderr).toBe(0);
+    await until(() => fs.existsSync(holding));
+    const holder = tickets()[0]!.pid;
+    appendStatus(id, 'work', 'paused', 'Check in progress', undefined, { waitingOn: 'heavy' });
+    fs.writeFileSync(release, '');
+    await until(() => {
+      try { process.kill(holder, 0); return false; } catch { return true; }
+    });
+    heavyDaemonPass();
+    const messages = unhandled(id, 'work');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.text).toContain('exited 6');
+    expect(messages[0]!.text).toContain('background result');
+  }, TEST_MS);
+
   it('passes through the exit code, gives the worker limits, and shows an empty line', () => {
     setSlots(1);
     const run = spawnSync(process.execPath, [cli, 'heavy', '--', process.execPath, '-e', "console.log(process.env.VITEST_MAX_FORKS, process.env.VITEST_MAX_THREADS, process.env.VITEST_MAX_WORKERS, Boolean(process.env.LOBSTAH_HEAVY_TICKET)); process.exit(7)"], { env: env(), cwd: home, encoding: 'utf8' });
@@ -177,6 +243,24 @@ describe('lobstah heavy', () => {
   }, TEST_MS);
 
   describe.skipIf(!unix)('with processes killed', () => {
+    it('keeps a verbose owned command and its output alive after the holder is killed', async () => {
+      setSlots(1);
+      const { id, worktree } = claimHeavyTrap();
+      const holding = path.join(home, 'holding');
+      const completed = path.join(home, 'completed');
+      const run = start(`const fs=require('fs');fs.writeFileSync(${JSON.stringify(holding)},'');const timer=setInterval(()=>console.log('still running'),25);setTimeout(()=>{clearInterval(timer);console.log('completed output');fs.writeFileSync(${JSON.stringify(completed)},'')},1000)`, {}, worktree);
+      await until(() => fs.existsSync(holding) && tickets()[0]?.group !== undefined);
+      appendStatus(id, 'work', 'paused', 'Check running', undefined, { waitingOn: 'heavy' });
+      run.child.kill('SIGKILL');
+      await run.done;
+      await until(() => fs.existsSync(completed) && unhandled(id, 'work').length > 0);
+      const [message] = unhandled(id, 'work');
+      expect(message!.text).toContain('exited 0');
+      const log = /^log: (.+)$/m.exec(message!.text)![1]!;
+      expect(fs.readFileSync(log, 'utf8')).toContain('completed output');
+      expect(tickets()).toEqual([]);
+    }, TEST_MS);
+
     it('kill -9 of a holder keeps the slot until its command ends', async () => {
       setSlots(1);
       const holding = path.join(home, 'holding');
