@@ -113,6 +113,11 @@ exist yet. Later deploys need only `pnpm run deploy`: the local file stays on
 the deploying machine, and the Worker keeps its variables and secrets. Coordination uses each
 account's SQLite Durable Object; core does not import this service or Better Auth.
 
+To deploy main from any checkout, run `scripts/deploy-from-main.sh` (or post it as a
+run card). It checks the live version and pending migrations, applies them, deploys,
+checks health and prints the rollback. `--set-var SLACK_CLIENT_ID` also sets that var
+from stdin.
+
 ### Boats
 
 Sign in at `https://glass.lobstah.dev` first. The CLI names the account, and the
