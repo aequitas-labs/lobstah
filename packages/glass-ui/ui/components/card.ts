@@ -85,7 +85,15 @@ export interface CardProps {
  * of the top line, the same place on every card, and a click on it never
  * opens the card.
  */
-export type CardOpen = { href: string; label: string; onOpen?: () => void } | { control: Children };
+export type CardOpen =
+  | {
+      href: string;
+      label: string;
+      onOpen?: () => void;
+      /** Opens it in the glass instead (a report's sheet); it decides whether a click wanted a new tab after all. */
+      here?: (e: Event) => void;
+    }
+  | { control: Children };
 
 /** A pull request, as a small line icon in the text's color. */
 export const PrIcon = html`<svg class="pricon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" /></svg>`;
@@ -108,6 +116,7 @@ export function OpenArrow({ open }: { open: CardOpen }) {
   ) => {
     e.stopPropagation();
     open.onOpen?.();
+    open.here?.(e);
   }}>${OpenIcon}</a>`;
 }
 

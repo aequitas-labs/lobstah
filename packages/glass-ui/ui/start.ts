@@ -1,16 +1,18 @@
 import { h, render } from 'preact';
 import type { GlassSnapshot } from '@lobstah/core';
-import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath, reportPageUrl } from '../src/glass-diff.js';
+import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
 import {
   closeDecision,
   closeLightbox,
   closeModal,
+  closeReportSheet,
   decisionNumberKey,
   loadSettings,
   loadStats,
   openDecision,
   receive,
   reviewRequest,
+  routeReport,
   sendAnswer,
   showModal,
   stepDecision,
@@ -34,20 +36,13 @@ import type { GlassHost } from './host.js';
  * once and stops. Otherwise it builds the store from localStorage and the
  * URL, renders App into the body on every change, and starts polling.
  * Either page reports its presence, so the pet can show an item in it.
- * A `#report/<key>` link goes to the report's page.
+ * A `#report/<key>` link opens that report in the sheet over the glass.
  */
-
-/** An old `#report/<key>` link: replace it with the report's page. */
-function reportRedirect(): boolean {
-  const key = reportFromHash(location.hash);
-  if (key === null) return false;
-  location.replace(reportPageUrl(key));
-  return true;
-}
 
 const initialState = (): GlassState => ({
   snapshot: undefined,
   route: currentRoute(),
+  reportSheet: reportFromHash(location.hash),
   prefs: location.hash.startsWith('#review-') ? { ...loadPrefs(), repo: '', q: '' } : loadPrefs(),
   modal: null,
   detail: null,
@@ -81,7 +76,7 @@ export function startGlassPage(source: GlassBackend, parts: GlassHost = {}): Gla
   const reportKey = reportFromPath(location.pathname);
   const stops: Array<() => void> = [];
   if (reportKey !== null) stops.push(...startReportPage(reportKey));
-  else if (!reportRedirect()) stops.push(...startGlass());
+  else stops.push(...startGlass());
   return {
     refresh: poll,
     live: setLive,
@@ -203,7 +198,10 @@ function startGlass(): Array<() => void> {
   paint();
 
   const unroute = onRoute((route) => {
-    if (reportRedirect()) return;
+    // A report opens in the sheet over the tab, which keeps its place underneath.
+    const report = reportFromHash(location.hash);
+    routeReport(report);
+    if (report !== null) return;
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({
@@ -230,14 +228,15 @@ function startGlass(): Array<() => void> {
     const state = getState();
     const t = e.target as HTMLElement | null;
     if (e.key === 'Escape') {
-      // Topmost first: the image overlay, then the decision modal, then the modal.
+      // Topmost first: the image overlay, then the decision modal, then the report sheet, then the modal.
       if (state.lightbox) closeLightbox();
       else if (state.decisionModal) {
         if (typing(t) && t!.closest?.('.dmodal')) {
           t!.blur();
           document.querySelector<HTMLElement>('.dmodal')?.focus();
         } else closeDecision();
-      } else closeModal();
+      } else if (state.reportSheet) closeReportSheet();
+      else closeModal();
       return;
     }
     if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.keyCode === 229 || typing(t) || state.lightbox) return;

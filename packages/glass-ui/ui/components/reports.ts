@@ -2,6 +2,7 @@ import type { GlassReport } from '@lobstah/core';
 import { reportFrom, reportPageUrl } from '../../src/glass-diff.js';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
+import { openReportSheet } from '../actions.js';
 import { Age, RepoName, TRAP_MARK, Table, ageText } from './common.js';
 import { Card } from './card.js';
 
@@ -9,13 +10,21 @@ import { Card } from './card.js';
  * The Reports tab: every report, newest first regardless of acknowledgment.
  * A card shows the title, then its repo, who filed it (a trap's name, a
  * headless dispatch's id, nothing for the helm) and its age, with ↗ Open; it
- * is greyed once read. A row says `acked` instead. Each opens the report's
- * own page in a new tab.
+ * is greyed once read. A row says `acked` instead. Each opens the report in
+ * the sheet over the glass, in a browser tab and in the installed app alike.
  */
 
-/** Open a report's own page in a new tab. Its page acknowledges it once the report text loads. */
-export const openReport = (r: GlassReport) => () => {
-  window.open(reportPageUrl(r.key), '_blank', 'noopener');
+/** Whether a click asked for a new tab (⌘, ctrl, shift or a middle click): the link's own target then. */
+const newTab = (e?: Event): boolean => {
+  const m = e as MouseEvent | undefined;
+  return !!m && (m.metaKey || m.ctrlKey || m.shiftKey || m.button === 1);
+};
+
+/** Open a report in the sheet over the glass. Showing it acknowledges it once its text loads. */
+export const openReport = (r: GlassReport) => (e?: Event) => {
+  if (newTab(e)) return;
+  e?.preventDefault();
+  openReportSheet(r.key);
 };
 
 /** The meta line as elements (the age ticks) and as text (the clamped line's title). */
@@ -37,7 +46,7 @@ export function reportCard(r: GlassReport) {
     titleAttr=${r.title}
     context=${[r.repo && [RepoName(r.repo), ' · '], from && [r.trap ? `${TRAP_MARK} ${from}` : from, ' · '], Age(r.filedAt), ' ago']}
     contextTitle=${[lead, `${ageText(r.filedAt)} ago`].filter(Boolean).join(' · ')}
-    open=${{ href: reportPageUrl(r.key), label: 'Open the report' }}
+    open=${{ href: reportPageUrl(r.key), label: 'Open the report', here: openReport(r) }}
     quiet=${!!r.acked}
     cls=${r.acked ? 'acked' : undefined}
     onClick=${openReport(r)}
@@ -45,7 +54,12 @@ export function reportCard(r: GlassReport) {
 }
 
 function row(r: GlassReport) {
-  return html`<tr key=${r.key} class=${'rowhead' + (r.acked ? ' acked' : '')} onClick=${openReport(r)}><td class="grow"><a href=${reportPageUrl(r.key)} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>${r.title}</a></td><td>${reportFrom(r)}</td><td>${Age(r.filedAt)}</td><td>${r.acked ? 'acked' : ''}</td></tr>`;
+  return html`<tr key=${r.key} class=${'rowhead' + (r.acked ? ' acked' : '')} onClick=${openReport(r)}><td class="grow"><a href=${reportPageUrl(r.key)} target="_blank" rel="noopener" onClick=${(
+    e: Event,
+  ) => {
+    e.stopPropagation();
+    openReport(r)(e);
+  }}>${r.title}</a></td><td>${reportFrom(r)}</td><td>${Age(r.filedAt)}</td><td>${r.acked ? 'acked' : ''}</td></tr>`;
 }
 
 export function Reports({ inp }: { inp: SectionInputs['reports'] }) {

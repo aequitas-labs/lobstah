@@ -1,4 +1,4 @@
-import { reportFromHash, reportPageUrl, validShowHash } from '../src/glass-diff.js';
+import { validShowHash } from '../src/glass-diff.js';
 import { backend, can } from './backend.js';
 
 /**
@@ -72,10 +72,8 @@ export function applyShow(show: unknown): boolean {
   if (shown().includes(showId)) return false;
   remember(showId);
   if (hash === '') return true;
-  const report = reportFromHash(hash);
-  if (report !== null) {
-    if (location.pathname !== reportPageUrl(report)) location.assign(reportPageUrl(report));
-  } else if (location.pathname !== '/') {
+  // A report's hash opens its sheet on the glass, as a tab's hash opens the tab.
+  if (location.pathname !== '/') {
     location.assign(`/${hash}`);
   } else if (location.hash !== hash) {
     location.hash = hash;
