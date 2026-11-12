@@ -44,6 +44,14 @@ never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
 disabled hook, or approves repo/user/other-plugin hooks. Those still require
 their normal review. Manually launched Codex sessions still use `/hooks`.
 
+Doctor's `codex trap hooks` row names every hook that would hold a thrown
+trap at that picker: the user's `hooks.json`, each repo's project hooks, and
+another plugin's hooks, such as ume's after `codex plugin add ume@ume`.
+Plugin hooks apply in every folder, so they're listed once. Their trust
+comes from Codex's own `hooks/list` answer; a disabled one doesn't count.
+When a thrown Codex trap doesn't sign on in time, the error names the same
+hooks.
+
 That trust covers the plugin as it was at launch. When the lobstah Codex
 plugin's contents change, a running session refuses lobstah's hooks: the
 transcript shows "Hook failed: plugin contents changed; hook approval

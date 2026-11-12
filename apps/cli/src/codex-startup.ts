@@ -152,7 +152,7 @@ function codexHookState(codexDir: string): Record<string, { enabled?: boolean; t
  * checkout's project hooks, less those Codex already trusts at their current
  * hash and those lobstah supplies for the session. A disabled hook never asks.
  */
-export function codexTrapHookBlockers(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): CodexHookBlocker[] {
+export function codexTrapHookBlockers(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string; listed?: CodexHookList } = {}): CodexHookBlocker[] {
   const env = opts.env ?? process.env;
   const codexDir = env.CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
   const state = codexHookState(codexDir);
@@ -168,8 +168,38 @@ export function codexTrapHookBlockers(cwd: string, opts: { env?: NodeJS.ProcessE
     const why = entry?.trusted_hash ? 'changed since it was trusted' : 'never trusted';
     out.push({ ...e, reason: project.unverified && e.key.startsWith(`${project.file}:`) ? `${why}; lobstah supplies no trust because ${project.unverified}` : why });
   }
+  out.push(...codexPluginHookBlockers(opts.listed, state));
   return out;
 }
+
+/**
+ * Another plugin's hooks that would hold a Codex trap at hook review: only
+ * Codex knows their trust (since 0.166, a hash of the plugin's contents too),
+ * so this reads its `hooks/list` answer. Lobstah never supplies trust for
+ * them. Plugin hooks apply in every folder, unlike project hooks.
+ */
+export function codexPluginHookBlockers(
+  listed: CodexHookList | undefined,
+  state: Record<string, { enabled?: boolean }> = {},
+): CodexHookBlocker[] {
+  const out: CodexHookBlocker[] = [];
+  for (const hook of listed?.values() ?? []) {
+    const [plugin, , event] = hook.key.split(':');
+    if (!plugin || !PLUGIN_ID.test(plugin) || plugin === 'lobstah@lobstah') continue;
+    if (hook.trustStatus === 'trusted' || state[hook.key]?.enabled === false) continue;
+    out.push({
+      key: hook.key,
+      event: event ?? '',
+      command: hook.command ?? '',
+      hash: hook.currentHash,
+      reason: hook.trustStatus === 'modified' ? `${plugin} changed since it was trusted` : `${plugin} never trusted`,
+    });
+  }
+  return out;
+}
+
+/** A plugin id as Codex keys a plugin hook's trust: `<plugin>@<marketplace>`. */
+const PLUGIN_ID = /^[^/\\:@\s]+@[^/\\:@\s]+$/;
 
 /** The commands this CLI authorizes for its own trap lifecycle, never repo hooks. */
 const COMMANDS: Record<CodexHook, string> = {
@@ -257,7 +287,7 @@ export function codexTrapHookTrust(opts: { env?: NodeJS.ProcessEnv; home?: strin
  */
 export function codexTrapHooksRow(
   repos: Record<string, { path: string }>,
-  opts: { env?: NodeJS.ProcessEnv; home?: string } = {},
+  opts: { env?: NodeJS.ProcessEnv; home?: string; listed?: CodexHookList } = {},
 ): { check: string; status: 'ok' | 'fail' | 'skip'; detail: string } {
   const check = 'codex trap hooks';
   if (!installedCodexPlugin(opts)) return { check, status: 'skip', detail: 'Codex plugin not installed' };
@@ -266,9 +296,12 @@ export function codexTrapHooksRow(
   for (const [name, repo] of Object.entries(repos)) {
     if (!fs.existsSync(repo.path)) continue;
     supplied += codexProjectHookTrust(repo.path).supplied.length;
-    const blockers = codexTrapHookBlockers(repo.path, opts);
+    const blockers = codexTrapHookBlockers(repo.path, { env: opts.env, home: opts.home });
     if (blockers.length) blocked.push(`${name}: ${blockers.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ')}`);
   }
+  const codexDir = (opts.env ?? process.env).CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
+  const plugins = codexPluginHookBlockers(opts.listed, codexHookState(codexDir));
+  if (plugins.length) blocked.unshift(`every repo: ${plugins.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ')}`);
   if (blocked.length === 0) {
     return { check, status: 'ok', detail: `no hook would hold a Codex trap at hook review${supplied ? ` (lobstah supplies session trust for ${supplied} committed project hook${supplied > 1 ? 's' : ''})` : ''}` };
   }
