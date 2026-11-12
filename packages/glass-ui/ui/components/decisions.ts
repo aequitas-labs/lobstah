@@ -27,6 +27,7 @@ import { LinkedText } from './links.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
 import { RunCardBody } from './run-card.js';
 import { can, fileUrl } from '../backend.js';
+import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -56,10 +57,6 @@ function attachments(key: string, list: Attachment[]) {
       : html`<div key=${a.name} class="dfile"><span>${a.name}</span> <span class="dim">· ${a.type} · ${a.bytes} bytes · </span><code>${a.path}</code></div>`,
   )}</div>`;
 }
-
-/** A touch screen with no mouse or keyboard to speak of: no hotkey numbers and no keyboard legend. */
-export const touchOnly = (): boolean =>
-  typeof window.matchMedia === 'function' && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
 function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: string) {
   const key = c.key;
@@ -105,6 +102,10 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         setDraft(key, { text: el.value, error: undefined });
       }}
       onPaste=${can('answer-files') ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
+      onKeyDown=${onSendKey(
+        () => !getState().drafts[key]?.sending,
+        () => void sendAnswer(key),
+      )}
     ></textarea></div><div class="dtools">${
       can('answer-files') &&
       html`<label class="btn dattach dicon" title="Attach images or files">${AttachIcon}<input
@@ -120,7 +121,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
             });
           }}
         /></label>`
-    }<button type="button" class="btn dsend dicon" aria-label="Send" title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div></div>`,
+    }${!touch && html`<${SendHint} />`}<button type="button" class="btn dsend dicon" aria-label="Send" aria-keyshortcuts=${sendShortcut()} title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div></div>`,
     !permission &&
       (files.length > 0 || (draft?.error && !(instant && draft.option))) &&
       html`<div class="dfoot">

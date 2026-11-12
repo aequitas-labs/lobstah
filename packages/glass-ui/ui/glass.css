@@ -2115,6 +2115,26 @@ a.lob {
 .btn.dsend:disabled {
   color: var(--dim);
 }
+/* The send shortcut's hint (send-key.ts), quiet beside Send in the subtitle gray. */
+.sendhint {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.dtools .sendhint {
+  margin-left: auto;
+}
+.dtools .sendhint + .dsend {
+  margin-left: 0;
+}
+/* The helm message's button with its hint. */
+.jobsend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 6px;
+}
 .btn:disabled {
   cursor: default;
   opacity: 0.6;
