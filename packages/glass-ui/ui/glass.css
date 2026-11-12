@@ -2931,6 +2931,39 @@ footer .glass-brand {
   border-color: var(--ok);
   color: var(--ok);
 }
+/* A run's status as an icon (components/run-status.ts), its words in its name and tooltip. */
+.runicon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+.runicon .rundot {
+  display: none;
+}
+.runicon .runspin {
+  transform-origin: 8px 8px;
+  animation: runspin 0.9s linear infinite;
+}
+@keyframes runspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Less motion: a still amber dot instead of the spin. */
+@media (prefers-reduced-motion: reduce) {
+  .runicon .runspin {
+    display: none;
+  }
+  .runicon .rundot {
+    display: inline;
+  }
+}
+.runstate {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
 .runout {
   display: flex;
   flex-direction: column;

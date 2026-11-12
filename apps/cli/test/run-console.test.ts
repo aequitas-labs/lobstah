@@ -298,7 +298,7 @@ describe('the eye on a secret line', () => {
       (glass.$('#doverlay .runbtn') as HTMLButtonElement).click();
       const stop = await until(() => glass.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Stop') as HTMLButtonElement | undefined);
       stop.click();
-      await until(() => glass.$('#doverlay .runstate')?.textContent?.includes('Stopped'));
+      await until(() => glass.$('#doverlay .runstate .runicon')?.getAttribute('aria-label')?.startsWith('Stopped'));
       expect(glass.$('#doverlay .runbtn')?.textContent).toBe('Run again');
       expect(glass.$$('#doverlay .runfoot button').some((button) => button.textContent === 'Dismiss')).toBe(true);
     } finally {
