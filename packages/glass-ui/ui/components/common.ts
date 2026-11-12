@@ -21,6 +21,8 @@ import { ageText } from './age.js';
 import { VERB_TONE, VerbIcon, isIconVerb } from './run-status.js';
 import type { VerbTone } from './run-status.js';
 import { Button } from './button.js';
+import { Dialog } from './dialog.js';
+import { ITEM_ICON } from './icons.js';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
@@ -901,7 +903,7 @@ export function startCommands(t: GlassTrap): Children {
   return html`<div class="startcmds" onClick=${stop}><div class="dim">start it: run one in a terminal</div>${commands.map((c) => cmdRow(c.command, c.harness))}</div>`;
 }
 
-/** The New trap button and its form: a repo and a harness, filed as a request for the helm. */
+/** The New trap button and its dialog: a repo and a harness, filed as a request for the helm. */
 export function NewTrap() {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('trap-request')) return null;
@@ -918,15 +920,19 @@ export function NewTrap() {
     setResult(error ?? null);
     if (!error) setOpen(false);
   };
-  if (!open)
-    return html`<span class="newtrap"><${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//></span>`;
-  return html`<form class="newtrap" onClick=${stop} onSubmit=${submit}>
-    <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
-    <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
-    <${Button} type="submit" disabled=${!chosen}>Request<//>
-    <${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//>
-    ${result && html`<span class="bad">${result}</span>`}
-  </form>`;
+  const trigger = html`<${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//>`;
+  // A modal on a desktop, a sheet on a phone (Dialog); the form's fields stack in it.
+  return html`<span class="newtrap">${trigger}${
+    open &&
+    html`<${Dialog} title="New trap" icon=${ITEM_ICON.newTrap} onClose=${() => setOpen(false)}>
+      <form class="newtrap-form" onSubmit=${submit}>
+        <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
+        <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+        ${result && html`<div class="bad">${result}</div>`}
+        <div class="dialog-actions"><${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//><${Button} variant="primary" type="submit" disabled=${!chosen}>Request<//></div>
+      </form>
+    <//>`
+  }</span>`;
 }
 
 /** trapNow as plain text: the hover title of a clamped meta line. */

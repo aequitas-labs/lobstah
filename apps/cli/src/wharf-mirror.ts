@@ -9,6 +9,7 @@ import {
   lobstahVersion,
   mirrorReadAllowed,
   mirrorWriteAllowed,
+  postNotice,
   readMirrorStatus,
   wharfCredential,
   writeMirrorStatus,
@@ -35,6 +36,8 @@ import { ownAttentionList, writeOtherBoats } from './wharf-attention.js';
 export const MIRROR_WATCHED_READ_MS = 2_000;
 /** How often the local glass is read while none is open, for the pet's walking list. Loopback only: nothing goes to the wharf unless the list changed. */
 export const MIRROR_IDLE_READ_MS = 30_000;
+/** A disconnected or failing mirror needs attention after ten minutes, once per outage. */
+export const MIRROR_STALE_NOTICE_MS = 10 * 60_000;
 /** The largest local answer a relayed call carries back. */
 const MIRROR_ANSWER_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -93,11 +96,15 @@ export class WharfMirror {
   /** Calls carried out, one at a time, and the ids already handled (a resume may push one again). */
   private queue: Promise<void> = Promise.resolve();
   private readonly handled = new Set<string>();
+  private healthyAt: number;
+  private staleNoticed = false;
+  private retryMs = MIRROR_WATCHED_READ_MS;
   constructor(private options: WharfMirrorOptions) {
     const prior = readMirrorStatus();
     const same = prior?.wharf === options.wharf ? prior : undefined;
     this.status = { wharf: options.wharf, id: same?.id ?? randomUUID(), calls: 0, at: new Date(this.now()).toISOString(), ...(same?.boat ? { boat: same.boat } : {}), ...(same?.glass ? { glass: same.glass } : {}) };
     if (options.backend.glass) this.status.glass = options.backend.glass;
+    this.healthyAt = this.now();
   }
   private now(): number {
     return (this.options.now ?? Date.now)();
@@ -119,6 +126,12 @@ export class WharfMirror {
     this.sentEtag = undefined;
     this.attentionSent = undefined;
   }
+  /** Keep connection failures visible even when reading the local glass still works. */
+  onError(error: Error): void {
+    this.sentEtag = undefined;
+    this.fail(error);
+    this.writeStatus();
+  }
   /** A call pushed by the wharf: carried out after any before it, once. */
   onCall(call: WharfMirrorCall): Promise<void> {
     if (this.handled.has(call.id)) return this.queue;
@@ -137,20 +150,38 @@ export class WharfMirror {
    * Returns how long to wait before the next read.
    */
   async read(): Promise<number> {
+    let failed = false;
     try {
       await this.readSnapshot();
       this.sendSnapshotIfDue();
       this.sendAttentionIfChanged();
-      delete this.status.error;
+      if (this.options.channel.connected()) {
+        delete this.status.error;
+        this.healthyAt = this.now();
+        this.staleNoticed = false;
+      }
+      this.retryMs = MIRROR_WATCHED_READ_MS;
     } catch (error) {
+      failed = true;
       this.fail(error);
     }
+    if (!this.staleNoticed && this.now() - this.healthyAt >= MIRROR_STALE_NOTICE_MS) {
+      postNotice({ kind: 'wharf-mirror-stale', refId: this.options.wharf,
+        text: `Wharf mirror ${this.options.wharf} has been unavailable for 10 minutes. The hosted glass may be out of date. Run lobstah wharf whoami to check the connection.` });
+      this.staleNoticed = true;
+    }
     this.writeStatus();
+    if (failed) {
+      const delay = this.retryMs;
+      this.retryMs = Math.min(this.retryMs * 2, MIRROR_IDLE_READ_MS);
+      return delay;
+    }
     return this.watched ? MIRROR_WATCHED_READ_MS : MIRROR_IDLE_READ_MS;
   }
   private fail(error: unknown): void {
-    this.status.error = error instanceof Error ? error.message : String(error);
-    this.options.log?.(`wharf mirror: ${this.status.error}`);
+    const reason = error instanceof Error ? error.message : String(error);
+    if (this.status.error !== reason) this.options.log?.(`wharf mirror: ${reason}`);
+    this.status.error = reason;
   }
   private writeStatus(): void {
     this.status.at = new Date(this.now()).toISOString();
@@ -294,27 +325,24 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
   const wharf = config.glass.mirror;
   if (!wharf) return undefined;
   const scope = mirrorScope(config, wharf);
-  const token = wharfCredential(scope);
-  if (!token) {
-    log(`wharf mirror: no boat credential for ${wharf}; run lobstah wharf login --wharf ${wharf} --mirror`);
-    return undefined;
-  }
+  const credential = (): string => wharfCredential(scope);
   const port = glassPort();
   let mirror: WharfMirror | undefined;
-  const socket = new WharfSocket(scope.location, token, {
+  const socket = new WharfSocket(scope.location, credential, {
     client: lobstahVersion(),
     onState: (open) => {
       if (open) mirror?.onReconnect();
     },
+    onError: (error) => mirror?.onError(error),
     onMessage: (message) => {
       if (!mirror) return;
       if (message.t === 'watch') void mirror.onWatch(message.on);
       else if (message.t === 'call') void mirror.onCall(message.call);
       else if (message.t === 'attention') mirror.onAttention(message.boats);
-      else if (message.t === 'error') log(`wharf mirror: ${message.reason}`);
+      else if (message.t === 'error') mirror.onError(new Error(message.reason));
     },
   });
-  mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, token), channel: socket, glass: loopbackGlass(port), glassPort: port, log });
+  mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, credential), channel: socket, glass: loopbackGlass(port), glassPort: port, log });
   socket.start();
   let stopped = false;
   let sleeping: ReturnType<typeof setTimeout> | undefined;

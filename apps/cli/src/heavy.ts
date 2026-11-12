@@ -1,11 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process';
+import type { StdioOptions } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   checkHeavyLine, COMPILED_BINARY, formatHeavyView, heavyDir, heavyRunningText, heavyView, heavyWorkerEnv, heavyWorkers,
-  joinHeavyLine, laneDirs, laneOf, loadConfig, ordinal, readTrap, readWorktreeLock, releaseHeavyTicket, sendMessage,
-  sendTrapMessage, setHeavyGroup, tickHeavyTicket, toonKV, trapIdAbove,
+  joinHeavyLine, laneDirs, laneOf, loadConfig, ordinal, readTrap, readStatusLog, readWorktreeLock, releaseHeavyTicket,
+  sendTrapMessage, sendMessageOnce, heavyResultDeliveryId, heavyResultText, setHeavyGroup, tickHeavyTicket, toonKV, trapIdAbove,
 } from '@lobstah/core';
 import type { Descriptor, HeavyJoin, Lane } from '@lobstah/core';
 
@@ -17,6 +19,8 @@ const LOG_KEEP_MS = 7 * 86_400_000;
 /** Set on the detached holder `--bg` starts: where its log goes. */
 const BG_ENV = 'LOBSTAH_HEAVY_BG';
 const TICKET_ENV = 'LOBSTAH_HEAVY_TICKET';
+/** The output relay owns the command's pipes even if its queue holder exits. */
+const RELAY_ENV = 'LOBSTAH_HEAVY_RELAY';
 
 const say = (line: string): void => {
   process.stderr.write(`heavy: ${line}\n`);
@@ -103,14 +107,25 @@ export function windowsCommand(argv: string[], platform: NodeJS.Platform = proce
 }
 
 /** Run `argv`, wired to this process. Resolves with its exit code. */
-function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { input?: Buffer; onGroup?: (group: number) => void; onTick?: () => void } = {}): Promise<number> {
+function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { input?: Buffer; log?: string; relay?: boolean; onGroup?: (group: number) => void; onTick?: () => void } = {}): Promise<number> {
   // Its own process group, so a killed wrapper leaves a command whose load is
   // still visible to the line. A command on a terminal stays in the foreground.
-  const detached = process.platform !== 'win32' && !process.stdin.isTTY;
+  const detached = !hooks.relay && process.platform !== 'win32' && !process.stdin.isTTY;
   return new Promise((resolve) => {
-    const [file, args, shell] = windowsCommand(argv);
-    const stdio = hooks.input ? (['pipe', 'inherit', 'inherit'] as const) : 'inherit';
-    const child = spawn(file, args, { stdio: stdio as 'inherit', env, detached, shell, windowsHide: true });
+    const relay = hooks.log && !hooks.relay;
+    const self = COMPILED_BINARY ? [] : [fs.realpathSync(process.argv[1]!)];
+    const command = relay ? [process.execPath, ...self, 'heavy', '--', ...argv] : argv;
+    const [file, args, shell] = windowsCommand(command);
+    const output = hooks.relay && hooks.log ? fs.createWriteStream(hooks.log, { flags: 'a', mode: 0o600 }) : undefined;
+    output?.on('error', error => say(`could not retain output: ${error.message}`));
+    const stdio: StdioOptions = [hooks.input ? 'pipe' : 'inherit', output ? 'pipe' : 'inherit', output ? 'pipe' : 'inherit'];
+    const child = spawn(file, args, { stdio, env: relay ? { ...env, [RELAY_ENV]: '1' } : env, detached, shell, windowsHide: true });
+    if (output) {
+      child.stdout?.pipe(process.stdout, { end: false });
+      child.stderr?.pipe(process.stderr, { end: false });
+      child.stdout?.pipe(output, { end: false });
+      child.stderr?.pipe(output, { end: false });
+    }
     if (hooks.input) {
       // A hook that never reads its stdin closes the pipe: not an error.
       child.stdin?.on('error', () => {});
@@ -128,10 +143,14 @@ function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { input?: Buffe
     const handlers = signals.map((s) => [s, forward(s)] as const);
     for (const [s, h] of handlers) process.on(s, h);
     const timer = hooks.onTick ? setInterval(hooks.onTick, TICK_MS) : undefined;
+    let finished = false;
     const finish = (code: number) => {
+      if (finished) return;
+      finished = true;
       if (timer) clearInterval(timer);
       for (const [s, h] of handlers) process.off(s, h);
-      resolve(code);
+      if (output && !output.destroyed) output.end(() => resolve(code));
+      else resolve(code);
     };
     if (detached && child.pid !== undefined) hooks.onGroup?.(child.pid);
     child.once('error', (err) => {
@@ -142,14 +161,14 @@ function runChild(argv: string[], env: NodeJS.ProcessEnv, hooks: { input?: Buffe
   });
 }
 
-type Outcome = { exit: number; ranCommand: boolean; reason?: string };
+type Outcome = { exit: number; ranCommand: boolean; seq?: number; reason?: string };
 
 /** Wait for a slot, run the command, free the slot. A queue failure runs the command without one. */
 export async function runInLine(
   argv: string[],
   baseEnv: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd(),
-  opts: { label?: string; input?: Buffer } = {},
+  opts: { label?: string; input?: Buffer; log?: string } = {},
 ): Promise<Outcome> {
   const { input } = opts;
   if (baseEnv[TICKET_ENV]) return { exit: await runChild(argv, baseEnv, { input }), ranCommand: true };
@@ -159,8 +178,13 @@ export async function runInLine(
   };
 
   let seq: number;
+  const who = heavyIdentity(cwd, baseEnv);
+  let log = opts.log;
+  if (!log && (who.dispatch || who.trap) && !process.stdin.isTTY) {
+    try { log = createLog(); } catch (error) { say(`could not retain output: ${error instanceof Error ? error.message : String(error)}`); }
+  }
   try {
-    seq = joinHeavyLine({ ...heavyIdentity(cwd, baseEnv), pid: process.pid, command: opts.label ?? commandLabel(argv) }).seq;
+    seq = joinHeavyLine({ ...who, ...(log ? { log } : {}), pid: process.pid, command: opts.label ?? commandLabel(argv) }).seq;
   } catch (err) {
     return unqueued(err);
   }
@@ -204,7 +228,7 @@ export async function runInLine(
     if (step.kind === 'cancelled') {
       stopWaitingHandlers();
       say(`left the line without running: ${step.reason}`);
-      return { exit: EXIT_CANCELLED, ranCommand: false, reason: step.reason };
+      return { exit: EXIT_CANCELLED, ranCommand: false, seq, reason: step.reason };
     }
     if (step.kind === 'lost') {
       stopWaitingHandlers();
@@ -231,6 +255,7 @@ export async function runInLine(
   try {
     exit = await runChild(argv, env, {
       input,
+      ...(log && !opts.log ? { log } : {}),
       onGroup: (group) => {
         try {
           setHeavyGroup(seq, group);
@@ -246,7 +271,7 @@ export async function runInLine(
         }
       },
     });
-    return { exit, ranCommand: true };
+    return { exit, ranCommand: true, seq };
   } finally {
     try {
       releaseHeavyTicket(seq, exit);
@@ -267,11 +292,18 @@ function pruneLogs(dir: string, now = Date.now()): void {
   }
 }
 
-function startBackground(argv: string[]): void {
+/** Allocate retained output for an owned command or a detached holder. */
+function createLog(): string {
   const dir = path.join(heavyDir(), 'logs');
   fs.mkdirSync(dir, { recursive: true });
   pruneLogs(dir);
-  const log = path.join(dir, `${Date.now()}-${process.pid}.log`);
+  const log = path.join(dir, `${Date.now()}-${process.pid}-${randomUUID().slice(0, 8)}.log`);
+  fs.closeSync(fs.openSync(log, 'ax', 0o600));
+  return log;
+}
+
+function startBackground(argv: string[]): void {
+  const log = createLog();
   const fd = fs.openSync(log, 'a');
   try {
     const self = [...(COMPILED_BINARY ? [] : [fs.realpathSync(process.argv[1]!)])];
@@ -285,22 +317,17 @@ function startBackground(argv: string[]): void {
   console.log(toonKV({ heavy: 'in the background', command: commandLabel(argv), log, result: "this dispatch's inbox" }));
 }
 
-function lastLines(file: string, count = 15): string {
-  try {
-    return fs.readFileSync(file, 'utf8').trimEnd().split('\n').slice(-count).join('\n');
-  } catch {
-    return '';
-  }
-}
-
 /** The background holder is done: tell the dispatch, or the trap between dispatches. */
 function postResult(who: ReturnType<typeof heavyIdentity>, argv: string[], log: string, outcome: Outcome): void {
-  const head = outcome.ranCommand
-    ? `heavy: ${commandLabel(argv)} exited ${outcome.exit}`
-    : `heavy: ${commandLabel(argv)} did not run: ${outcome.reason ?? 'removed from the line'}`;
-  const text = `${head}\nlog: ${log}\n\n${lastLines(log)}`;
+  const text = outcome.ranCommand
+    ? heavyResultText({ command: commandLabel(argv), exit: outcome.exit, log })
+    : `heavy: ${commandLabel(argv)} did not run: ${outcome.reason ?? 'removed from the line'}\nlog: ${log}`;
   try {
-    if (who.dispatch && who.lane) sendMessage(who.dispatch, who.lane, text, 'heavy');
+    if (who.dispatch && who.lane) {
+      const entry = readStatusLog(who.dispatch, who.lane).at(-1);
+      const pauseAt = entry?.verb === 'paused' && entry.waitingOn === 'heavy' ? entry.at : undefined;
+      sendMessageOnce(who.dispatch, who.lane, heavyResultDeliveryId({ seq: outcome.seq, joinedAt: log, dispatch: who.dispatch }, pauseAt), text, 'heavy');
+    }
     else if (who.trap) sendTrapMessage(who.trap, 'heavy', text);
   } catch (err) {
     say(`could not post the result: ${err instanceof Error ? err.message : String(err)}`);
@@ -367,6 +394,17 @@ export async function heavyPushHook(argv: string[]): Promise<void> {
 }
 
 export async function heavyCommand(argv: string[], opts: { bg?: boolean; json?: boolean }): Promise<void> {
+  if (process.env[RELAY_ENV]) {
+    const view = heavyView();
+    const seq = Number(process.env[TICKET_ENV]);
+    const ticket = [...view.running, ...view.over].find(ticket => ticket.seq === seq);
+    if (!ticket?.log) throw new Error('the heavy output relay has no live ticket');
+    const env = { ...process.env };
+    delete env[RELAY_ENV];
+    const exit = await runChild(argv, env, { log: ticket.log, relay: true });
+    try { releaseHeavyTicket(seq, exit); } catch { /* The holder or daemon retries delivery. */ }
+    process.exit(exit);
+  }
   if (argv.length === 0) {
     if (opts.bg) throw new Error('heavy --bg needs a command: lobstah heavy --bg -- <command>');
     const view = heavyView();
@@ -383,7 +421,7 @@ export async function heavyCommand(argv: string[], opts: { bg?: boolean; json?: 
     delete env[BG_ENV];
     // Named now: by the time this ends, the trap may have moved to other work.
     const who = heavyIdentity(process.cwd(), env);
-    const outcome = await runInLine(argv, env);
+    const outcome = await runInLine(argv, env, process.cwd(), { log });
     postResult(who, argv, log, outcome);
     process.exit(outcome.exit);
   }

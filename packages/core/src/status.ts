@@ -11,6 +11,7 @@ import { observeLocalCatch } from './catch-context.js';
 import { readSessionClaim, readTrap } from './soak.js';
 import { withTrapCacheLock } from './cache-paths.js';
 import { clearFinishedTrapCaches, repoCachesConfigured } from './cache-cleanup.js';
+import { wakeHeavyWait } from './heavy-waits.js';
 
 export function isVerb(v: string): v is Verb {
   return (VERBS as readonly string[]).includes(v);
@@ -119,6 +120,9 @@ export function appendStatus(
   // Resuming a paused trap must wait for an in-progress cache removal, never race it as working.
   if (trap && repoCachesConfigured(trap.repo)) withTrapCacheLock(trap.trapId, write);
   else write();
+  if (entry.verb === 'paused' && entry.waitingOn === 'heavy') {
+    try { wakeHeavyWait(id, lane); } catch { /* The daemon retries a busy inbox on its next pass. */ }
+  }
   if (trap?.configured?.surface === 'claude-desktop' && ['done', 'failed', 'paused', 'needs-decision', 'blocked'].includes(verb)) releaseDesktopLease(trap.trapId);
   if (trap && trap.claimed === id && (verb === 'done' || verb === 'failed')) clearFinishedTrapCaches(trap, verb);
   if (verb === 'done') {

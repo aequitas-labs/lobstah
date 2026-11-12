@@ -5,11 +5,11 @@ import * as path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ANSWER_INLINE_MAX_BYTES, askDecision, claimBait, decodeFrame, enqueue, ensureLayout, listGrants, loadConfig, readDecisionAnswer, settlePermissionCards, signOnTrap } from '@lobstah/core';
+import { ANSWER_INLINE_MAX_BYTES, askDecision, claimBait, decodeFrame, enqueue, ensureLayout, listGrants, listNotices, loadConfig, readDecisionAnswer, settlePermissionCards, signOnTrap } from '@lobstah/core';
 import type { ClientSocketMessage, MirrorStatus, WharfMirrorCall } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { askPermission } from '../src/grants-cli.js';
-import { MIRROR_IDLE_READ_MS, MIRROR_WATCHED_READ_MS, WharfMirror, loopbackGlass, startWharfMirror } from '../src/wharf-mirror.js';
+import { MIRROR_IDLE_READ_MS, MIRROR_STALE_NOTICE_MS, MIRROR_WATCHED_READ_MS, WharfMirror, loopbackGlass, startWharfMirror } from '../src/wharf-mirror.js';
 import type { LocalGlass, MirrorChannel, MirrorWharf } from '../src/wharf-mirror.js';
 import { readOtherBoats } from '../src/wharf-attention.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -98,6 +98,58 @@ afterEach(async () => {
 });
 
 describe('the snapshot', () => {
+  it('retries ECONNRESET with a bounded delay and sends the snapshot after recovery', async () => {
+    const wharf = new FakeWharf();
+    const glass = loopbackGlass(port);
+    let failing = true;
+    const statuses: MirrorStatus[] = [];
+    const m = new WharfMirror({ wharf: 'lobstah', backend: wharf, channel: wharf, now: () => now,
+      glass: { ...glass, get: async (path, etag) => {
+        if (failing) throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+        return glass.get(path, etag);
+      } }, writeStatus: status => statuses.push({ ...status }) });
+    await m.onWatch(true);
+    expect(wharf.puts).toEqual([]);
+    expect(statuses.at(-1)?.error).toContain('ECONNRESET');
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const delay = await m.read();
+      expect(delay).toBeGreaterThanOrEqual(MIRROR_WATCHED_READ_MS);
+      expect(delay).toBeLessThanOrEqual(MIRROR_IDLE_READ_MS);
+      now += delay;
+    }
+    failing = false;
+    expect(await m.read()).toBe(MIRROR_WATCHED_READ_MS);
+    expect(wharf.puts).toHaveLength(1);
+    expect(statuses.at(-1)?.error).toBeUndefined();
+    expect(statuses.at(-1)?.lastPutAt).toBe(new Date(now).toISOString());
+  });
+
+  it('keeps a disconnected mirror error visible and raises one attention notice per outage', async () => {
+    const wharf = new FakeWharf();
+    wharf.open = false;
+    const statuses: MirrorStatus[] = [];
+    const m = new WharfMirror({ wharf: 'lobstah', backend: wharf, channel: wharf, glass: loopbackGlass(port),
+      now: () => now, writeStatus: status => statuses.push({ ...status }) });
+    m.onError(new Error('Unexpected server response: 401'));
+    await m.read();
+    expect(statuses.at(-1)?.error).toContain('401');
+    now += MIRROR_STALE_NOTICE_MS - 1;
+    await m.read();
+    expect(listNotices()).toEqual([]);
+    now++;
+    await m.read();
+    await m.read();
+    expect(listNotices().map(notice => notice.kind)).toEqual(['wharf-mirror-stale']);
+    wharf.open = true;
+    m.onReconnect();
+    await m.read();
+    expect(statuses.at(-1)?.error).toBeUndefined();
+    wharf.open = false;
+    now += MIRROR_STALE_NOTICE_MS;
+    await m.read();
+    expect(listNotices().filter(notice => notice.kind === 'wharf-mirror-stale')).toHaveLength(2);
+  });
+
   it('sends the snapshot the moment a glass opens, within two seconds, then each change while it stays open', async () => {
     const wharf = new FakeWharf();
     const m = mirror(wharf);
@@ -136,6 +188,7 @@ describe('the snapshot', () => {
     expect(wharf.sent()).toBe(first);
     expect(wharf.puts).toEqual([]);
     expect(wharf.http).toEqual([]);
+    expect(listNotices()).toEqual([]);
   });
 
   it('sends the whole snapshot again after the socket reconnects, while a glass is open', async () => {

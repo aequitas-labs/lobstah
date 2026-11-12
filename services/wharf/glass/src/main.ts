@@ -19,6 +19,7 @@ import { PasskeyPairing } from './pairing.js';
 import { requestState } from './model.js';
 import { glassSocket } from './socket.js';
 import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
+import { ITEM_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
 
 /**
  * The hosted glass: GitHub sign-in around the shared glass, which runs on the
@@ -183,7 +184,7 @@ function start(mirror = false): void {
   page = startGlassPage(backend, {
     chips: () => [
       'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">${backend.account()?.helmLive ? 'helm live' : 'no helm signed on'}</span>`,
-      html`<${Button} onClick=${() => void signOut()}>Sign out<//>`,
+      html`<${Button} onClick=${() => void signOut()}>${ITEM_ICON.signOut}Sign out<//>`,
     ],
     banner: () => [
       notice && html`<div class=${notice.bad ? 'bad' : 'ok'} role=${notice.bad ? 'alert' : 'status'}>${notice.text}</div>`,

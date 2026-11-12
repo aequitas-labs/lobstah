@@ -425,15 +425,23 @@ it('a boat card shows its name and state chip, then its access and age; a revoke
   // Asleep is a grey chip, with no status edge.
   expect(cards[0]!.querySelector('.gchip')!.className).toBe('gchip dim');
   expect(cards[0]!.className).not.toContain('gcard-edge');
-  expect(line(cards[0]!, '.gaction')).toBe('revoke…');
+  // Its actions are a line of their own, its last, below the access.
+  const actions = (c: Element) => Array.from(c.querySelectorAll('.gactions button')).map((b) => b.textContent);
+  expect(actions(cards[0]!)).toEqual(['revoke…']);
+  expect(cards[0]!.querySelector('.gcontext .gaction')).toBeNull();
+  expect(cards[0]!.lastElementChild!.className).toBe('gline gactions');
   expect(cards[2]!.className).toContain('quiet');
-  expect(cards[2]!.querySelector('.gaction')).toBeNull();
+  expect(cards[2]!.querySelector('.gactions')).toBeNull();
   // revoke… never expands the card; a tap or Enter does.
   await g.click('#boats .card button', 'revoke…');
   expect(cards[0]!.getAttribute('aria-expanded')).toBe('false');
   cards[1]!.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event);
   await g.settle();
-  expect(g.doc.querySelectorAll('#boats .card')[1]!.getAttribute('aria-expanded')).toBe('true');
+  const opened = g.doc.querySelectorAll('#boats .card')[1]!;
+  expect(opened.getAttribute('aria-expanded')).toBe('true');
+  // Opened, its details sit above its actions, which stay its last line.
+  expect(opened.lastElementChild!.className).toBe('gline gactions');
+  expect(opened.lastElementChild!.previousElementSibling!.className).toBe('gmore');
 });
 
 it('boat approval shows the resolved name and allows only requested or lower access, never admin', async () => {

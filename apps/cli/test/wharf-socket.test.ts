@@ -80,3 +80,46 @@ it('does not throw or hold a wait when the wharf is away', async () => {
     expect(socket.send({ t: 'resume' })).toBe(false);
   } finally { socket.close(); }
 });
+
+it('recovers from ECONNRESET and reloads the saved credential before reconnecting', async () => {
+  const server = createServer();
+  const ws = new WebSocketServer({ noServer: true });
+  const credentials: Array<string | undefined> = [];
+  server.on('upgrade', (request, socket, head) => {
+    credentials.push(request.headers.authorization);
+    if (credentials.length === 1) return void socket.destroy();
+    ws.handleUpgrade(request, socket, head, () => {});
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const errors: Array<string | undefined> = [];
+  let credential = 'old-test-token';
+  const socket = new WharfSocket({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, account: 'a', tokenEnv: 'TEST' }, () => credential,
+    { random: () => 0, onError: error => { errors.push((error as NodeJS.ErrnoException).code); credential = 'new-test-token'; } });
+  try {
+    socket.start();
+    await until(() => socket.connected(), 5000);
+    expect(errors).toContain('ECONNRESET');
+    expect(credentials).toEqual(['Bearer old-test-token', 'Bearer new-test-token']);
+  } finally {
+    socket.close();
+    for (const client of ws.clients) client.terminate();
+    ws.close();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+it('keeps retrying when the boat credential is missing and connects after login', async () => {
+  const w = await wharf();
+  let credential = '';
+  const errors: string[] = [];
+  const socket = new WharfSocket({ url: w.url, account: 'a', tokenEnv: 'TEST' }, () => credential,
+    { random: () => 0, onError: error => errors.push(error.message) });
+  try {
+    socket.start();
+    expect(errors).toEqual([expect.stringContaining('credential is missing')]);
+    expect(w.seen).toEqual([]);
+    credential = 'new-test-token';
+    await until(() => socket.connected(), 5000);
+    expect(w.seen[0]?.authorization).toBe('Bearer new-test-token');
+  } finally { socket.close(); }
+});

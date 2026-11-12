@@ -65,6 +65,7 @@ export type NoticeKind =
   | 'pool-out'
   | 'pool-returned'
   | 'heavy-line-long'
+  | 'wharf-mirror-stale'
   | 'heavy-over-limit';
 
 /**

@@ -151,7 +151,7 @@ describe('two mirror boats in one fleet', () => {
     expect(chips.some((c) => c.startsWith('south · mirrored'))).toBe(true);
   });
 
-  it('shows review settings and repo scope as text, and helm chat without inputs', async () => {
+  it("shows review settings and repo scope as text, and only this device's settings behind the gear", async () => {
     const h = await hosted('#reviews', { boats: [[NORTH, 'n']] });
     const controls = () => h.doc.querySelector('#reviews .rv-controls');
     expect(text(controls())).toContain('Review mode · default: Notify');
@@ -165,9 +165,10 @@ describe('two mirror boats in one fleet', () => {
     expect(text(controls())).toContain('Publish: on');
     (h.doc.querySelector('#gearbtn') as HTMLElement).click();
     await h.settle();
-    const chat = h.doc.querySelector('[data-helm-chat]');
-    expect(text(chat)).toContain('full');
-    expect(chat?.querySelector('button, input, select')).toBeNull();
+    // Device settings link to the boats' Configuration without showing helm chat here.
+    expect(h.doc.querySelector('.settings-dialog')).not.toBeNull();
+    expect(h.doc.querySelector('[data-helm-chat]')).toBeNull();
+    expect(text(h.doc.querySelector('.settings-config a'))).toBe('Configuration');
     const choose = async (setting: string, value: string) => {
       const button = Array.from(h.doc.querySelectorAll(`.settings [aria-label="${setting}"] button`)).find(button => text(button) === value)!;
       (button as HTMLElement).click();
