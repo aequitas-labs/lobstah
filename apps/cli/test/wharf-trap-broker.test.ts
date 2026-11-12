@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { BackendError, brokerAddressFile, brokerRequest, ensureLayout, loadConfig, saveBrokerAgent, type BrokerAgent, type ClaimReceipt } from '@lobstah/core';
-import { BROKER_LIVENESS_MS, startWharfBroker, WharfTrapBroker, type BrokerOptions } from '../src/wharf-trap-broker.js';
+import { BROKER_LIVENESS_MS, RENEW_EVERY_MS, startWharfBroker, WharfTrapBroker, type BrokerOptions, type BrokerSignals } from '../src/wharf-trap-broker.js';
 import { wharfCommand } from '../src/wharf-commands.js';
 import { lobstahTmuxPane } from '../src/wharf-soak.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -24,7 +24,13 @@ repos = ['repo']
 wharf = 'cloud'
 `);
 });
-afterEach(() => { vi.restoreAllMocks(); delete process.env.LOBSTAH_HOME; delete process.env.LOBSTAH_WHARF_SESSION_PID; removeTempDir(home); });
+// A test run inside a harness session must not read that session as the bound agent's.
+const harnessSession = process.env.CLAUDE_CODE_SESSION_ID;
+beforeEach(() => { delete process.env.CLAUDE_CODE_SESSION_ID; });
+afterEach(() => {
+  vi.restoreAllMocks(); delete process.env.LOBSTAH_HOME; delete process.env.LOBSTAH_WHARF_SESSION_PID; removeTempDir(home);
+  if (harnessSession !== undefined) process.env.CLAUDE_CODE_SESSION_ID = harnessSession;
+});
 const receipt: ClaimReceipt = { dispatch: { id: 'job', repo: 'repo', brief: 'work' }, epoch: 1, token: 'd.person.job.1.job-secret', leaseUntil: new Date(Date.now() + 90000).toISOString() };
 function fixture(extra: Partial<BrokerOptions> = {}) {
   const request = vi.fn(async () => ({})), claim = vi.fn(async () => receipt);
@@ -200,4 +206,77 @@ it('rejects a configured desktop session on a terminal surface before registerin
   const f = fixture(), ticket = await f.broker.ticket('away', undefined, 'configured-request', undefined, undefined, 'desk');
   await expect(f.broker.signOn({ ...ticket, session: 'terminal-session', pid: 123, harness: 'claude', entrypoint: 'cli' })).rejects.toThrow('surface');
   expect(f.request).not.toHaveBeenCalled(); expect(f.prepare).not.toHaveBeenCalled();
+});
+
+describe('on the boat’s socket', () => {
+  /** Signals whose due topics the test sets; renewals go on the socket while `open`. */
+  function signals() {
+    const due = new Set<string>(), asked: string[] = [];
+    let open = true;
+    const renew = vi.fn(async () => open);
+    const value: BrokerSignals = {
+      due: (_scope, topic) => { asked.push(topic); const d = due.has(topic); due.delete(topic); return d; },
+      forget: (_scope, topic) => { due.add(topic); },
+      renew,
+    };
+    return { value, due, asked, renew, close: () => { open = false; } };
+  }
+
+  it('claims only when the socket heard of work, and renews on the socket each 30 seconds, not on every poll', async () => {
+    const sig = signals(), f = fixture({ signals: sig.value }), a = await signOn(f.broker); f.request.mockClear();
+    expect(await f.broker.handle('poll', body(a))).toEqual({ claim: null });
+    expect(f.claim).not.toHaveBeenCalled();
+    expect(sig.renew).toHaveBeenCalledTimes(1);
+    await f.broker.handle('poll', body(a)); await f.broker.poll();
+    expect(sig.renew).toHaveBeenCalledTimes(1);
+    // Work queued: the next poll claims it.
+    sig.due.add('claim');
+    expect(await f.broker.handle('poll', body(a))).toEqual({ claim: receipt });
+    expect(f.claim).toHaveBeenCalledTimes(1);
+    // The trap works on, beating: its worker is renewed again once 30 seconds have passed.
+    now += RENEW_EVERY_MS; await f.broker.handle('heartbeat', body(a));
+    expect(sig.renew).toHaveBeenCalledTimes(2);
+    // No HTTP at all while the socket carries the renewals.
+    expect(f.request).not.toHaveBeenCalled();
+  });
+
+  it('renews over HTTP when the socket is down, still at most each 30 seconds', async () => {
+    const sig = signals(), f = fixture({ signals: sig.value }), a = await signOn(f.broker); f.request.mockClear();
+    sig.close();
+    await f.broker.handle('poll', body(a)); await f.broker.handle('poll', body(a));
+    expect(f.request.mock.calls.filter((c) => c[0] === 'workers/renew')).toHaveLength(1);
+  });
+
+  it('checks a held claim only when its job changed, and reads the inbox only when a message came', async () => {
+    const inbox = vi.fn(async () => [{ id: '1', text: 'answer', received: false }]);
+    const sig = signals(), f = fixture({ signals: sig.value, inbox }), a = await signOn(f.broker);
+    sig.due.add('claim'); await f.broker.handle('poll', body(a));
+    await f.broker.handle('progress', { ...body(a), dispatch: 'job' });
+    expect(await f.broker.handle('poll', body(a))).toEqual({ claim: null, dispatch: 'job', messages: [] });
+    expect(inbox).not.toHaveBeenCalled(); expect(f.validateClaim).not.toHaveBeenCalled();
+    sig.due.add('messages:job');
+    expect(await f.broker.handle('poll', body(a))).toEqual({ claim: null, dispatch: 'job', messages: [{ id: '1', text: 'answer', received: false }] });
+    // The job is cancelled: the claim is checked once, and dropped.
+    f.validateClaim.mockRejectedValue(new BackendError(409, 'dispatch no longer active'));
+    sig.due.add('job:job');
+    expect(await f.broker.handle('heartbeat', body(a))).toEqual({ claim: null });
+    expect(f.validateClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed claim is tried again on the next poll', async () => {
+    const sig = signals(), f = fixture({ signals: sig.value }), a = await signOn(f.broker);
+    sig.due.add('claim'); f.claim.mockRejectedValueOnce(new BackendError(503, 'away'));
+    await expect(f.broker.handle('poll', body(a))).rejects.toThrow('away');
+    expect(await f.broker.handle('poll', body(a))).toEqual({ claim: receipt });
+  });
+
+  it('reads trap starts only when the glass authorized one', async () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nacceptWharfStarts = true\n');
+    const sig = signals(), f = fixture({ signals: sig.value });
+    f.request.mockImplementation(async (route: string) => route === 'requests/starts' ? [] : {});
+    await f.broker.poll();
+    expect(f.request).not.toHaveBeenCalled();
+    sig.due.add('starts'); await f.broker.poll();
+    expect(f.request).toHaveBeenCalledWith('requests/starts');
+  });
 });

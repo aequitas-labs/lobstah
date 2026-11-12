@@ -11,7 +11,7 @@ import { takeHelm } from '../src/helm.js';
 import { statsPath, readStatsStore, recordWharfCatch, recordCatch } from '../src/stats.js';
 import { buildTelemetryPayload, serializeTelemetryPayload } from '../src/telemetry.js';
 import { anonymousTelemetryPost } from '../src/telemetry-transport.js';
-import { refreshHostedViews } from '../src/hosted-cache.js';
+import { refreshHostedViews, USAGE_EVERY_MS } from '../src/hosted-cache.js';
 import { usageBucket, groundsBucket } from '../src/telemetry-usage.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -44,7 +44,8 @@ it('uses one cached account roster/helm for several grounds, buckets counts and 
 });
 it('missing, stale and unreadable observations remain unknown, not one boat or no helm', () => {
   const cfg = config();
-  for (const setup of [() => {}, () => snapshot(NOW - 60_000), () => snapshot(NOW, null, null)]) {
+  // The daemon reads usage hourly: older than two reads is stale.
+  for (const setup of [() => {}, () => snapshot(NOW - 2 * USAGE_EVERY_MS - 1), () => snapshot(NOW, null, null)]) {
     setup(); expect(telemetryContext(cfg, NOW)).toMatchObject({ boats: null, remoteHelmsUnknown: true });
     expect(buildTelemetryPayload(ID, NOW).helms).toBeNull();
   }

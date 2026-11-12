@@ -119,7 +119,16 @@ export interface AttentionListsMessage {
   boats: WharfAttentionList[];
 }
 
-export type ServerSocketMessage = EventMessage | HelloMessage | ResultMessage | ErrorMessage | WatchMessage | CallPushMessage | AttentionListsMessage;
+/**
+ * To one boat: something it reads changed that raises no event, so it reads
+ * it now instead of on a timer. `read` names the route.
+ */
+export interface NudgeMessage {
+  t: 'nudge';
+  read: 'cards/answers';
+}
+
+export type ServerSocketMessage = EventMessage | HelloMessage | ResultMessage | ErrorMessage | WatchMessage | CallPushMessage | AttentionListsMessage | NudgeMessage;
 
 /**
  * A boat's new glass snapshot, pushed to glass tabs as a binary frame whose

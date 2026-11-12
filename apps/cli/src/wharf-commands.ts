@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { CONFIGURED_TRAP_INSTRUCTION, IdleWait, lobstahVersion, injectedPrompt, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
   readBrokerAgent, brokerRequest, WharfBackend, recordWharfCatch, type BrokerPoll } from '@lobstah/core';
-import type { BackendScope, Config, ReportInput } from '@lobstah/core';
+import type { BackendEvent, BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 import { hostedItem, isHostedKey } from './hosted-view.js';
 import { wharfRepoIdentity } from './wharf-repo.js';
@@ -14,6 +14,13 @@ import { readHookStdin } from './soak-site.js';
 import { WharfSocket } from './wharf-socket.js';
 import { mirrorScope } from './wharf-mirror.js';
 import { markOtherBoatAcked, otherBoatsAttention, parseBoatItemKey } from './wharf-attention.js';
+
+/** How often the helm's wait renews its seat (on its socket): the seat lasts longer. */
+const HELM_RENEW_MS = 60_000;
+/** How long a wait gives its socket to open before its first renewal. */
+const SOCKET_OPEN_WAIT_MS = 2_000;
+/** How often a wait whose socket is down reads the events over HTTP instead. */
+const WAIT_UNSOCKETED_READ_MS = 5_000;
 
 export function commandScope(config: Config, grounds?: string, repo?: string): BackendScope | undefined {
   if (grounds) return backendScope(config, grounds);
@@ -230,28 +237,48 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       print(await brokerRequest('launch', { grounds: scope.grounds, repo: opts.opt('--repo') })); break;
     }
     case 'man:wait': {
-      let cursor = opts.opt('--after');
+      const after = opts.opt('--after');
       const idle = new IdleWait(session, config.wait, opts.opt('--timeout'));
-      let unknown = false; let renewed = 0;
-      // Pushed events end each wait at once; the read of the cursor still decides what to print.
-      const hints = new WharfSocket(scope.location, wharfCredential(scope)!, { kinds: ['event'], client: lobstahVersion() });
-      try {
-      while (idle.probe || !idle.expired()) {
-        try {
-          if (Date.now() - renewed > 60_000) { await backend.request('helm/renew', {}, randomUUID()); renewed = Date.now(); }
-          const batch = await backend.events(cursor); cursor = batch.cursor;
-          if (batch.events.length) { idle.woke(); print(batch); return true; }
-          unknown = false;
-        } catch (e) {
-          if (!(e instanceof BackendError) || e.status !== 503) throw e;
-          if (!unknown) console.error(toonKV({ grounds: scope.grounds, state: 'unknown', note: 'wharf unavailable; keeping cursor and waiting' }));
-          unknown = true;
-        }
-        await hints.wait(Math.min(1000, idle.probe ? 1000 : idle.remainingMs()));
+      // Without a cursor, the wait starts from the account's history, as `GET events` gives it: one read.
+      if (after === undefined) {
+        const batch = await backend.events(undefined);
+        if (batch.events.length) { idle.woke(); print(batch); return true; }
       }
-      if (!unknown) idle.timedOut(); // Missing remote signal is unknown, not an empty observation.
-      print({ cursor, timeout: true });
-      } finally { hints.close(); }
+      // The wharf pushes every event after the cursor on the socket: the wait reads nothing while it waits.
+      const pushed: BackendEvent[] = [];
+      const socket = new WharfSocket(scope.location, wharfCredential(scope)!, { kinds: ['event'], client: lobstahVersion(), after,
+        onMessage: (m) => { if (m.t === 'event') pushed.push(...m.events); }, onState: (open) => { if (!open) dropped = true; } });
+      let unknown = false, renewed = 0, read = Date.now(), cursor = after, dropped = false;
+      const renew = async () => {
+        const id = randomUUID(), result = await socket.command({ id, method: 'POST', path: 'helm/renew', body: {}, ...(session ? { session } : {}) });
+        if (!result) await backend.request('helm/renew', {}, id);
+        else if (result.status >= 400) throw new BackendError(result.status, String((result.value as { error?: unknown })?.error ?? 'helm renew refused'));
+      };
+      try {
+        // Let the socket open first, so the first renewal goes on it (an unreachable wharf ends this at once).
+        await socket.wait(SOCKET_OPEN_WAIT_MS);
+        while (idle.probe || !idle.expired()) {
+          if (Date.now() - renewed > HELM_RENEW_MS) { await renew(); renewed = Date.now(); }
+          cursor = socket.lastCursor() ?? cursor;
+          if (pushed.length) { idle.woke(); print({ events: pushed, cursor }); return true; }
+          // A socket that dropped or could not open: read the events over HTTP, then again each WAIT_UNSOCKETED_READ_MS until it is back.
+          if (!socket.connected() && (dropped || Date.now() - read >= WAIT_UNSOCKETED_READ_MS)) {
+            read = Date.now(); dropped = false;
+            try {
+              const batch = await backend.events(cursor); cursor = batch.cursor;
+              if (batch.events.length) { idle.woke(); print(batch); return true; }
+              unknown = false;
+            } catch (e) {
+              if (!(e instanceof BackendError) || e.status !== 503) throw e;
+              if (!unknown) console.error(toonKV({ grounds: scope.grounds, state: 'unknown', note: 'wharf unavailable; keeping cursor and waiting' }));
+              unknown = true;
+            }
+          }
+          await socket.wait(Math.min(WAIT_UNSOCKETED_READ_MS, idle.probe ? WAIT_UNSOCKETED_READ_MS : idle.remainingMs()));
+        }
+        if (!unknown) idle.timedOut(); // Missing remote signal is unknown, not an empty observation.
+        print({ cursor: socket.lastCursor() ?? cursor, timeout: true });
+      } finally { socket.close(); }
       break;
     }
     case 'wharf': {

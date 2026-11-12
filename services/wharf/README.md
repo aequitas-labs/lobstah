@@ -337,7 +337,8 @@ not client clocks. Requests finish immediately; the DO can sleep idle.
 
 ### Sockets and the alarm
 
-`GET wake` upgrades a read-authorized bearer connection; the glass uses its
+`GET wake` upgrades a bearer connection with `read` (or a boat with `work`
+only); the glass uses its
 cookie-only `/api/glass/wake` instead. A client must ask for subprotocol
 `lobstah.2` (`packages/core/src/wharf-socket.ts`); any other upgrade gets 426
 with the minimum lobstah version, so an old CLI says to update instead of
@@ -359,7 +360,25 @@ per account.
 - Every event is pushed to every socket as `{"t":"event","events","cursor"}`
   after its command commits. Each push rechecks the socket's credential first:
   a revoked boat or an expired person session is closed with 1008 and gets
-  nothing more. Account deletion closes all sockets.
+  nothing more. Account deletion closes all sockets. A boat with `work` but no
+  `read` gets each event's kind, job and time, never its note or boat name:
+  enough to know there is work to claim.
+- A person's answer to a boat's card raises no event (every event wakes a
+  helm's wait). The card's boat is sent `{"t":"nudge","read":"cards/answers"}`
+  instead, and reads its answers then.
+
+A wharf-grounds boat keeps one socket per account (`apps/cli/src/wharf-channel.ts`)
+and reads over HTTP only what an event says changed: `GET dispatches` after an
+event about a job, `GET documents` after a decision or report, `requests/starts`
+after `trap-start-authorized`, a job's messages after `message`, and
+`cards/answers` after a nudge. It claims after `queued`, `lease-lost` or
+`servable`, and checks a held claim after its job is cancelled or lost. Worker
+renewals (every 30 seconds, inside the 90-second lease) and its card
+restatements go on the socket as commands. A reopened socket makes every read
+due once, since it may have missed a push; while the socket is down each read
+falls back to every 30 seconds. An idle boat on an open socket sends no HTTP
+request: its hourly usage read (`_boat`, which a boat may read on its socket, and
+`glass`) goes on the socket too.
 
 The account keeps one alarm, at the earliest time something comes due with no
 request: an active lease or a paused report's hold ends, a worker goes stale
@@ -539,12 +558,15 @@ the agent can use `wharf heartbeat <dispatch>` and its post-tool hook.
 Agents report with the existing six-verb `report` command. `inbox` reads without
 acknowledging; `wharf receipt <dispatch> <message-id>` acknowledges explicitly.
 Upload evidence using `wharf upload <dispatch> <file>`, then `report ... --file-id
-<id> --pr <url>`. `man wait --after <opaque-cursor>` polls ordered wharf events
-and renews its helm lease; keep the returned cursor for the next wait. Use
+<id> --pr <url>`. `man wait --after <opaque-cursor>` resumes its socket after
+the cursor and ends on the first events pushed to it; it renews its helm lease on
+the socket every minute and reads `GET events` only while the socket is down.
+Keep the returned cursor for the next wait. Use
 `--request-key <id>` to retry a mutation without writing twice. Expired results
 go through `wharf recover <dispatch> <report.json>`, not a new final report.
 
-The daemon's existing cadence refreshes independent observational wharf caches.
+The daemon refreshes independent observational wharf caches on what its socket
+hears.
 Glass and tend show local and remote work together, labelled by grounds/wharf;
 the pet reads the same attention feed. A wharf dispatch that needs a decision, is
 blocked, or landed is an attention item carrying its `grounds`, its `wharf`, and
@@ -557,8 +579,8 @@ authenticated API answers and keeps the last one named; it accepts only an exact
 HTTPS origin (HTTP on loopback). Until a wharf names its glass, the click is
 unchanged.
 
-The same poll reads `GET documents` (a boat needs `read`, as for jobs), at most
-every thirty seconds, and keeps per document only its id, kind, title, time, job
+The same refresh reads `GET documents` (a boat needs `read`, as for jobs) after
+a decision or report event (a one-shot command at most every thirty seconds), and keeps per document only its id, kind, title, time, job
 whether it is answered, and its ack: never its Markdown, options or files. A decision
 stands until the wharf shows it answered or withdrawn, and hides the raw question
 of the job it is about. A report stands until it is acknowledged, and walks only

@@ -63,11 +63,17 @@ it('hibernates an idle connected account, restores its socket, and catches up af
   expect(caught.events.some((e) => e.kind === 'queued')).toBe(true);
   expect(await runInDurableObject(stub(), (_instance: Account, state) => state.storage.getAlarm())).toBeNull();
 });
-it('rejects wrong-account, work-only and dispatch tokens; never trusts a supplied internal command', async () => {
+it('rejects wrong-account, unreadable and dispatch tokens; never trusts a supplied internal command', async () => {
+  // A work-only boat listens for work to claim; a boat with neither read nor work has no socket.
   const b = await boat(['work']);
-  expect((await connect(b.token)).status).toBe(403);
+  const listening = await connect(b.token); expect(listening.status).toBe(101); listening.webSocket!.accept(); listening.webSocket!.close();
   expect((await connect(b.token, 'b')).status).toBe(403);
-  expect((await connect(b.token, 'wake', { 'X-Wharf-Command': JSON.stringify({ helm: true }) })).status).toBe(403);
+  // A supplied internal command is ignored: the socket is the boat's, never a helm's or a person's.
+  const forged = await connect(b.token, 'wake', { 'X-Wharf-Command': JSON.stringify({ helm: true }) });
+  expect(forged.status).toBe(101); forged.webSocket!.accept();
+  const tags = await runInDurableObject(stub(), (_instance: Account, state) => state.getWebSockets().map((socket) => state.getTags(socket)));
+  expect(tags.flat().filter((t) => !t.startsWith('boat'))).toEqual([]);
+  forged.webSocket!.close();
   await command('helm/take', { session: 'helm' });
   await command('dispatches', { id: 'job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'work' });
   await api('workers/sign-on', { worker: 'worker', repo: 'repo', repoRemote: 'github.com/test/repo' }, b.token);

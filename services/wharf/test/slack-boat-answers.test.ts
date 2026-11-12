@@ -4,6 +4,7 @@ import type { Account } from '../src/account.js';
 import { glassTables } from '../src/glass-state.js';
 import { sealToken } from '../src/slack-install.js';
 import { authFixtures } from './auth-fixture.js';
+import { WHARF_SOCKET_PROTOCOL } from '../../../packages/core/src/wharf-socket.js';
 import type { CardAnswerReceipt, GlassCard } from '../../../packages/core/src/backend-model.js';
 
 let sequence = 0;
@@ -111,4 +112,22 @@ it('a refused or expired answer says why, and the card can be answered again', a
   expect(await (await call('cards/answers', undefined, fisher.token)).json()).toEqual([]);
   await deliver();
   expect(context()).toContain('No expired: its boat did not take it in time; answer again');
+});
+
+it('tells the card’s boat on its socket to read its answers, and no other boat', async () => {
+  const fisher = await published();
+  const other = await boat('other', ['work']);
+  const open = async (token: string) => {
+    const r = await SELF.fetch('https://state.test/v1/accounts/a/wake', { headers: { Upgrade: 'websocket', Authorization: `Bearer ${token}`, 'Sec-WebSocket-Protocol': WHARF_SOCKET_PROTOCOL } });
+    expect(r.status).toBe(101);
+    const socket = r.webSocket!; socket.accept();
+    const got: unknown[] = [];
+    socket.addEventListener('message', (e) => { if (e.data !== 'pong') got.push(JSON.parse(String(e.data))); });
+    return { socket, got };
+  };
+  const mine = await open(fisher.token), theirs = await open(other.token);
+  await press(buttons()['Allow once']!.value!);
+  await vi.waitFor(() => expect(mine.got).toContainEqual({ t: 'nudge', read: 'cards/answers' }));
+  expect(theirs.got).not.toContainEqual({ t: 'nudge', read: 'cards/answers' });
+  mine.socket.close(); theirs.socket.close();
 });
