@@ -85,6 +85,14 @@ export class IdleWait {
     return Math.max(0, this.started + this.timeoutSecs * 1000 - now);
   }
   expired(now = Date.now()): boolean { return this.remainingMs(now) === 0; }
+  /**
+   * How long to sleep before the next poll: the interval, or until the
+   * deadline when that is sooner, so a short wait ends when it says. A probe
+   * (`--timeout 0`) has no deadline and polls at the interval.
+   */
+  pollMs(intervalMs: number, now = Date.now()): number {
+    return this.probe ? intervalMs : Math.min(intervalMs, Math.max(1, this.remainingMs(now)));
+  }
   timedOut(now = Date.now()): void {
     // Probes and a waiter overtaken by a reset cannot advance the history.
     if (!this.session || this.probe || this.completed || generation(this.session) !== this.epoch || !this.expired(now)) return;

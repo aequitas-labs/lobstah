@@ -50,6 +50,8 @@ export interface GlassState {
   runPasskey?: { busy?: boolean; done?: string; error?: string };
   /** Each run card's run from this page: in progress, its scrubbed output so far, how it ended, or why it didn't start. Never its inputs. */
   runs?: Record<string, RunView>;
+  /** The stacks this page shows open on the PRs tab, by stack id: for this page only. */
+  openStacks?: Record<string, true>;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */
   preview: boolean;
   /** Answers being written on the deck's decision cards, by card key. */

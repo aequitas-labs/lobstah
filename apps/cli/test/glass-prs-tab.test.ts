@@ -22,6 +22,11 @@ async function page(d: GlassFullSnapshot, opts: Partial<GlassDomOptions> = {}): 
   return g;
 }
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** Open every stack card, as clicks would: the cards view shows a stack's PRs only once it is open. */
+async function openStacks(g: GlassDom): Promise<void> {
+  for (const card of g.$$('#prs .stackcard')) (card as HTMLElement).click();
+  await g.settle();
+}
 
 /** The acceptance fleet's three-PR stack, plus one more PR in its own stack; `mine` marks which are the person's. */
 function fleet(mine: number[]): GlassFullSnapshot {
@@ -41,14 +46,16 @@ for (const view of ['cards', 'table'] as const) {
       expect(text(others.querySelector('summary'))).toBe('Other PRs · 3');
       expect(others.hasAttribute('open')).toBe(false);
       // Yours comes before Other PRs, and holds only the lone PR's stack.
+      await openStacks(g);
       const yoursPart = text(g.$('#prs')).split('Other PRs')[0]!;
       expect(yoursPart).toContain('A lone PR');
       expect(yoursPart).not.toContain('#41');
-      expect(text(others)).toContain('#41');
+      expect(text(g.$('#prs details.otherprs'))).toContain('#41');
     });
 
     it('keeps a whole stack under Yours when any of its PRs is the person’s', async () => {
       const g = await page(fleet([42]), { hash: '#prs', prefs: { view } });
+      await openStacks(g);
       const yoursPart = text(g.$('#prs')).split('Other PRs')[0]!;
       for (const n of ['#41', '#42', '#43']) expect(yoursPart).toContain(n);
       expect(text(g.$('#prs .yourshead'))).toBe('Yours · 1');

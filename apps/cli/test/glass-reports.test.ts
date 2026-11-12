@@ -413,7 +413,10 @@ describe('glass: a PR card with a long badge', () => {
     p.number = 1826;
     p.badge = { ...p.badge, tone: 'warn', text: 'repairing: checks (attempt 1 of 2)' };
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
-    const card = g.$$('#prs .card').find((c) => text(c.querySelector('.gcontext')).includes('#1826'))!;
+    // A stack shows its PRs' cards once open.
+    for (const s of g.$$('#prs .stackcard[aria-expanded="false"]')) (s as HTMLElement).click();
+    await g.settle();
+    const card = g.$$('#prs .card:not(.stackcard)').find((c) => text(c.querySelector('.gcontext')).includes('#1826'))!;
     expect(card.querySelector('.gtop .gword, .gtop .gchip')).toBeNull();
     const word = [...card.querySelectorAll('.gstate .gchip')].find((c) => text(c).startsWith('repairing'))!;
     expect(word.getAttribute('title')).toBe('repairing: checks (attempt 1 of 2)');
