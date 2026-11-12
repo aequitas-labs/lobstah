@@ -1,7 +1,6 @@
 import { useState } from 'preact/hooks';
 import { ackPrAttention, requestPrMerge } from '../actions.js';
 import type { DeckAttention } from '../../src/glass-diff.js';
-import { Fragment } from 'preact';
 import type { GlassPr, GlassStack } from '@lobstah/core';
 import { shownPrAttention } from '../../src/glass-diff.js';
 import type { PrsInputs } from '../../src/glass-diff.js';
@@ -28,10 +27,10 @@ import {
 import type { OlderControl } from './common.js';
 import { LinkedText } from './links.js';
 import { can } from '../backend.js';
-import { getState } from '../store.js';
+import { getState, setState } from '../store.js';
 import type { Children } from '../html.js';
-import { Card, CardLink, PrIcon } from './card.js';
-import type { CardTone } from './card.js';
+import { Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
+import type { CardPerson, CardTone } from './card.js';
 
 /**
  * The PRs tab: Yours first (the stacks holding a PR of the person's own,
@@ -190,6 +189,8 @@ export interface PrCardParts {
   quiet?: boolean;
   cls?: string;
   attrs?: Record<string, unknown>;
+  /** The person it is about, as the avatar chip at its top right. */
+  person?: CardPerson;
   onClick: () => void;
 }
 
@@ -226,8 +227,16 @@ export function prShapedCard(c: PrCardParts) {
     quiet=${c.quiet}
     cls=${['prcard', c.cls].filter(Boolean).join(' ')}
     attrs=${c.attrs}
+    person=${c.person}
     onClick=${c.onClick}
   />`;
+}
+
+/** A PR's author, as its card's avatar chip shows them. */
+export function prAuthor(p: Pick<GlassPr, 'author'>): CardPerson | undefined {
+  if (!p.author) return undefined;
+  const avatarUrl = githubAvatarUrl(p.author);
+  return { login: p.author, ...(avatarUrl ? { avatarUrl } : {}), role: 'author' };
 }
 
 const PR_STATE_WORD = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' } as const;
@@ -262,6 +271,7 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
     number: p.number,
     at: p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt,
     trap: dispatchTrap(p.dispatchIds),
+    person: prAuthor(p),
     detail: prChecks(p),
     tail: p.mergeRequest && [' · ', mergeNote(p)],
     actions: [
@@ -275,16 +285,112 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
   });
 }
 
+/** A stack's members in merge order: the bottom of the stack first, as its numbers run. */
+export function stackMembers(s: Pick<GlassStack, 'numbers'>, prs: readonly GlassPr[]): GlassPr[] {
+  const order = new Map(s.numbers.map((n, i) => [n, i]));
+  return [...prs].sort((a, b) => (order.get(a.number) ?? Infinity) - (order.get(b.number) ?? Infinity) || a.number - b.number);
+}
+
+/** When a PR last changed, as its card's age reads it. */
+const prChangedAt = (p: GlassPr): string | undefined => p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt;
+
+/** When the newest change across a stack's members happened. */
+export function stackUpdatedAt(prs: readonly GlassPr[]): string | undefined {
+  return prs
+    .map(prChangedAt)
+    .filter((at): at is string => !!at)
+    .sort()
+    .at(-1);
+}
+
+/**
+ * A stack's one-chip summary and the tone of its edge: "ready to merge" when
+ * every PR in it is, else "N failing" when some fail, else "N of M green"
+ * over its open PRs; a stack with none open says "merged" or "closed".
+ */
+export function stackSummary(s: Pick<GlassStack, 'readiness'>, prs: readonly GlassPr[]): { text: string; tone: CardTone } {
+  const open = prs.filter((p) => p.state === 'OPEN');
+  if (!open.length) return prs.some((p) => p.state === 'MERGED') ? { text: 'merged', tone: 'dim' } : { text: 'closed', tone: 'dim' };
+  if (s.readiness?.allReady) return { text: 'ready to merge', tone: 'ok' };
+  const failing = open.filter((p) => p.badge.tone === 'bad').length;
+  if (failing) return { text: `${failing} failing`, tone: 'bad' };
+  const green = open.filter((p) => p.badge.tone === 'ok').length;
+  return { text: `${green} of ${open.length} green`, tone: green === open.length ? 'ok' : 'warn' };
+}
+
+/** Whether this page shows a stack's members: per stack, for this page only. */
+const stackOpen = (id: string): boolean => !!getState().openStacks?.[id];
+
+/** Show or hide a stack's members. */
+export function toggleStack(id: string): void {
+  const open = { ...(getState().openStacks ?? {}) };
+  if (open[id]) delete open[id];
+  else open[id] = true;
+  setState({ openStacks: open });
+}
+
+/** A stack, as a three-layer octicon (stack-16, @primer/octicons, MIT) in the text's color. */
+const StackIcon = html`<svg class="pricon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M7.122.392a1.75 1.75 0 0 1 1.756 0l5.003 2.902c.83.481.83 1.68 0 2.162L8.878 8.358a1.75 1.75 0 0 1-1.756 0L2.119 5.456a1.251 1.251 0 0 1 0-2.162ZM8.125 1.69a.248.248 0 0 0-.25 0l-4.63 2.685 4.63 2.685a.248.248 0 0 0 .25 0l4.63-2.685ZM1.601 7.789a.75.75 0 0 1 1.025-.273l5.249 3.044a.248.248 0 0 0 .25 0l5.249-3.044a.75.75 0 0 1 .752 1.298l-5.248 3.044a1.75 1.75 0 0 1-1.756 0L1.874 8.814A.75.75 0 0 1 1.6 7.789Zm0 3.5a.75.75 0 0 1 1.025-.273l5.249 3.044a.248.248 0 0 0 .25 0l5.249-3.044a.75.75 0 0 1 .752 1.298l-5.248 3.044a1.75 1.75 0 0 1-1.756 0l-5.248-3.044a.75.75 0 0 1-.273-1.025Z" /></svg>`;
+
+/**
+ * A stack of several PRs as one card, in the PR card's layout: the stack's
+ * title; its summary and how many PRs it holds; its repo and last change;
+ * Ack stack while it has attention. A click opens it downward in place to
+ * every member's own PR card, the bottom of the stack first; another click
+ * closes it. The avatar is the top PR's author.
+ */
+export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]; attention: readonly DeckAttention[] }) {
+  const members = stackMembers(s, prs);
+  const top = members.at(-1)!;
+  const summary = stackSummary(s, prs);
+  const at = stackUpdatedAt(prs);
+  const open = stackOpen(s.id);
+  const title = s.title || top.title || `#${top.number}`;
+  const toggle = () => toggleStack(s.id);
+  return Card({
+    // A stack with a title of its own carries it as the stack title, as the table and the deck do.
+    title: s.title ? html`<span class="stacktitle">${LinkedText(s.title)}</span>` : LinkedText(title),
+    titleAttr: title,
+    icon: html`<span class="prstate pr-open">${StackIcon}</span>`,
+    iconFirst: true,
+    state: { word: '', tone: summary.tone, mark: 'edge' },
+    status: [StatusChip(summary.text, summary.tone), StatusChip(`${members.length} PRs`, 'dim')],
+    context: [RepoName(s.repo), at && [' · updated ', Age(at), ' ago']],
+    contextTitle: [s.repo, at && `updated ${ageText(at)} ago`].filter(Boolean).join(' · '),
+    // The bar only when there is something to ack: a stack has no action of its own beyond Ack stack.
+    ...(shownPrAttention(attention, prs, [s]).some((a) => !a.acked)
+      ? { actions: html`<${PrAck} stack=${s} prs=${prs} attention=${attention} />` }
+      : {}),
+    person: prAuthor(top),
+    cls: ['prcard stackcard', open && 'open'].filter(Boolean).join(' '),
+    attrs: {
+      'data-stack': s.id,
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': String(open),
+      onKeyDown: (e: KeyboardEvent) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+          e.preventDefault();
+          toggle();
+        }
+      },
+    },
+    onClick: toggle,
+    extra:
+      open &&
+      html`<div class="stackmembers" onClick=${(e: Event) => e.stopPropagation()}>${members.map((p) => prCard(p, { attention }))}</div>`,
+  });
+}
+
 function prCards(inp: PrsInputs, older: unknown) {
   const { yours, others } = splitMine(prGroups(inp));
-  // A lone PR's card acks its stack too; a stack of several keeps Ack stack on its heading.
-  const card = (s: GlassStack, prs: GlassPr[]) => (p: GlassPr) =>
-    prCard(p, { attention: inp.prAttention, stack: prs.length === 1 ? s : undefined });
+  // A stack of several PRs is one card; a lone PR is its own card, whose Ack acks its stack too.
   const stacksOf = (groups: typeof yours) =>
-    groups.map(
-      ({ s, prs }) =>
-        html`<${Fragment} key=${'stack:' + s.id}><h2>${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? '' : ' · history'}${prs.length > 1 && html`<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />`}</h2>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${prs.map(card(s, prs))}</div><//>`,
-    );
+    html`<div class="cards">${groups.map(({ s, prs }) =>
+      prs.length > 1
+        ? html`<${StackCard} key=${'stack:' + s.id} s=${s} prs=${prs} attention=${inp.prAttention} />`
+        : prCard(prs[0]!, { attention: inp.prAttention, stack: s }),
+    )}</div>`;
   const otherCount = others.reduce((n, g) => n + g.prs.length, 0);
   return [
     html`<h2 class="yourshead">Yours · ${yours.reduce((n, g) => n + g.prs.filter((p) => p.mine).length, 0)}</h2>`,

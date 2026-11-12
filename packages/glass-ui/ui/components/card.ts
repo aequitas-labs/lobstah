@@ -28,6 +28,17 @@ export interface CardState {
   mark: 'chip' | 'edge';
 }
 
+/** The person a card is about, shown as a small avatar chip at its top right: a PR's author, a review's asker. */
+export interface CardPerson {
+  login: string;
+  /** Their display name, when known. */
+  name?: string;
+  /** Their GitHub avatar; without one, or when it can't load, the chip shows their initials. */
+  avatarUrl?: string;
+  /** What they are to the card, for the hover text: "author", "requested by". */
+  role: string;
+}
+
 export interface CardProps {
   title: Children;
   /** The title's hover text: the item's full name or address. */
@@ -60,6 +71,8 @@ export interface CardProps {
   cls?: string;
   /** Attributes for the card itself: an id or data- attribute a link looks for, a role, a key handler. */
   attrs?: Record<string, unknown>;
+  /** The person it is about, as an avatar chip at the top right; their name shows only on hover. */
+  person?: CardPerson;
 }
 
 /** A pull request, as a small line icon in the text's color. */
@@ -75,6 +88,47 @@ export const CardLink = ({ href, label = '↗ Open', onOpen }: { href: string; l
 /** A repo, as a small line icon in the text's color: GitHub's Octicon "repo" (repo-16, @primer/octicons, MIT), sized to a 12px subtitle. */
 export const RepoIcon = html`<svg class="repoicon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z" /></svg>`;
 
+/** A name's initials, at most two: "Dana Developer" is DD, "dana" is D. */
+export const initials = (name: string): string =>
+  name
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]!.toUpperCase())
+    .join('');
+
+/**
+ * A GitHub login's avatar, served by the host both glasses allow images from.
+ * A bot's login names no user avatar there, so it gets none and shows initials.
+ */
+export function githubAvatarUrl(login: string): string | undefined {
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(login)) return undefined;
+  return `https://avatars.githubusercontent.com/${login}?size=48`;
+}
+
+/**
+ * An avatar image; one that can't load (offline, or blocked) shows the
+ * person's initials instead. It remembers which url failed rather than
+ * resetting in an effect: a page's Content-Security-Policy refuses an image
+ * before the first effect runs, and a reset there would bring the broken
+ * image back.
+ */
+export function Avatar({ url, name, size = 24, cls = 'rv-initials' }: { url?: string; name: string; size?: number; cls?: string }) {
+  const [failedUrl, setFailedUrl] = useState<string>();
+  if (!url || failedUrl === url) return html`<span class=${cls} aria-hidden="true">${initials(name)}</span>`;
+  return html`<img src=${url} alt="" width=${size} height=${size} loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailedUrl(url)} />`;
+}
+
+/** The hover text of a person's chip: their role and login, then their name when it differs. */
+export function personLabel(person: CardPerson): string {
+  const name = person.name && person.name !== person.login ? ` (${person.name})` : '';
+  return `${person.role}: ${person.login}${name}`;
+}
+
+/** A card's person as a round chip: their avatar, else their initials, named only on hover. */
+export const PersonChip = ({ person }: { person: CardPerson }) =>
+  html`<span class="gavatar" role="img" title=${personLabel(person)} aria-label=${personLabel(person)}><${Avatar} url=${person.avatarUrl} name=${person.name ?? person.login} size=${20} cls="gavatar-initials" /></span>`;
+
 export function Card(p: CardProps) {
   const mark = p.state?.mark;
   const cls = ['card gcard', mark === 'edge' && `gcard-edge gedge-${p.state!.tone}`, p.quiet && 'dim quiet', p.cls]
@@ -87,7 +141,7 @@ export function Card(p: CardProps) {
     p.state &&
     html`<span class=${(mark === 'chip' ? 'gchip ' : 'gword ') + p.state.tone + (long ? ' long' : '')} title=${long ? p.state.word : undefined}>${p.state.word}</span>`;
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
-    <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}</div>
+    <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}${p.person && html`<${PersonChip} person=${p.person} />`}</div>
     ${p.status && html`<div class="gline gstate">${p.status}</div>`}
     ${(p.context || p.action) && html`<div class="gline gcontext"><span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
     ${p.now && html`<div class="gline gnow dim"><span class="gtext" title=${p.nowTitle}>${p.now}</span></div>`}
