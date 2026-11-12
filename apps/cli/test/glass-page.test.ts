@@ -161,11 +161,11 @@ describe('glass page: tabs and hash routing', () => {
     expect(rows.map(text).join(' ')).toContain('parked · waiting on review');
   });
 
-  it('leads each trap state line with a green, amber, or grey dot on deck, cards, and table', async () => {
+  it('leads each trap state line with an amber, green, or grey dot on deck, cards, and table', async () => {
     const want: Record<string, [string, string]> = {
-      'working trap': ['ok', 'working · '],
+      'working trap': ['warn', 'working · '],
       'listening trap': ['ok', 'idle · listening'],
-      'parked trap': ['warn', 'parked · waiting on review'],
+      'parked trap': ['dim', 'parked · waiting on review'],
       'stale trap': ['dim', 'idle · not listening'],
     };
     /** The state dot's tone and its line's text, per trap label, in one tab's items. */
@@ -193,9 +193,9 @@ describe('glass page: tabs and hash routing', () => {
 
   it("shows each trap card's state as a lowercase chip in the dot's tone, and its work on the third line", async () => {
     const want: Record<string, [string, string, string]> = {
-      'working trap': ['ok', 'working', ''],
+      'working trap': ['warn', 'working', ''],
       'listening trap': ['ok', 'idle', 'listening for work'],
-      'parked trap': ['warn', 'waiting', 'waiting on review'],
+      'parked trap': ['dim', 'waiting', 'waiting on review'],
       'stale trap': ['dim', 'idle', 'not listening'],
     };
     const chips = (cards: Element[]) =>
@@ -766,8 +766,8 @@ describe('glass page: per-section change detection', () => {
     const seen = await mutations(g, () => g.poll());
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.filter((m) => !card.contains(m.target as never))).toEqual([]);
-    expect(card.querySelector('.gchip')!.className).toBe('gchip bad');
-    expect(text(card.querySelector('.gchip'))).toBe('blocked');
+    expect(card.querySelector('.verbicon')!.className).toBe('runicon verbicon verb-blocked bad');
+    expect(card.querySelector('.verbicon')!.getAttribute('aria-label')).toMatch(/^Blocked · /);
   });
 
   it('a new dispatch inserts one row and keeps every existing row node', async () => {
@@ -1137,7 +1137,7 @@ describe('glass page: On deck', () => {
       Array.from({ length: 5 }, (_, i) => `1${i}aaaaaa`),
     );
     expect(lines.map((l) => !!l.querySelector('.badge.unreported'))).toEqual([true, true, true, true, false]);
-    expect(lines[2]!.querySelector('.gchip')!.className).toBe('gchip bad');
+    expect(lines[2]!.querySelector('.verbicon')!.className).toBe('runicon verbicon verb-failed bad');
     expect(text(landed)).not.toContain('yesterday');
     expect(landed.querySelector('.deckmore')).toBeNull();
   });

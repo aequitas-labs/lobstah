@@ -1,3 +1,5 @@
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 // Windows runners spawn git slowly and hold file handles after a process
@@ -15,7 +17,9 @@ export default defineConfig({
     environment: 'node',
     exclude: ['services/wharf/**', '**/node_modules/**'],
     // No test names or clears the tab of the terminal running the suite.
-    env: { LOBSTAH_TERMINAL_TITLE: '0' },
+    // Sign-on writes a turn-end owner file (packages/core/src/turn-owner.ts):
+    // never into the real ~/.agent-turn.
+    env: { LOBSTAH_TERMINAL_TITLE: '0', AGENT_TURN_HOME: path.join(os.tmpdir(), `lobstah-test-agent-turn-${process.pid}`) },
     ...(windows && {
       maxWorkers: windowsWorkers,
       minWorkers: 1,

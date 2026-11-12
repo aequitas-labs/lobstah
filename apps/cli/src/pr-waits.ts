@@ -10,6 +10,7 @@ import {
   listWatches,
   mergeEvidence,
   parsePrRef,
+  quietWait,
   readEvidence,
   readPr,
   readStatusLog,
@@ -55,6 +56,8 @@ function ownPrs(id: string, lane: Lane): PrRef[] {
  */
 export function waitWarning(id: string, lane: Lane, entry: StatusEntry): string | undefined {
   if (entry.verb !== 'paused' || !entry.waitingOn || !PR_WAITS.has(entry.waitingOn)) return undefined;
+  // A review of a document in its own tool (not a PR) waits on that tool, not on a merge.
+  if (quietWait(entry)) return undefined;
   if (waitedPrs(id, lane, entry).length > 0) return undefined;
   return (
     `no PR known for this wait: --link names no GitHub PR and the dispatch has no PR. ` +

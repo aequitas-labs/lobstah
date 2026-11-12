@@ -23,6 +23,7 @@ import { toolSummary, toolTarget, writeActivity } from './activity.js';
 import { knownTrapNames, reserveTrapName, trapIdForName, trapNameForId } from './trap-names.js';
 import { laneOf } from './worktrees.js';
 import { protectTrapRevision, removeGhostWorktree } from './worktree-safety.js';
+import { claimTurnEnd, releaseTurnEnd } from './turn-owner.js';
 import { readRoster, recordRosterDeparture, recordRosterSignOn } from './roster.js';
 import { readReservation } from './trap-start.js';
 import { loadConfig, DEFAULT_SOAK } from './config.js';
@@ -424,6 +425,9 @@ export function signOnTrap(opts: {
   recordRosterSignOn(reg, { soakBranch: anchor.branch, revision: opts.configured ? undefined : protectTrapRevision(opts.worktree, trapId, now), creationReason: opts.creationReason, startMode: opts.startMode, now });
   // Back within the grace: held messages deliver at the next park.
   releaseSignedOff(trapId);
+  // Lobstah's park owns this session's turn end: other tools register their waits with it.
+  if (prior && prior.sessionId !== opts.sessionId) releaseTurnEnd(prior.sessionId);
+  claimTurnEnd(opts.sessionId, opts.cwd);
   if (!prior) {
     postNotice({
       kind: 'trap-signed-on',
@@ -509,6 +513,7 @@ export function stowTrap(trapId: string, reason = 'signed off', by?: string): Tr
   fs.rmSync(regPath(trapId), { force: true });
   fs.rmSync(beatPath(trapId), { force: true });
   fs.rmSync(prProbePath(trapId), { force: true });
+  releaseTurnEnd(reg.sessionId);
   dropTrapTickets(trapId, 'its trap was stowed');
   clearFinishedTrapCaches(reg, 'signed off');
   postNotice({
@@ -895,6 +900,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     const codexProcess = reg.harness === 'codex' && !reg.codexServer && reg.harnessProcess ? { ...reg.harnessProcess, threadId: reg.sessionId } : undefined;
     actions.push({ trapId: reg.trapId, ...released, ...(pauseExpired ? { pauseExpired } : {}), ...(removal ? { worktree: removal.removed ? 'removed' : 'kept' } : {}), ...(codexProcess ? { codexProcess } : {}) });
     fs.rmSync(regPath(reg.trapId), { force: true });
+    releaseTurnEnd(reg.sessionId);
     fs.rmSync(beatPath(reg.trapId), { force: true });
     fs.rmSync(prProbePath(reg.trapId), { force: true });
     postNotice({
@@ -949,7 +955,7 @@ export function baitBrief(id: string, d: Descriptor): string {
     `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" ${d.target ? '[--report <file>] [--attach <file>]' : '[--pr <url>]'}\` (or \`failed\`).`,
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     '`working` means you are still executing and will report again. If the next move belongs to a person or to the helm, report `needs-decision` with the question. If you are waiting on an external await, report `paused` and name it. Never end a turn on `working`.',
-    'Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.',
+    'Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`. The exception is a document under review in its own tool, such as a plan or spec: report `paused --waiting-on review --link <its URL>`. That wakes nobody; the document\'s tool shows it to the person and wakes you.',
     ...(d.target ? [] : ['Never park on your PR\'s CI or review: once the PR is up, finish with `done --pr <url>`. Its watch starts the next round on review feedback, a failing check or a merge.']),
     `Before you wait on something else external (a deploy), report \`lobstah report ${id} paused "<note>" --waiting-on deploy|external --link <url>\`.`,
     'Run full test suites, full builds and Playwright as `lobstah heavy -- <command>`: one line per machine keeps them from overloading it. A focused test file or single-package build doesn\'t need it. Your pushes queue on their own.',

@@ -197,7 +197,9 @@ starts the next round on review feedback, a failing check or a merge. A
 trap's `paused --waiting-on pr|review` about its own PR is recorded as
 `done --pr`. Tend, `status`, `ls`, and the glass then show
 `paused: waiting on review` with the link and the time waited. It is a
-state, not a question: nothing to answer, no attention, no pet. A paused
+state, not a question: nothing to answer, no attention, no pet. A review of
+a document in its own tool (a link that isn't a PR) doesn't even wake the
+helm: that tool shows it to the person and wakes the worker. A paused
 headless worker is never counted as wedged and its wall clock stops.
 
 A paused headless dispatch is **parked**. When the worker's turn ends on

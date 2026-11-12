@@ -62,7 +62,7 @@ describe('glass: a paused dispatch says what it waits on', () => {
     x.waiting = { on: 'review', link: 'https://ume.example.com/s/abc', since: ago(12 * 60_000), waitedSecs: 720 };
     const g = await page(d, { hash: '#dispatches', prefs: { view: 'cards' } });
     const card = g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb'))!;
-    expect(text(card.querySelector('.gchip'))).toBe('paused');
+    expect(card.querySelector('.verbicon')!.getAttribute('aria-label')).toMatch(/^Paused · \S+ · waiting on review$/);
     await click(g, card);
     const w = g.$('#modalbox .waiting')!;
     expect(text(w)).toBe('paused: waiting on review · 12m · ume.example.com/s/abc');

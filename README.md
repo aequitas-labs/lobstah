@@ -25,15 +25,20 @@ and recovers each; status and evidence land on disk. Supervision costs
 nothing — no tokens, no attention — so the whole fleet fits in one
 conversation, and **your agents just bring home the lobstahs**.
 
-## Which one? 🧭
+## Choose your approach 🧭
 
-As a **background router**, lobstah takes work you (or a tracker) lob in,
-runs supervised workers in their own worktrees, pings you when something
-needs you, and brings PRs home with no session open. As the **lobstah man**,
-one interactive Claude Code or Codex session takes the helm and runs that
-same fleet from a conversation, woken by the plugin's hooks instead of by
-you. Both sit on the same daemon, so start with the router and add a helm
+Both run on the same daemon, so you can start with the router and add a helm
 whenever you like.
+
+| | Background router | Lobstah man |
+|---|---|---|
+| What it is | lobstah takes work you (or a tracker) lob in, runs supervised workers in their own worktrees, and brings PRs home | One interactive Claude Code or Codex session takes the helm and runs that same fleet from a conversation |
+| Who it's for | You, with no session open: it pings you when something needs you | You, talking to one session that dispatches, answers workers and hands you the catch |
+| How it runs | The daemon, as a service; `[hooks.notify]` reaches you | The daemon, plus the plugin's hooks, which wake the helm instead of you |
+| Setup | `npm i -g lobstah`, `lobstah init --scan ~/src`, `lobstah daemon install` | The same, then the lobstah plugin for your harness |
+| Start with | `lobstah dispatch --repo myapp --brief ./brief.md` | `/lobstah:man` (Claude Code) or `$lobstah:man` (Codex) |
+
+See [the router's quickstart](#quickstart-the-background-router-) or [the lobstah man's](#quickstart-the-lobstah-man-).
 
 ![Pixel lobster carrying a star across the page](docs/assets/lob-crawl.svg)
 
@@ -227,6 +232,26 @@ means the brief is fulfilled. Merging is never the dispatch's job.
 Everything lives under `$LOBSTAH_HOME` (default `~/.lobstah`). To run more
 instances, use more homes. One daemon per home, enforced.
 
+## Glass 🔭
+
+The glass is lobstah's web view of your fleet: what's on deck, cards waiting
+for an answer, PRs and their stacks, reviews, runs and traps.
+`lobstah glass --detach` starts it in the background at
+`http://127.0.0.1:4949` (`lobstah glass` runs it in the foreground).
+
+<img src="docs/assets/glass-mobile.png" width="320" alt="The glass on a phone, On deck: three decisions waiting, three dispatches in flight (one needs a decision, two working), and two that landed today">
+
+From the glass you can answer decision and permission cards, run a run card,
+mark a PR to merge when its checks are green, and review a PR. Everything you
+do there goes through the same paths as the CLI.
+
+The same glass is hosted at [glass.lobstah.dev](https://glass.lobstah.dev),
+through a wharf. Enroll this machine with `lobstah wharf login --wharf <name>
+--mirror`, set `[glass] mirror` to that wharf, and run `lobstah daemon restart`.
+The hosted glass then shows this machine's glass, and what you do there is
+carried out on this machine. The fleet stays on its local grounds.
+[docs/configuration.md](docs/configuration.md) has the details.
+
 ## When something needs you 🛎️
 
 Set one config table — `[hooks.notify]` with `command = "ntfy pub my-topic ..."` — and the
@@ -296,44 +321,12 @@ with a nudge.
 
 ## Telemetry 📊
 
-lobstah shares anonymous daily usage statistics, **on by default**. Once
-per UTC day the daemon sends schema 2, with `catches.today` and `catches.total` for the UTC day and
-all-time, plus up to 100 `traps: [{name, today, harness, model, config}]` entries with automatically
-generated names and recorded provenance. Custom names (`--name`) and older
-names with unknown provenance stay local; their catches remain in the totals.
-Names are not hashed. A `helm` snapshot and up to 100 headless `byWorker`
-count buckets include harness, catalog-only model id, and nullable reasoning
-effort/permission-mode enums. Unknown observations stay null; custom or
-unrecognised model ids become `other`. No arbitrary config is sent.
-The payload also includes the lobstah
-version, OS family, CPU architecture, the UTC date, and a random install id
-made on your machine. It never sends repository names or paths, code, briefs,
-session ids, PR URLs, hostnames, or usernames. It also sends small count ranges
-for boats and local/wharf grounds, fixed choices for hosted/self-hosted use
-and boat access, and daily catches with/without a live helm and on local/wharf
-grounds. Older unobserved catches stay unknown. Helm presence distinguishes
-none, one and several; an unreadable wharf stays unknown. Boat count is at
-least one locally, or the largest visible account roster; it is unknown when
-the boat cannot read a configured wharf. Telemetry reads cached observations
-only, on its own clock and a fresh connection without wharf credentials or
-cookies. Signing in never links the install id to an account. No account or
-boat identifiers, wharf addresses, grounds names, tokens or times finer than
-the UTC date are sent. Self-hosted wharves receive no telemetry. Hooks never send
-anything, and nothing is sent until a one-time notice has been shown in your
-terminal. The counts feed a project-wide `🦞 N` badge. Per-install rows are
-deleted after 90 days, as are per-trap and worker/config rows; retained daily
-totals have only counts, including harness/model aggregates and usage-bucket
-histograms, no names or config.
-
-- `lobstah telemetry show` prints the exact JSON that would be sent.
-- `lobstah telemetry status` shows whether it is on and why.
-- Turn it off with any one of: `lobstah telemetry disable`,
-  `[telemetry] share = false` in `~/.lobstah/config.toml`,
-  `LOBSTAH_TELEMETRY=0`, `DO_NOT_TRACK=1`, or `CI` set.
-
-No release sends anything yet: the endpoint is not set. Everything about it,
-including who receives it and how long it is kept, is in
-[PRIVACY.md](PRIVACY.md).
+lobstah sends anonymous daily usage counts, on by default: how many catches,
+which harness and model, the lobstah version and OS, and a random install id.
+It never sends code, briefs, repository names, paths or hostnames. Turn it off
+with `lobstah telemetry disable` (or `DO_NOT_TRACK=1`); `lobstah telemetry show`
+prints exactly what would be sent. Everything it collects:
+[docs/telemetry.md](docs/telemetry.md).
 
 ## What a wharf holds
 

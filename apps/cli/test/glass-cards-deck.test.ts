@@ -39,7 +39,7 @@ describe('a dispatch card', () => {
     const card = g.$$('#dispatches .card').find((c) => c.querySelector('.gtitle')?.getAttribute('title')?.startsWith('cccccccc'))!;
     // The title is the brief's first line (the server's briefTitle).
     expect(text(card.querySelector('.gtitle'))).toBe(x.brief.split('\n')[0]!.trim());
-    expect(text(card.querySelector('.gchip'))).toBe('needs decision');
+    expect(card.querySelector('.verbicon')!.getAttribute('aria-label')).toMatch(/^Needs decision · \S+$/);
     expect(text(card.querySelector('.gcontext'))).toMatch(/^web · 🪤 hardy-kelp · \d+\w ago$/);
     // The repo carries GitHub's repo icon, which reads as nothing: the name is the text.
     expect(card.querySelector('.gcontext .reponame svg.repoicon')?.getAttribute('aria-hidden')).toBe('true');
@@ -63,7 +63,8 @@ describe('the deck', () => {
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       const [first, second] = [...row.querySelectorAll(':scope > .gline')];
-      expect(first!.lastElementChild!.className).toMatch(/^gchip /);
+      // Its verb's icon in a pill; a queued dispatch keeps its word.
+      expect(first!.lastElementChild!.className).toMatch(/^(runicon verbicon verb-|gchip )/);
       expect(second).toBeTruthy();
     }
   });

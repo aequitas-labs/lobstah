@@ -55,7 +55,7 @@ lobstah report <id> paused "<note>" --waiting-on <kind> [--link <url>] [--until 
 
 | Kind | Meaning |
 | --- | --- |
-| `review` | A human review of an artifact (a ume plan or result). |
+| `review` | A human review: of a PR (with a PR `--link`, or the dispatch's own PR), or of a document in its own tool, such as a ume plan (with its `--link`). A document review wakes nobody: its tool shows it to the person and wakes the worker. |
 | `pr` | A pull request review or merge. |
 | `deploy` | A deploy or release to finish. |
 | `person` | A named person to act. |
@@ -91,6 +91,11 @@ Effects of `paused` with `--waiting-on`:
   dispatch's own PR when it has none, and the daemon reads a waited-on PR
   that no live dispatch-owned watch observes. When no PR is known, the
   report prints a `warning`.
+- With `--waiting-on review` and a `--link` that is not a GitHub PR (a
+  document in its own tool, such as a ume plan): the pause wakes nobody, as
+  a `heavy` wait doesn't, and prints no PR warning. The document's tool shows
+  it to the person and wakes the worker; the helm hears the worker's next
+  report.
 - No attention, no notice, no pet. It is a state, not a question.
 
 Source of truth: `WAITING_ON` in `packages/core/src/types.ts`.
@@ -322,9 +327,20 @@ plus Codex's `UserPromptSubmit` and `PermissionRequest` when declared, it says:
   Code has no per-hook trust: `trust n/a`;
 - **last run**: when lobstah last saw the hook run (`never run` when it has
   not). Each hook run stamps `~/.lobstah/hook-runs.json` (`<harness>:<event>`
-  → time; a hook that runs on every tool call stamps at most every 30 s).
+  → time; a hook that runs on every tool call stamps at most every 30 s);
+- **a command the CLI doesn't know**: the plugin's command for the hook is a
+  `lobstah` command this CLI doesn't run as that hook, such as a flag from a
+  newer plugin (`runs \`lobstah hook stop --x\`, which this CLI doesn't
+  know`);
+- **failed**: the hook's last error, when it is newer than its last run.
 
-A hook that is missing, untrusted, or off makes the row `fail`, and the row
+A lobstah hook fails open. `lobstah hook …` never exits 2, which a harness
+reads as "block" and would send the session back to work every turn. On any
+error it writes one line to stderr, records the error in
+`~/.lobstah/hook-failures.json` under its event, and exits 0.
+
+A hook that is missing, untrusted, off, runs a command the CLI doesn't know,
+or failed since its last run makes the row `fail`, and the row
 ends with the step to take, for example `In Codex, open /hooks and trust
 lobstah's Stop and SessionStart hooks.` Doctor reads the harness config and
 never writes it.
@@ -464,6 +480,11 @@ checkout, or with `--repo <key>` from outside any configured repo, creates a
 linked worktree (`~/.lobstah/worktrees/soak-<trap>`, branch
 `lobstah/soak-<trap>`) and signs that on; a live foreign session in an owned
 worktree is refused (the session lock); a stale one is adopted.
+
+A trap's sign-on also takes its session's turn end under the
+[turn-end contract](turn-end.md): another tool's Stop hook registers its
+wait with lobstah instead of waiting beside lobstah's park, and the daemon
+runs it and wakes the trap with a pointer.
 
 | Word | Meaning |
 | ---- | ------- |

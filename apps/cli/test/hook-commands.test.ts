@@ -18,6 +18,7 @@ import {
   HELM_STOP_REMINDER,
   RUN_CARD_RULE,
   REVIEW_DRAFT_RULE,
+  DOCUMENT_REVIEW_RULE,
   PARKED_TODO_RULE,
   TODO_COMMITMENT_RULE,
   WITHDRAW_CARD_RULE,
@@ -223,6 +224,9 @@ describe('lobstah hook user-prompt-submit', () => {
     expect(HELM_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
     expect(HELM_STOP_REMINDER).not.toContain(REVIEW_DRAFT_RULE);
     expect(charter({ name: 'fleet', repos: ['web'] }).split(REVIEW_DRAFT_RULE)).toHaveLength(2);
+    // So is the document-review rule.
+    expect(HELM_REMINDER).not.toContain(DOCUMENT_REVIEW_RULE);
+    expect(charter({ name: 'fleet', repos: ['web'] }).split(DOCUMENT_REVIEW_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] }).split(CARD_RULE)).toHaveLength(2);
     expect(charter({ name: 'fleet', repos: ['web'] })).not.toContain('any question or choice for the human');
   });
@@ -393,12 +397,13 @@ describe('lobstah hook session-end (alias: stow --quiet)', () => {
 });
 
 describe('lobstah hook', () => {
-  it('bare prints its card; an unknown event is a usage error', () => {
+  it('bare prints its card; an unknown event fails open, with the error on stderr', () => {
     const bare = hook(['hook'], {});
     expect(bare.status).toBe(0);
     expect(bare.stdout).toContain('session-start|user-prompt-submit|stop|post-tool-use|session-end|permission-request|pre-tool-use|grant-check|permission-denied');
     const unknown = hook(['hook', 'pre-compact'], {});
-    expect(unknown.status).toBe(2);
+    expect(unknown.status).toBe(0);
+    expect(unknown.stderr).toContain('lobstah hook pre-compact:');
   });
 
   it("both plugins' hooks.json run the new commands", () => {

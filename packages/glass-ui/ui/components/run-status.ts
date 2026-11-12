@@ -1,5 +1,6 @@
 import type { RunResult, RunState } from '@lobstah/core';
 import { html } from '../html.js';
+import { ageText } from './age.js';
 
 /**
  * A run card's state as an icon instead of words: a green check once it
@@ -84,4 +85,71 @@ const ICON: Record<RunStatus, unknown> = {
 export function RunStatusIcon({ status, result, startedAt }: { status: RunStatus; result?: RunResult; startedAt?: string }) {
   const label = runStatusLabel(status, result, startedAt);
   return html`<span class=${`runicon run-${status} ${TONE[status]}`} role="img" aria-label=${label} title=${label}>${ICON[status]}</span>`;
+}
+
+/**
+ * A dispatch's verb as the same kind of icon, in a small pill: an amber
+ * spinner while working (a still dot with less motion), a blue hand when it
+ * needs a decision, a red stop sign when blocked, a grey pause, a green
+ * check when done, and a red X when it failed. Its accessible name and
+ * tooltip say the verb, how long it has been in it, and what it waits on.
+ */
+export type VerbIconVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed';
+
+/** A verb's tone, one meaning everywhere: amber in progress, blue needs a decision, red blocked or failed, grey paused, green done. */
+export type VerbTone = 'ok' | 'warn' | 'bad' | 'dim' | 'info';
+
+const VERB_WORD: Record<VerbIconVerb, string> = {
+  working: 'Working',
+  'needs-decision': 'Needs decision',
+  blocked: 'Blocked',
+  paused: 'Paused',
+  done: 'Done',
+  failed: 'Failed',
+};
+
+/** Amber working, blue needs a decision, red blocked or failed, grey paused (a turn in the heavy line too), green done. */
+export const VERB_TONE: Record<VerbIconVerb, VerbTone> = {
+  working: 'warn',
+  'needs-decision': 'info',
+  blocked: 'bad',
+  paused: 'dim',
+  done: 'ok',
+  failed: 'bad',
+};
+
+/** True for the six report verbs; a queued or unknown dispatch keeps its word. */
+export const isIconVerb = (verb: string): verb is VerbIconVerb => Object.hasOwn(VERB_WORD, verb);
+
+/** The verb icon's words: "Paused · 12m · waiting on review". */
+export function verbIconLabel(verb: VerbIconVerb, at?: string, waitingOn?: string): string {
+  const parts = [VERB_WORD[verb]];
+  if (at && Number.isFinite(Date.parse(at))) parts.push(ageText(at));
+  if (waitingOn) parts.push(`waiting on ${waitingOn}`);
+  return parts.join(' · ');
+}
+
+const VERB_ICON: Record<VerbIconVerb, unknown> = {
+  working: ICON.running,
+  // A raised open hand: three fingers, then the little finger running into the palm and thumb.
+  'needs-decision': svg(
+    '<g transform="scale(0.6667)" stroke-width="2.4"><path d="M7.5 12.5V6a1.5 1.5 0 0 1 3 0v5"/><path d="M10.5 10.5V4a1.5 1.5 0 0 1 3 0v6.5"/><path d="M13.5 10.5V5.5a1.5 1.5 0 0 1 3 0v5.5"/><path d="M16.5 11V8.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a6 6 0 0 1-4.6-2.2L3.4 16a1.6 1.6 0 0 1 2.5-2l1.6 1.5v-3"/></g>',
+  ),
+  // A stop sign: an octagon with a bar.
+  blocked: svg('<path d="M5.6 2.2h4.8l3.4 3.4v4.8l-3.4 3.4H5.6l-3.4-3.4V5.6z" stroke-width="1.6"/><path d="M5.2 8h5.6"/>'),
+  paused: svg(
+    '<rect x="4" y="3.5" width="2.6" height="9" rx="0.8" fill="currentColor" stroke="none"/><rect x="9.4" y="3.5" width="2.6" height="9" rx="0.8" fill="currentColor" stroke="none"/>',
+  ),
+  done: ICON.succeeded,
+  failed: ICON.failed,
+};
+
+/**
+ * A dispatch's verb icon in its pill, named and titled with its words. `at`
+ * is when it took the verb; `waitingOn` what a paused or questioning
+ * worker waits on.
+ */
+export function VerbIcon({ verb, at, waitingOn }: { verb: VerbIconVerb; at?: string; waitingOn?: string }) {
+  const label = verbIconLabel(verb, at, waitingOn);
+  return html`<span class=${`runicon verbicon verb-${verb} ${VERB_TONE[verb]}`} role="img" aria-label=${label} title=${label}>${VERB_ICON[verb]}</span>`;
 }
