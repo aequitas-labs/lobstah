@@ -85,6 +85,8 @@ export const GLASS_ACTIONS = [
   'todo-schedule',
   /** Acknowledge PR and stack attention. */
   'pr-ack',
+  /** Merge one of your PRs when it's green, or cancel that. */
+  'pr-merge',
   /** Acknowledge the item a clicked lob walked, so the pet and every glass stop walking it. */
   'attention-ack',
   /** Ask for, see or dismiss a review round. */

@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { ackPrAttention } from '../actions.js';
+import { ackPrAttention, requestPrMerge } from '../actions.js';
 import type { DeckAttention } from '../../src/glass-diff.js';
 import { Fragment } from 'preact';
 import type { GlassPr, GlassStack } from '@lobstah/core';
@@ -82,7 +82,7 @@ function prTable(inp: PrsInputs, older: unknown) {
       html`<tr key=${'stack:' + s.id}><th colspan="8">${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}</th></tr>`,
       ...prs.map(
         (p) =>
-          html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}</td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
+          html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}${p.mergeRequest && [' · ', mergeNote(p)]} <${MergeWhenGreen} p=${p} /></td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
       ),
     ]);
   const cols = ['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'];
@@ -99,6 +99,54 @@ function prTable(inp: PrsInputs, older: unknown) {
 /** What Yours says when it is empty: how a PR gets there. */
 const YOURS_EMPTY = 'no PRs of yours are watched: a trap’s PR shows here, and `lobstah watch add <url>` adds one you opened';
 
+const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', rebase: 'rebased commits' } as const;
+
+/**
+ * Merge when green, on a row of yours: the button, then a second tap that
+ * names what happens, then Cancel while the request stands. A PR repair
+ * works a failing or conflicting PR back to green first (the boat's pass).
+ */
+export function MergeWhenGreen({ p }: { p: GlassPr }) {
+  // Constant for the page's life, so the hooks below always run in the same order.
+  if (!can('pr-merge') || !p.mine || p.state !== 'OPEN') return null;
+  const [confirming, setConfirming] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const send = (cancel: boolean) => async (e: Event) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await requestPrMerge(p.key, cancel);
+      setConfirming(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not ask for the merge.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const stop = (e: Event) => e.stopPropagation();
+  const button = p.mergeRequest
+    ? html`<button class="btn" disabled=${busy} onClick=${send(true)}>Cancel</button>`
+    : confirming
+      ? html`<button class="btn go" disabled=${busy} onClick=${send(false)}>Merge #${p.number} into ${p.baseRefName ?? 'its base'}${p.mergeMethod ? ` as ${METHOD_WORDS[p.mergeMethod]}` : ''}</button><button class="btn" onClick=${(
+          e: Event,
+        ) => {
+          stop(e);
+          setConfirming(false);
+        }}>Keep</button>`
+      : html`<button class="btn" onClick=${(e: Event) => {
+          stop(e);
+          setConfirming(true);
+        }}>Merge when green</button>`;
+  return html`<span class="prmerge" onClick=${stop}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+}
+
+/** What a standing merge request says on the row's status line. */
+const mergeNote = (p: GlassPr) =>
+  p.mergeRequest && html`<span class="mergenote" title=${`merges as ${METHOD_WORDS[p.mergeRequest.method]}`}>merges when green</span>`;
+
 /**
  * A PR card: its title and PR icon; under them its status word on a colored
  * edge (you act on PRs); then repo #number, checks and age, with ↗ Open. Merge readiness,
@@ -114,9 +162,9 @@ export function prCard(p: GlassPr, quiet = false) {
     icon=${PrIcon}
     state=${{ word: p.badge.text.toLowerCase(), tone: p.badge.tone, mark: 'edge' }}
     stateBelow
-    context=${[RepoName(p.repo), ` #${p.number} · ${checks} · `, Age(at), ' ago']}
+    context=${[RepoName(p.repo), ` #${p.number} · ${checks} · `, Age(at), ' ago', p.mergeRequest && [' · ', mergeNote(p)]]}
     contextTitle=${`${p.repo} #${p.number} · ${checks}`}
-    action=${html`<${CardLink} href=${reviewLink(p.url)} />`}
+    action=${p.mine && p.state === 'OPEN' && can('pr-merge') ? html`<${MergeWhenGreen} p=${p} />` : html`<${CardLink} href=${reviewLink(p.url)} />`}
     quiet=${quiet}
     cls=${quiet ? 'acked' : undefined}
     onClick=${opener('pr', p.key)}

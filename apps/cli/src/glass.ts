@@ -108,6 +108,7 @@ import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrHead, dispatchPrList } from './glass-prs.js';
 import { githubViewer } from './pr-ownership.js';
+import { PrMergeRefused, cancelPrMerge, prMergeMethod, requestPrMerge } from './pr-merge.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -172,6 +173,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['review-redraft', 1024],
   ['review-draft', 1024],
   ['pr-ack', 256 * 1024],
+  ['pr-merge', 1024],
   ['attention-ack', 1024],
 ]);
 
@@ -651,6 +653,8 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     { readySettleSecs: cfg.readySettleSecs, now: Date.now() },
     () => githubViewer(),
   );
+  // Your open PRs say how Merge when green would merge them, so its second tap can.
+  for (const p of prs) if (p.mine && p.state === 'OPEN') p.mergeMethod = prMergeMethod(cfg, p.forgeRepo);
   // A dispatch with several PRs lists each, in stack order, with its state.
   for (const d of dispatches as GlassDispatch[]) {
     const urls = d.evidence?.prUrls;
@@ -1165,6 +1169,19 @@ export function serveGlass(
               () => reply(500, { ok: false, reason: 'The review could not be changed.' }),
             );
             return;
+          }
+          case 'pr-merge': {
+            const payload = body.payload as { key?: unknown; cancel?: unknown } | undefined;
+            const key = payload?.key;
+            if (typeof key !== 'string' || !/^pr:[^\s]{1,300}$/.test(key)) return reply(400, { ok: false, reason: 'A PR key is required.' });
+            if (payload?.cancel === true) return reply(200, { ok: true, key, cancelled: cancelPrMerge(key) });
+            try {
+              const request = requestPrMerge(key, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass');
+              return reply(200, { ok: true, key, method: request.method });
+            } catch (error) {
+              if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
+              return reply(500, { ok: false, reason: 'The merge request could not be stored.' });
+            }
           }
           case 'pr-ack':
           case 'attention-ack': {

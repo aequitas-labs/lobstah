@@ -287,6 +287,7 @@ import {
   runPrCheck,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
+import { mergeRequestedPrs } from './pr-merge.js';
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
@@ -3963,6 +3964,8 @@ async function mainCli(): Promise<void> {
             // Before the cull pass: a merged PR's release needs the chain finished.
             finishResolvedWaits(log);
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
+            // "Merge when green" from the glass: merge, repair, or tell the helm it's stuck.
+            mergeRequestedPrs(log);
             stampRepairerBeat(now);
           },
           todoFiring: createTodoFiring(),

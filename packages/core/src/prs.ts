@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import type { PrMergeRequest } from './pr-merge.js';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { withDirLock } from './dir-lock.js';
@@ -52,6 +53,8 @@ export interface PrRecord extends PrEvidence {
   repairStreak?: RepairStreak;
   /** Last daemon repair, independent of the current PR head and no-progress counter. */
   repairCooldown?: { dispatchId: string; endedAt?: string; released?: true };
+  /** "Merge when green" from the glass (pr-merge.ts), until the PR merges, closes, or it's cancelled. */
+  mergeRequest?: PrMergeRequest;
 }
 
 export interface RepairStreak {

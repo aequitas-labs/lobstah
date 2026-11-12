@@ -67,3 +67,62 @@ it('leaves Reviews its own tab', async () => {
   expect(g.$('#tabs a[href="#reviews"]')?.className).toContain('on');
   expect(g.$('#reviews .yourshead')).toBeNull();
 });
+
+describe('Merge when green', () => {
+  /** A boat that stores the request, as glass.ts does. */
+  const boat: GlassDomOptions['post'] = (_url, req) => {
+    const { kind, payload } = JSON.parse(req.body);
+    expect(kind).toBe('pr-merge');
+    return { status: 200, body: payload.cancel ? { ok: true, key: payload.key, cancelled: true } : { ok: true, key: payload.key, method: 'merge' } };
+  };
+  const mergeFleet = () => {
+    const d = fleet([50]);
+    d.focusToken = 'page-token';
+    d.prs = d.prs.map((p) => (p.number === 50 ? { ...p, mergeMethod: 'merge' as const } : p));
+    return d;
+  };
+  const button = (g: GlassDom, label: string) => g.$$('#prs button').find((b) => text(b) === label) as HTMLElement | undefined;
+
+  for (const view of ['cards', 'table'] as const) {
+    it(`asks before it asks the boat, says what it merges into and how, then offers Cancel, as ${view}`, async () => {
+      const g = await page(mergeFleet(), { hash: '#prs', post: boat, prefs: { view } });
+      // Only your PR has it.
+      expect(g.$$('#prs button').filter((b) => text(b) === 'Merge when green')).toHaveLength(1);
+      button(g, 'Merge when green')!.click();
+      await g.settle();
+      expect(g.posts()).toHaveLength(0);
+      expect(button(g, 'Keep')).toBeDefined();
+      button(g, 'Merge #50 into main as a merge commit')!.click();
+      await g.settle();
+      expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'pr-merge', payload: { key: 'pr:acme/web#50' } });
+      expect(text(g.$('#prs .mergenote'))).toBe('merges when green');
+      button(g, 'Cancel')!.click();
+      await g.settle();
+      expect(JSON.parse(g.posts().at(-1)!.body).payload).toEqual({ key: 'pr:acme/web#50', cancel: true });
+      expect(g.$('#prs .mergenote')).toBeNull();
+      expect(button(g, 'Merge when green')).toBeDefined();
+    });
+  }
+
+  it('Keep backs out without asking the boat', async () => {
+    const g = await page(mergeFleet(), { hash: '#prs', post: boat });
+    button(g, 'Merge when green')!.click();
+    await g.settle();
+    button(g, 'Keep')!.click();
+    await g.settle();
+    expect(g.posts()).toHaveLength(0);
+    expect(button(g, 'Merge when green')).toBeDefined();
+  });
+
+  it('shows why the boat refused', async () => {
+    const g = await page(mergeFleet(), {
+      hash: '#prs',
+      post: () => ({ status: 403, body: { ok: false, reason: 'Only your own PRs, or ones a dispatch opened, merge from the glass.' } }),
+    });
+    button(g, 'Merge when green')!.click();
+    await g.settle();
+    button(g, 'Merge #50 into main as a merge commit')!.click();
+    await g.settle();
+    expect(text(g.$('#prs [role="alert"]'))).toBe('Only your own PRs, or ones a dispatch opened, merge from the glass.');
+  });
+});

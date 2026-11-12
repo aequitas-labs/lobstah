@@ -489,6 +489,28 @@ stack. When two PRs share a head branch, the parent is the one first seen
 last. The attention list is in standing order: the time each condition
 started. `observedAt` is shown as the time of the last check.
 
+**Merge when green.** On the glass PRs tab, each open PR of yours has Merge
+when green. A second tap names the merge (`Merge #12 into main as one
+squashed commit`) and stores the request on the PR record. The boat refuses
+a PR it has no record of (404), one that isn't open (409), and one that is
+neither authored by the login `gh` signs in as nor opened by a dispatch
+(403). Each PR-watch tick, the daemon takes each request in turn:
+
+- A green PR that GitHub calls clean, with no open PR below it in its stack,
+  merges with `gh pr merge --<method> --match-head-commit <head>`. A refused
+  merge is tried again on the next tick.
+- A conflicting PR, or one with failing checks, is repaired first. A
+  dispatch's PR already has its PR repair. For a PR no dispatch opened, the
+  daemon queues one repair dispatch per head, which pushes to that PR's
+  branch; once it reports the PR, the repair chain takes later rounds.
+- When a PR's repair stops at a head, the helm gets one `repair-stopped`
+  notice for that head.
+- Drafts and running checks wait. A merged or closed PR drops its request.
+
+Cancel withdraws the request. The method is the repo's
+[`mergeMethod`](configuration.md#reposkey--workspace-definitions), else
+`[pickup.github.merge].method`, else squash.
+
 An observed PR joins tend's attention list by kind. `pr:ready` needs a
 mergeable, non-draft PR with no failed, pending, or unknown current checks.
 `pr:conflict` and `pr:checks` appear for an owned PR only when repair is off,

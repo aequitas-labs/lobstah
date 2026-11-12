@@ -104,6 +104,19 @@ h2 {
   letter-spacing: 0.08em;
   margin: 20px 0 6px;
 }
+/* Merge when green on a PR row: its buttons in a row, and the note a standing request puts on the line. */
+.prmerge {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.mergenote {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 7px;
+  color: var(--warn);
+}
 /* The PRs tab's Other PRs: its heading sits on the disclosure arrow's line. */
 .otherprs > summary {
   margin: 20px 0 6px;

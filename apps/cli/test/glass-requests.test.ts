@@ -21,6 +21,7 @@ import {
   reserveTrap,
   shellQuote,
   signOnTrap,
+  readPr,
   upsertPr,
   syncStackReadiness,
 } from '@lobstah/core';
@@ -434,5 +435,40 @@ describe('todo-schedule: set or move a todo time from the glass', () => {
     addTodo(grounds, 'Retry');
     const snapshot = (await (await fetch(`${base}/data`)).json()) as GlassSnapshot;
     expect(snapshot.todos?.[0]).toMatchObject({ groundsKey: grounds, grounds: 'home' });
+  });
+});
+
+describe('pr-merge: Merge when green from the glass', () => {
+  const merge = (payload: unknown, headers: Record<string, string> = {}) => post({ kind: 'pr-merge', payload }, headers);
+  const pr = (n: number, author: string) => ({
+    url: `https://github.com/acme/web/pull/${n}`, number: n, state: 'OPEN' as const, draft: false, reviewDecision: '', mergeStateStatus: 'CLEAN',
+    headSha: `h${n}`, baseRefName: 'main', headRefName: `b${n}`, author,
+    checks: { total: 1, failed: 0, passed: 1, pending: 0 }, review: { unresolvedThreads: 0, changesRequested: false }, observedAt: new Date().toISOString(),
+  });
+  beforeEach(() => {
+    // The login gh signs in as, so no test runs gh.
+    fs.writeFileSync(path.join(home, 'github-viewer.json'), JSON.stringify({ login: 'chris', at: Date.now() }));
+    upsertPr(pr(201, 'chris'));
+    upsertPr(pr(202, 'someone-else'));
+  });
+
+  it('stores a request for your PR, says who asked, and cancels it', async () => {
+    const asked = await merge({ key: 'pr:acme/web#201' }, { 'x-lobstah-relay': 'wharf' });
+    expect(asked.status).toBe(200);
+    expect(await asked.json()).toEqual({ ok: true, key: 'pr:acme/web#201', method: 'squash' });
+    expect(readPr('pr:acme/web#201')!.mergeRequest).toMatchObject({ by: 'wharf', method: 'squash' });
+    expect(buildGlassSnapshot().prs.find((p) => p.number === 201)).toMatchObject({ mine: true, mergeMethod: 'squash', mergeRequest: { method: 'squash' } });
+    const cancelled = await merge({ key: 'pr:acme/web#201', cancel: true });
+    expect(await cancelled.json()).toEqual({ ok: true, key: 'pr:acme/web#201', cancelled: true });
+    expect(readPr('pr:acme/web#201')!.mergeRequest).toBeUndefined();
+  });
+
+  it("refuses someone else's PR, an unknown one, a bad key and a missing token", async () => {
+    expect((await merge({ key: 'pr:acme/web#202' })).status).toBe(403);
+    expect(readPr('pr:acme/web#202')!.mergeRequest).toBeUndefined();
+    expect((await merge({ key: 'pr:acme/web#999' })).status).toBe(404);
+    expect((await merge({ key: 'not a key' })).status).toBe(400);
+    expect((await merge({ key: 'pr:acme/web#201' }, { 'x-lobstah-token': '' })).status).toBe(403);
+    expect(readPr('pr:acme/web#201')!.mergeRequest).toBeUndefined();
   });
 });
