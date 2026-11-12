@@ -1,0 +1,78 @@
+# The turn-end contract
+
+A harness starts every Stop hook together and continues the session only
+when all of them have returned. Two tools whose Stop hooks each wait for
+their own news hold each other up, for hours. Codex measured this on
+5 November 2026. A background command doesn't help in Codex either: one
+that finishes after the turn ends starts no new turn.
+
+So one tool owns a session's turn end. Every other tool that would wait
+there registers a wait for the owner to run instead. Neither tool names the
+other. In a lobstah trap, lobstah's park is the owner.
+
+## The files
+
+```
+~/.agent-turn/<session>/owner.json       the owner
+~/.agent-turn/<session>/waits/<n>.json   one registration per waiting tool
+```
+
+`<session>` is the harness's session id, which every hook gets in its
+input (`session_id`). `AGENT_TURN_HOME` moves the folder.
+
+`owner.json`:
+
+```json
+{ "owner": "lobstah", "since": "2026-11-12T07:00:00Z", "cwd": "/path/to/worktree", "waits": "/Users/me/.agent-turn/<session>/waits" }
+```
+
+A registration, written into `waits` (one file per tool, any name ending in
+`.json`):
+
+```json
+{ "from": "ume", "wait": "ume await a1 --since {cursor} --turn-line", "read": "ume feedback a1", "cursor": "30" }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `from` | The tool's name: lower-case letters, digits, `.`, `_`, `-`. |
+| `wait` | A command that blocks until there is something new, prints one JSON line, and exits. |
+| `read` | What the agent runs to see what's new. |
+| `cwd` | Where to run `wait`. Optional; the owner's `cwd` otherwise. |
+| `cursor` | Where `{cursor}` starts. Optional. |
+
+`wait` prints `{ "cursor": "<next>", "summary": "<one line>" }`. The owner
+replaces `{cursor}` in the command with the last cursor it printed (the
+registration's `cursor` the first time), quoted for the shell. `wait` must
+not move what `read` shows the agent: the agent reads it later.
+
+## The rules
+
+1. **One owner per session.** The tool that holds the turn end writes
+   `owner.json`. A session another tool already owns stays theirs.
+2. **Everyone else registers a wait instead of waiting.** A Stop hook that
+   would wait first reads `owner.json`. If another tool owns the turn end,
+   it writes its registration into `waits` and returns at once. With no
+   owner, it behaves as it always has.
+3. **The owner runs the waits.** When a wait prints, the owner wakes the
+   session with a pointer to `read`, never the content.
+
+## What lobstah does as the owner
+
+- A trap's sign-on writes `owner.json` for its session; stow and a ghost
+  sweep remove it. Registrations stay, so a wait for a trap that went away
+  still runs.
+- The daemon keeps one record per registration in
+  `~/.lobstah/turn-waits/`, tied to the trap and the dispatch it worked when
+  the wait registered, and runs each `wait` as one child process at a time.
+- When a wait prints, a live trap gets the pointer in its dispatch's inbox
+  (its own inbox between dispatches), which wakes its park: "ume has
+  something new: Chris picked an option. Run `ume feedback a1` to see it."
+  A trap that's gone gets a continuation of its dispatch, one at a time.
+- A pointer still unread after 15 minutes raises one `trap-not-receiving`
+  notice to the helm: the trap has stopped receiving.
+- A wait that exits non-zero within 10 seconds without printing has failed:
+  it retries after 5 s, doubling to at most 5 minutes, and the record keeps
+  the last error line. A later exit is a quiet timeout, and it runs again.
+- A record ends when its registration file is removed while the trap is
+  live, or when its dispatch finishes.

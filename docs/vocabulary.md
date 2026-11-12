@@ -465,6 +465,11 @@ linked worktree (`~/.lobstah/worktrees/soak-<trap>`, branch
 `lobstah/soak-<trap>`) and signs that on; a live foreign session in an owned
 worktree is refused (the session lock); a stale one is adopted.
 
+A trap's sign-on also takes its session's turn end under the
+[turn-end contract](turn-end.md): another tool's Stop hook registers its
+wait with lobstah instead of waiting beside lobstah's park, and the daemon
+runs it and wakes the trap with a pointer.
+
 | Word | Meaning |
 | ---- | ------- |
 | `soak` | Sign the worktree's trap on and take matching work. From a primary checkout, or with `--repo <key>` from outside any configured repo, it first creates a linked worktree like a dispatch does (fetch trunk, new branch from `origin/<trunk>`, `setup` commands), prints `worktree:`, `created: true`, `branch:`, and, when the session is elsewhere, `instruction: cd <path> ...`; the session works in that directory. If creation fails, nothing is signed on and the partial worktree and branch are removed. `--repo` in a linked worktree must match its repo. A session that already mans a trap re-uses it (resolved from the session id) and never gets a second worktree. `--session` is needed only on first sign-on. `--one` stows after the first catch. `--wait` registers a watcher and waits for work; a quiet timeout exits 3. Workers never run `man` verbs. |
