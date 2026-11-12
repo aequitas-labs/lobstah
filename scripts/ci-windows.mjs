@@ -1,8 +1,9 @@
-#!/usr/bin/env node
 // Whether a pull request's changes can affect lobstah on Windows, for CI's
 // Windows run. Usage: node scripts/ci-windows.mjs <file listing changed paths>
 // Prints `windows=true` or `windows=false` (for $GITHUB_OUTPUT), and why on
 // stderr. Anything it doesn't recognise counts: an unknown path runs Windows.
+// No shebang: a Windows checkout gives this file CRLF line endings, and a
+// `#!` line ending in CR fails to import under vitest (SyntaxError).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
