@@ -28,6 +28,16 @@ export type Command = { account: string; helm: boolean; personId?: string; token
   prepared?: { id?: string; hash: string } };
 const HELM_MS = 120_000;
 
+/**
+ * How long a mutation's Idempotency-Key replays its first result. Clients
+ * never retry on their own: a timeout says the state is unknown, and a person
+ * or agent runs the command again with `--request-key` (a multi-step publish
+ * resumes from its base key; a boat reports a card answer under
+ * `answer-<receipt>` each pass until it settles). A day covers a retry after
+ * an outage or in the next session; after it, the same key runs as new.
+ */
+export const IDEM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /** One account's only coordination authority. No alarms, timers or socket pings: Slack deliveries drain after each command. */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
@@ -207,7 +217,7 @@ export class Account extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS reports (seq INTEGER PRIMARY KEY AUTOINCREMENT, dispatch TEXT NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, dispatch TEXT, at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS event_details (seq INTEGER PRIMARY KEY, note TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS idem (actor TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(actor,key));
+      CREATE TABLE IF NOT EXISTS idem (actor TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, at INTEGER, PRIMARY KEY(actor,key));
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS claims (dispatch TEXT NOT NULL, epoch INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(dispatch,epoch));
       CREATE TABLE IF NOT EXISTS catch_context (dispatch TEXT PRIMARY KEY, claim_helm INTEGER NOT NULL);
@@ -219,6 +229,8 @@ export class Account extends DurableObject<Env> {
       ${mirrorSchema}
     `);
     ctx.storage.sql.exec('INSERT OR IGNORE INTO meta VALUES (?,?)', 'generation', crypto.randomUUID());
+    // An idem record says when it was made, so it can expire. Records from before then have no time, and go first.
+    if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(idem)').toArray().some((c) => c.name === 'at')) ctx.storage.sql.exec('ALTER TABLE idem ADD COLUMN at INTEGER');
     // Request counts and the hosted glass's watch moved to memory; their old rows go (nothing to write once gone).
     ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
     this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
@@ -378,9 +390,21 @@ export class Account extends DurableObject<Env> {
     if (actor.kind !== 'dispatch' && permission) this.requirePermission(actor, permission);
     if (actor.kind === 'dispatch') requireThat(c.path.startsWith(`dispatches/${actor.id}/`) || c.path === `dispatches/${actor.id}`, 403, 'dispatch scope required');
   }
+  /**
+   * Drop the oldest idem record once it is past the retry window: one row at
+   * most per command, read by rowid (insertion order), so no scan and no
+   * index. Each command adds one record and takes at most one expired one, so
+   * the table settles at a window's worth of commands, and a backlog drains
+   * one row per command.
+   */
+  private trimIdem(now: number) {
+    const oldest = this.ctx.storage.sql.exec<{ id: number; at: number | null }>('SELECT rowid AS id, at FROM idem ORDER BY rowid LIMIT 1').toArray()[0];
+    if (oldest && (oldest.at === null || oldest.at <= now - IDEM_WINDOW_MS)) this.ctx.storage.sql.exec('DELETE FROM idem WHERE rowid=?', oldest.id);
+  }
   private budget(now: number) { this.spend('account', Number(this.env.REQUESTS_PER_MINUTE), now, 'account rate limit'); }
+  /** The account's stored rows, against MAX_ROWS. Idem records are left out: the retry window bounds them (trimIdem). */
   private capacity() {
-    const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'idem', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables];
+    const tables = ['boats', 'boat_permissions', 'workers', 'configured_workers', 'worker_nicknames', 'unservable', 'dispatches', 'reports', 'events', 'event_details', 'recoveries', 'claims', 'catch_context', 'messages', 'assistance_results', 'assistance_stops', 'files', ...glassTables, ...mirrorTables];
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
@@ -405,7 +429,10 @@ export class Account extends DurableObject<Env> {
       this.availability(now);
       // The wharf's cards move in the same transaction as the records they show.
       this.cards.project(now);
-      if (c.method !== 'GET') this.ctx.storage.sql.exec('INSERT INTO idem VALUES (?,?,?,?)', `${actor.kind}:${actor.id}`, c.key!, fingerprint, JSON.stringify(result));
+      if (c.method !== 'GET') {
+        this.ctx.storage.sql.exec('INSERT INTO idem(actor,key,fingerprint,result,at) VALUES (?,?,?,?,?)', `${actor.kind}:${actor.id}`, c.key!, fingerprint, JSON.stringify(result), now);
+        this.trimIdem(now);
+      }
       return result;
     });
   }
