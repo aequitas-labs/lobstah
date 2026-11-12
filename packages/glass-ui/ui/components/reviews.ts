@@ -10,6 +10,7 @@ import { getState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone } from './card.js';
 import { StatusChip, dispatchTrap, prShapedCard } from './prs.js';
+import { Button } from './button.js';
 
 /**
  * The Reviews tab: one row or card per PR that asked for your review,
@@ -59,7 +60,7 @@ function Dismiss({ r }: { r: GlassReview }) {
     setState(refusal ? 'idle' : 'sent');
   };
   if (state === 'sent') return html`<span class="ok" role="status">Sent to the boat that drafted it</span>`;
-  return html`<button class="btn" disabled=${state === 'busy'} onClick=${dismiss}>Dismiss</button>${error && html` <span class="bad" role="alert">${error}</span>`}`;
+  return html`<${Button} disabled=${state === 'busy'} onClick=${dismiss}>Dismiss<//>${error && html` <span class="bad" role="alert">${error}</span>`}`;
 }
 
 /** Sending a drafted review: the request, the button, and what a card's second tap says it posts. */
@@ -107,20 +108,20 @@ function Actions({
   const sendButton =
     r.state === 'drafted' &&
     (confirm && asking
-      ? html`<button class="btn go" disabled=${busy} onClick=${act(send.kind)}>Post ${send.posts} on #${r.number}</button><button class="btn" onClick=${(
+      ? html`<${Button} variant="primary" disabled=${busy} onClick=${act(send.kind)}>Post ${send.posts} on #${r.number}<//><${Button} onClick=${(
           e: Event,
         ) => {
           e.stopPropagation();
           setAsking(false);
-        }}>Keep</button>`
-      : html`<button class="btn" disabled=${busy} onClick=${
+        }}>Keep<//>`
+      : html`<${Button} disabled=${busy} onClick=${
           confirm
             ? (e: Event) => {
                 e.stopPropagation();
                 setAsking(true);
               }
             : act(send.kind)
-        }>${send.label}</button>`);
+        }>${send.label}<//>`);
   if (split && !asking) {
     const drafts = (canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale';
     const skips = OPEN.has(r.state) || !!r.notification;
@@ -128,18 +129,18 @@ function Actions({
       "Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.";
     const main =
       r.state === 'drafted'
-        ? html`<button class="btn bigbtn" disabled=${busy} onClick=${
+        ? html`<${Button} variant="primary" disabled=${busy} onClick=${
             confirm
               ? (e: Event) => {
                   e.stopPropagation();
                   setAsking(true);
                 }
               : act(send.kind)
-          }>${SEND_ICON[r.verdict ?? 'comment']}${send.label}</button>`
+          }>${SEND_ICON[r.verdict ?? 'comment']}${send.label}<//>`
         : drafts
-          ? html`<button class="btn bigbtn" disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}</button>`
+          ? html`<${Button} variant="primary" disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`
           : skips
-            ? html`<button class="btn bigbtn" disabled=${busy} title=${skipTitle} onClick=${act('review-skip')}>${ActionIcon.skip}Skip</button>`
+            ? html`<${Button} variant="primary" disabled=${busy} title=${skipTitle} onClick=${act('review-skip')}>${ActionIcon.skip}Skip<//>`
             : null;
     const more =
       main && skips && (r.state === 'drafted' || drafts)
@@ -148,9 +149,9 @@ function Actions({
     return html`<span class="rv-actions">${main && html`<${SplitButton} main=${main} more=${more} />`}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
   }
   return html`<span class=${asking ? 'rv-actions asking' : 'rv-actions'}>
-    ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<button class="btn" disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}</button>`}
+    ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}
     ${sendButton}
-    ${(OPEN.has(r.state) || r.notification) && html`<button class="btn" disabled=${busy} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub." onClick=${act('review-skip')}>Skip</button>`}
+    ${(OPEN.has(r.state) || r.notification) && html`<${Button} disabled=${busy} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub." onClick=${act('review-skip')}>Skip<//>`}
     ${error && html`<span class="bad" role="alert">${error}</span>`}
   </span>`;
 }

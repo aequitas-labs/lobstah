@@ -30,6 +30,7 @@ import { RUN_DECLINE, RunKindIcon, RunStatusIcon, runStatus } from './run-status
 import type { RunStatus } from './run-status.js';
 import { can, fileUrl } from '../backend.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
+import { Button, buttonClass } from './button.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -81,12 +82,12 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
     shown.length > 0 &&
       html`<div class="doptions">${shown.map((o, i) => {
         const k = hotkey(i);
-        return html`<button key=${o} type="button" class=${'btn dopt' + (draft?.option === o ? ' on' : '')} aria-pressed=${draft?.option === o ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => {
+        return html`<${Button} key=${o} size="lg" class="dopt" pressed=${draft?.option === o} aria-keyshortcuts=${k} disabled=${sending} onClick=${() => {
           if (instant) {
             setDraft(key, { option: o, error: undefined });
             void sendAnswer(key);
           } else toggleOption(key, o);
-        }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</span></button>`;
+        }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</span><//>`;
       })}</div>`,
     instant && options.length > 0 && draft?.option && draft?.error && html`<div class="bad derr">${draft.error}</div>`,
     // The dock's composer, one box as in a chat app: the text box across the full width, then a slim
@@ -112,7 +113,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
       )}
     ></textarea></div><div class="dtools">${
       can('answer-files') &&
-      html`<label class="btn dattach dicon" title="Attach images or files">${AttachIcon}<input
+      html`<label class=${buttonClass('icon', 'lg', 'dattach')} title="Attach images or files">${AttachIcon}<input
           type="file"
           multiple
           aria-label="Attach"
@@ -125,13 +126,13 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
             });
           }}
         /></label>`
-    }${!touch && html`<${SendHint} />`}<button type="button" class="btn dsend dicon" aria-label="Send" aria-keyshortcuts=${sendShortcut()} title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}</button></div></div>`,
+    }${!touch && html`<${SendHint} />`}<${Button} variant="icon" size="lg" class="dsend" aria-label="Send" aria-keyshortcuts=${sendShortcut()} title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}<//></div></div>`,
     !permission &&
       (files.length > 0 || (draft?.error && !(instant && draft.option))) &&
       html`<div class="dfoot">
       ${files.map(
         (f, i) =>
-          html`<span key=${f.name + i} class="dchip">${f.name}<button type="button" class="dx" title="remove" disabled=${sending} onClick=${() => removeFile(key, i)}>×</button></span>`,
+          html`<span key=${f.name + i} class="dchip">${f.name}<${Button} variant="icon" class="dx" label="remove" disabled=${sending} onClick=${() => removeFile(key, i)}>×<//></span>`,
       )}
       ${draft?.error && !(instant && draft.option) && html`<span class="bad derr">${draft.error}</span>`}
     </div>`,
@@ -147,10 +148,10 @@ function RunDecline({ c, draft }: { c: DecisionCard; draft: DecisionDraft | unde
   const option = (c.kind === 'decision' && c.options[0]) || RUN_DECLINE;
   const k = touchOnly() ? undefined : '1';
   const on = draft?.option === option;
-  return html`<button type="button" class=${'btn dopt rundecline' + (on ? ' on' : '')} aria-pressed=${on ? 'true' : 'false'} aria-keyshortcuts=${k} disabled=${!!draft?.sending} onClick=${() => {
+  return html`<${Button} size="lg" class="dopt rundecline" pressed=${on} aria-keyshortcuts=${k} disabled=${!!draft?.sending} onClick=${() => {
     setDraft(c.key, { option, error: undefined });
     void sendAnswer(c.key);
-  }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(option)}</span></span></button>`;
+  }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(option)}</span></span><//>`;
 }
 
 /** The dock's icons: a paperclip to attach, and the paper plane of Material's `send` to send. Each button carries its own label. */
@@ -370,7 +371,7 @@ export function DecisionModal({
   const shell = (label: string, body: unknown, shown = '') =>
     html`<div id="doverlay" class="open" onClick=${(e: Event) => e.target === e.currentTarget && closeDecision()}>
       <div class=${'modal dmodal' + (c?.kind === 'decision' && c.permission ? ' dpermission' : '')} role="dialog" aria-modal="true" aria-labelledby="dmodal-title" tabindex="-1" ref=${box} onKeyDown=${trap} onTouchStart=${swipeStart} onTouchEnd=${swipeEnd} data-decision=${shown}>
-        <button type="button" class="x" aria-label="close" aria-keyshortcuts="Escape" onClick=${closeDecision}>×</button>
+        <${Button} variant="icon" class="x" label="close" aria-keyshortcuts="Escape" onClick=${closeDecision}>×<//>
         <h3 id="dmodal-title" class="sr-only">${label}</h3>
         ${body}
       </div>
@@ -406,9 +407,9 @@ export function DecisionModal({
     c.kind === 'decision' ? c.title : c.note,
     html`<div class="dhead">
         <div class="dnav">
-          <button type="button" class="btn dprev" aria-label="previous decision" aria-keyshortcuts="ArrowLeft" disabled=${!near?.prev} onClick=${() => stepDecision(-1)}>‹ prev</button>
+          <${Button} class="dprev" aria-label="previous decision" aria-keyshortcuts="ArrowLeft" disabled=${!near?.prev} onClick=${() => stepDecision(-1)}>‹ prev<//>
           <span class="dpos" aria-live="polite">${near?.listed ? `${near.index + 1} of ${order.length}` : `${order.length} open`}</span>
-          <button type="button" class="btn dnext" aria-label="next decision" aria-keyshortcuts="ArrowRight" disabled=${!near?.next} onClick=${() => stepDecision(1)}>next ›</button>
+          <${Button} class="dnext" aria-label="next decision" aria-keyshortcuts="ArrowRight" disabled=${!near?.next} onClick=${() => stepDecision(1)}>next ›<//>
         </div>
       </div>
       <div class="dbody">
@@ -454,7 +455,7 @@ export function DecisionAlert({ unread, dismissed }: { unread: DecisionCard[]; d
     show &&
     html`<div class="dalert">
       <button type="button" class="dalert-open" aria-keyshortcuts="d" onClick=${() => openDecision()}><span class="dcount" aria-hidden="true">${n}</span> <span>${words}</span></button>
-      <button type="button" class="dx" aria-label="dismiss" title="dismiss" onClick=${dismissAlert}>×</button>
+      <${Button} variant="icon" class="dx" label="dismiss" onClick=${dismissAlert}>×<//>
     </div>`
   }</div>`;
 }

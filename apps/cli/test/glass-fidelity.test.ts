@@ -131,14 +131,23 @@ function canon(node: Node, skeletonOnly = false): string {
     if (el.tagName === 'BUTTON' && el.classList.contains('thumb')) continue;
     // Where a link out of the glass opens, and its ↗ mark, are html.ts's rule now; glass-links tests them.
     const external = el.tagName === 'A' && isExternalHref(el.getAttribute('href') ?? '', el.ownerDocument.location.origin);
+    // Every button is the Button atom now (components/button.ts): its variant and size classes and its
+    // type="button" are the atom's own; glass-button.test.ts tests them. The role classes still compare.
+    const atom = el.classList.contains('btn') || (el.tagName === 'BUTTON' && el.getAttribute('type') === 'button');
+    // The modal's close was a span; it is the atom's icon button now, so a keyboard reaches it.
+    const close = el.classList.contains('x');
     const attrs = [...el.attributes]
       .filter((a) => !a.name.startsWith('on') && a.name !== 'selected' && a.name !== 'title')
+      .filter((a) => !(atom && el.tagName === 'BUTTON' && a.name === 'type' && a.value === 'button'))
+      .filter((a) => !(close && a.name === 'aria-label'))
+      // A button's name that only repeats its title: the atom sets both on an icon button, the old page often only one.
+      .filter((a) => !((el.tagName === 'BUTTON' || el.tagName === 'A') && a.name === 'aria-label' && a.value === el.getAttribute('title')))
       .filter((a) => !(external && (a.name === 'target' || a.name === 'rel')))
-      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )(long|extlink)(?= |$)/g, '').trim() : a.value] as const)
+      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )(long|extlink|btn|btn-(?:primary|secondary|danger|icon|lg))(?= |$)/g, '').trim() : a.value] as const)
       .filter(([n, v]) => !((n === 'class' || n === 'style') && v === ''))
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([n, v]) => `${n}=${JSON.stringify(v)}`);
-    out += `<${el.tagName.toLowerCase()}${attrs.length ? ' ' + attrs.join(' ') : ''}>${canon(el, skeletonOnly)}</>`;
+    out += `<${close ? 'close' : el.tagName.toLowerCase()}${attrs.length ? ' ' + attrs.join(' ') : ''}>${canon(el, skeletonOnly)}</>`;
   }
   flush();
   return out;
@@ -393,8 +402,9 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
+          // Every button is the Button atom (components/button.ts), sized and colored there; glass-button.test.ts tests it.
           // A verb cell is colored as its icon is (components/run-status.ts VERB_TONE); glass-verb-icons.test.ts tests it.
-          .filter((el) => !el.matches('#dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *'))
+          .filter((el) => !el.matches('.btn, .btn *, button, button *, .x, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);

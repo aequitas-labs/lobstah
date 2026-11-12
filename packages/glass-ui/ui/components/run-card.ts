@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from 'preact/hooks';
 import { TerminalOutput } from './terminal.js';
 import { RunStatusIcon, runStatus } from './run-status.js';
+import { Button } from './button.js';
 
 /**
  * A run card's body in the decision modal: the script in full, with every
@@ -153,10 +154,10 @@ function ConsoleLine({ cardKey, onSent }: { cardKey: string; onSent: (secret: st
         void send();
       }}
     />${secret && html`<${Eye} shown=${shown} onToggle=${() => setShown(!shown)} />`}</div>
-    <button type="button" class=${'btn runsecret' + (secret ? ' on' : '')} aria-pressed=${secret ? 'true' : 'false'} title="Mask this line and scrub its value from the output" onClick=${() => {
+    <${Button} class="runsecret" pressed=${secret} title="Mask this line and scrub its value from the output" onClick=${() => {
       setSecret(!secret);
       setShown(false);
-    }}>secret</button>
+    }}>secret<//>
     <span class="dim">Enter sends the line</span>
     ${error && html`<span class="bad">${error}</span>`}
   </div>`;
@@ -318,14 +319,12 @@ export function RunActions({
   const primary =
     runs &&
     (view?.busy
-      ? html`<button type="button" class="btn danger" onClick=${() => void stopRunCard(cardKey)}>Stop</button>`
+      ? html`<${Button} variant="danger" size="lg" onClick=${() => void stopRunCard(cardKey)}>Stop<//>`
       : here || blocked || hosted
-        ? html`<button type="button" class="btn runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}</button>`
-        : html`<a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}</a>`);
+        ? html`<${Button} variant="primary" size="lg" class="runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}<//>`
+        : html`<${Button} variant="primary" size="lg" class="runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}<//>`);
   const second =
-    view?.result && runs
-      ? html`<button type="button" class="btn" onClick=${() => void dismissRunCard(cardKey)}>Dismiss</button>`
-      : !view?.busy && decline;
+    view?.result && runs ? html`<${Button} size="lg" onClick=${() => void dismissRunCard(cardKey)}>Dismiss<//>` : !view?.busy && decline;
   const note =
     runs &&
     !view?.busy &&

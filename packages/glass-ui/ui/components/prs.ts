@@ -31,6 +31,7 @@ import { getState, setState } from '../store.js';
 import type { Children } from '../html.js';
 import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
 import type { CardPerson, CardTone } from './card.js';
+import { Button } from './button.js';
 
 /**
  * The PRs tab: Yours first (the stacks holding a PR of the person's own,
@@ -135,8 +136,8 @@ export function MergeWhenGreen({ p }: { p: GlassPr }) {
   const method = p.mergeRequest?.method ?? p.mergeMethod;
   const how = `#${p.number} into ${p.baseRefName ?? 'its base'}${method ? ` as ${METHOD_WORDS[method]}` : ''}`;
   const button = p.mergeRequest
-    ? html`<button class="btn bigbtn on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} disabled=${busy} onClick=${send(true)}>${ActionIcon.merge}Cancel merge</button>`
-    : html`<button class="btn bigbtn" aria-pressed="false" title=${`Merges ${how} once green`} disabled=${busy} onClick=${send(false)}>${ActionIcon.merge}Merge when green</button>`;
+    ? html`<${Button} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} disabled=${busy} onClick=${send(true)}>${ActionIcon.merge}Cancel merge<//>`
+    : html`<${Button} variant="primary" aria-pressed="false" title=${`Merges ${how} once green`} disabled=${busy} onClick=${send(false)}>${ActionIcon.merge}Merge when green<//>`;
   return html`<span class="prmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
@@ -175,10 +176,10 @@ export function MergeStackWhenGreen({ s, prs }: { s: GlassStack; prs: GlassPr[] 
   const method = s.mergeRequest?.method ?? open[0]?.mergeMethod;
   const how = `${numberList(open.map((p) => p.number))} into ${s.floor} in order${method ? `, as ${METHOD_WORDS[method]}` : ''}`;
   const button = s.mergeRequest?.merging
-    ? html`<button class="btn bigbtn on" aria-pressed="true" disabled title=${`GitHub is merging ${how}`}>${ActionIcon.merge}Merging</button>`
+    ? html`<${Button} variant="primary" class="on" aria-pressed="true" disabled title=${`GitHub is merging ${how}`}>${ActionIcon.merge}Merging<//>`
     : s.mergeRequest
-      ? html`<button class="btn bigbtn on" aria-pressed="true" title=${`Merges ${how}, once all are green; click to cancel`} disabled=${busy} onClick=${send(true)}>${ActionIcon.merge}Cancel merge</button>`
-      : html`<button class="btn bigbtn" aria-pressed="false" title=${`Merges ${how}, once all are green`} disabled=${busy} onClick=${send(false)}>${ActionIcon.merge}Merge stack when green</button>`;
+      ? html`<${Button} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how}, once all are green; click to cancel`} disabled=${busy} onClick=${send(true)}>${ActionIcon.merge}Cancel merge<//>`
+      : html`<${Button} variant="primary" aria-pressed="false" title=${`Merges ${how}, once all are green`} disabled=${busy} onClick=${send(false)}>${ActionIcon.merge}Merge stack when green<//>`;
   return html`<span class="prmerge stackmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
@@ -490,7 +491,7 @@ function AckButton({ pending, label, stack }: { pending: DeckAttention[]; label:
       setBusy(false);
     }
   };
-  return html`<span class="prack" onClick=${(e: Event) => e.stopPropagation()}><button class="btn" data-stack=${stack} disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : label}</button>${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+  return html`<span class="prack" onClick=${(e: Event) => e.stopPropagation()}><${Button} data-stack=${stack} disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : label}<//>${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
 }
 
 export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {

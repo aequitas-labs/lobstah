@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Children } from '../html.js';
 import { html } from '../html.js';
+import { Button } from './button.js';
 
 /**
  * The glass's one card: up to four lines with the same parts in the same
@@ -104,12 +105,12 @@ export const PrIcon = html`<svg class="pricon" viewBox="0 0 16 16" width="14" he
  * Open draft). A new tab, and the card's own click never fires.
  */
 export const CardLink = ({ href, label = 'Open', onOpen }: { href: string; label?: string; onOpen?: () => void }) =>
-  html`<a class="btn open gopenbtn ibtn" href=${href} target="_blank" rel="noopener" aria-label=${label} title=${label} onClick=${(
+  html`<${Button} variant="icon" class="open gopenbtn" href=${href} target="_blank" rel="noopener" aria-label=${label} title=${label} onClick=${(
     e: Event,
   ) => {
     e.stopPropagation();
     onOpen?.();
-  }}>${OpenIcon}</a>`;
+  }}>${OpenIcon}<//>`;
 
 const actionIcon = (body: string) =>
   html`<svg class="acticon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: body }}></svg>`;
@@ -165,15 +166,13 @@ export function SplitButton({ main, more }: { main: Children; more: MenuAction[]
     };
   }, [open]);
   if (!more.length) return main;
-  return html`<span class="split" ref=${box} onClick=${(e: Event) => e.stopPropagation()}>${main}<span class="cmenu"><button
-        type="button"
-        class="btn ibtn splitcaret"
+  return html`<span class="split" ref=${box} onClick=${(e: Event) => e.stopPropagation()}>${main}<span class="cmenu"><${Button} variant="icon" class="splitcaret"
         aria-haspopup="menu"
         aria-expanded=${open ? 'true' : 'false'}
         aria-label="More actions"
         title="More actions"
         onClick=${() => setOpen(!open)}
-      >${ActionIcon.caret}</button>${
+      >${ActionIcon.caret}<//>${
         open &&
         html`<span class="cmenulist" role="menu">${more.map(
           (m) =>

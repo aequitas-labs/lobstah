@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { json } from './api.js';
 import { html, when } from './common.js';
+import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
 
 /** This person's Slack link as the wharf holds it. */
 export interface SlackStatus {
@@ -53,7 +54,7 @@ export function SlackLinkSection(): ReturnType<typeof html> {
       : !status.configured
         ? html`<div class="dim">No Slack app is configured on this wharf</div>`
         : status.link
-          ? html`<div class="sub">Slack serves ${status.link.grounds.join(', ') || 'no grounds'} · linked ${when(status.link.linkedAt)}</div><button class="btn" disabled=${busy || !selectedGrounds.length} onClick=${save}>Save grounds</button><button class="btn" disabled=${busy} onClick=${disconnect}>Disconnect Slack</button>`
-          : html`<div class="sub">Choose which grounds to use from your private chat with the lobstah app</div><button class="btn" disabled=${busy || !selectedGrounds.length} onClick=${connect}>Connect Slack</button>`
+          ? html`<div class="sub">Slack serves ${status.link.grounds.join(', ') || 'no grounds'} · linked ${when(status.link.linkedAt)}</div><${Button} disabled=${busy || !selectedGrounds.length} onClick=${save}>Save grounds<//><${Button} disabled=${busy} onClick=${disconnect}>Disconnect Slack<//>`
+          : html`<div class="sub">Choose which grounds to use from your private chat with the lobstah app</div><${Button} disabled=${busy || !selectedGrounds.length} onClick=${connect}>Connect Slack<//>`
   }`;
 }
