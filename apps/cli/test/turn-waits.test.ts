@@ -165,7 +165,7 @@ describe('the daemon pass', () => {
     expect(log.some((l) => l.endsWith(': inbox'))).toBe(true);
   });
 
-  it('a wait that fails at once backs off and records why', async () => {
+  it('a wait that exits with an error code backs off and records why, however long it ran', async () => {
     working();
     register('ume.json', { ...UME, wait: `"${process.execPath}" -e "console.error('engine down'); process.exit(1)"` });
     const { pass, children } = createTurnWaits();
@@ -175,5 +175,18 @@ describe('the daemon pass', () => {
     expect(readTurnWaitRecords()[0]).toMatchObject({ failures: 1, lastError: 'engine down' });
     pass(Date.now(), () => {});
     expect(children.size).toBe(0);
+  });
+
+  it('exit 2 with nothing printed is a quiet timeout: no failure, and it runs again at once', async () => {
+    working();
+    register('ume.json', { ...UME, wait: `"${process.execPath}" -e "process.exit(2)"` });
+    const { pass, children } = createTurnWaits();
+    pass(Date.now(), () => {});
+    await new Promise<void>((resolve) => children.values().next().value!.on('close', () => resolve()));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(readTurnWaitRecords()[0]).not.toHaveProperty('failures');
+    pass(Date.now(), () => {});
+    expect(children.size).toBe(1);
+    await new Promise<void>((resolve) => children.values().next().value!.on('close', () => resolve()));
   });
 });

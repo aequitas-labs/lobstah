@@ -47,8 +47,12 @@ import type { Lane, TrapRegistration, TurnWait } from '@lobstah/core';
 
 /** How long a pointer may sit unread before the helm hears. */
 export const STALE_MS = 15 * 60_000;
-/** A wait that exits non-zero sooner than this failed; a later exit is a quiet timeout. */
-const QUICK_EXIT_MS = 10_000;
+/**
+ * How a wait that printed nothing ended: exit 0 or 2 is a quiet timeout (2 is
+ * the usual "timed out" code, as `ume await` uses), a signal is the daemon
+ * stopping it, and any other exit code is a failure, however long it ran.
+ */
+const QUIET_EXITS: ReadonlySet<number> = new Set([0, 2]);
 /** Backoff after a failed wait: 5 s, doubling, at most 5 minutes. */
 const backoffMs = (failures: number): number => Math.min(300_000, 5_000 * 2 ** Math.max(0, failures - 1));
 
@@ -280,7 +284,6 @@ export function createTurnWaits(start: SpawnWait = spawnWait): { pass: (now: num
     }
     for (const r of readTurnWaitRecords()) {
       if (children.has(r.key) || (r.nextRunAt && Date.parse(r.nextRunAt) > now)) continue;
-      const startedAt = Date.now();
       const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd);
       children.set(r.key, child);
       let buffered = '';
@@ -300,7 +303,7 @@ export function createTurnWaits(start: SpawnWait = spawnWait): { pass: (now: num
       child.stderr?.on('data', (chunk: Buffer) => {
         errText = (errText + chunk.toString('utf8')).slice(-500);
       });
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
         children.delete(r.key);
         if (buffered.trim()) {
           printed = true;
@@ -308,7 +311,7 @@ export function createTurnWaits(start: SpawnWait = spawnWait): { pass: (now: num
         }
         const current = readRecord(r.key);
         if (!current) return;
-        const failed = !printed && code !== 0 && Date.now() - startedAt < QUICK_EXIT_MS;
+        const failed = !printed && signal === null && code !== null && !QUIET_EXITS.has(code);
         if (failed) {
           const failures = (current.failures ?? 0) + 1;
           const error = errText.trim().split('\n').at(-1) || `exit ${String(code)}`;
