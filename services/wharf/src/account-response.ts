@@ -10,8 +10,8 @@ import type { MirrorListing } from './mirror-state.js';
 export async function accountResponse(request: Request, env: Env, c: Command): Promise<Response> {
   const stub = env.ACCOUNTS.getByName(c.account);
   if (c.path === 'wake' && c.method === 'GET') {
-    // Never forward a caller-supplied internal header or a bearer in the URL.
-    return stub.fetch('https://internal/wake', { headers: { Upgrade: request.headers.get('Upgrade') ?? '', 'X-Wharf-Command': JSON.stringify(c) } });
+    // Never forward a caller-supplied internal header or a bearer in the URL. The subprotocol says which socket protocol the client speaks.
+    return stub.fetch('https://internal/wake', { headers: { Upgrade: request.headers.get('Upgrade') ?? '', 'Sec-WebSocket-Protocol': request.headers.get('Sec-WebSocket-Protocol') ?? '', 'X-Wharf-Command': JSON.stringify(c) } });
   }
   if (c.path === 'mirror' || c.path.startsWith('mirror/')) return mirrorResponse(request, env, c);
   const upload = /^(dispatches|documents)\/[A-Za-z0-9_-]+\/files$/.test(c.path) && c.method === 'POST';

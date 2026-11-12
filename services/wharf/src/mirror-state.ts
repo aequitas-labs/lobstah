@@ -81,6 +81,16 @@ export class MirrorState {
    * R2 keys they leave behind. An expired call stays listed, so its page
    * learns it expired, until its own time plus another wait has passed.
    */
+  /** When the next live call passes its time and turns expired, so its page learns it without polling; none when no call is live. */
+  nextExpiry(now: number): number | undefined {
+    let next: number | undefined;
+    for (const row of this.sql.exec<{ data: string }>('SELECT data FROM mirror_calls').toArray()) {
+      const call = JSON.parse(row.data) as WharfMirrorCall;
+      const ends = Date.parse(call.expiresAt);
+      if (call.state !== 'answered' && call.state !== 'expired' && ends > now) next = Math.min(next ?? ends, ends);
+    }
+    return next;
+  }
   expire(account: string, now: number): MirrorCleanup {
     const keys: string[] = [];
     for (const row of this.sql.exec<{ id: string; data: string }>('SELECT id,data FROM mirror_calls').toArray()) {

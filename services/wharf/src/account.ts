@@ -14,6 +14,8 @@ import { routeSlackMessage } from './slack-routing.js';
 import { MIRROR_WATCH_MS, MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
+import { MINIMUM_SOCKET_CLIENT, PING_TEXT, PONG_TEXT, SOCKET_EVENTS_PER_MESSAGE, WHARF_SOCKET_PROTOCOL, offersSocketProtocol, parseClientMessage } from '../../../packages/core/src/wharf-socket.js';
+import type { CommandMessage, ServerSocketMessage } from '../../../packages/core/src/wharf-socket.js';
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 /** What a Slack action came to: done, a form to ask for words first, or why not, said to the person. */
@@ -22,6 +24,15 @@ type DispatchRow = { id: string; data: string; state: string; worker: string | n
 type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo?: string; seen: number; target?: import('../../../packages/core/src/configured-trap-model.js').ConfiguredTrapTarget };
 type StoredResult = { status: number; value: unknown };
+/**
+ * What a socket keeps across hibernation (well under the 16 KB attachment
+ * limit): who it is, its credential's hash (never the secret), and the
+ * command fields its messages run under.
+ */
+type SocketAttachment = { actor: Actor; hash: string; account: string; sessionId?: string; protocol: typeof WHARF_SOCKET_PROTOCOL;
+  base: Pick<Command, 'account' | 'helm' | 'personId' | 'personSessionId' | 'token'> };
+/** The most sockets one account holds at once: boats, glass tabs and waiting helms together. */
+const SOCKET_LIMIT = 256;
 type FileRow = { id: string; dispatch: string; name: string; size: number; hash: string; ready: number };
 export type Command = { account: string; helm: boolean; personId?: string; token: string; method: string; path: string; key?: string; session?: string; body: unknown; after?: string;
   personSessionId?: string;
@@ -38,13 +49,22 @@ const HELM_MS = 120_000;
  */
 export const IDEM_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-/** One account's only coordination authority. No alarms, timers or socket pings: Slack deliveries drain after each command. */
+/**
+ * One account's only coordination authority. Clients hold hibernatable
+ * sockets (lobstah.2) and get each event pushed; pings are answered by the
+ * runtime without waking the object. One alarm, set only while something is
+ * due (a lease, a paused report's end, a live mirror call, an open request, a
+ * waiting card answer, a Slack retry), stands in for the polls that used to
+ * observe expiry; with nothing due there is no alarm and no timer.
+ */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
   private cards: Cards;
   private outbox: SlackOutbox;
   private mirrorState: MirrorState;
-  private hintPending = false;
+  /** The newest event already pushed to sockets; events after it go out on the next push. */
+  private pushedSeq = 0;
+  private pushPending = false;
   /** Fetch is only for the private upgrade binding: normal state uses RPC. */
   async fetch(request: Request): Promise<Response> {
     try {
@@ -57,34 +77,177 @@ export class Account extends DurableObject<Env> {
       this.requirePermission(actor, 'read'); this.budget(Date.now());
       requireThat(actor.kind !== 'person' || c.personSessionId && await personSessionLive(this.env, c.account, c.personSessionId), 401, 'session expired');
       requireThat(!this.get('deleted'), 410, 'account deleted');
-      requireThat(this.ctx.getWebSockets().length < 32, 429, 'wake connection limit');
+      // A client from before the socket protocol is told to update, never served the old hints.
+      if (!offersSocketProtocol(request.headers.get('Sec-WebSocket-Protocol'))) {
+        return Response.json({ error: `this wharf speaks ${WHARF_SOCKET_PROTOCOL}; update lobstah to ${MINIMUM_SOCKET_CLIENT} or later`, minimumClient: MINIMUM_SOCKET_CLIENT }, { status: 426 });
+      }
+      requireThat(this.ctx.getWebSockets().length < SOCKET_LIMIT, 429, 'socket connection limit');
       const pair = new WebSocketPair();
-      this.ctx.acceptWebSocket(pair[1]);
-      pair[1].serializeAttachment({ actor, hash, account: c.account, sessionId: c.personSessionId });
-      return new Response(null, { status: 101, webSocket: pair[0] });
+      this.ctx.acceptWebSocket(pair[1], socketTags(actor, c));
+      const attachment: SocketAttachment = { actor, hash, account: c.account, sessionId: c.personSessionId, protocol: WHARF_SOCKET_PROTOCOL,
+        base: { account: c.account, helm: c.helm, personId: c.personId, personSessionId: c.personSessionId, token: credentialName(c.token) } };
+      pair[1].serializeAttachment(attachment);
+      return new Response(null, { status: 101, webSocket: pair[0], headers: { 'Sec-WebSocket-Protocol': WHARF_SOCKET_PROTOCOL } });
     } catch (e) {
       if (e instanceof ApiError) return Response.json({ error: e.message }, { status: e.status });
       return Response.json({ error: 'wake unavailable' }, { status: 503 });
     }
   }
-  webSocketMessage(socket: WebSocket) { socket.close(1008, 'wake hints are receive-only'); }
+  /**
+   * One message from a client: catch up from a cursor, or run a command as
+   * its HTTP route would. The socket's credential is checked again first; a
+   * revoked or expired one closes the socket.
+   */
+  async webSocketMessage(socket: WebSocket, data: string | ArrayBuffer) {
+    const a = socket.deserializeAttachment() as SocketAttachment | null;
+    if (!a || a.protocol !== WHARF_SOCKET_PROTOCOL) return void socket.close(1008, 'unknown socket');
+    if (!await this.socketAllowed(a)) return void socket.close(1008, 'credential expired or revoked');
+    // The runtime answers pings while the object hibernates; one that reaches a live instance gets the same answer.
+    if (data === PING_TEXT) return void socket.send(PONG_TEXT);
+    if (typeof data !== 'string') return void send(socket, { t: 'error', reason: 'binary messages are not accepted yet' });
+    const message = parseClientMessage(data);
+    if ('invalid' in message) return void send(socket, { t: 'error', reason: message.invalid });
+    if (message.t === 'resume') return void this.resume(socket, message.after);
+    send(socket, { t: 'result', id: message.id, ...await this.socketCommand(a, message) });
+    await this.afterChange();
+  }
   webSocketClose(socket: WebSocket, code: number, reason: string) { socket.close(code === 1005 || code === 1006 ? 1000 : code, reason); }
-  webSocketError(socket: WebSocket) { socket.close(1011, 'wake connection failed'); }
-  private async hint() {
-    // No content or authority travels here. Clients fetch from their durable cursor.
+  webSocketError(socket: WebSocket) { socket.close(1011, 'socket connection failed'); }
+  /** Whether a socket's credential still holds: a boat not revoked, with read; a person's session still live. */
+  private async socketAllowed(a: SocketAttachment): Promise<boolean> {
+    if (this.get('deleted')) return false;
+    if (a.actor.kind === 'boat') {
+      const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
+      const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
+      return !!row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], 'read');
+    }
+    return a.actor.kind === 'person' && !!a.sessionId && await personSessionLive(this.env, a.account, a.sessionId);
+  }
+  /** Send every event after `after`, in messages of at most SOCKET_EVENTS_PER_MESSAGE, then hello with the newest cursor. */
+  private resume(socket: WebSocket, after: string | undefined) {
+    const generation = this.get('generation')!;
+    let seq = 0;
+    if (after !== undefined) {
+      const [g, n] = after.split('.');
+      // Another generation is another account's history: the client starts again from now.
+      seq = g === generation && /^\d+$/.test(n ?? '') && Number.isSafeInteger(Number(n)) ? Number(n) : this.newestSeq();
+    } else seq = this.newestSeq();
+    for (;;) {
+      const page = this.eventsAfter(seq, SOCKET_EVENTS_PER_MESSAGE);
+      if (!page.events.length) break;
+      send(socket, { t: 'event', events: page.events, cursor: page.cursor });
+      seq = page.seq;
+    }
+    send(socket, { t: 'hello', protocol: WHARF_SOCKET_PROTOCOL, cursor: `${generation}.${seq}` });
+  }
+  /** A socket's command, run as its HTTP route under the socket's own credential. Claims and enrolment stay HTTP: they mint credentials. */
+  private async socketCommand(a: SocketAttachment, m: CommandMessage): Promise<StoredResult> {
+    // A glass tab's cookie reaches only the glass's own routes (glass-browser.ts); its socket runs no command until it has the same list.
+    if (a.base.token.startsWith('browser:')) return { status: 403, value: { error: 'the glass sends its commands over HTTP' } };
+    if (m.path === 'claims' || m.path === 'boats' || m.path.startsWith('_')) return { status: 400, value: { error: `${m.path} is HTTP only` } };
+    const c: Command = { ...a.base, method: m.method, path: m.path, key: m.id, body: m.method === 'GET' ? {} : (m.body ?? {}), ...(m.session ? { session: m.session } : {}) };
+    try {
+      return await this.command(c, a.hash);
+    } catch (e) {
+      if (e instanceof ApiError) return { status: e.status, value: { error: e.message } };
+      throw e;
+    }
+  }
+  /**
+   * Push the events after the last pushed one to every socket whose
+   * credential still holds, and close the rest. Events from one command go
+   * out together: a push already scheduled carries the later ones too.
+   */
+  private async push() {
+    const page = this.eventsAfter(this.pushedSeq, SOCKET_EVENTS_PER_MESSAGE);
+    if (!page.events.length) return;
+    this.pushedSeq = page.seq;
     for (const socket of this.ctx.getWebSockets()) {
       try {
-        const a = socket.deserializeAttachment() as { actor: Actor; hash: string; account: string; sessionId?: string };
-        let allowed = !this.get('deleted');
-        if (a.actor.kind === 'boat') {
-          const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
-          const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
-          allowed &&= !!row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], 'read');
-        } else allowed &&= a.actor.kind === 'person' && !!a.sessionId && await personSessionLive(this.env, a.account, a.sessionId);
-        if (allowed && !this.get('deleted')) socket.send('{"type":"wake"}');
+        const a = socket.deserializeAttachment() as SocketAttachment | null;
+        if (a?.protocol === WHARF_SOCKET_PROTOCOL && await this.socketAllowed(a)) send(socket, { t: 'event', events: page.events, cursor: page.cursor });
         else socket.close(1008, 'credential expired or revoked');
-      } catch { try { socket.close(1011, 'wake unavailable'); } catch { /* disconnected */ } }
+      } catch { try { socket.close(1011, 'socket unavailable'); } catch { /* disconnected */ } }
     }
+    // More than one message's worth: the rest go in the next push.
+    if (this.eventsAfter(this.pushedSeq, 1).events.length) await this.push();
+  }
+  /** The newest event's sequence number; 0 for an account with none. */
+  private newestSeq(): number {
+    return this.ctx.storage.sql.exec<{ seq: number | null }>('SELECT max(seq) AS seq FROM events').one().seq ?? 0;
+  }
+  /** Up to `limit` events after `after`, as clients read them, with the newest one's cursor and sequence number. */
+  private eventsAfter(after: number, limit: number): { events: BackendEvent[]; cursor: string; seq: number } {
+    const generation = this.get('generation')!;
+    const rows = this.ctx.storage.sql.exec<{ seq: number; kind: string; dispatch: string | null; at: string; note: string | null }>('SELECT e.*,d.note FROM events e LEFT JOIN event_details d ON d.seq=e.seq WHERE e.seq>? ORDER BY e.seq LIMIT ?', after, limit).toArray();
+    const events: BackendEvent[] = rows.map((r) => ({ cursor: `${generation}.${r.seq}`, kind: r.kind, ...(r.dispatch ? { dispatchId: r.dispatch } : {}), at: r.at, ...(r.note ? { note: r.note } : {}) }));
+    // Historical events still label an addressed boat with its current name.
+    for (const e of events) if (e.dispatchId) {
+      const d = this.ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches WHERE id=?', e.dispatchId).toArray()[0];
+      const target = d ? this.targetBoat(JSON.parse(d.data)) : undefined;
+      if (target) {
+        e.boatName = target.name;
+        if (e.note) e.note = e.note.replace(/boat [a-z0-9_-]+/g, `boat ${target.name}`);
+      }
+    }
+    const seq = rows.at(-1)?.seq ?? after;
+    return { events, cursor: `${generation}.${seq}`, seq };
+  }
+  /**
+   * The earliest time something becomes due without any request: a lease
+   * ends (or a paused report's hold), a worker goes stale while untargeted
+   * work waits, a live mirror call or an open request expires, a card answer
+   * no boat took expires, or a Slack delivery's retry comes round. None when
+   * nothing is due.
+   */
+  private nextDue(now: number): number | undefined {
+    const times: number[] = [];
+    for (const d of this.ctx.storage.sql.exec<{ id: string; lease: number }>("SELECT id,lease FROM dispatches WHERE state='active'").toArray()) {
+      if (d.lease > now) { times.push(d.lease); continue; }
+      const last = this.lastReport(d.id);
+      if (last?.verb === 'paused' && Date.parse(last.until ?? '') > now) times.push(Date.parse(last.until!));
+    }
+    // A worker that goes stale can leave untargeted queued work with no one to serve it: the glass says so.
+    if (this.ctx.storage.sql.exec("SELECT 1 FROM dispatches WHERE state='queued' AND json_extract(data,'$.target') IS NULL LIMIT 1").toArray().length) {
+      const stale = this.ctx.storage.sql.exec<{ at: number | null }>('SELECT min(seen) AS at FROM workers WHERE seen>?', now - LEASE_MS).one().at;
+      if (stale !== null) times.push(stale + LEASE_MS);
+    }
+    for (const at of [this.mirrorState.nextExpiry(now), this.glass.nextExpiry(now), this.cards.nextExpiry(now), this.outbox.nextDue()]) if (at !== undefined) times.push(at);
+    return times.length ? Math.max(Math.min(...times), now) : undefined;
+  }
+  /** Set the alarm to the next due time, move it when that changed, or delete it when nothing is due. */
+  private async scheduleAlarm() {
+    if (this.get('deleted')) return void await this.ctx.storage.deleteAlarm();
+    const next = this.nextDue(Date.now());
+    const current = await this.ctx.storage.getAlarm();
+    if (next === undefined) { if (current !== null) await this.ctx.storage.deleteAlarm(); }
+    else if (current !== next) await this.ctx.storage.setAlarm(next);
+  }
+  /** After anything that may have changed what is due: deliver to Slack what is due now, then move the alarm. */
+  private async afterChange() {
+    if (!this.get('deleted') && this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}).then(() => this.scheduleAlarm()));
+    await this.scheduleAlarm();
+  }
+  /**
+   * The alarm: observe what came due with no request (expired leases and
+   * requests, stale workers, expired calls and answers), push the events it
+   * made, deliver Slack retries, and set the next alarm.
+   */
+  async alarm() {
+    if (this.get('deleted')) return;
+    const now = Date.now();
+    const account = this.ctx.id.name;
+    const cleanup = this.ctx.storage.transactionSync(() => {
+      this.expire(now); this.availability(now);
+      const keys = this.mirrorState.expire(account ?? '', now);
+      this.cards.project(now);
+      return keys;
+    });
+    // Without the account's name its R2 keys are unknown; the next mirror request removes them.
+    if (account) this.dropMirrorFiles(cleanup);
+    if (this.outbox.due(now)) await this.outbox.drain().catch(() => {});
+    await this.push();
+    await this.scheduleAlarm();
   }
   /** Serialises only R2 mutations in this live instance; ownership stays in SQL. */
   private fileTail: Promise<unknown> = Promise.resolve();
@@ -108,8 +271,8 @@ export class Account extends DurableObject<Env> {
       if (e instanceof ApiError) return { status: e.status, value: { error: e.message } };
       throw e;
     } finally {
-      // After the command commits, its card changes go out. A failed drain leaves them due for the next command.
-      if (!this.get('deleted') && this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
+      // After the command commits, its card changes go out; a failed drain is retried by the alarm.
+      await this.afterChange();
     }
   }
   /** Private binding only: deliver what is due now, and wait for it. */
@@ -127,7 +290,7 @@ export class Account extends DurableObject<Env> {
       this.outbox.link(person, link, this.cards.store.list(now).filter((c) => !c.terminal), now);
       this.cards.restrictSlackAnswers(person, (grounds) => this.outbox.serves(person, grounds), now);
     });
-    if (this.outbox.due(now)) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
+    await this.afterChange();
   }
   /**
    * Private binding only: a verified DM message from this account's linked
@@ -143,7 +306,7 @@ export class Account extends DurableObject<Env> {
       this.cards.project(now);
       return recorded;
     });
-    if (this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
+    await this.afterChange();
     return result;
   }
   /** The routing question was posted; a replay need not post another one. */
@@ -170,7 +333,7 @@ export class Account extends DurableObject<Env> {
       this.cards.project(now);
       return done;
     });
-    if (this.outbox.due(Date.now())) this.ctx.waitUntil(this.outbox.drain().catch(() => {}));
+    await this.afterChange();
     return result;
   }
   /**
@@ -263,6 +426,10 @@ export class Account extends DurableObject<Env> {
       },
     });
     this.mirrorState = new MirrorState(ctx.storage.sql, { read: (a) => this.requirePermission(a, 'read'), mirror: (a) => this.requirePermission(a, 'mirror') });
+    // Keepalives never wake the object: the runtime answers them, even while it hibernates.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING_TEXT, PONG_TEXT));
+    // Events made before this instance started were pushed by the one before it, or are a resume's to replay.
+    this.pushedSeq = this.newestSeq();
   }
   /**
    * Request counts per minute, and until when a hosted glass is open, kept in
@@ -293,15 +460,16 @@ export class Account extends DurableObject<Env> {
   private event(kind: string, dispatch?: string, note?: string) {
     this.ctx.storage.sql.exec('INSERT INTO events(kind,dispatch,at) VALUES (?,?,?)', kind, dispatch ?? null, new Date().toISOString());
     if (note) this.ctx.storage.sql.exec('INSERT INTO event_details VALUES (last_insert_rowid(),?)', note);
-    if (!this.hintPending && this.ctx.getWebSockets().length) {
-      this.hintPending = true;
-      this.ctx.waitUntil(Promise.resolve().then(() => this.hint()).finally(() => { this.hintPending = false; }));
+    // After the command's transaction commits, its events go to every socket.
+    if (!this.pushPending && this.ctx.getWebSockets().length) {
+      this.pushPending = true;
+      this.ctx.waitUntil(Promise.resolve().then(() => { this.pushPending = false; return this.push(); }));
     }
   }
   private targetBoat(d: DispatchInput): BoatRow | undefined {
     return d.boat ? this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', d.boat).toArray()[0] : undefined;
   }
-  /** Polling is the guarantee: observe expiry on the next request, without timers. */
+  /** Which queued work no online worker can serve. Runs on every command, and on the alarm when a worker goes stale. */
   private availability(now: number) {
     const absent = this.ctx.storage.sql.exec<DispatchRow>(`SELECT d.* FROM dispatches d WHERE d.state='queued' AND json_extract(d.data,'$.target') IS NULL AND NOT EXISTS (
       SELECT 1 FROM workers w JOIN boats b ON b.id=w.boat LEFT JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND w.seen>?
@@ -408,8 +576,9 @@ export class Account extends DurableObject<Env> {
     const count = tables.reduce((n, t) => n + this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${t}`).one().n, 0);
     requireThat(count < Number(this.env.MAX_ROWS) && this.ctx.storage.sql.databaseSize < Number(this.env.MAX_ACCOUNT_BYTES), 507, 'account storage limit');
   }
-  async command(c: Command): Promise<StoredResult> {
-    const hash = await digest(c.token.startsWith('d.') || c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
+  /** One command in one transaction. A socket's command passes its credential's stored hash: the socket never keeps the secret. */
+  async command(c: Command, credentialHash?: string): Promise<StoredResult> {
+    const hash = credentialHash ?? await digest(c.token.startsWith('d.') || c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
     const fingerprint = await digest(JSON.stringify([c.method, c.path, c.body, c.session]));
     // Crypto awaits are before the transaction. Auth and ownership are checked
     // inside it, including revocations that arrived while hashing.
@@ -558,18 +727,8 @@ export class Account extends DurableObject<Env> {
       this.requirePermission(actor, 'read');
       const generation = this.get('generation')!; const [g, n] = (c.after ?? `${generation}.0`).split('.');
       requireThat(g === generation && /^\d+$/.test(n) && Number.isSafeInteger(Number(n)), 400, 'invalid account event cursor');
-      const rows = this.ctx.storage.sql.exec<{ seq: number; kind: string; dispatch: string | null; at: string; note: string | null }>('SELECT e.*,d.note FROM events e LEFT JOIN event_details d ON d.seq=e.seq WHERE e.seq>? ORDER BY e.seq LIMIT 100', Number(n)).toArray();
-      const events: BackendEvent[] = rows.map((r) => ({ cursor: `${generation}.${r.seq}`, kind: r.kind, ...(r.dispatch ? { dispatchId: r.dispatch } : {}), at: r.at, ...(r.note ? { note: r.note } : {}) }));
-      // Historical events still label an addressed boat with its current name.
-      for (const e of events) if (e.dispatchId) {
-        const d = this.ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches WHERE id=?', e.dispatchId).toArray()[0];
-        const target = d ? this.targetBoat(JSON.parse(d.data)) : undefined;
-        if (target) {
-          e.boatName = target.name;
-          if (e.note) e.note = e.note.replace(/boat [a-z0-9_-]+/g, `boat ${target.name}`);
-        }
-      }
-      return ok({ events, cursor: events.at(-1)?.cursor ?? `${generation}.${n}` });
+      const page = this.eventsAfter(Number(n), 100);
+      return ok({ events: page.events, cursor: page.cursor });
     }
     const parts = c.path.split('/');
     if (parts[0] === 'documents' && parts[2] === 'files' && !parts[3] && c.method === 'POST') {
@@ -753,7 +912,11 @@ export class Account extends DurableObject<Env> {
    * file; `meta` is what the request's headers said about it.
    */
   async mirror(command: string, bytes?: Uint8Array, meta: { status?: number; contentType?: string; name?: string; boat?: string } = {}): Promise<string> {
-    return this.serialFile(async () => {
+    // A call made or answered moves when the next one expires.
+    return this.serialFile(() => this.mirrorRoute(command, bytes, meta)).finally(() => this.scheduleAlarm());
+  }
+  private async mirrorRoute(command: string, bytes: Uint8Array | undefined, meta: { status?: number; contentType?: string; name?: string; boat?: string }): Promise<string> {
+    {
       const c: Command = JSON.parse(command);
       try {
         // A catch's own credential reaches its dispatch only, never a boat's mirror.
@@ -837,7 +1000,7 @@ export class Account extends DurableObject<Env> {
         if (e instanceof ApiError) return JSON.stringify({ status: e.status, value: { error: e.message } });
         throw e;
       }
-    });
+    }
   }
   private serialFile<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.fileTail.catch(() => {}).then(fn); this.fileTail = result.catch(() => {}); return result;
@@ -879,6 +1042,7 @@ export class Account extends DurableObject<Env> {
         this.set('delete-authority', hash); // permits the same admin retry after its boat row is deleted
         this.set('deleted', keyHash); // reject every other request before R2 I/O
         for (const socket of this.ctx.getWebSockets()) socket.close(1008, 'account deleted');
+        await this.ctx.storage.deleteAlarm();
         for (;;) {
           const files = await this.env.FILES.list({ prefix: `${c.account}/`, limit: 1000 });
           if (!files.objects.length) break;
@@ -896,6 +1060,31 @@ export class Account extends DurableObject<Env> {
       }
     });
   }
+}
+
+/** Send one protocol message on a socket. */
+function send(socket: WebSocket, message: ServerSocketMessage) { socket.send(JSON.stringify(message)); }
+
+/**
+ * A socket's tags: what it is (a boat, a glass tab, a person's CLI) and
+ * which one, so later pushes can address one kind or one client.
+ */
+function socketTags(actor: Actor, c: Command): string[] {
+  if (actor.kind === 'boat') return ['boat', `boat:${actor.id}`];
+  const glass = c.token.startsWith('browser:');
+  return [glass ? 'glass' : 'person', ...(c.personSessionId ? [`session:${c.personSessionId}`] : [])];
+}
+
+/**
+ * A credential's name without its secret: a boat's or a dispatch's token
+ * keeps its kind, account and id, which is all authentication reads beside
+ * the hash; any other token (a person's session) is not kept at all.
+ */
+function credentialName(token: string): string {
+  const pieces = token.split('.');
+  if (pieces[0] === 'b') return `b.${pieces[1]}.${pieces[2]}.-`;
+  if (token.startsWith('browser:')) return token;
+  return 'person';
 }
 
 /** Unpack a gzip body as text, refusing more than `max` bytes of it. */

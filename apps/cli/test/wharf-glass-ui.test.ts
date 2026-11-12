@@ -42,13 +42,13 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
   const intervals: (() => void)[] = [];
   const opened: string[] = [];
   let unauthenticated = signedOut;
-  const sockets: { url: string; onopen?: (() => void) | null; onmessage?: ((e: { data: string }) => void) | null; onclose?: (() => void) | null; closed: boolean; close(): void }[] = [];
+  const sockets: { url: string; protocol?: string; onopen?: (() => void) | null; onmessage?: ((e: { data: string }) => void) | null; onclose?: (() => void) | null; closed: boolean; close(): void }[] = [];
   w.WebSocket = class {
     onopen?: (() => void) | null;
     onmessage?: ((e: { data: string }) => void) | null;
     onclose?: (() => void) | null;
     closed = false;
-    constructor(public url: string) {
+    constructor(public url: string, public protocol?: string) {
       sockets.push(this);
     }
     close() {
@@ -193,12 +193,19 @@ it('keeps the hosted glass usable when the OS denies app badges', async () => {
   expect(g.text('#deck')).toContain('Choose the next catch');
 });
 
-it('uses a cookie-only wake hint, retains polling on a drop and closes hints on sign-out', async () => {
+it('opens a cookie-only lobstah.2 socket, refreshes on pushed events, retains polling on a drop and closes it on sign-out', async () => {
   const g = await page();
   expect(g.sockets).toHaveLength(1);
   expect(String(g.sockets[0]!.url)).toBe('wss://glass.test/api/glass/wake');
-  const reads = g.reads.length;
+  expect(g.sockets[0]!.protocol).toBe('lobstah.2');
+  // A pong or an unknown message reads nothing; pushed events refresh the page.
+  let reads = g.reads.length;
+  g.sockets[0]!.onmessage?.({ data: 'pong' });
   g.sockets[0]!.onmessage?.({ data: '{"type":"wake"}' });
+  await g.settle();
+  expect(g.reads.length).toBe(reads);
+  reads = g.reads.length;
+  g.sockets[0]!.onmessage?.({ data: JSON.stringify({ t: 'event', events: [{ cursor: 'g.1', kind: 'queued', at: '2026-11-12T00:00:00Z' }], cursor: 'g.1' }) });
   await g.settle();
   expect(g.reads.length).toBeGreaterThan(reads);
   g.sockets[0]!.onclose?.();

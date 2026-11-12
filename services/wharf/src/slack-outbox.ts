@@ -141,6 +141,11 @@ export class SlackOutbox {
     if (!this.serves(person, card.grounds)) return;
     this.sql.exec('UPDATE slack_deliveries SET want=want+1, next_at=min(next_at,?) WHERE card=? AND person=? AND next_at<>?', now, seqOf(card), person, NEVER);
   }
+  /** When the next Slack delivery is due, a retry's backoff included; none when nothing waits to go out. */
+  nextDue(): number | undefined {
+    const row = this.sql.exec<{ at: number | null }>('SELECT min(next_at) AS at FROM slack_deliveries WHERE want>sent AND next_at<>?', NEVER).toArray()[0];
+    return row?.at ?? undefined;
+  }
   /** Whether a drain has anything to do now. */
   due(now: number): boolean {
     return this.sql.exec('SELECT 1 FROM slack_deliveries WHERE want>sent AND next_at<=? LIMIT 1', now).toArray().length > 0;

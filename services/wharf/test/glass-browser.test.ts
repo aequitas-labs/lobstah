@@ -155,8 +155,17 @@ it('reads cards with the glass cookie, by list or by id, and nothing else under 
   expect((await browser('cards', { cards: [] })).status).toBe(404);
   expect((await browser('cards/job')).status).toBe(404);
 });
-it('accepts cookie-scoped wake hints without a helm lease and fences expired sessions', async () => {
-  const response = await browser('wake', undefined, 'GET', { Upgrade: 'websocket' }); expect(response.status).toBe(101);
+it('a cookie-scoped socket runs no command: the cookie reaches only the glass routes', async () => {
+  const response = await browser('wake', undefined, 'GET', { Upgrade: 'websocket', 'Sec-WebSocket-Protocol': 'lobstah.2' }); expect(response.status).toBe(101);
+  const socket = response.webSocket!; socket.accept();
+  const answer = new Promise<string>((resolve) => socket.addEventListener('message', (e) => resolve(String(e.data)), { once: true }));
+  socket.send(JSON.stringify({ t: 'command', id: 'cookie-helm', method: 'POST', path: 'helm/take', body: { session: 'cookie' } }));
+  expect(JSON.parse(await answer)).toMatchObject({ t: 'result', id: 'cookie-helm', status: 403 });
+  expect(await sql("SELECT value FROM meta WHERE key='helm'")).toEqual([]);
+  socket.close();
+});
+it('accepts a cookie-scoped socket without a helm lease and fences expired sessions', async () => {
+  const response = await browser('wake', undefined, 'GET', { Upgrade: 'websocket', 'Sec-WebSocket-Protocol': 'lobstah.2' }); expect(response.status).toBe(101);
   const socket = response.webSocket!; socket.accept();
   const closed = new Promise((resolve) => socket.addEventListener('close', resolve, { once: true }));
   const previous = await env.AUTH_DB.prepare('SELECT expiresAt FROM session WHERE token=?').bind(token).first<{ expiresAt: number }>();

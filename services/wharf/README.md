@@ -5,8 +5,9 @@ is one SQLite Durable Object; R2 holds evidence files. Briefs, messages, reports
 and explicitly uploaded evidence go to the chosen wharf. Checkouts, harness
 credentials and local env are not automatically uploaded. Local files remain the default.
 This service has not been deployed. GitHub admission and boat approval APIs are
-implemented; the hosted glass UI follows in the next slice. There is no billing,
-second runtime, socket, alarm or background timer.
+implemented; the hosted glass UI follows in the next slice. There is no billing
+or second runtime. Clients hold hibernatable sockets, and one alarm per account
+runs only while something is due (see Sockets and the alarm).
 
 ## Local development and tests
 
@@ -332,17 +333,42 @@ not done; a replacement epoch fences old reports, not external Git pushes.
 Recoveries are stored separately for helm reconciliation.
 
 Event cursors are opaque, account-generation scoped and ordered by SQLite sequence,
-not client clocks. Polling requests finish immediately; the DO can sleep idle.
+not client clocks. Requests finish immediately; the DO can sleep idle.
+
+### Sockets and the alarm
+
 `GET wake` upgrades a read-authorized bearer connection; the glass uses its
-cookie-only `/api/glass/wake` instead. These receive-only hibernating sockets send
-only `{ "type": "wake" }`. They carry no cursor, task data or mutation authority.
-There are at most 32 connections per account, no server pings, timers or alarms.
-Boat rotation/revocation and person-session expiry are rechecked before hints;
-account deletion closes all sockets. Helm wait still polls the durable cursor
-every second; the glass still polls every fifteen seconds and retries a dropped
-hint connection on that cadence. Workers never connect. Losing a hint loses no
-work. Native tests evict the DO with a connected socket, prove its transient state
-is gone and its socket survives, then fetch events missed after disconnecting.
+cookie-only `/api/glass/wake` instead. A client must ask for subprotocol
+`lobstah.2` (`packages/core/src/wharf-socket.ts`); any other upgrade gets 426
+with the minimum lobstah version, so an old CLI says to update instead of
+polling quietly. Sockets are accepted with the hibernation API and tagged
+`boat`/`boat:<id>`, `glass`/`person` and `session:<id>`. A socket's attachment
+keeps its credential's name and hash, never the secret. There are at most 256
+per account.
+
+- Keepalive: the client sends the text `ping` every 30 seconds. The runtime
+  answers `pong` itself (`setWebSocketAutoResponse`), without waking the object.
+- `{"t":"resume","after":<cursor>}` replays every event after the cursor, in
+  `event` messages of at most 100, then `hello` with the newest cursor. A drop,
+  an eviction or a deploy loses nothing: the client resumes from its cursor.
+- `{"t":"command","id","method","path","body","session"}` runs one command as
+  its HTTP route would, under the socket's credential, answered by
+  `{"t":"result","id","status","value"}`. The id is its idempotency key, as
+  `Idempotency-Key` on HTTP. Claims and enrolment stay HTTP: they mint
+  credentials.
+- Every event is pushed to every socket as `{"t":"event","events","cursor"}`
+  after its command commits. Each push rechecks the socket's credential first:
+  a revoked boat or an expired person session is closed with 1008 and gets
+  nothing more. Account deletion closes all sockets.
+
+The account keeps one alarm, at the earliest time something comes due with no
+request: an active lease or a paused report's hold ends, a worker goes stale
+while untargeted work waits, a live mirror call or an open request expires, a
+card answer no boat took expires, or a Slack delivery's retry comes round. The
+alarm runs the same expiry the commands run, pushes the events it makes,
+delivers Slack, and sets the next one. With nothing due there is no alarm, so
+an idle account costs nothing. Native tests evict the DO with a connected
+socket, then resume it, ping it while it hibernates, and run the alarm.
 Report evidence is data, not hosted executable HTML. No GitHub polling or worker
 execution is moved into this service; a review is staged and dismissed by the boat that published it and sent from the review tool, never by the wharf.
 
@@ -547,8 +573,8 @@ Claims match that identity even for addressed work. List and status include
 an `unservable` reason when queued work has no eligible fresh worker on an
 unrevoked boat. The event cursor records one `unservable` event per transition,
 with the remote and reason, rather than repeating it on every poll. Fresh
-sign-on clears it; expiry is observed on the next polling request, with no
-background timer or connection.
+sign-on clears it; a worker going stale is observed by the account's alarm, or
+the next request, whichever comes first.
 
 ## Stable boats and sticky targets
 
