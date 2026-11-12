@@ -44,7 +44,7 @@ import { trapCard } from './traps.js';
 import { dispatchCard } from './dispatches.js';
 import { Card } from './card.js';
 import { getState } from '../store.js';
-import { reportCard, reportMeta } from './reports.js';
+import { openReport, reportCard, reportMeta } from './reports.js';
 import { PrAck, prCard } from './prs.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
@@ -71,8 +71,10 @@ interface DeckItem {
   metaText?: string;
   /** A control at the right end of the card's foot line, or the row's end. */
   action?: Children;
-  /** A page this item opens in a new tab, instead of `open`. */
+  /** A page this item links to, for a new tab, instead of `open`. */
   href?: string;
+  /** What a plain click on that link does in the glass instead (a report's sheet). */
+  here?: (e: Event) => void;
   /** A block under the card or line: a starting trap's start commands. */
   extra?: Children;
   /** The item's own card, used as is in the cards view: a trap's, a dispatch's. */
@@ -121,11 +123,11 @@ function deckItem(it: DeckItem, view: View) {
   const worker = it.worker && html`<${Harness} worker=${it.worker} />`;
   if (view === 'cards' && it.card) return it.card;
   if (it.href) {
-    // A page of its own, in a new tab (a report).
+    // A page of its own (a report): a plain click opens its sheet, a ⌘-click a new tab.
     const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
     return view === 'cards'
-      ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener"><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
-      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
+      ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
+      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
   if (view !== 'cards' && it.row) return it.row;
   if (view === 'cards')
@@ -290,6 +292,7 @@ export function Deck({
       meta: meta.nodes,
       metaText: meta.text,
       href: reportPageUrl(r.key),
+      here: openReport(r),
       acked: !!r.acked,
     };
   });

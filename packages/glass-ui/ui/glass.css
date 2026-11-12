@@ -87,6 +87,8 @@
   /* stacking: every modal's layer, the decision modal above it, and the new-decision alert always below both */
   --layer-modal: 10;
   --layer-decision-modal: 15;
+  /* A report's sheet: over the tabs and their modal, under the decision modal and the image overlay. */
+  --layer-sheet: 12;
   --layer-alert: calc(var(--layer-modal) - 1);
   /* the phone's bottom bar: its row's height, above the safe-area inset */
   --bottombar-height: 44px;
@@ -2450,6 +2452,49 @@ a.lob {
  * definite width, so a wide table or code line scrolls in its own box and
  * never widens the page; long tokens (paths, hashes, URLs) wrap.
  */
+/*
+ * A report's sheet over the glass (components/report-view.ts ReportSheet): a
+ * bar with Back and the title, then the report, scrolling on its own so the
+ * tab underneath keeps its place.
+ */
+.rsheet {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-sheet);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.rbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+.rbar .rback {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.rbartitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.rbody {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The report keeps the page's side gutter inside the sheet, at every width. */
+.rbody .reportview {
+  padding: var(--space-3) var(--space-4) 48px;
+}
 .reportview {
   width: 100%;
   max-width: 1100px;

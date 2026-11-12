@@ -14,6 +14,7 @@ import { Dispatches } from './dispatches.js';
 import { Footer, Header } from './header.js';
 import { Lobs } from './lobs.js';
 import { LightboxView } from './lightbox.js';
+import { ReportSheet } from './report-view.js';
 import { Modal } from './modals.js';
 import { Notices } from './notices.js';
 import { PRs } from './prs.js';
@@ -74,6 +75,7 @@ export function App({ state }: { state: GlassState }) {
     ),
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
+    d && html`<${ReportSheet} reportKey=${state.reportSheet ?? null} />`,
     html`<${LightboxView} box=${state.lightbox} />`,
     html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
     d &&

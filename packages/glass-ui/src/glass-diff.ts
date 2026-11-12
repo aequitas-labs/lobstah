@@ -303,10 +303,10 @@ export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
 /** Reports in list order: newest first, regardless of acknowledgment. */
 export const reportOrder = (a: GlassReport, b: GlassReport): number => b.filedAt.localeCompare(a.filedAt);
 
-/** A report's own page on the glass: it opens in a new tab and renders once. */
+/** A report's own page on the glass, for a new tab or a direct link: it renders once. The glass itself shows a report in its sheet. */
 export const reportPageUrl = (key: string): string => `/report/${encodeURIComponent(key)}`;
 
-/** The report key an old `#report/<key>` link names, else null: it redirects to the report's page. */
+/** The report key a `#report/<key>` hash names, else null: the glass shows it in the sheet over the tab. */
 export function reportFromHash(hash: string | undefined | null): string | null {
   const m = /^#?report\/(.+)$/.exec(String(hash || ''));
   if (!m) return null;
