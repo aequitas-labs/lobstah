@@ -24,21 +24,24 @@ const fromB64u = (text: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob
 /** How long a relayed call waits for its boat in all. */
 const RELAY_WAIT_MS = 60_000;
 
-/** One relayed write to a boat, waited for: the boat's own status and answer. */
+/**
+ * One relayed write to a boat, waited for: the boat's own status and answer.
+ * The wharf holds each relay up to 20 s for the answer; posting the same id
+ * again waits on the same call (it never runs twice), until RELAY_WAIT_MS.
+ */
 async function relay(boat: string, kind: string, payload: unknown): Promise<{ status: number; body: { ok?: boolean; reason?: string; challenge?: string; rpId?: string } }> {
   const id = crypto.randomUUID();
-  let response = await fetch('/api/glass/mirror/relay', {
-    method: 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, boat, write: { kind, payload } }),
-  });
+  const post = () =>
+    fetch('/api/glass/mirror/relay', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, boat, write: { kind, payload } }),
+    });
+  let response = await post();
   const deadline = Date.now() + RELAY_WAIT_MS;
-  while (response.status === 202 && response.headers.get('X-Lobstah-Mirror-Call') !== 'answered' && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    response = await fetch(`/api/glass/mirror/calls/${encodeURIComponent(id)}`, { credentials: 'same-origin', cache: 'no-store' });
-  }
+  while (response.status === 202 && Date.now() < deadline) response = await post();
   if (response.status === 202) return { status: 504, body: { ok: false, reason: "The boat didn't answer. Check that it's on, then try again." } };
   return { status: response.status, body: await response.json().catch(() => ({})) };
 }

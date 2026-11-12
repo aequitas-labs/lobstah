@@ -314,8 +314,8 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Mirror boat | PUT mirror/snapshot | Replace this boat's latest glass snapshot: gzip, at most 2 MB, never carrying the page token |
 | Mirror boat | GET mirror/calls; POST mirror/calls/:id/take, answer | The calls addressed to it (and `watchedUntil` while a hosted glass is open); take one, then answer it with the local glass's status, type and body |
 | Mirror boat | GET mirror/files/:file | A file the person attached to a relayed answer for this boat |
-| Signed-in person | GET mirror; POST mirror/calls; GET mirror/calls/:id; POST mirror/files | The hosted glass's side: see Mirror boats |
-| Signed-in person | POST mirror/relay; GET mirror/read?boat=&path= | One call, waited for: the boat's own answer, or 202 after 20 seconds for the page to poll. `read` is a relayed read in one GET, for an image's `src` |
+| Signed-in person | GET mirror; POST mirror/calls; POST mirror/files | The hosted glass's side: see Mirror boats. `GET mirror/calls/:id` is 410: a call is never polled |
+| Signed-in person | POST mirror/relay; GET mirror/read?boat=&path= | One call, held open until the boat answers (no polling), or 202 after 20 seconds. Posting the same id again waits on the same call. `read` is a relayed read in one GET, for an image's `src`. A tab with its socket open relays on the socket instead |
 
 Boat credentials are named, revocable, hashed at rest and shown once. A lost
 issuance response is retried for metadata only; approve another login to receive a new
@@ -441,17 +441,27 @@ each boat's latest snapshot and calls in transit, never a second record.
   `packages/core/src/backend-model.ts`. Focus is never relayed. The boat checks
   the same lists again before it runs a call. A new call sends that boat's
   sockets `{ "type": "mirror-call" }`; the boat takes it, runs it against its
-  local glass over loopback, and answers. `GET /api/glass/mirror/calls/:id` is
-  202 while it waits, the boat's own status, type and body once answered
-  (sandboxed), and 410 once ten minutes pass unanswered. An expired call is
-  never delivered again.
+  local glass over loopback, and answers. A glass tab sends its call on its
+  socket (`{"t":"call","id","boat","read"|"write","files"}`), is answered
+  `result` 202 once the call stands, and gets the boat's answer pushed as a
+  binary `answer` frame: the boat's status, type and body (up to 1 MiB; a
+  larger read comes with `large` and is read once over `mirror/read`). Without
+  its socket, a tab uses `POST /api/glass/mirror/relay`, which the account
+  holds open until the answer comes. No call is polled:
+  `GET /api/glass/mirror/calls/:id` answers 410. An expired call (ten minutes
+  unanswered) is never delivered again.
 - **Files.** A file attached to a relayed answer goes to
   `POST /api/glass/mirror/files` (`X-File-Name`, `X-Mirror-Boat`) and waits ten
   minutes for its boat's `GET mirror/files/:file`.
-- **Watching.** Reading the mirror list marks a hosted glass as open for 30
-  seconds. The boats hear `{ "type": "mirror-watch", "until": … }` when that
-  begins, and `GET mirror/calls` carries `watchedUntil`, so a boat puts often
-  only while someone is looking.
+- **Watching.** A glass tab with its socket open is watching, for as long as
+  it stays connected; reading the mirror list also marks it for 30 seconds.
+  The boats hear `{ "type": "mirror-watch", "until": … }` when a tab connects,
+  and `GET mirror/calls` carries `watchedUntil`, so a boat puts often only while
+  someone is looking. A tab hidden for a minute closes its socket.
+- **Pushed snapshots.** Each snapshot a boat puts is pushed to every open glass
+  tab as a binary `snapshot` frame (`boat`, `name`, `at`, `etag`, then the gzip
+  the boat put). The tab shows it with no request, and polls on no timer while
+  its socket is open.
 - **Attention lists.** Each mirror boat also puts the items its pet walks,
   without ages, with `PUT mirror/attention` (`{ attention: [...] }`, at most 500
   items and 256 KB). An unchanged list keeps its time. A changed one sends

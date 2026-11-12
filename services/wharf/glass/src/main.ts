@@ -17,7 +17,7 @@ import { html } from './common.js';
 import { DeviceConsent } from './device.js';
 import { PasskeyPairing } from './pairing.js';
 import { requestState } from './model.js';
-import { glassWake } from './wake.js';
+import { glassSocket } from './socket.js';
 
 /**
  * The hosted glass: GitHub sign-in around the shared glass, which runs on the
@@ -160,11 +160,20 @@ function HostedCard({ backend }: { backend: HostedBackend }): ReturnType<typeof 
 
 function start(mirror = false): void {
   const signedOut = (status: 401 | 403) => end(status === 403 ? 'denied' : hadSession ? 'expired' : 'signin');
+  let page: GlassPage | undefined;
+  let mirrorBackend: MirrorBackend | undefined;
+  // The page's live channel: pushed events read the page again, a boat's pushed snapshot shows with no request.
+  const socket = glassSocket({
+    live: (open) => page?.live(open),
+    refresh: () => void page?.refresh(),
+    snapshot: (pushed) => {
+      if (mirrorBackend) page?.apply(mirrorBackend.applySnapshot(pushed));
+    },
+  });
   const wharf = createWharfBackend({ onSignedOut: signedOut });
-  const backend: HostedBackend = mirror ? createMirrorBackend({ wharf, onSignedOut: signedOut }) : wharf;
+  const backend: HostedBackend = mirror ? (mirrorBackend = createMirrorBackend({ wharf, onSignedOut: signedOut, socket })) : wharf;
   const pending = translateLink();
   // Registered before the glass's own route listener, so the glass reads the translated hash.
-  let page: GlassPage | undefined;
   const follow = () => {
     const item = translateLink();
     if (item) page?.open(item);
@@ -189,10 +198,9 @@ function start(mirror = false): void {
   });
   if (pending) page.open(pending);
   const live = page;
-  const wake = glassWake(() => void live.refresh());
-  wake.connect();
-  // A dropped hint reconnects on the poll's cadence; losing a hint loses no work.
-  const reconnect = setInterval(() => wake.connect(), 15000);
+  socket.connect();
+  // A dropped socket reconnects every 15 s; the page polls meanwhile, so nothing is lost.
+  const reconnect = setInterval(() => socket.connect(), 15000);
   hadSession = true;
   document.title = 'lobstah spyglass';
   session = {
@@ -200,7 +208,7 @@ function start(mirror = false): void {
     backend,
     stop() {
       live.stop();
-      wake.close();
+      socket.close();
       clearInterval(reconnect);
       window.removeEventListener('hashchange', follow);
     },

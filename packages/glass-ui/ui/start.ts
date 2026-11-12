@@ -1,4 +1,5 @@
 import { h, render } from 'preact';
+import type { GlassSnapshot } from '@lobstah/core';
 import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath, reportPageUrl } from '../src/glass-diff.js';
 import {
   closeDecision,
@@ -8,6 +9,7 @@ import {
   loadSettings,
   loadStats,
   openDecision,
+  receive,
   reviewRequest,
   sendAnswer,
   showModal,
@@ -16,7 +18,7 @@ import {
 import { App } from './components/app.js';
 import { ReportShell, loadReportView, markReportViewed } from './components/report-view.js';
 import type { ReportViewState } from './components/report-view.js';
-import { poll, startPolling } from './poll.js';
+import { poll, setLive, startPolling } from './poll.js';
 import { startPresence } from './presence.js';
 import { loadLobHidden, loadPrefs } from './prefs.js';
 import { currentRoute, onRoute } from './route.js';
@@ -82,6 +84,8 @@ export function startGlassPage(source: GlassBackend, parts: GlassHost = {}): Gla
   else if (!reportRedirect()) stops.push(...startGlass());
   return {
     refresh: poll,
+    live: setLive,
+    apply: receive,
     repaint: () => setState({}),
     open(item) {
       pendingOpen = item;
@@ -95,8 +99,12 @@ export function startGlassPage(source: GlassBackend, parts: GlassHost = {}): Gla
 
 /** A started glass page, for its host: read again now, repaint, open an item, or stop for good. */
 export interface GlassPage {
-  /** Read the snapshot now (a wake hint arrived). */
+  /** Read the snapshot now (pushed events arrived). */
   refresh(): Promise<void>;
+  /** The host's live socket opened (no polling timer) or closed (polling resumes). */
+  live(open: boolean): void;
+  /** Show a snapshot the host built from pushed data, with no request. */
+  apply(snapshot: GlassSnapshot): void;
   /** Paint again: the host's own parts changed. */
   repaint(): void;
   /** Open a dispatch or trap once the snapshot lists it (a link named it). */
