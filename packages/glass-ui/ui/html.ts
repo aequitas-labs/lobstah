@@ -45,11 +45,14 @@ export function externalLinkProps(props: Props, children: Child[]): Props {
   return { ...props, class: marked, target: '_blank', rel: 'noopener noreferrer' };
 }
 
-/** Whether a link's label, at any depth, already has the ↗ in its text. */
+/** Whether a link's label, at any depth, already has the ↗: in its text, or as the open icon (card.ts OpenIcon) a card's Open shows alone. */
 function labelShowsArrow(children: Child): boolean {
   if (typeof children === 'string') return children.includes(ARROW);
   if (Array.isArray(children)) return children.some(labelShowsArrow);
-  if (children && typeof children === 'object' && 'props' in children)
-    return labelShowsArrow((children as VNode<{ children?: Child }>).props.children);
+  if (children && typeof children === 'object' && 'props' in children) {
+    const props = (children as VNode<{ children?: Child; class?: string }>).props;
+    if (typeof props.class === 'string' && props.class.split(' ').includes('openicon')) return true;
+    return labelShowsArrow(props.children);
+  }
   return false;
 }

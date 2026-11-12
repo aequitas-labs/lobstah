@@ -3217,6 +3217,112 @@ a.runbtn {
 .gactions .gopenbtn {
   margin-left: auto;
 }
+/*
+ * Every button on a card is one size, 32px tall with 12px words, 6px apart,
+ * in a tighter bar. It wins over the finger-sized Open (pointer: coarse),
+ * which the table and the modals keep.
+ */
+.gactions {
+  gap: 6px;
+  padding-top: 6px;
+}
+.gactions .btn,
+.gfoot .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  margin-block: 0;
+  padding: 0 12px;
+  font-size: 12px;
+  line-height: 1;
+}
+/* Still the bar's right-hand corner on every card. */
+.gactions .gopenbtn {
+  margin-left: auto;
+}
+/* An icon alone (Open, ▾) is a square. */
+.gactions .ibtn,
+.gfoot .gopenbtn .btn {
+  min-width: 32px;
+  padding: 0;
+}
+.gactions .ibtn svg,
+.gfoot .gopenbtn .btn svg {
+  width: 14px;
+  height: 14px;
+}
+/* A trap's Open, at the right of its boat line. */
+.gfoot .gright {
+  margin-left: auto;
+}
+.gfoot {
+  align-items: center;
+}
+/* The main action: its words in the text's color, its icon beside them. */
+.gactions .bigbtn {
+  color: var(--fg);
+  padding: 0 14px;
+}
+.gactions .acticon {
+  flex: 0 0 auto;
+}
+/* The big button joined to its ▾, which opens the other actions upward. */
+.split {
+  display: inline-flex;
+}
+.split > .bigbtn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.split .splitcaret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 0;
+  min-width: 28px;
+}
+.cmenu {
+  position: relative;
+  display: inline-flex;
+}
+.cmenulist {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 4px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--line-hover);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.cmenuitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cmenuitem:hover,
+.cmenuitem:focus-visible {
+  background: var(--row-hover);
+}
+.cmenuitem svg {
+  flex: 0 0 auto;
+  color: var(--dim);
+}
 /* A report card's way out: a small arrow at the far right of its top line. */
 .gopen {
   flex: 0 0 auto;

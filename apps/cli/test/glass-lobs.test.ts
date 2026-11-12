@@ -78,10 +78,11 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
     const port = (server.address() as AddressInfo).port;
     const post = await fetch(`http://127.0.0.1:${port}/settings`, { method: 'POST', body: '{}' });
     const other = await fetch(`http://127.0.0.1:${port}/no-such-path`);
+    // Read both pages before closing the server: closing it mid-body cuts a large page off.
+    const [a, b] = [await post.text(), await other.text()];
     server.close();
     expect(post.status).toBe(200);
     expect(post.headers.get('content-type')).toBe(other.headers.get('content-type'));
-    const [a, b] = [await post.text(), await other.text()];
     expect(a).toBe(b);
     expect(a).not.toContain('glass-token');
   });

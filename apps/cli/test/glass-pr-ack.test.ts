@@ -70,11 +70,10 @@ const click = async (g: GlassDom, stack: string) => {
 const sent = (g: GlassDom, i = -1) => (JSON.parse(g.posts().at(i)!.body).payload.items as Array<{ key: string; stateHash: string }>).map((a) => a.key).sort();
 
 describe('glass PR Ack stack', () => {
+  // The tables keep their Ack buttons; a card acks by opening (below).
   it.each([
     ['#prs', 'table'],
-    ['#prs', 'cards'],
     ['#deck', 'table'],
-    ['#deck', 'cards'],
   ])('on %s (%s) acks one stack, leaving the other stack and the lone PR, and stands again for a new state', async (hash, view) => {
     const d = fleet();
     const g = await page(d, { hash, prefs: { view }, post: acking(d) });
@@ -95,6 +94,18 @@ describe('glass PR Ack stack', () => {
     g.serve(d);
     await g.poll();
     expect(ackFor(g, A)?.textContent).toBe('Ack stack');
+  });
+
+  it('on #prs (cards) has no Ack buttons: opening a stack acks it, leaving the other stack and the lone PR', async () => {
+    const d = fleet();
+    const g = await page(d, { hash: '#prs', prefs: { view: 'cards' }, post: acking(d) });
+    expect(buttons(g)).toHaveLength(0);
+    (g.$$('#prs .stackcard').find((c) => c.getAttribute('data-stack') === A) as HTMLElement).click();
+    await g.settle();
+    expect(g.posts()).toHaveLength(1);
+    expect(g.posts()[0]!.headers['x-lobstah-token']).toBe('page-token');
+    expect(sent(g)).toEqual(stackKeys(d, A));
+    expect(d.attention.filter((a) => a.acked).map((a) => a.key).sort()).toEqual(stackKeys(d, A));
   });
 
   it("a lone PR's Ack acks only that PR", async () => {

@@ -238,8 +238,9 @@ describe('glass links: leaving the glass', () => {
 
   it('marks no link whose label already shows ↗, though it still opens in a new tab', async () => {
     const g = await page(repoFilterFleet(), { hash: '#prs', prefs: { view: 'cards' } });
-    const open = g.$$('#prs a').find((a) => a.textContent === '↗ Open');
-    expect(open, 'a PR card has ↗ Open').toBeTruthy();
+    // A PR card's Open is its ↗ icon alone, named Open.
+    const open = g.$$('#prs a').find((a) => a.getAttribute('aria-label') === 'Open' && !!a.querySelector('svg.openicon'));
+    expect(open, 'a PR card has the Open icon').toBeTruthy();
     expect(open!.getAttribute('target')).toBe('_blank');
     expect(open!.classList.contains('extlink')).toBe(false);
   });

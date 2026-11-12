@@ -108,7 +108,7 @@ describe('the Reviews tab', () => {
     // The drafted round's card links its pending review; the others open the review tool.
     const drafted = 20 + REVIEW_ROUND_STATES.indexOf('drafted');
     const draftLink = g.$(`#reviews [data-review="review:acme/web#${drafted}"] .gactions a`)!;
-    expect([draftLink.textContent, draftLink.getAttribute('href')]).toEqual(['Open draft', 'https://github.com/acme/web/pull/22#pullrequestreview-99']);
+    expect([draftLink.getAttribute('aria-label'), draftLink.getAttribute('href')]).toEqual(['Open draft', 'https://github.com/acme/web/pull/22#pullrequestreview-99']);
     const firstOpen = g.$('#reviews .card .gactions a') as unknown as HTMLElement;
     expect(firstOpen.getAttribute('href')).toContain('linear://review/');
     // Who asked, with the avatar, is in the modal.
