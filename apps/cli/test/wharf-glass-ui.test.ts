@@ -588,9 +588,9 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   expect(g.text('#reviews')).toContain('acme/web#7 Add the thing');
   expect(g.text('#reviews')).toContain('acme/web#8 Add the thing');
   expect(g.text('#reviews').indexOf('#7 Add')).toBeLessThan(g.text('#reviews').indexOf('#8 Add'));
-  // Only the still-open round can be dismissed, and there is nothing else to press.
+  // The open round can be dismissed, and each PR can be muted.
   const buttons = Array.from(g.doc.querySelectorAll('#reviews button')).map((b) => b.textContent?.trim());
-  expect(buttons).toEqual(['Dismiss']);
+  expect(buttons).toEqual(['Mute this PR', 'Dismiss', 'Mute this PR']);
   await g.click('#reviews button', 'Dismiss');
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
   expect(g.text('#reviews')).toContain('Sent to the boat that drafted it');

@@ -212,11 +212,11 @@ describe('a review card', () => {
     expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #7 · 🪤 wt:t1');
     expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
-    // The main action as a big button with its ▾, then Open draft as its icon; Skip waits in the menu.
+    // The main action as a big button with its ▾, then mute and Open draft; dismiss waits in the menu.
     const bar = [...card(7).querySelectorAll('.gactions button, .gactions a')].map((b) => text(b) || b.getAttribute('aria-label'));
-    expect(bar).toEqual(['Approve', 'More actions', 'Open draft']);
+    expect(bar).toEqual(['Approve', 'More actions', 'Mute this PR', 'Open draft']);
     await click(g, card(7).querySelector('.gactions .splitcaret'));
-    expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Skip']);
+    expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Dismiss']);
     expect(g.$('#overlay')!.className).not.toBe('open');
     expect(chips(8)).toEqual(['drafting']);
     expect(chips(9)).toEqual(['approved']);
@@ -265,6 +265,6 @@ describe('a review card', () => {
     expect(text(box.querySelector('.rv-person'))).toContain('maya');
     expect(text(box.querySelector('.rv-staged'))).toBe('Open pending review');
     // Its actions; the modal's close is a button too.
-    expect([...box.querySelectorAll('button:not(.x)')].map(text)).toEqual(['Redraft', 'Skip']);
+    expect([...box.querySelectorAll('button:not(.x)')].map(text)).toEqual(['Redraft', 'Mute this PR', 'Dismiss']);
   });
 });
