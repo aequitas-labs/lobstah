@@ -247,9 +247,13 @@ export function mirrorRow(cfg: Config, now = Date.now()): DoctorRow | undefined 
   const status = readMirrorStatus();
   const mine = status?.wharf === wharf ? status : undefined;
   const fresh = mirrorFreshness(mine, now);
-  if (fresh === 'fresh') return { check, status: 'ok', detail: `${wharf}: snapshot put ${mine!.lastPutAt}${mine!.calls ? `; ${mine!.calls} calls carried out` : ''}` };
+  const put = mine?.lastPutAt ? `; last snapshot put ${mine.lastPutAt}` : '';
+  if (fresh === 'fresh') return { check, status: 'ok', detail: `${wharf}: connected${put}${mine!.calls ? `; ${mine!.calls} calls carried out` : ''}` };
   const why = mine?.error ? `; last error: ${mine.error}` : '';
-  return { check, status: 'warn', detail: fresh === 'never' ? `${wharf}: no snapshot put yet — is the daemon running? (lobstah daemon restart)${why}` : `${wharf}: last snapshot put ${mine!.lastPutAt}, longer ago than the daemon puts${why}` };
+  if (fresh === 'never') return { check, status: 'warn', detail: `${wharf}: the mirror has not run yet — is the daemon running? (lobstah daemon restart)${why}` };
+  return { check, status: 'warn', detail: mine!.connected
+    ? `${wharf}: the mirror last ran ${mine!.at}, longer ago than it reads — is the daemon running?${why}`
+    : `${wharf}: not connected to the wharf (as of ${mine!.at})${why}` };
 }
 
 export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {

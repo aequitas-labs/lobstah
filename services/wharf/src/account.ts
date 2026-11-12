@@ -11,11 +11,14 @@ import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
 import { routeSlackMessage } from './slack-routing.js';
-import { MIRROR_WATCH_MS, MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
+import { MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
-import { ANSWER_INLINE_MAX_BYTES, MINIMUM_SOCKET_CLIENT, PING_TEXT, PONG_TEXT, SOCKET_EVENTS_PER_MESSAGE, WHARF_SOCKET_PROTOCOL, encodeFrame, offersSocketProtocol, parseClientMessage } from '../../../packages/core/src/wharf-socket.js';
+import { ANSWER_INLINE_MAX_BYTES, MINIMUM_SOCKET_CLIENT, PING_TEXT, PONG_TEXT, SOCKET_EVENTS_PER_MESSAGE, WHARF_SOCKET_PROTOCOL, decodeFrame, encodeFrame, offersSocketProtocol, parseClientMessage } from '../../../packages/core/src/wharf-socket.js';
 import type { CallMessage, CommandMessage, ServerSocketMessage, SocketFrame } from '../../../packages/core/src/wharf-socket.js';
+
+/** How often a boat's snapshot sent on its socket is also stored (its row and R2 copy): every change still reaches the glass at once. */
+const SNAPSHOT_STORE_MS = 60_000;
 
 export type Actor = { kind: 'person' | 'boat'; id: string; permissions: Permission[] } | { kind: 'dispatch'; id: string; epoch: number };
 /** What a Slack action came to: done, a form to ask for words first, or why not, said to the person. */
@@ -67,6 +70,8 @@ export class Account extends DurableObject<Env> {
   private pushPending = false;
   /** Relays held open over HTTP, waiting for their call's answer, by call id. */
   private readonly answerWaiters = new Map<string, Array<() => void>>();
+  /** When each boat's socket snapshot was last stored (row and R2), in this instance: at most every SNAPSHOT_STORE_MS. */
+  private readonly snapshotStoredAt = new Map<string, number>();
   /** Fetch is only for the private upgrade binding: normal state uses RPC. */
   async fetch(request: Request): Promise<Response> {
     try {
@@ -90,7 +95,7 @@ export class Account extends DurableObject<Env> {
         base: { account: c.account, helm: c.helm, personId: c.personId, personSessionId: c.personSessionId, token: credentialName(c.token) } };
       pair[1].serializeAttachment(attachment);
       // A glass tab open is what makes mirror boats put their snapshots at once.
-      if (isGlass(c)) this.ctx.waitUntil(this.mirrorHint('all', { type: 'mirror-watch', until: new Date(Date.now() + MIRROR_WATCH_MS).toISOString() }));
+      if (isGlass(c)) this.ctx.waitUntil(this.pushWatch());
       return new Response(null, { status: 101, webSocket: pair[0], headers: { 'Sec-WebSocket-Protocol': WHARF_SOCKET_PROTOCOL } });
     } catch (e) {
       if (e instanceof ApiError) return Response.json({ error: e.message }, { status: e.status });
@@ -108,15 +113,24 @@ export class Account extends DurableObject<Env> {
     if (!await this.socketAllowed(a)) return void socket.close(1008, 'credential expired or revoked');
     // The runtime answers pings while the object hibernates; one that reaches a live instance gets the same answer.
     if (data === PING_TEXT) return void socket.send(PONG_TEXT);
-    if (typeof data !== 'string') return void send(socket, { t: 'error', reason: 'binary messages are not accepted yet' });
+    if (typeof data !== 'string') return void await this.boatFrame(socket, a, data);
     const message = parseClientMessage(data);
     if ('invalid' in message) return void send(socket, { t: 'error', reason: message.invalid });
-    if (message.t === 'resume') return void this.resume(socket, message.after);
+    if (message.t === 'resume') {
+      this.resume(socket, message.after);
+      if (a.actor.kind === 'boat') await this.catchUpBoat(socket, a);
+      return;
+    }
+    if (message.t === 'attention') return void await this.boatAttention(socket, a, message.attention);
     if (message.t === 'call') return void send(socket, { t: 'result', id: message.id, ...await this.socketCall(a, message) });
     send(socket, { t: 'result', id: message.id, ...await this.socketCommand(a, message) });
     await this.afterChange();
   }
-  webSocketClose(socket: WebSocket, code: number, reason: string) { socket.close(code === 1005 || code === 1006 ? 1000 : code, reason); }
+  webSocketClose(socket: WebSocket, code: number, reason: string) {
+    socket.close(code === 1005 || code === 1006 ? 1000 : code, reason);
+    // The last glass tab gone: the boats stop sending snapshots.
+    if (this.ctx.getTags(socket).includes('glass')) this.ctx.waitUntil(this.pushWatch(socket));
+  }
   webSocketError(socket: WebSocket) { socket.close(1011, 'socket connection failed'); }
   /** Whether a socket's credential still holds: a boat not revoked, with read; a person's session still live. */
   private async socketAllowed(a: SocketAttachment): Promise<boolean> {
@@ -483,14 +497,13 @@ export class Account extends DurableObject<Env> {
     this.pushedSeq = this.newestSeq();
   }
   /**
-   * Request counts per minute, and until when a hosted glass is open, kept in
-   * this instance's memory, never in SQLite: they change on every request, and
-   * a row written per request (about 3 rows_written each) is what spends the
-   * Durable Objects free tier. An evicted instance starts the minute's count
-   * again, and the next hosted glass poll says it is open again.
+   * Request counts per minute, kept in this instance's memory, never in
+   * SQLite: they change on every request, and a row written per request
+   * (about 3 rows_written each) is what spends the Durable Objects free tier.
+   * An evicted instance starts the minute's count again. Whether a glass is
+   * open is never stored: it is whether a glass socket is connected.
    */
   private readonly budgets = new Map<'account' | 'mirror', { window: number; count: number }>();
-  private mirrorWatchedUntil = 0;
   /** Count one request against a per-minute budget, or refuse it. */
   private spend(which: 'account' | 'mirror', limit: number, now: number, message: string) {
     const window = Math.floor(now / 60000);
@@ -933,23 +946,93 @@ export class Account extends DurableObject<Env> {
     if (cleanup.keys.length) this.ctx.waitUntil(this.serialFile(() => this.env.FILES.delete(cleanup.keys)).catch(() => {}));
   }
   /**
-   * Tell mirror boats something through their wake sockets: a call waits, a
-   * hosted glass is open, or another boat's walking list changed (only to
-   * boats granted attention, never to the boat that put it). No content travels.
+   * Send a message to the sockets of mirror boats that still hold a
+   * credential with `needs`: all of them, one, or all but one.
    */
-  private async mirrorHint(boats: ReadonlySet<string> | 'all' | { except: string },
-    message: { type: 'mirror-call' } | { type: 'mirror-watch'; until: string } | { type: 'attention' }) {
-    const needs: Permission = message.type === 'attention' ? 'attention' : 'mirror';
-    for (const socket of this.ctx.getWebSockets()) {
+  private async pushToBoats(boats: 'all' | { only: string } | { except: string }, needs: Permission, message: ServerSocketMessage | ((boat: string) => ServerSocketMessage)) {
+    const only = typeof boats === 'object' && 'only' in boats ? boats.only : undefined;
+    const except = typeof boats === 'object' && 'except' in boats ? boats.except : undefined;
+    const sockets = only ? this.ctx.getWebSockets(`boat:${only}`) : this.ctx.getWebSockets('boat');
+    for (const socket of sockets) {
       try {
-        const a = socket.deserializeAttachment() as { actor: Actor; hash: string };
-        if (a.actor.kind !== 'boat') continue;
-        if (boats instanceof Set ? !boats.has(a.actor.id) : boats !== 'all' && a.actor.id === (boats as { except: string }).except) continue;
-        const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
-        const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
-        if (!this.get('deleted') && row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], needs)) socket.send(JSON.stringify(message));
+        const a = socket.deserializeAttachment() as SocketAttachment | null;
+        if (a?.protocol !== WHARF_SOCKET_PROTOCOL || a.actor.kind !== 'boat') continue;
+        if (except && a.actor.id === except) continue;
+        if (!this.boatHolds(a, needs)) continue;
+        send(socket, typeof message === 'function' ? message(a.actor.id) : message);
       } catch { /* disconnected */ }
     }
+  }
+  /** Whether a boat socket's credential still holds and carries `needs`. */
+  private boatHolds(a: SocketAttachment, needs: Permission): boolean {
+    if (this.get('deleted') || a.actor.kind !== 'boat') return false;
+    const row = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', a.actor.id).toArray()[0];
+    const grants = this.ctx.storage.sql.exec<{ permissions: string }>('SELECT permissions FROM boat_permissions WHERE boat=?', a.actor.id).toArray()[0];
+    return !!row && !row.revoked && sameHash(row.hash, a.hash) && permits(grants ? JSON.parse(grants.permissions) : ['work'], needs);
+  }
+  /** Whether a glass tab is open now; `closing` is a socket on its way out, not counted. */
+  private glassWatching(closing?: WebSocket): boolean {
+    return this.ctx.getWebSockets('glass').some((s) => s !== closing);
+  }
+  /** Tell every mirror boat whether a glass tab is open now. */
+  private async pushWatch(closing?: WebSocket) {
+    await this.pushToBoats('all', 'mirror', { t: 'watch', on: this.glassWatching(closing) });
+  }
+  /** Push one stored call to the boat it addresses. */
+  private async pushCall(id: string) {
+    const call = this.mirrorState.stored(id);
+    if (call) await this.pushToBoats({ only: call.boat }, 'mirror', { t: 'call', call });
+  }
+  /** Push every boat granted attention the other boats' lists, except to the boat whose list changed. */
+  private async pushAttention(except: string) {
+    await this.pushToBoats({ except }, 'attention', (boat) => ({ t: 'attention', boats: this.mirrorState.attentionLists(boat) }));
+  }
+  /**
+   * A boat's socket resumed: it gets whether a glass is watching, the calls
+   * waiting for it, and (with the grant) the other boats' lists, so nothing
+   * pushed while it was away is lost.
+   */
+  private async catchUpBoat(socket: WebSocket, a: SocketAttachment) {
+    if (this.boatHolds(a, 'mirror')) {
+      send(socket, { t: 'watch', on: this.glassWatching() });
+      for (const call of this.mirrorState.queuedCalls(a.actor.id)) send(socket, { t: 'call', call });
+    }
+    if (this.boatHolds(a, 'attention')) send(socket, { t: 'attention', boats: this.mirrorState.attentionLists(a.actor.id) });
+  }
+  /**
+   * A boat's binary frame: its snapshot, or its answer to a call. Each runs
+   * the same path as its HTTP route, under the socket's credential.
+   */
+  private async boatFrame(socket: WebSocket, a: SocketAttachment, data: ArrayBuffer) {
+    const frame = decodeFrame(data);
+    if (!frame) return void send(socket, { t: 'error', reason: 'not a frame' });
+    if (a.actor.kind !== 'boat') return void send(socket, { t: 'error', reason: 'only a boat sends frames' });
+    const base = { ...a.base, body: {} };
+    if (frame.header.t === 'snapshot') {
+      const c: Command = { ...base, method: 'PUT', path: 'mirror/snapshot' };
+      const result = JSON.parse(await this.mirrorAs(c, frame.payload, {}, a.hash, true)) as StoredResult;
+      if (result.status !== 200) send(socket, { t: 'error', reason: `snapshot: ${(result.value as { error?: string }).error ?? result.status}` });
+      return;
+    }
+    const id = frame.header.id;
+    const take = JSON.parse(await this.mirrorAs({ ...base, method: 'POST', path: `mirror/calls/${id}/take` }, undefined, {}, a.hash)) as StoredResult;
+    // Taken already (by this boat's earlier frame) is fine; expired or another boat's is not.
+    if (take.status !== 200 && take.status !== 409) return void send(socket, { t: 'error', reason: `answer ${id}: ${(take.value as { error?: string }).error ?? take.status}` });
+    const answered = JSON.parse(await this.mirrorAs({ ...base, method: 'POST', path: `mirror/calls/${id}/answer` }, frame.payload, { status: frame.header.status, contentType: frame.header.contentType }, a.hash)) as StoredResult;
+    if (answered.status !== 200) send(socket, { t: 'error', reason: `answer ${id}: ${(answered.value as { error?: string }).error ?? answered.status}` });
+  }
+  /** A boat's walking list, sent on its socket: kept when it changed, and the boats granted attention get the lists. */
+  private async boatAttention(socket: WebSocket, a: SocketAttachment, attention: unknown[]) {
+    if (a.actor.kind !== 'boat' || !this.boatHolds(a, 'mirror')) return void send(socket, { t: 'error', reason: 'only a mirror boat sends its list' });
+    let json: string;
+    try { json = attentionJson({ attention }); } catch (e) { return void send(socket, { t: 'error', reason: e instanceof ApiError ? e.message : 'invalid list' }); }
+    const etag = await digest(json);
+    const put = this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      this.mirrorBudget(now);
+      return this.mirrorState.putAttention(a.actor, json, etag, now);
+    });
+    if (put.changed) await this.pushAttention(a.actor.id);
   }
   /**
    * The mirror's own rate budget, apart from the account's: a hosted glass
@@ -964,15 +1047,26 @@ export class Account extends DurableObject<Env> {
    */
   async mirror(command: string, bytes?: Uint8Array, meta: { status?: number; contentType?: string; name?: string; boat?: string } = {}): Promise<string> {
     // A call made or answered moves when the next one expires.
-    return this.serialFile(() => this.mirrorRoute(command, bytes, meta)).finally(() => this.scheduleAlarm());
+    return this.serialFile(() => this.mirrorRoute(JSON.parse(command), bytes, meta)).finally(() => this.scheduleAlarm());
   }
-  private async mirrorRoute(command: string, bytes: Uint8Array | undefined, meta: { status?: number; contentType?: string; name?: string; boat?: string }): Promise<string> {
+  /**
+   * A mirror route for a socket: under its credential's stored hash, never
+   * the secret. A boat's socket snapshot (`throttled`) is stored at most
+   * every SNAPSHOT_STORE_MS, and still pushed to the glass every time.
+   */
+  private async mirrorAs(c: Command, bytes: Uint8Array | undefined, meta: { status?: number; contentType?: string }, credentialHash: string, throttled = false): Promise<string> {
+    return this.serialFile(() => this.mirrorRoute(c, bytes, meta, credentialHash, throttled)).finally(() => this.scheduleAlarm());
+  }
+  private async mirrorRoute(c: Command, bytes: Uint8Array | undefined, meta: { status?: number; contentType?: string; name?: string; boat?: string }, credentialHash?: string, throttled = false): Promise<string> {
     {
-      const c: Command = JSON.parse(command);
       try {
         // A catch's own credential reaches its dispatch only, never a boat's mirror.
         requireThat(!c.token.startsWith('d.'), 403, 'mirror routes take a mirror boat credential or a signed-in person');
-        const hash = await digest(c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
+        // Calls are pushed and lists are sent on the socket: the routes boats polled are gone.
+        if ((c.path === 'mirror/calls' && c.method === 'GET') || (c.path === 'mirror/attention' && (c.method === 'GET' || c.method === 'PUT'))) {
+          return JSON.stringify({ status: 410, value: { error: `this wharf pushes mirror calls and lists on the socket (${WHARF_SOCKET_PROTOCOL}); update lobstah to ${MINIMUM_SOCKET_CLIENT} or later`, minimumClient: MINIMUM_SOCKET_CLIENT } });
+        }
+        const hash = credentialHash ?? await digest(c.token.startsWith('b.') ? c.token.split('.').at(-1)! : c.token);
         // A put, an answer or a file runs more than one transaction; the request counts once.
         let counted = false;
         const run = <T>(fn: (actor: Actor, now: number) => T): T => {
@@ -999,25 +1093,21 @@ export class Account extends DurableObject<Env> {
           requireThat(!('focusToken' in (snapshot as object)), 400, 'a mirrored snapshot never carries the page token');
           const etag = await digest(json);
           const actor = run((a) => a);
-          await this.env.FILES.put(mirrorSnapshotKey(c.account, actor.id), bytes!, { customMetadata: { etag } });
-          const recorded = run((a, now) => this.mirrorState.recordSnapshot(a, etag, bytes!.byteLength, now));
+          const storedAt = this.snapshotStoredAt.get(actor.id) ?? 0;
+          // A socket's snapshot is stored at most once a minute: the glass gets every one in its push.
+          const store = !throttled || Date.now() - storedAt >= SNAPSHOT_STORE_MS;
+          let recorded: StoredResult = { status: 200, value: { etag, bytes: bytes!.byteLength, at: new Date().toISOString() } };
+          if (store) {
+            await this.env.FILES.put(mirrorSnapshotKey(c.account, actor.id), bytes!, { customMetadata: { etag } });
+            recorded = run((a, now) => this.mirrorState.recordSnapshot(a, etag, bytes!.byteLength, now));
+            this.snapshotStoredAt.set(actor.id, Date.now());
+          }
           // Every open glass tab gets the bytes the boat put: it shows them with no request.
           if (recorded.status === 200) {
             const boat = this.ctx.storage.sql.exec<BoatRow>('SELECT * FROM boats WHERE id=?', actor.id).one();
             this.ctx.waitUntil(this.pushFrame({ t: 'snapshot', boat: actor.id, name: boat.name, at: new Date().toISOString(), etag }, bytes!));
           }
           return JSON.stringify(recorded);
-        }
-        // A boat's walking list: kept when it changed, and the boats granted attention are told.
-        if (c.path === 'mirror/attention' && c.method === 'PUT') {
-          const json = attentionJson(c.body);
-          const etag = await digest(json);
-          const put = run((actor, now) => {
-            const r = this.mirrorState.putAttention(actor, json, etag, now);
-            return { ...r, boat: actor.id };
-          });
-          if (put.changed) this.ctx.waitUntil(this.mirrorHint({ except: put.boat }, { type: 'attention' }));
-          return JSON.stringify({ status: put.status, value: put.value });
         }
         const answer = /^mirror\/calls\/([A-Za-z0-9_-]+)\/answer$/.exec(c.path);
         if (answer && c.method === 'POST') {
@@ -1045,24 +1135,10 @@ export class Account extends DurableObject<Env> {
           await this.env.FILES.put(mirrorFileKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType: 'application/octet-stream', contentDisposition: 'attachment' } });
           return JSON.stringify(run((actor, now) => this.mirrorState.recordFile(actor, boat, id, name, bytes?.byteLength ?? 0, now)));
         }
-        const result = run((actor, now) => {
-          const r = this.mirrorState.execute(c, actor, now, c.account);
-          if (r.watch) {
-            const watched = this.mirrorWatchedUntil > now;
-            this.mirrorWatchedUntil = now + MIRROR_WATCH_MS;
-            if (!watched) this.ctx.waitUntil(this.mirrorHint('all', { type: 'mirror-watch', until: new Date(now + MIRROR_WATCH_MS).toISOString() }));
-          }
-          if (r.hint) this.ctx.waitUntil(this.mirrorHint(new Set([r.hint]), { type: 'mirror-call' }));
-          // A boat's call list says whether a hosted glass is open, so it knows how often to put.
-          if (c.path === 'mirror/calls' && c.method === 'GET' && r.status === 200) {
-            // A glass tab with its socket open watches for as long as it stays connected.
-            if (this.ctx.getWebSockets('glass').length) this.mirrorWatchedUntil = Math.max(this.mirrorWatchedUntil, now + MIRROR_WATCH_MS);
-            const until = this.mirrorWatchedUntil;
-            return { status: r.status, value: { ...(r.value as object), ...(until > now ? { watchedUntil: new Date(until).toISOString() } : {}) } };
-          }
-          return { status: r.status, value: r.value };
-        });
-        return JSON.stringify(result);
+        const result = run((actor, now) => this.mirrorState.execute(c, actor, now, c.account));
+        // A new call goes to its boat's socket at once, with all it needs.
+        if (result.hint && result.status === 200) this.ctx.waitUntil(this.pushCall(String((result.value as { id: string }).id)));
+        return JSON.stringify({ status: result.status, value: result.value });
       } catch (e) {
         if (e instanceof ApiError) return JSON.stringify({ status: e.status, value: { error: e.message } });
         throw e;

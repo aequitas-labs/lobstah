@@ -1,4 +1,4 @@
-import { env, SELF, runInDurableObject } from 'cloudflare:test';
+import { env, SELF, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { wharfAuth } from '../src/auth.js';
 import type { Account } from '../src/account.js';
@@ -7,7 +7,7 @@ import { mirrorTables } from '../src/mirror-state.js';
 import { authFixtures } from './auth-fixture.js';
 import { rowsWritten } from './rows-written.js';
 import type { WharfMirrorCall } from '../../../packages/core/src/backend-model.js';
-import { decodeFrame } from '../../../packages/core/src/wharf-socket.js';
+import { MINIMUM_SOCKET_CLIENT, decodeFrame, encodeFrame } from '../../../packages/core/src/wharf-socket.js';
 import type { AnswerFrame, ServerSocketMessage, SnapshotFrame } from '../../../packages/core/src/wharf-socket.js';
 
 /**
@@ -96,6 +96,31 @@ async function frame<T extends 'snapshot' | 'answer'>(tab: GlassTab, t: T, match
 }
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
+/** The calls waiting for one boat, as the wharf holds them. */
+async function queuedFor(boat: Pick<Boat, 'id'>): Promise<WharfMirrorCall[]> {
+  const rows = await sql("SELECT data FROM mirror_calls WHERE boat=? AND json_extract(data,'$.state')='queued' ORDER BY rowid", boat.id);
+  return rows.map((r) => JSON.parse(String(r.data)) as WharfMirrorCall);
+}
+
+/** A mirror boat's socket, and every message pushed to it. */
+type BoatSocket = { socket: WebSocket; received: ServerSocketMessage[] };
+async function boatSocket(boat: Pick<Boat, 'token'>): Promise<BoatSocket> {
+  const r = await SELF.fetch(`https://state.test/v1/accounts/${account}/wake`, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${boat.token}`, 'Sec-WebSocket-Protocol': 'lobstah.2' } });
+  expect(r.status).toBe(101);
+  const socket = r.webSocket!; socket.accept();
+  const received: ServerSocketMessage[] = [];
+  socket.addEventListener('message', (e) => { if (typeof e.data === 'string' && e.data !== 'pong') received.push(JSON.parse(e.data)); });
+  return { socket, received };
+}
+async function pushed(b: BoatSocket, match: (m: ServerSocketMessage) => boolean): Promise<ServerSocketMessage> {
+  for (let i = 0; i < 300; i++) {
+    const found = b.received.find(match);
+    if (found) return found;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`no matching push; got ${JSON.stringify(b.received)}`);
+}
+
 beforeAll(async () => {
   await authFixtures();
   const start = await SELF.fetch('https://glass.test/api/auth/sign-in/social', { method: 'POST', headers: { Origin: 'https://glass.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'github', callbackURL: 'https://glass.test/' }) });
@@ -176,8 +201,7 @@ describe('relayed calls', () => {
     const tab = await glassTab();
     const call = await relay(north, { read: '/data/stats' });
     expect(call).toMatchObject({ boat: north.id, read: '/data/stats', state: 'queued' });
-    const queued = await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>();
-    expect(queued.calls.map((c) => c.id)).toEqual([call.id]);
+    expect((await queuedFor(north)).map((c) => c.id)).toEqual([call.id]);
     expect((await boatCall(north, `mirror/calls/${call.id}/take`, { body: '{}' })).status).toBe(200);
     expect((await answer(north, call.id, 200, '{"catchesToday":3}')).status).toBe(200);
     const answered = await frame(tab, 'answer', (h) => h.id === call.id);
@@ -203,14 +227,13 @@ describe('relayed calls', () => {
     const payload = { key: 'decision:0a1b2c3d', attempt: 'a1', seq: 0, secret: false, sealed: { epk: 'ZXBr', iv: 'aXY', ct: 'Y3Q' }, signature: 'c2ln' };
     const call = await relay(north, { write: { kind: 'run-line', payload } });
     expect(call.write).toEqual({ kind: 'run-line', payload });
-    const waiting = await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>();
-    expect(waiting.calls.find((c) => c.id === call.id)?.write).toEqual({ kind: 'run-line', payload });
+    expect((await queuedFor(north)).find((c) => c.id === call.id)?.write).toEqual({ kind: 'run-line', payload });
   });
 
   it('delivers a call to the boat it names only', async () => {
     const north = await enrol('north', ['mirror', 'read']), south = await enrol('south', ['mirror', 'read']);
     const call = await relay(north, { read: '/data/settings' });
-    expect((await (await boatCall(south, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls).toEqual([]);
+    expect((await queuedFor(south))).toEqual([]);
     expect((await boatCall(south, `mirror/calls/${call.id}/take`, { body: '{}' })).status).toBe(403);
     await boatCall(north, `mirror/calls/${call.id}/take`, { body: '{}' });
     expect((await answer(south, call.id, 200, '{}')).status).toBe(403);
@@ -220,7 +243,9 @@ describe('relayed calls', () => {
     const north = await enrol('north', ['mirror', 'read']);
     const call = await relay(north, { read: '/data/stats' });
     await sql("UPDATE mirror_calls SET data=json_set(data,'$.expiresAt',?) WHERE id=?", new Date(Date.now() - 1000).toISOString(), call.id);
-    expect((await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls).toEqual([]);
+    // No request comes: the account's alarm notices the call expired.
+    await runDurableObjectAlarm(env.ACCOUNTS.getByName(account));
+    expect((await queuedFor(north))).toEqual([]);
     expect((await sql('SELECT json_extract(data,\'$.state\') AS state FROM mirror_calls WHERE id=?', call.id))[0]).toEqual({ state: 'expired' });
     expect((await boatCall(north, `mirror/calls/${call.id}/take`, { body: '{}' })).status).toBe(410);
   });
@@ -241,7 +266,7 @@ describe('relayed calls', () => {
       expect((await boatCall(north, path, { body: JSON.stringify(body) })).status).toBe(403);
     }
     expect(await sql('SELECT count(*) AS n FROM mirror_calls')).toEqual([{ n: 0 }]);
-    expect((await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls).toEqual([]);
+    expect((await queuedFor(north))).toEqual([]);
   });
 
   it('carries a file the person attached to a relayed answer to its boat', async () => {
@@ -278,7 +303,7 @@ describe('the glass socket', () => {
     tab.socket.send(JSON.stringify({ t: 'call', id: 'socket-call-1', boat: north.id, read: '/data/stats' }));
     let queued: WharfMirrorCall[] = [];
     for (let i = 0; i < 100 && !queued.length; i++) {
-      queued = (await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls;
+      queued = (await queuedFor(north));
       if (!queued.length) await new Promise((r) => setTimeout(r, 20));
     }
     expect(queued).toEqual([expect.objectContaining({ id: 'socket-call-1', read: '/data/stats', state: 'queued' })]);
@@ -295,15 +320,17 @@ describe('the glass socket', () => {
     tab.socket.close();
   });
 
-  it('counts an open glass socket as watching: boats hear the watch while it is connected', async () => {
-    const north = await enrol('north', ['mirror', 'read']);
-    await runInDurableObject(env.ACCOUNTS.getByName(account), (instance: Account) => { (instance as unknown as { mirrorWatchedUntil: number }).mirrorWatchedUntil = 0; });
-    const before = await (await boatCall(north, 'mirror/calls')).json<{ watchedUntil?: string }>();
-    expect(before.watchedUntil).toBeUndefined();
+  it('counts an open glass socket as watching: the boats hear the watch start and end', async () => {
+    const north = await boatSocket(await enrol('north', ['mirror', 'read']));
+    north.socket.send(JSON.stringify({ t: 'resume' }));
+    expect(await pushed(north, (m) => m.t === 'watch')).toEqual({ t: 'watch', on: false });
+    north.received.length = 0;
     const tab = await glassTab();
-    const during = await (await boatCall(north, 'mirror/calls')).json<{ watchedUntil?: string }>();
-    expect(Date.parse(during.watchedUntil!)).toBeGreaterThan(Date.now());
+    expect(await pushed(north, (m) => m.t === 'watch')).toEqual({ t: 'watch', on: true });
+    north.received.length = 0;
     tab.socket.close();
+    expect(await pushed(north, (m) => m.t === 'watch')).toEqual({ t: 'watch', on: false });
+    north.socket.close();
   });
 
   it('answers 410 to a page that polls a relayed call', async () => {
@@ -314,14 +341,60 @@ describe('the glass socket', () => {
   });
 });
 
+describe('the boat socket', () => {
+  it('pushes a new call to its boat with everything it needs', async () => {
+    const boat = await enrol('north', ['mirror', 'read']);
+    const north = await boatSocket(boat);
+    const call = await relay(boat, { read: '/data/stats' });
+    expect(await pushed(north, (m) => m.t === 'call')).toEqual({ t: 'call', call: expect.objectContaining({ id: call.id, boat: boat.id, read: '/data/stats', state: 'queued' }) });
+    north.socket.close();
+  });
+
+  it('takes an answer frame as the HTTP take and answer would, and pushes it to the glass and the waiting relay', async () => {
+    const boat = await enrol('north', ['mirror', 'read']);
+    const north = await boatSocket(boat);
+    const tab = await glassTab();
+    const relayed = browser('mirror/relay', { body: { id: 'socket-relay-1', boat: boat.id, read: '/data/stats' } });
+    await pushed(north, (m) => m.t === 'call' && m.call.id === 'socket-relay-1');
+    north.socket.send(encodeFrame({ t: 'answer', id: 'socket-relay-1', status: 200, contentType: 'application/json' }, new TextEncoder().encode('{"catchesToday":5}')));
+    const answered = await frame(tab, 'answer', (h) => h.id === 'socket-relay-1');
+    expect(JSON.parse(text(answered.payload))).toEqual({ catchesToday: 5 });
+    const response = await relayed;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ catchesToday: 5 });
+    expect((await sql("SELECT json_extract(data,'$.state') AS state FROM mirror_calls WHERE id='socket-relay-1'"))[0]).toEqual({ state: 'answered' });
+    north.socket.close(); tab.socket.close();
+  });
+
+  it('refuses a snapshot frame that carries the page token, and pushes nothing', async () => {
+    const boat = await enrol('north', ['mirror', 'read']);
+    const north = await boatSocket(boat);
+    const tab = await glassTab();
+    north.socket.send(encodeFrame({ t: 'snapshot', boat: boat.id, name: '', at: '', etag: '' }, await gzip(JSON.stringify({ ...snapshot('north'), focusToken: 'secret' }))));
+    expect(await pushed(north, (m) => m.t === 'error')).toMatchObject({ reason: expect.stringContaining('page token') });
+    expect(tab.frames).toEqual([]);
+    north.socket.close(); tab.socket.close();
+  });
+
+  it('gives a resuming boat the watch and every call that waited for it', async () => {
+    const boat = await enrol('north', ['mirror', 'read']);
+    const call = await relay(boat, { read: '/data/settings' });
+    const north = await boatSocket(boat);
+    north.socket.send(JSON.stringify({ t: 'resume' }));
+    expect(await pushed(north, (m) => m.t === 'watch')).toEqual({ t: 'watch', on: false });
+    expect(await pushed(north, (m) => m.t === 'call')).toMatchObject({ call: { id: call.id, read: '/data/settings' } });
+    north.socket.close();
+  });
+});
+
 describe('who may mirror', () => {
   it('refuses a work-only boat and a dispatch token on every mirror route', async () => {
     const worker = await enrol('worker', ['work', 'read']);
     expect((await put(worker, snapshot('worker'))).status).toBe(403);
-    expect((await boatCall(worker, 'mirror/calls')).status).toBe(403);
+    expect((await boatCall(worker, 'mirror/files/none')).status).toBe(403);
     expect((await boatCall(worker, 'mirror')).status).toBe(403);
     const dispatchToken = { token: `d.${account}.job.1.secret` };
-    expect((await boatCall(dispatchToken, 'mirror/calls')).status).toBe(403);
+    expect((await boatCall(dispatchToken, 'mirror/files/none')).status).toBe(403);
     expect((await boatCall(dispatchToken, 'mirror/snapshot', { method: 'PUT', body: await gzip('{}') })).status).toBe(403);
   });
 
@@ -329,7 +402,10 @@ describe('who may mirror', () => {
     const north = await enrol('north', ['mirror', 'read']);
     expect((await boatCall(north, 'workers/sign-on', { body: JSON.stringify({ worker: 'w', repo: 'repo', repoRemote: 'github.com/test/repo' }) })).status).toBe(403);
     expect((await boatCall(north, 'helm/take', { body: JSON.stringify({ session: 'seat' }) })).status).toBe(403);
-    expect((await boatCall(north, 'mirror/calls')).status).toBe(200);
+    // The call list boats polled is gone: calls are pushed to the boat's socket.
+    const polled = await boatCall(north, 'mirror/calls');
+    expect(polled.status).toBe(410);
+    expect(await polled.json()).toMatchObject({ minimumClient: MINIMUM_SOCKET_CLIENT });
   });
 
   it('refuses a call for a boat that is not a mirror boat', async () => {
@@ -354,7 +430,7 @@ describe('the waiting relay', () => {
   /** The boat's side: wait for one call, take it, answer it with what `body` gives. */
   async function boatAnswers(boat: Boat, status: number, body: (call: WharfMirrorCall) => string, contentType = 'application/json'): Promise<WharfMirrorCall> {
     for (let i = 0; i < 50; i++) {
-      const { calls } = await (await boatCall(boat, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>();
+      const calls = await queuedFor(boat);
       if (calls[0]) {
         await boatCall(boat, `mirror/calls/${calls[0].id}/take`, { body: '{}' });
         await answer(boat, calls[0].id, status, body(calls[0]), contentType);
@@ -390,26 +466,34 @@ describe('the waiting relay', () => {
   it('refuses a relay the hosted glass may not make, before any boat hears of it', async () => {
     const north = await enrol('north', ['mirror', 'read']);
     expect((await browser('mirror/relay', { body: { id: 'relay-2', boat: north.id, write: { kind: 'focus', payload: {} } } })).status).toBe(403);
-    expect((await (await boatCall(north, 'mirror/calls')).json<{ calls: WharfMirrorCall[] }>()).calls).toEqual([]);
+    expect((await queuedFor(north))).toEqual([]);
   });
 });
 
 describe('rows written', () => {
   const written = (fn: () => Promise<unknown>) => rowsWritten(env.ACCOUNTS.getByName(account), fn);
 
-  it('writes nothing for a boat’s call poll or a hosted glass’s poll', async () => {
+  it('writes nothing for a hosted glass’s read of the boats', async () => {
     const north = await enrol('north', ['mirror', 'read']);
     expect((await put(north, snapshot('north'))).status).toBe(200);
+    expect(await written(async () => { for (let i = 0; i < 5; i++) await list(); })).toBe(0);
+  });
+
+  it('stores a boat’s socket snapshots at most once a minute, and still pushes each one to the glass', async () => {
+    const boat = await enrol('north', ['mirror', 'read']);
+    const north = await boatSocket(boat);
+    const tab = await glassTab();
+    const send = async (fleet: string) => north.socket.send(encodeFrame({ t: 'snapshot', boat: boat.id, name: '', at: '', etag: '' }, await gzip(JSON.stringify(snapshot(fleet)))));
     const rows = await written(async () => {
-      for (let i = 0; i < 5; i++) {
-        expect((await boatCall(north, 'mirror/calls')).status).toBe(200);
-        await list();
+      for (const fleet of ['one', 'two', 'three']) {
+        await send(fleet);
+        await frame(tab, 'snapshot', () => tab.frames.filter((f) => f.header.t === 'snapshot').length >= ['one', 'two', 'three'].indexOf(fleet) + 1);
       }
     });
-    expect(rows).toBe(0);
-    // The hosted glass's poll still tells the boat a glass is open.
-    const calls = await (await boatCall(north, 'mirror/calls')).json<{ watchedUntil?: string }>();
-    expect(Date.parse(calls.watchedUntil ?? '')).toBeGreaterThan(Date.now());
+    expect(tab.frames.filter((f) => f.header.t === 'snapshot')).toHaveLength(3);
+    expect(rows).toBeLessThanOrEqual(2);
+    expect(await sql('SELECT count(*) AS n FROM mirror_snapshots WHERE boat=?', boat.id)).toEqual([{ n: 1 }]);
+    north.socket.close(); tab.socket.close();
   });
 
   it('writes only the snapshot’s own row for a put', async () => {

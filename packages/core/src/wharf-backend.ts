@@ -208,37 +208,9 @@ export class WharfBackend implements CoordinationBackend {
     const value = record(await responseValue(await this.raw('mirror/snapshot', 'PUT', gzip, { 'Content-Type': 'application/gzip' })));
     return { etag: string(value.etag), bytes: Number(value.bytes), at: string(value.at) };
   }
-  /** A mirror boat's put of its walking list. The wharf keeps the latest, and hints the other boats when it changed. */
-  async putMirrorAttention(attention: unknown[]): Promise<{ etag: string; at: string; changed: boolean }> {
-    const value = record(await this.request('mirror/attention', { attention }, undefined, 'PUT'));
-    return { etag: string(value.etag), at: string(value.at), changed: value.changed === true };
-  }
-  /** Every other mirror boat's walking list; a list held at its ETag in `known` comes back `unchanged`. */
-  async mirrorAttention(known: Record<string, string> = {}): Promise<WharfAttentionList[]> {
-    const pairs = Object.entries(known).map(([boat, etag]) => `${boat}:${etag}`).join(',');
-    const value = record(await this.request(`mirror/attention${pairs ? `?known=${encodeURIComponent(pairs)}` : ''}`));
-    if (!Array.isArray(value.boats) || value.boats.length > 100) throw new BackendError(502, 'invalid attention lists');
-    return value.boats.map((v) => {
-      const b = record(v);
-      if (typeof b.boat !== 'string' || typeof b.name !== 'string' || typeof b.etag !== 'string' || typeof b.at !== 'string' || (b.unchanged !== true && !Array.isArray(b.attention)))
-        throw new BackendError(502, 'invalid attention list');
-      return b as unknown as WharfAttentionList;
-    });
-  }
   /** Ask the boat that owns an item to acknowledge it, through the wharf's relay. */
   async ackMirrorAttention(boat: string, key: string, stateHash: string): Promise<void> {
     await this.request('mirror/attention/acks', { boat, key, stateHash }, undefined, 'POST');
-  }
-  /** The calls waiting for this boat, and until when a hosted glass is open. */
-  async mirrorCalls(): Promise<{ calls: WharfMirrorCall[]; watchedUntil?: string }> {
-    const value = record(await this.request('mirror/calls'));
-    if (!Array.isArray(value.calls) || value.calls.length > 32) throw new BackendError(502, 'invalid mirror calls');
-    const calls = value.calls.map((v) => {
-      const c = record(v);
-      if (typeof c.id !== 'string' || typeof c.boat !== 'string' || (c.read === undefined) === (c.write === undefined)) throw new BackendError(502, 'invalid mirror call');
-      return c as unknown as WharfMirrorCall;
-    });
-    return { calls, ...(typeof value.watchedUntil === 'string' ? { watchedUntil: value.watchedUntil } : {}) };
   }
   /** Take a call before running it, so it runs once. */
   async takeMirrorCall(id: string): Promise<void> {

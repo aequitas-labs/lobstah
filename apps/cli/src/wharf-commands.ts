@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { CONFIGURED_TRAP_INSTRUCTION, IdleWait, injectedPrompt, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
+import { CONFIGURED_TRAP_INSTRUCTION, IdleWait, lobstahVersion, injectedPrompt, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
   readBrokerAgent, brokerRequest, WharfBackend, recordWharfCatch, type BrokerPoll } from '@lobstah/core';
 import type { BackendScope, Config, ReportInput } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
@@ -11,7 +11,7 @@ import { registerWharfPrWatch } from './pr-watch.js';
 import { wharfLogin } from './wharf-login.js';
 import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
 import { readHookStdin } from './soak-site.js';
-import { WharfWake } from './wharf-wake.js';
+import { WharfSocket } from './wharf-socket.js';
 import { mirrorScope } from './wharf-mirror.js';
 import { markOtherBoatAcked, otherBoatsAttention, parseBoatItemKey } from './wharf-attention.js';
 
@@ -233,7 +233,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       let cursor = opts.opt('--after');
       const idle = new IdleWait(session, config.wait, opts.opt('--timeout'));
       let unknown = false; let renewed = 0;
-      const hints = new WharfWake(scope.location, wharfCredential(scope));
+      // Pushed events end each wait at once; the read of the cursor still decides what to print.
+      const hints = new WharfSocket(scope.location, wharfCredential(scope)!, { kinds: ['event'], client: lobstahVersion() });
       try {
       while (idle.probe || !idle.expired()) {
         try {

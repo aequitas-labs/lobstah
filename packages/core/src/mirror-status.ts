@@ -20,6 +20,8 @@ export interface MirrorStatus {
   bytes?: number;
   /** Until when a hosted glass is open, as the wharf last said. */
   watchedUntil?: string;
+  /** Whether the socket to the wharf was open when this was written. */
+  connected?: boolean;
   /** The hosted glass's origin, as the wharf names it: the one origin this glass answers its focus probe for. */
   glass?: string;
   /** Relayed calls carried out since the daemon started, and the last one's time. */
@@ -31,8 +33,8 @@ export interface MirrorStatus {
   at: string;
 }
 
-/** How long after its last put a mirror still counts as fresh: one idle interval, with a minute's slack. */
-export const MIRROR_FRESH_MS = 6 * 60_000;
+/** How long after the mirror last wrote its status it still counts as fresh: two idle reads, with slack. */
+export const MIRROR_FRESH_MS = 90_000;
 
 export function mirrorStatusPath(): string {
   return path.join(lobstahHome(), 'wharf-mirror.json');
@@ -54,8 +56,12 @@ export function writeMirrorStatus(status: MirrorStatus): void {
   atomicRenameSync(tmp, file);
 }
 
-/** `fresh` when the last put is recent, `stale` when it is not, `never` before the first. */
+/**
+ * `fresh` while the mirror is reading its glass with its socket to the wharf
+ * open, `stale` when it stopped or lost the wharf, `never` before it first ran.
+ * An unwatched mirror puts no snapshot, so the last put says nothing here.
+ */
 export function mirrorFreshness(status: MirrorStatus | undefined, now = Date.now()): 'fresh' | 'stale' | 'never' {
-  if (!status?.lastPutAt) return 'never';
-  return now - Date.parse(status.lastPutAt) <= MIRROR_FRESH_MS ? 'fresh' : 'stale';
+  if (!status?.at) return 'never';
+  return status.connected && now - Date.parse(status.at) <= MIRROR_FRESH_MS ? 'fresh' : 'stale';
 }
