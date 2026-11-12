@@ -244,7 +244,7 @@ h2 {
   color: var(--fg);
 }
 @media (max-width: 899px) {
-  .tabs a:not([data-tab='deck'], [data-tab='reviews']) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='prs']) {
     display: none;
   }
   .nav-toggle {
@@ -945,6 +945,75 @@ tr.rowhead:hover {
 .gchip.dim,
 .gword.dim {
   color: var(--dim);
+}
+/* PR and review cards (components/prs.ts prShapedCard): the PR icon in its state's color, before the title. */
+.prstate {
+  display: inline-flex;
+}
+.prstate.pr-open {
+  color: var(--ok);
+}
+.prstate.pr-draft {
+  color: var(--dim);
+}
+.prstate.pr-merged {
+  color: var(--pr-merged-fg);
+}
+.prstate.pr-closed {
+  color: var(--bad);
+}
+/* A PR's state chip, filled in GitHub's color. */
+.gchip.pr-open,
+.gchip.pr-draft,
+.gchip.pr-merged,
+.gchip.pr-closed {
+  color: var(--on-fill);
+}
+.gchip.pr-open {
+  background: var(--pr-open);
+  border-color: var(--pr-open);
+}
+.gchip.pr-draft {
+  background: var(--pr-draft);
+  border-color: var(--pr-draft);
+}
+.gchip.pr-merged {
+  background: var(--pr-merged);
+  border-color: var(--pr-merged-fg);
+}
+.gchip.pr-closed {
+  background: var(--pr-closed);
+  border-color: var(--pr-closed);
+}
+.prcard .gstate {
+  flex-wrap: wrap;
+}
+.prcard .gtop {
+  align-items: flex-start;
+}
+/* The icon sits on the title's first line. */
+.prcard .gtop .gicon {
+  margin-top: 3px;
+}
+/* The card's buttons, in a bar along its bottom under a thin divider. */
+.gactions {
+  flex-wrap: wrap;
+  margin-top: auto;
+  margin-left: -14px;
+  margin-right: -14px;
+  padding: var(--space-2) 14px 0;
+  border-top: 1px solid var(--line);
+  cursor: default;
+}
+/* In the bar the bar's gap spaces the buttons; Ack drops the margin it has beside a stack heading. */
+.gactions .prack {
+  margin-left: 0;
+}
+/* Asking which merge or which review to post: the buttons may wrap their words, so a phone shows both. */
+.gactions .prmerge.asking .btn,
+.gactions .rv-actions.asking .btn {
+  white-space: normal;
+  text-align: left;
 }
 .harness-icon {
   display: inline-flex;

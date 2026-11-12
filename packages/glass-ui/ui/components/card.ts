@@ -10,6 +10,8 @@ import { html } from '../html.js';
  * - Line 2: the context, with the card's one action at the right.
  * - Line 3: what is happening now.
  * - Line 4, under a thin divider: where it is, with a count or time at the right.
+ * - A PR or review card instead puts status chips under the title and its
+ *   buttons in a bar along the bottom (prs.ts prShapedCard).
  *
  * State is shown one of two ways. A chip (a lowercase word in a pill) is for
  * state you read; an edge (a colored left border plus the word) is for state
@@ -44,8 +46,15 @@ export interface CardProps {
   extra?: Children;
   /** Greyed: signed off, read, done. */
   quiet?: boolean;
-  /** The state word gets its own line under the title instead of ending line 1, leaving the title the whole first line. */
-  stateBelow?: boolean;
+  /** The icon leads the title instead of following it: a PR card's PR icon. */
+  iconFirst?: boolean;
+  /**
+   * Status chips on their own line under the title, leaving the title the
+   * whole first line. `state` then only sets the edge; its word is not shown.
+   */
+  status?: Children;
+  /** The card's buttons, in a bar along its bottom. A click there never opens the card. */
+  actions?: Children;
   onClick?: () => void;
   /** More classes for the card itself. */
   cls?: string;
@@ -73,15 +82,17 @@ export function Card(p: CardProps) {
     .join(' ');
   // A word over 12 characters may shrink (class long, never below 12) and carries itself as a title.
   const long = !!p.state && p.state.word.length > 12;
+  const icon = p.icon && html`<span class="gicon">${p.icon}</span>`;
   const state =
     p.state &&
     html`<span class=${(mark === 'chip' ? 'gchip ' : 'gword ') + p.state.tone + (long ? ' long' : '')} title=${long ? p.state.word : undefined}>${p.state.word}</span>`;
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
-    <div class="gline gtop"><b class="gtitle" title=${p.titleAttr}>${p.title}</b>${p.icon && html`<span class="gicon">${p.icon}</span>`}<span class="gfill"></span>${!p.stateBelow && state}</div>
-    ${p.stateBelow && state && html`<div class="gline gstate">${state}</div>`}
+    <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}</div>
+    ${p.status && html`<div class="gline gstate">${p.status}</div>`}
     ${(p.context || p.action) && html`<div class="gline gcontext"><span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
     ${p.now && html`<div class="gline gnow dim"><span class="gtext" title=${p.nowTitle}>${p.now}</span></div>`}
     ${p.foot && html`<div class="gline gfoot dim"><span class="gtext">${p.foot.left}</span>${p.foot.right && html`<span class="gright">${p.foot.right}</span>`}</div>`}
+    ${p.actions && html`<div class="gline gactions" onClick=${(e: Event) => e.stopPropagation()}>${p.actions}</div>`}
     ${p.extra}
   </div>`;
 }

@@ -361,6 +361,8 @@ export interface GlassReview {
   by?: string;
   /** The draft is staged on the PR as the identity's pending review. */
   staged?: boolean;
+  /** The newest round's review job, when one ran: the card names the trap that has it. */
+  dispatch?: string;
 }
 
 export type { ChecklistItem, ChecklistProgress } from './checklist-types.js';

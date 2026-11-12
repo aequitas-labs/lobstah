@@ -114,16 +114,45 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
   </div>`;
 }
 
-/** Always in the bar. The other tabs join them where the screen fits every tab on one line (glass.css), else sit behind More. */
-const PINNED: readonly GlassTab[] = ['deck', 'reviews'];
+/** What a tab's count says to a screen reader: the same words on the tab bar and the phone bar. */
+function badgeLabel(t: GlassTab, n: number): string {
+  if (t === 'deck') return `${n} new decision${n === 1 ? '' : 's'}`;
+  if (t === 'prs') return `${n} of your PRs need${n === 1 ? 's' : ''} you`;
+  return 'reviews in inbox';
+}
+
+/**
+ * Always in the bar, in the phone bar's order. The other tabs join them where
+ * the screen fits every tab on one line (glass.css), else sit behind More.
+ */
+const PINNED: readonly GlassTab[] = ['deck', 'reviews', 'prs'];
 /** glass.css's breakpoint: from this width every tab is inline and More is hidden. */
 const ALL_TABS_FIT = '(min-width: 900px)';
+
+/**
+ * Whether every tab fits on one line. Below that width (a narrow desktop
+ * window) the bar is the pinned tabs alone, in PINNED's order, so the order
+ * you read is the order Tab moves through.
+ */
+function useAllTabsFit(): boolean {
+  const query = typeof window.matchMedia === 'function' ? window.matchMedia(ALL_TABS_FIT) : undefined;
+  const [fit, setFit] = useState(query ? query.matches : true);
+  useLayoutEffect(() => {
+    if (!query) return;
+    const change = () => setFit(query.matches);
+    change();
+    query.addEventListener?.('change', change);
+    return () => query.removeEventListener?.('change', change);
+  }, []);
+  return fit;
+}
 
 /** The tab bar, and More: a disclosure with ordinary navigation links, so Tab works without menu-specific keys. */
 function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unread: number }) {
   const [open, setOpen] = useState(false);
   const tabs = visibleTabs();
   const moreTabs = tabs.filter((t) => !PINNED.includes(t));
+  const barTabs = useAllTabsFit() ? tabs : [...PINNED.filter((t) => tabs.includes(t)), ...moreTabs];
   const root = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLElement>(null);
@@ -164,18 +193,22 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
     };
   }, [open]);
   const badge = (t: GlassTab) => {
-    const count = t === 'deck' ? unread : t === 'reviews' ? (d?.reviews ?? []).filter((r) => r.stands || r.notification).length : 0;
-    return (
-      count > 0 &&
-      html`<span class="dbadge" aria-label=${t === 'deck' ? `${count} new decision${count === 1 ? '' : 's'}` : 'reviews in inbox'}>${count}</span>`
-    );
+    const count =
+      t === 'deck'
+        ? unread
+        : t === 'reviews'
+          ? (d?.reviews ?? []).filter((r) => r.stands || r.notification).length
+          : t === 'prs'
+            ? prsNeedingYou(d?.prs ?? [])
+            : 0;
+    return count > 0 && html`<span class="dbadge" aria-label=${badgeLabel(t, count)}>${count}</span>`;
   };
   const link = (t: GlassTab, inMenu = false) =>
-    html`<a href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${inMenu ? close : undefined}>${TAB_LABEL[t]}${badge(t)}</a>`;
+    html`<a key=${t} href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${inMenu ? close : undefined}>${TAB_LABEL[t]}${badge(t)}</a>`;
   // With the active tab behind More, More carries the active tab's underline.
   const here = moreTabs.includes(tab);
   return html`<div class="navbar" ref=${root}>
-    <nav class="tabs" id="tabs" aria-label="Spyglass views">${tabs.map((t) => link(t))}</nav>
+    <nav class="tabs" id="tabs" aria-label="Spyglass views">${barTabs.map((t) => link(t))}</nav>
     <button ref=${toggle} type="button" class=${here ? 'nav-toggle on' : 'nav-toggle'} aria-label="More" aria-expanded=${open} aria-controls="more-sections" onClick=${() => (open ? close() : setOpen(true))}><span aria-hidden="true">☰</span></button>
     ${open && html`<nav ref=${menu} id="more-sections" class="more-sections" aria-label="Spyglass sections">${moreTabs.map((t) => link(t, true))}</nav>`}
   </div>`;
@@ -184,7 +217,7 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
 /**
  * On a phone (glass.css, under 700px) the header is the name and the helm
  * pill, then one strip of the fleet's numbers; the tabs, chips and filters
- * give way to a bar at the bottom: On deck, Reviews, Search and Menu. Wider
+ * give way to a bar at the bottom: On deck, Reviews, PRs, Search and Menu. Wider
  * screens never show these parts.
  */
 
@@ -285,9 +318,9 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
       </div>`
     }
     <nav class="bbrow" aria-label="Spyglass">
-      ${link('deck', DECK_ICON, count(unread, `${unread} new decision${unread === 1 ? '' : 's'}`))}
-      ${link('reviews', REVIEWS_ICON, count(reviews, 'reviews in inbox'))}
-      ${link('prs', PRS_ICON, count(prsWaiting, `${prsWaiting} of your PR${prsWaiting === 1 ? '' : 's'} need${prsWaiting === 1 ? 's' : ''} you`))}
+      ${link('deck', DECK_ICON, count(unread, badgeLabel('deck', unread)))}
+      ${link('reviews', REVIEWS_ICON, count(reviews, badgeLabel('reviews', reviews)))}
+      ${link('prs', PRS_ICON, count(prsWaiting, badgeLabel('prs', prsWaiting)))}
       <button type="button" class=${'bbitem bbiconly' + (st.q || st.repo ? ' on' : '')} aria-label="Search" onClick=${() => setMode('search')}><span class="bbicon">${SEARCH_ICON}</span></button>
       <button type="button" class=${'bbitem bbiconly' + (mode === 'menu' ? ' on' : '')} aria-label="Menu" aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${MENU_ICON}</span></button>
     </nav>
