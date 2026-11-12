@@ -442,6 +442,8 @@ export interface DaemonHooks {
   prWatches?: (now: number, log: (message: string) => void) => void;
   /** Records todo firings, provided by the CLI daemon entry. Runs after `prWatches`, so PR records are fresh. */
   todoFiring?: (now: number, log: (message: string) => void) => void;
+  /** Withdraws finished run cards past their grace period and prunes old run history (see run-cleanup). */
+  runCleanup?: (now: number, log: (message: string) => void) => void;
   /** Wakes traps on Codex's shared app-server after it restarts; provided by the CLI daemon entry. */
   codexServerWatch?: (now: number, log: (message: string) => void) => void;
   /** Wakes a Codex trap that claimed work and never read it, then releases the claim (see codex-claim-watch). */
@@ -596,6 +598,11 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   } catch (err) {
     // A failure here must not skip the rest of the tick either.
     log(`todo firing: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    hooks.runCleanup?.(hooks.now?.() ?? Date.now(), log);
+  } catch (err) {
+    log(`run cleanup: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
     hooks.codexServerWatch?.(hooks.now?.() ?? Date.now(), log);

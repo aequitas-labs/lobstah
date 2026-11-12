@@ -3004,3 +3004,23 @@ a.runbtn {
   flex: none;
   white-space: nowrap;
 }
+
+/* Finished runs that left the decisions: closed until opened, and quieter than a standing card. */
+.recent-runs {
+  margin-top: var(--space-2);
+}
+.recent-runs summary {
+  cursor: pointer;
+}
+.recent-run .drow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5em;
+  color: inherit;
+  text-decoration: none;
+}
+.recent-run .dtitle {
+  font-weight: normal;
+  min-width: 0;
+}

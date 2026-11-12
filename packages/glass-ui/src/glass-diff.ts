@@ -19,6 +19,7 @@ import type {
   LandedCatch,
   Notice,
   PrBadge,
+  RecentRun,
   TendAttention,
   TodoView,
   Watch,
@@ -474,6 +475,8 @@ export interface DeckInputs {
   view: GlassPrefs['view'] | undefined;
   /** Decision and raw question cards, newest first. */
   decisions: DecisionCard[];
+  /** Finished runs whose cards have left the glass, newest first. */
+  recentRuns: RecentRun[];
   prAttention: DeckAttention[];
   landed: LandedCatch[];
   /** Newest first, regardless of acknowledgment; the deck shows REPORTS_MAX. */
@@ -555,6 +558,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     deck: {
       view: st.view,
       decisions: filteredDecisionCards(d, st),
+      recentRuns: (d.recentRuns || []).filter((r) => hasQuery(r.repo, r.title, r.dispatch)),
       prAttention: shownPrAttention((d.attention || []).map(noAge), prs, stacks),
       landed: (d.landed || [])
         .filter((a) => inRepo({ ...a, dispatch: a.id }) && recent(a.at, LANDED_WINDOW_MS) && hasQuery(a.repo, a.note, a.id))

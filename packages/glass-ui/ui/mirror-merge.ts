@@ -122,6 +122,7 @@ const KEYED: ReadonlyArray<keyof GlassSnapshot> = [
   'helms',
   'todos',
   'configuredTraps',
+  'recentRuns',
 ];
 const KEY_FIELDS = ['id', 'key', 'trapId', 'url', 'sessionId', 'dispatch', 'profile'];
 /** The lists concatenated across boats. */
@@ -145,6 +146,7 @@ const LISTS: ReadonlyArray<keyof GlassSnapshot> = [
   'standingGrants',
   'todos',
   'decisions',
+  'recentRuns',
 ];
 /** The fields that say a row's place, labelled with its boat when there are several: [list, field, label even when empty]. */
 const LABELLED: ReadonlyArray<[keyof GlassSnapshot, string, boolean]> = [
@@ -152,6 +154,7 @@ const LABELLED: ReadonlyArray<[keyof GlassSnapshot, string, boolean]> = [
   ['traps', 'repo', true],
   ['attention', 'repo', true],
   ['decisions', 'repo', true],
+  ['recentRuns', 'repo', false],
   ['reports', 'repo', false],
   ['landed', 'repo', false],
   ['helms', 'grounds', false],
