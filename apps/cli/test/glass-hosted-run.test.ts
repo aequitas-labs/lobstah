@@ -144,13 +144,13 @@ describe('a finished run card', () => {
       },
     });
     await h.run();
-    expect(text(h.g.$('#doverlay .runstate'))).toContain('Succeeded');
+    expect(h.g.$('#doverlay .runstate .runicon')?.getAttribute('aria-label')).toContain('Succeeded');
     // The run answered the card: the next snapshot no longer lists it, and the card stays on screen with its result.
     h.fleet.attention = h.fleet.attention.filter((a) => a.key !== RUN_KEY);
     h.fleet.decisions = h.fleet.decisions.filter((d) => d.key !== RUN_KEY);
     h.g.serve(h.fleet);
     await h.g.poll();
-    expect(text(h.g.$('#doverlay .runstate'))).toContain('Succeeded');
+    expect(h.g.$('#doverlay .runstate .runicon')?.getAttribute('aria-label')).toContain('Succeeded');
     expect((h.g.$('#doverlay .dprev') as HTMLButtonElement).disabled).toBe(false);
     expect((h.g.$('#doverlay .dnext') as HTMLButtonElement).disabled).toBe(false);
     (h.g.$('#doverlay .dnext') as HTMLButtonElement).click();
@@ -183,7 +183,7 @@ describe('a finished run card', () => {
     h.fleet.decisions = h.fleet.decisions.filter((d) => d.key !== RUN_KEY);
     h.g.serve(h.fleet);
     await h.g.poll();
-    expect(text(h.g.$('#doverlay .runstate'))).toContain('Failed');
+    expect(h.g.$('#doverlay .runstate .runicon')?.getAttribute('aria-label')).toContain('Failed');
     expect((h.g.$('#doverlay .dnext') as HTMLButtonElement).disabled).toBe(true);
     h.g.document.dispatchEvent(new h.g.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     await h.g.settle();

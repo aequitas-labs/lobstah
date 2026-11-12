@@ -304,6 +304,32 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
   expect(g.writes.some((w) => w.path.includes('helm/'))).toBe(false);
 });
 
+it('Ctrl+Enter queues the helm message as its button does, only when there is one to send, and once', async () => {
+  const g = await page('/#dispatches');
+  await g.click('#dispatches tr', 'job');
+  const box = g.doc.querySelector("[aria-label='message to helm']")!;
+  const press = async (opts: { ctrlKey?: boolean; repeat?: boolean }) => {
+    const ev = new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...opts });
+    box.dispatchEvent(ev as unknown as Event);
+    await g.settle();
+    return ev;
+  };
+  expect(g.text('#modalbox .jobsend .sendhint')).toMatch(/↵ to send$/);
+  // An empty box: its button is disabled, and so is the shortcut.
+  await press({ ctrlKey: true });
+  expect(g.writes).toHaveLength(0);
+  g.input('message to helm', 'Please retry');
+  await g.settle();
+  // Plain Enter is a newline.
+  expect((await press({})).defaultPrevented).toBe(false);
+  await press({ ctrlKey: true, repeat: true });
+  expect(g.writes).toHaveLength(0);
+  expect((await press({ ctrlKey: true })).defaultPrevented).toBe(true);
+  expect(g.writes).toHaveLength(1);
+  expect(g.writes[0]).toMatchObject({ path: '/api/glass/requests', body: { kind: 'message', dispatch: 'job', text: 'Please retry' } });
+  expect(g.text('#modalbox')).toContain('Queued for the helm');
+});
+
 it('boats show repos and check-in, no edit/grant controls; revoke and delete each require confirmation', async () => {
   const g = await page('/#boats');
   // The card shows the boat's access and age; a tap shows its repos, last check-in and trap request.

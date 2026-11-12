@@ -132,8 +132,11 @@ describe('the deck', () => {
     const g = await page(d, '#deck', 'table');
     const row = g.$('#deck .drow[data-decision="decision:run"]')!;
     expect(row.querySelectorAll('button')).toHaveLength(1);
-    expect(text(row.querySelector('.dopen .dsent'))).toBe('Failed · exit 3');
-    expect(row.querySelector('.dsent')!.className).toContain('bad');
+    // Its state is an icon: a red X, named and titled with the words, the exit code and how long it ran.
+    const icon = row.querySelector('.dopen .dsent .runicon')!;
+    expect(icon.className).toContain('run-failed bad');
+    expect([icon.getAttribute('role'), icon.getAttribute('aria-label'), icon.getAttribute('title')]).toEqual(['img', 'Failed · exit 3 · 1ms', 'Failed · exit 3 · 1ms']);
+    expect(text(row.querySelector('.dopen .dsent'))).toBe('');
     expect(text(row.querySelector('.dboat'))).toBe('⛵ studio');
   });
 });

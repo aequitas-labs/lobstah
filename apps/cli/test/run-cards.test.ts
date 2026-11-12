@@ -216,7 +216,7 @@ describe('a run card in the glass', () => {
       },
     });
     open.push(g);
-    expect(g.$('#doverlay .runstate')?.textContent).toContain('Failed · exit 3');
+    expect(g.$('#doverlay .runstate .runicon.run-failed')?.getAttribute('aria-label')).toMatch(/^Failed · exit 3\b/);
     expect(g.$('#doverlay .runlog')?.textContent).toContain('command failed');
     expect(g.$('#doverlay .runbtn')?.textContent).toBe('Run again');
     expect(g.$$('#doverlay .dopt')).toHaveLength(0);
@@ -246,7 +246,7 @@ describe('a run card in the glass', () => {
     open.push(g);
     const stop = g.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Stop') as HTMLButtonElement;
     expect(stop).toBeDefined();
-    expect(g.$('#doverlay .runstate')?.textContent).toContain('Running');
+    expect(g.$('#doverlay .runstate .runicon.run-running')?.getAttribute('aria-label')).toMatch(/^Running · started /);
     expect(g.$('#doverlay .runbtn')).toBeNull();
     stop.click();
     await g.settle();

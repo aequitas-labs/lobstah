@@ -2184,6 +2184,26 @@ a.lob {
 .btn.dsend:disabled {
   color: var(--dim);
 }
+/* The send shortcut's hint (send-key.ts), quiet beside Send in the subtitle gray. */
+.sendhint {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.dtools .sendhint {
+  margin-left: auto;
+}
+.dtools .sendhint + .dsend {
+  margin-left: 0;
+}
+/* The helm message's button with its hint. */
+.jobsend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 6px;
+}
 .btn:disabled {
   cursor: default;
   opacity: 0.6;
@@ -2979,6 +2999,44 @@ footer .glass-brand {
 .runbtn:not([disabled]) {
   border-color: var(--ok);
   color: var(--ok);
+}
+/* A run's status as an icon (components/run-status.ts), its words in its name and tooltip. */
+.runicon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+.runicon .rundot {
+  display: none;
+}
+.runicon .runspin {
+  transform-origin: 8px 8px;
+  animation: runspin 0.9s linear infinite;
+}
+@keyframes runspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Less motion: a still amber dot instead of the spin. */
+@media (prefers-reduced-motion: reduce) {
+  .runicon .runspin {
+    display: none;
+  }
+  .runicon .rundot {
+    display: inline;
+  }
+}
+.runstate {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* In the card the icon stands in for the status line, so it is a size larger than in a deck row. */
+.runout .runicon svg {
+  width: 20px;
+  height: 20px;
 }
 .runout {
   display: flex;
