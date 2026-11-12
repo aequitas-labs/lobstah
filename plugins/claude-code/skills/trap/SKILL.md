@@ -14,7 +14,7 @@ belongs to a person or to the helm, report `needs-decision` with the question.
 If you are waiting on an external await, report `paused` and name it.
 Never end a turn on `working`.
 
-Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.
+Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`. The exception is a document under review in its own tool, such as a plan or spec: report `paused --waiting-on review --link <its URL>`. That wakes nobody; the document's tool shows it to the person and wakes you.
 
 ## Signing on
 

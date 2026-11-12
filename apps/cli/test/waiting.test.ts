@@ -82,13 +82,19 @@ describe('report paused --waiting-on --link', () => {
     expect(readStatusLog(id, 'work').map((e) => e.verb)).toEqual(['working']);
   });
 
-  it('refuses person and non-PR review pauses with the needs-decision instruction', () => {
+  it('refuses a person pause with the needs-decision instruction', () => {
     active();
-    for (const args of [['--waiting-on', 'person'], ['--waiting-on', 'review', '--link', 'https://ume.example.com/plan']]) {
-      const res = lobstah('report', id, 'paused', 'please look at this', ...args);
-      expect(res.status, res.stdout).toBe(2);
-      expect(res.stdout).toContain('report needs-decision with the question or the thing to look at');
-    }
+    const res = lobstah('report', id, 'paused', 'please look at this', '--waiting-on', 'person');
+    expect(res.status, res.stdout).toBe(2);
+    expect(res.stdout).toContain('report needs-decision with the question or the thing to look at');
     expect(readStatusLog(id, 'work').map((e) => e.verb)).toEqual(['working']);
+  });
+
+  it('accepts a review pause on a plan link, with no PR warning', () => {
+    active();
+    const res = lobstah('report', id, 'paused', 'plan is up for review', '--waiting-on', 'review', '--link', 'https://ume.example.com/plan');
+    expect(res.status, res.stdout).toBe(0);
+    expect(res.stdout).not.toContain('warning');
+    expect(readStatusLog(id, 'work').at(-1)).toMatchObject({ verb: 'paused', waitingOn: 'review', link: 'https://ume.example.com/plan' });
   });
 });

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { activeIds, answeredAt, reviewDispatchIds, laneDirs, lastEventAt, questionHeld, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
+import { activeIds, answeredAt, reviewDispatchIds, laneDirs, lastEventAt, questionHeld, quietWait, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 
 export interface NotifyEvent {
@@ -50,7 +50,7 @@ export function pendingNotifications(
   const question = (e: StatusEntry) => e.verb === 'needs-decision' || e.verb === 'blocked';
   if (reviewDispatchIds().has(id)) return [];
   return fresh
-    .filter((e) => verbs.includes(e.verb) && e.waitingOn !== 'heavy' && !(question(e) && answeredAt(id, lane, e.at) !== undefined))
+    .filter((e) => verbs.includes(e.verb) && !quietWait(e) && !(question(e) && answeredAt(id, lane, e.at) !== undefined))
     .map((entry) => ({ id, lane, entry }));
 }
 
@@ -149,7 +149,7 @@ export function attentionNow(
       const index = log.length - 1 - [...log].reverse().findIndex((e) => e.verb === state);
       const entry = log[index];
       if (!entry) continue;
-      if (entry.waitingOn === 'heavy') continue; // a push in line is routine
+      if (quietWait(entry)) continue; // a push in line, or a document review its own tool handles
       if (state !== 'paused' && answeredAt(id, lane, entry.at) !== undefined) continue; // answered: nothing to remind
       const file = attnCursorPath(id, lane);
       const cursor = readAttnCursor(file);
@@ -183,7 +183,7 @@ export function freshWakeEvents(
           if (!verbs.includes(entry.verb)) continue;
           // Successful drafts already belong to the person's Reviews page.
           if (lane === 'chore' && entry.verb === 'done' && reviewJobs.has(id)) continue;
-          if (entry.waitingOn === 'heavy') continue; // a push in line is routine
+          if (quietWait(entry)) continue; // a push in line, or a document review its own tool handles
           // A question already answered by the time we look is not a wake.
           if ((entry.verb === 'needs-decision' || entry.verb === 'blocked') && answeredAt(id, lane, entry.at) !== undefined) continue;
           out.push({ id, lane, entry });
