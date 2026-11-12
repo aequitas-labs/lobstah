@@ -319,7 +319,7 @@ export async function loadSettings(): Promise<void> {
     if (!r.ok) throw new Error(`/data/settings answered ${r.status}`);
     setState({ settings: r.data, settingsError: null });
   } catch {
-    setState({ settingsError: 'Settings could not be read' });
+    setState({ settingsError: 'Configuration could not be read' });
   } finally {
     settingsInflight = false;
   }

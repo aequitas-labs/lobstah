@@ -179,7 +179,7 @@ h2 {
   padding: 3px 9px;
 }
 .controls select,
-.newtrap select,
+.newtrap-form select,
 .controls input[type='search'] {
   background: var(--card);
   border: 1px solid var(--line);
@@ -205,8 +205,8 @@ h2 {
   height: 14px;
   accent-color: var(--link);
 }
-/* The tab bar: On deck and Reviews always; the other tabs inline from 900px, where all ten
-   fit on one line (about 840px with two-digit badges), else behind More at the bar's right. */
+/* The tab bar: On deck and Reviews always; the other tabs inline from 1200px, where all twelve
+   with their icons fit on one line (about 1150px), else behind More at the bar's right. */
 .navbar {
   display: flex;
   align-items: stretch;
@@ -247,7 +247,7 @@ h2 {
 .nav-toggle:hover {
   color: var(--fg);
 }
-@media (max-width: 899px) {
+@media (max-width: 1199px) {
   .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='prs']) {
     display: none;
   }
@@ -1361,6 +1361,103 @@ a.lob.extlink::after {
 }
 #overlay.open {
   display: block;
+}
+/* A dialog (components/dialog.ts): a centered modal on a desktop, a sheet from the bottom on a phone. */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--scrim);
+}
+.dialog {
+  width: min(440px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--modal-radius);
+  padding: 12px 18px 16px;
+  outline: none;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.dialog-head h3 {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  font-size: 14px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 16px;
+}
+.newtrap-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.settings-config {
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+.settings-config a {
+  display: inline-flex;
+  align-items: center;
+}
+@media (max-width: 699px) {
+  .dialog-scrim {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .dialog {
+    width: 100%;
+    max-height: 85dvh;
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+}
+/* A menu icon (components/icons.ts) before its words; alone in the gear and the bottom bar. */
+.navicon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+}
+.bbicon .navicon,
+#gearbtn .navicon {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+/* A button already spaces its icon from its words. */
+.btn .navicon {
+  margin-right: 0;
+}
+.pagetitle {
+  display: flex;
+  align-items: center;
+  margin: 4px 0 12px;
+  font-size: 16px;
+}
+.pagetitle .navicon {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
 }
 .modal {
   max-width: var(--modal-width);
@@ -2903,6 +3000,15 @@ footer .glass-brand {
 .runwarnings ul {
   margin: 4px 0 0;
   padding-left: 18px;
+}
+.usage-limit-banner {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--warn);
+  overflow-wrap: anywhere;
 }
 .runmeta {
   display: flex;

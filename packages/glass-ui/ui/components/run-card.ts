@@ -86,7 +86,7 @@ export function runBlocked(run: GlassRunCard, passkeys?: number): string | undef
   if (!count)
     return hosted
       ? 'Pair this phone first: run lobstah run passkey add --hosted on the Mac.'
-      : 'Set up a passkey in Settings to run cards.';
+      : 'Set up a passkey in Configuration to run cards.';
   return undefined;
 }
 

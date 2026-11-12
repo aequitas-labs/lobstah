@@ -21,6 +21,8 @@ import { ageText } from './age.js';
 import { VERB_TONE, VerbIcon, isIconVerb } from './run-status.js';
 import type { VerbTone } from './run-status.js';
 import { Button } from './button.js';
+import { Dialog } from './dialog.js';
+import { ITEM_ICON } from './icons.js';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
@@ -439,6 +441,7 @@ export const verbWord = (verb: string): string => verb.replace(/-/g, ' ');
  * decision, red blocked or failed, grey paused, green done, grey queued or unknown.
  */
 export function verbTone(verb: string): VerbTone {
+  if (verb === 'limited') return 'bad';
   return isIconVerb(verb) ? VERB_TONE[verb] : 'dim';
 }
 
@@ -743,6 +746,7 @@ export function trapRow(t: GlassTrap): TrapRowView {
 
 /** A trap's state: starting, start failed, signed off, idle (listening or not), parked on a wait, or working a catch. */
 type TrapState =
+  | { kind: 'limited'; reason: string; resetAt?: string }
   | { kind: 'requested'; helmOn: boolean }
   | { kind: 'starting'; deadline: string }
   | { kind: 'start failed'; reason: string }
@@ -752,6 +756,7 @@ type TrapState =
   | { kind: 'working'; current: GlassDispatchSummary };
 
 function trapState(t: GlassTrap): TrapState {
+  if (t.usageLimit) return { kind: 'limited', reason: t.usageLimit.reason, resetAt: t.usageLimit.resetAt };
   if (t.requested) return { kind: 'requested', helmOn: !!getState().snapshot?.helmOn };
   if (t.starting)
     return t.starting.failedAt
@@ -772,6 +777,7 @@ function trapState(t: GlassTrap): TrapState {
  */
 export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   const s = trapState(t);
+  if (s.kind === 'limited') return 'bad';
   if (s.kind === 'working' || s.kind === 'starting') return 'warn';
   if (s.kind === 'idle' && s.listening) return 'ok';
   if (s.kind === 'start failed') return 'bad';
@@ -787,6 +793,8 @@ export function trapStatus(t: GlassTrap): { word: string; tone: 'ok' | 'warn' | 
 /** What a trap is doing now, without its state word: its card's third line. */
 export function trapWork(t: GlassTrap): Children {
   const s = trapState(t);
+  if (s.kind === 'limited')
+    return html`<span class="bad">Usage limit${s.resetAt ? ` · resets ${new Date(s.resetAt).toLocaleString()}` : ` · ${s.reason}`}</span>`;
   if (s.kind === 'requested') return s.helmOn ? 'waiting for the helm' : 'waiting for a helm';
   if (s.kind === 'starting') return 'waiting for its session to sign on';
   if (s.kind === 'start failed') return html`<span class="bad">${LinkedText(s.reason)}</span>`;
@@ -805,6 +813,7 @@ export function trapWork(t: GlassTrap): Children {
 /** trapWork as plain text: the hover title of its line. */
 export function trapWorkText(t: GlassTrap): string {
   const s = trapState(t);
+  if (s.kind === 'limited') return `${s.reason}${s.resetAt ? ` · resets ${s.resetAt}` : ''}`;
   if (s.kind === 'requested') return s.helmOn ? 'waiting for the helm' : 'waiting for a helm';
   if (s.kind === 'starting') return `waiting for its session to sign on by ${s.deadline}`;
   if (s.kind === 'start failed') return s.reason;
@@ -859,6 +868,7 @@ const workTitle = (c: GlassDispatchSummary) => c.title.slice(0, 40) || '(no titl
 export function trapNow(t: GlassTrap): Children {
   const s = trapState(t);
   const dot = html`<span class=${'dot trapdot ' + trapDotTone(t)}></span>`;
+  if (s.kind === 'limited') return [dot, html`<span class="bad">limited</span>`, ' · ', trapWork(t)];
   if (s.kind === 'requested') return [dot, html`<span class="dim">${requestedText(t, s.helmOn)}</span>`];
   if (s.kind === 'starting') return [dot, 'starting · waiting for its session to sign on'];
   if (s.kind === 'start failed') return [dot, html`<span class="bad">start failed</span>`, ' · ', LinkedText(s.reason)];
@@ -893,7 +903,7 @@ export function startCommands(t: GlassTrap): Children {
   return html`<div class="startcmds" onClick=${stop}><div class="dim">start it: run one in a terminal</div>${commands.map((c) => cmdRow(c.command, c.harness))}</div>`;
 }
 
-/** The New trap button and its form: a repo and a harness, filed as a request for the helm. */
+/** The New trap button and its dialog: a repo and a harness, filed as a request for the helm. */
 export function NewTrap() {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('trap-request')) return null;
@@ -910,20 +920,25 @@ export function NewTrap() {
     setResult(error ?? null);
     if (!error) setOpen(false);
   };
-  if (!open)
-    return html`<span class="newtrap"><${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//></span>`;
-  return html`<form class="newtrap" onClick=${stop} onSubmit=${submit}>
-    <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
-    <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
-    <${Button} type="submit" disabled=${!chosen}>Request<//>
-    <${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//>
-    ${result && html`<span class="bad">${result}</span>`}
-  </form>`;
+  const trigger = html`<${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//>`;
+  // A modal on a desktop, a sheet on a phone (Dialog); the form's fields stack in it.
+  return html`<span class="newtrap">${trigger}${
+    open &&
+    html`<${Dialog} title="New trap" icon=${ITEM_ICON.newTrap} onClose=${() => setOpen(false)}>
+      <form class="newtrap-form" onSubmit=${submit}>
+        <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
+        <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
+        ${result && html`<div class="bad">${result}</div>`}
+        <div class="dialog-actions"><${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//><${Button} variant="primary" type="submit" disabled=${!chosen}>Request<//></div>
+      </form>
+    <//>`
+  }</span>`;
 }
 
 /** trapNow as plain text: the hover title of a clamped meta line. */
 export function trapNowText(t: GlassTrap): string {
   const s = trapState(t);
+  if (s.kind === 'limited') return `limited · ${trapWorkText(t)}`;
   if (s.kind === 'requested') return requestedText(t, s.helmOn);
   if (s.kind === 'starting') return `starting · sign-on due by ${s.deadline}`;
   if (s.kind === 'start failed') return `start failed · ${s.reason}`;

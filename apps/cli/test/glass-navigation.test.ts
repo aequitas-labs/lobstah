@@ -104,7 +104,7 @@ describe('the tab bar and More', () => {
     const mine = acceptanceFleet().prs[0]!;
     d.prs = [{ ...mine, mine: true, state: 'OPEN', badge: { ...mine.badge, tone: 'bad', text: 'checks failed' } }];
     d.stacks = acceptanceFleet().stacks;
-    // Under glass.css's 900px breakpoint every tab but the pinned ones sits behind More.
+    // Under glass.css's 1200px breakpoint every tab but the pinned ones sits behind More.
     const narrow = (w: Window) => {
       (w as unknown as { matchMedia: (q: string) => unknown }).matchMedia = (q: string) => ({
         matches: false,

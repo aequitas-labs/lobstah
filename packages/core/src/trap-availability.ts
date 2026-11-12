@@ -7,9 +7,10 @@ import { pendingIds, queuedDescriptor, storedDescriptor } from './queue.js';
 import { readStatusLog } from './status.js';
 import { planThrow, type ThrowPlanRow } from './throw-plan.js';
 import { sessionHolders } from './session-holder.js';
+import { trapUsageLimit } from './usage-limits.js';
 
 export interface TrapAvailability {
-  state: 'free' | 'busy';
+  state: 'free' | 'busy' | 'limited';
   dispatch?: string;
   verb?: string;
   text: string;
@@ -17,6 +18,8 @@ export interface TrapAvailability {
 
 /** Terminal reports release availability even before the stale claimed pointer is cleared. */
 export function trapAvailability(reg: TrapRegistration, now = Date.now()): TrapAvailability {
+  const limit = trapUsageLimit(reg);
+  if (limit) return { state: 'limited', dispatch: reg.claimed, verb: 'limited', text: `limited: ${limit.reason}${limit.resetAt ? ` · resets ${limit.resetAt}` : ''}` };
   if (reg.configured && reg.claimed && !storedDescriptor(reg.claimed, 'work') && !storedDescriptor(reg.claimed, 'chore')) return { state: 'busy', dispatch: reg.claimed, verb: reg.hostedCatch ? 'working' : 'waiting', text: `busy on ${reg.claimed} (wharf)` };
   if (hasOpenCatch(reg)) {
     const id = reg.claimed!;
@@ -113,7 +116,7 @@ export function reusableTraps(cfg: Config, repo: string, now = Date.now()): Arra
 export type TrapSelection =
   | { action: 'reuse'; registration: TrapRegistration; why: string }
   | { action: 'return'; row: ThrowPlanRow; why: string }
-  | { action: 'new' | 'wait'; why: string };
+  | { action: 'new' | 'wait'; why: string; harness?: string };
 
 /** Reuse a fresh free registration, then a safely returnable roster entry, then capacity for a new trap. */
 export function selectRepoTrap(cfg: Config, repo: string, harness?: string, now = Date.now(), failedStarts: ReadonlySet<string> = new Set()): TrapSelection {
@@ -125,9 +128,12 @@ export function selectRepoTrap(cfg: Config, repo: string, harness?: string, now 
   // A stowed or ghosted trap coming back takes a slot, like a new one: at the cap, the work waits.
   if (trapCapReached(cfg, repo)) return { action: 'wait', why: trapCapacityReason(cfg, repo, harness, now) };
   const rows = planThrow(cfg, { repo }, { now });
-  const returning = rows.find((r) => !failedStarts.has(r.trapId) && (r.action === 'resume' || r.action === 'cold') && (!harness || r.harness === harness));
+  const returning = rows.find((r) => !trapUsageLimit({ harness: r.harness ?? 'claude' }) && !failedStarts.has(r.trapId) && (r.action === 'resume' || r.action === 'cold') && (!harness || r.harness === harness));
   if (returning) return { action: 'return', row: returning, why: `no suitable free live trap; ${returning.why}` };
-  return { action: 'new', why: `no suitable free live or returnable stowed trap for ${repo}${harness ? ` (${harness})` : ''}` };
+  const requested = harness ?? cfg.repos[repo]!.harness?.default ?? cfg.harness.default ?? 'claude';
+  const selected = trapUsageLimit({ harness: requested }) ? (harness ? undefined : ['codex', 'claude'].find(candidate => !trapUsageLimit({ harness: candidate }))) : requested;
+  if (!selected) return { action: 'wait', why: `${requested} usage is limited; waiting for its reset` };
+  return { action: 'new', harness: selected, why: `no suitable free live or returnable stowed trap for ${repo} (${selected})` };
 }
 
 export function trapCapacityReason(cfg: Config, repo: string, harness?: string, now = Date.now()): string {

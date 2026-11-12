@@ -242,6 +242,9 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
+import { createUsageLimitWatch } from './usage-limit-watch.js';
+import { swapTrapCatch } from './trap-swap.js';
+import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
 import { createTurnWaits } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
@@ -916,7 +919,8 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
     const queued = bucket === 'queue';
     const log = readStatusLog(id, lane);
     const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
-    const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
+    const limited = dispatchUsageLimit(id, lane);
+    const state = limited ? 'limited' : displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
     const activity = bucket === 'active' ? activityView(readActivity(id, lane), staleSecs) : undefined;
     const waiting = bucket === 'active' ? waitingView(log.at(-1)) : undefined;
     const updated =
@@ -929,7 +933,7 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
       bucket,
       state,
       updated,
-      waiting: waiting ? waitingText(waiting) : '',
+      waiting: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : waiting ? waitingText(waiting) : '',
       activity: activity ? activityLine(activity) : '',
     };
   });
@@ -1413,7 +1417,8 @@ async function mainCli(): Promise<void> {
       const names = trapNamer();
       const since = queuedAt(id, lane);
       const claimedAt = claim?.at;
-      const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
+      const limited = dispatchUsageLimit(id, lane);
+      const state = limited ? 'limited' : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
       // Activity only while the dispatch is live: a finished one did its last thing.
       const live = fs.existsSync(path.join(laneDirs(lane).active, id));
       const activity = live ? activityView(readActivity(id, lane), wedgeSecs()) : undefined;
@@ -1424,6 +1429,7 @@ async function mainCli(): Promise<void> {
           id,
           lane,
           state,
+          ...(limited ? { usageLimit: limited.reason, resetAt: limited.resetAt } : {}),
           ...(progress ? { attention: progress.state, reason: progress.text } : {}),
           ...(descriptor?.systemRepair ? {
             repairPr: descriptor.pr?.url ?? '(unknown)',
@@ -1899,6 +1905,13 @@ async function mainCli(): Promise<void> {
       }
       const lane = findLane(id);
       const activeDir = path.join(laneDirs(lane).active, id);
+      if (readSessionClaim(id, lane)?.by.startsWith('wt:') || queuedDescriptor(id, lane)?.for?.startsWith('wt:')) {
+        const harness = opt('--harness') ?? resolveSessionHarness(id, loadConfig(), lane).harness;
+        if (!harness) throw new Error('name the target harness with --harness claude|codex');
+        const result = await swapTrapCatch(id, lane, { cfg: loadConfig(), harness, model: opt('--model'), effort: opt('--effort'), by: callerSession(opt('--session'))?.id });
+        console.log(toonKV({ id, harness: result.harness, swapped: true, trap: result.trap, session: result.registration.sessionId }));
+        break;
+      }
       if (!fs.existsSync(activeDir)) throw new Error(`${id} is not active — swap only applies to in-flight dispatches`);
 
       const descFile = path.join(activeDir, 'descriptor.json');
@@ -2385,7 +2398,7 @@ async function mainCli(): Promise<void> {
         }
         console.log(`warning: ${BYPASS_WARNING}`);
       }
-      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, harness: opt('--harness'), ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
       const configuredThrowName = pos.length === 1 ? (pos[0]!.startsWith('trap:') ? pos[0]!.slice(5) : rosterByAddress(pos[0]!)?.configured?.profile) : undefined;
       if (configuredThrowName) {
         const name = configuredThrowName, profile = cfgThrow.traps?.[name];
@@ -2468,7 +2481,7 @@ async function mainCli(): Promise<void> {
         const repoSel = opt('--repo');
         if (repoSel !== undefined && !cfgThrow.repos[repoSel]) throw new Error(`no repo "${repoSel}" is configured (configured: ${Object.keys(cfgThrow.repos).join(', ') || 'none'})`);
         gateHelm(callerThrow);
-        const rows = planThrow(cfgThrow, { all: has('--all'), ...(repoSel !== undefined ? { repo: repoSel } : {}) }, { repos: throwGrounds?.repos });
+        const rows = planThrow(cfgThrow, { all: has('--all'), ...(repoSel !== undefined ? { repo: repoSel } : {}) }, { repos: throwGrounds?.repos, harness: opt('--harness') });
         const results = await throwBatch({ ...base, rows });
         console.log(json ? JSON.stringify({ results }, null, 2) : batchText(results));
         if (results.some((r) => r.result === 'failed')) process.exitCode = 1;
@@ -2514,7 +2527,7 @@ async function mainCli(): Promise<void> {
       const caller = callerSession(opt('--session'));
       const groundsName = opt('--grounds') ?? (caller?.id !== undefined ? helmOf(caller.id)?.grounds : undefined);
       const grounds = groundsName !== undefined ? resolveGrounds(cfg, groundsName) : undefined;
-      const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos });
+      const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos, harness: opt('--harness') });
       // Each repo's traps in use against its cap: a resume past the cap waits like a new trap.
       const capacity = repoTrapRows(cfg, [...new Set(rows.flatMap((r) => (r.repo && cfg.repos[r.repo] ? [r.repo] : [])))].sort());
       if (has('--json')) {
@@ -3990,6 +4003,7 @@ async function mainCli(): Promise<void> {
           runCleanup: createRunCleanup(),
           codexServerWatch: createCodexServerWatch(),
           codexClaimWatch: createCodexClaimWatch(),
+          usageLimits: createUsageLimitWatch(),
           turnWaits: createTurnWaits().pass,
           codexHookWatch: createCodexHookWatch(),
         });
