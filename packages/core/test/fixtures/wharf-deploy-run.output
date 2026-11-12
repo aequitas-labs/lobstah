@@ -1,0 +1,131 @@
+‹SLACK_CLIENT_ID›
+== Deploying main at 6b5765cfde1f from /tmp/lobstah-wharf-deploy-6b5765cf
+== Installing and building
+== Checking the Cloudflare login
+Logged in.
+== Live now (read-only)
+Worker version at 100%: 00000000-0000-4000-8000-000000000000
+== Pending migrations on lobstah-wharf-auth (read-only)
+npm warn Unknown env config "reporter". This will stop working in the next major version of npm.
+npm warn Unknown env config "npm-globalconfig". This will stop working in the next major version of npm.
+npm warn Unknown env config "verify-deps-before-run". This will stop working in the next major version of npm.
+npm warn Unknown env config "_jsr-registry". This will stop working in the next major version of npm.
+
+ ⛅️ wrangler 4.149.0 (update available 4.160.1)
+───────────────────────────────────────────────
+Resource location: remote 
+
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mMore than one account available but unable to select one in non-interactive mode.[0m
+
+  Please set the appropriate `account_id` in your Wrangler configuration file or assign it to the `CLOUDFLARE_ACCOUNT_ID` environment variable.
+  Available accounts are (`<name>`: `<account_id>`):
+    `another account`: `00000000000000000000000000000005`
+    `lobstah`: `00000000000000000000000000000009`
+    `another account`: `00000000000000000000000000000004`
+    `another account`: `00000000000000000000000000000005`
+
+
+🪵  Logs were written to "/Users/me/Library/Preferences/.wrangler/logs/wrangler-2026-11-12_02-24-03_208.log"
+== Slack secrets on the live Worker (names only)
+SLACK_CLIENT_SECRET: set
+SLACK_SIGNING_SECRET: set
+== Applying migrations (wrangler asks to confirm: answer y)
+[1mnpm[22m [33mwarn[39m [94mUnknown env config "reporter". This will stop working in the next major version of npm.[39m
+[1mnpm[22m [33mwarn[39m [94mUnknown env config "npm-globalconfig". This will stop working in the next major version of npm.[39m
+[1mnpm[22m [33mwarn[39m [94mUnknown env config "verify-deps-before-run". This will stop working in the next major version of npm.[39m
+[1mnpm[22m [33mwarn[39m [94mUnknown env config "_jsr-registry". This will stop working in the next major version of npm.[39m
+[1G[0K
+ ⛅️ wrangler 4.149.0 (update available 4.160.1)
+───────────────────────────────────────────────
+Resource location: remote 
+
+Migrations to be applied:
+┌────────────────────────┐
+│ name                   │
+├────────────────────────┤
+│ 0002_slack.sql         │
+├────────────────────────┤
+│ 0003_slack_grounds.sql │
+└────────────────────────┘
+[?25l[2K[1G[36m?[39m [1mAbout to apply 2 migration(s)
+Your database may not be available to serve requests during the migration, continue?[22m [90m›[39m [90m(Y/n)[39m[2K[1G[2K[1G[32m✔[39m [1mAbout to apply 2 migration(s)
+Your database may not be available to serve requests during the migration, continue?[22m [90m…[39m yes
+[?25h🌀 Executing on remote database lobstah-wharf-auth (00000000-0000-4000-8000-000000000000):
+🌀 To execute on your local development database, remove the --remote flag from your wrangler command.
+🚣 Executed 5 commands in 0.98ms
+┌────────────────────────┬────────┐
+│ name                   │ status │
+├────────────────────────┼────────┤
+│ 0002_slack.sql         │ ✅     │
+├────────────────────────┼────────┤
+│ 0003_slack_grounds.sql │ 🕒️    │
+└────────────────────────┴────────┘
+🌀 Executing on remote database lobstah-wharf-auth (00000000-0000-4000-8000-000000000000):
+🌀 To execute on your local development database, remove the --remote flag from your wrangler command.
+🚣 Executed 3 commands in 0.51ms
+┌────────────────────────┬────────┐
+│ name                   │ status │
+├────────────────────────┼────────┤
+│ 0002_slack.sql         │ ✅     │
+├────────────────────────┼────────┤
+│ 0003_slack_grounds.sql │ ✅     │
+└────────────────────────┴────────┘
+[1G[0K⠙[1G[0K== Deploying
+[1G[0K
+ ⛅️ wrangler 4.149.0 (update available 4.160.1)
+───────────────────────────────────────────────
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMultiple environments are defined in the Wrangler configuration file, but no target environment was specified for the deploy command.[0m
+
+  To avoid unintentional changes to the wrong environment, it is recommended to explicitly specify the target environment using the `-e|--env` flag or CLOUDFLARE_ENV env variable.
+  If your intention is to use the top-level environment of your configuration simply pass an empty string to the flag to target such environment. For example `--env=""`.
+
+
+
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
+Total Upload: 3468.71 KiB / gzip: 917.59 KiB
+Worker Startup Time: 64 ms
+Your Worker has access to the following bindings:
+Binding                    Resource                
+env.ACCOUNTS               Durable Object          
+  Account
+env.AUTH_DB                D1 Database             
+  lobstah-wharf-auth
+env.FILES                  R2 Bucket               
+  lobstah-wharf-files
+env.GLASS_ORIGIN           Environment Variable    
+  "https://glass.lobstah.dev"
+env.API_ORIGIN             Environment Variable    
+  "https://api.lobstah.dev"
+env.GITHUB_ALLOWLIST       Environment Variable    
+  "["1000000"]"
+env.MAX_ROWS               Environment Variable    
+  "10000"
+env.MAX_FILE_BYTES         Environment Variable    
+  "26214400"
+env.MAX_ACCOUNT_BYTES      Environment Variable    
+  "104857600"
+env.REQUESTS_PER_MINUTE    Environment Variable    
+  "120"
+env.SLACK_CLIENT_ID        Environment Variable    
+  "(hidden)"
+
+Uploaded lobstah-wharf (3.82 sec)
+Deployed lobstah-wharf triggers (1.45 sec)
+  glass.lobstah.dev (custom domain)
+  api.lobstah.dev (custom domain)
+Current Version ID: 00000000-0000-4000-8000-000000000000
+
+[?25l[2K[1G[36m?[39m [1mIt looks like your Cloudflare skills might be out of date. Would you like Wrangler to update them for you?[22m [90m›[39m [90m(Y/n)[39m[2K[1G[2K[1G[32m✔[39m [1mIt looks like your Cloudflare skills might be out of date. Would you like Wrangler to update them for you?[22m [90m…[39m no
+[?25h
+Understood, skills will not be updated at this time.
+[?25l[2K[1G[36m?[39m [1mWould you like Wrangler to stop asking about skills updates?[22m [90m›[39m [90m(y/N)[39m[2K[1G[2K[1G[32m✔[39m [1mWould you like Wrangler to stop asking about skills updates?[22m [90m…[39m no
+[?25h[1G[0K⠙[1G[0K== Health
+Worker version at 100%: 00000000-0000-4000-8000-000000000000 (was 00000000-0000-4000-8000-000000000000)
+glass.lobstah.dev: 200 (want 200)
+api.lobstah.dev with no token: 401 (want 401)
+== Rollback, if needed
+cd /tmp/lobstah-wharf-deploy-6b5765cf/services/wharf && pnpm run wrangler rollback 00000000-0000-4000-8000-000000000000 --yes
+The migrations only add Slack tables, so the older Worker runs with them in place.
+When you no longer need it: git -C /Users/me/lobstah worktree remove --force /tmp/lobstah-wharf-deploy-6b5765cf
+Deployed and healthy.

@@ -6,7 +6,7 @@ import { renderTerminal, terminalText } from '../src/terminal-render.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** An interactive wharf deploy's output.log, with its ids and paths replaced. */
-const wharfDeploy = fs.readFileSync(path.join(here, 'fixtures', 'wharf-deploy-run.log'), 'utf8');
+const wharfDeploy = fs.readFileSync(path.join(here, 'fixtures', 'wharf-deploy-run.output'), 'utf8');
 
 describe('terminalText on a real wharf deploy', () => {
   const text = terminalText(wharfDeploy);
