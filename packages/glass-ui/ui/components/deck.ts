@@ -35,8 +35,9 @@ import {
   trapScope,
   windowAction,
   dispatchContext,
+  verbState,
+  VerbChip,
   verbTone,
-  verbWord,
 } from './common.js';
 import { GrantChip } from './session-grants.js';
 import { trapCard } from './traps.js';
@@ -95,11 +96,14 @@ function dispatchRow(p: {
   titleAttr: string;
   verb: string;
   context: Children;
+  /** When it took its verb. */
   at?: string;
+  /** What a paused or questioning worker waits on. */
+  waitingOn?: string;
   open: () => void;
 }) {
   return html`<div key=${p.key} class="deckrow click" onClick=${p.open}>
-    <div class="gline"><b class="gtitle" title=${p.titleAttr}>${p.title}</b><span class="gfill"></span><span class=${'gchip ' + verbTone(p.verb)}>${verbWord(p.verb)}</span></div>
+    <div class="gline"><b class="gtitle" title=${p.titleAttr}>${p.title}</b><span class="gfill"></span>${VerbChip(p.verb, p.at, p.waitingOn)}</div>
     <div class="gline dim"><span class="gtext">${p.context}</span>${p.at && html`<span class="gright">${Age(p.at)} ago</span>`}</div>
   </div>`;
 }
@@ -233,12 +237,13 @@ export function Deck({
       verb: x.verb,
       context: dispatchContext(x.repo, x.for || x.claimedBy),
       at: x.verbAt,
+      waitingOn: x.waiting?.on,
       open: opener('dispatch', x.lane + ':' + x.id),
     }),
     key: x.lane + ':' + x.id,
     title: [x.id.slice(0, 8), ' ', x.repo || ''],
     worker: x.worker,
-    badge: { text: x.verb, tone: x.verb === 'needs-decision' || x.verb === 'blocked' ? 'bad' : 'dim' },
+    badge: { text: x.verb, tone: verbTone(x.verb) },
     // No time at all (no log, no queue time): drop the fragment, not render "· ago".
     meta: [
       NamedText(x.note || '', 90),
@@ -263,14 +268,14 @@ export function Deck({
       key=${x.key}
       title=${title}
       titleAttr=${`${x.id.slice(0, 8)} · ${title}`}
-      state=${{ word: verbWord(x.verb), tone: verbTone(x.verb), mark: 'chip' }}
+      state=${verbState(x.verb, x.at)}
       context=${[context, ' · ', Age(x.at), ' ago']}
       onClick=${open}
     />`,
       row: dispatchRow({ key: x.key, title, titleAttr: `${x.id.slice(0, 8)} · ${title}`, verb: x.verb, context, at: x.at, open }),
       key: x.key,
       title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
-      badge: { text: x.verb, tone: x.verb === 'failed' ? 'bad' : 'ok' },
+      badge: { text: x.verb, tone: verbTone(x.verb) },
       meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
       metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,
       open,

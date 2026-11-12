@@ -1,5 +1,6 @@
 import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
 import { RepoIcon } from './card.js';
+import type { CardState } from './card.js';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { useState } from 'preact/hooks';
 import { desktopSession, isImageName, prBadgeClass, resumeCommand, watchState } from '../../src/glass-diff.js';
@@ -16,17 +17,13 @@ import { HarnessIcon, harnessLabel } from './harness-icon.js';
 import { workerMetadata } from '../../../core/src/worker-metadata.js';
 import type { WorkerMetadata, WorkerConfig } from '@lobstah/core';
 import { can, fileUrl } from '../backend.js';
+import { ageText } from './age.js';
+import { VERB_TONE, VerbIcon, isIconVerb } from './run-status.js';
+import type { VerbTone } from './run-status.js';
 
 /** Shared pieces every section renders with: ages, tables, copyable commands, PR and kind badges. */
 
-export const ageText = (iso: string | undefined | null): string => {
-  if (!iso) return '';
-  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
-  if (s < 90) return Math.round(s) + 's';
-  if (s < 5400) return Math.round(s / 60) + 'm';
-  if (s < 172800) return (s / 3600).toFixed(1) + 'h';
-  return Math.round(s / 86400) + 'd';
-};
+export { ageText };
 
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
 export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
@@ -436,12 +433,28 @@ export function TrapName(trapId: string): Children {
 /** A dispatch verb as a card's status word: lowercase, spaced ("needs decision"). */
 export const verbWord = (verb: string): string => verb.replace(/-/g, ' ');
 
-/** A dispatch verb's tone: red when it needs a person, amber in progress, green done, grey queued or unknown. */
-export function verbTone(verb: string): 'ok' | 'warn' | 'bad' | 'dim' {
-  if (verb === 'needs-decision' || verb === 'blocked' || verb === 'failed') return 'bad';
-  if (verb === 'done') return 'ok';
-  if (verb === 'working' || verb === 'paused') return 'warn';
-  return 'dim';
+/**
+ * A dispatch verb's tone, one meaning everywhere: amber working, blue needs a
+ * decision, red blocked or failed, grey paused, green done, grey queued or unknown.
+ */
+export function verbTone(verb: string): VerbTone {
+  return isIconVerb(verb) ? VERB_TONE[verb] : 'dim';
+}
+
+/**
+ * A dispatch's state for its card: its verb's icon in a pill, named with the
+ * verb, how long it has been in it, and what it waits on. A queued or unknown
+ * dispatch keeps its word.
+ */
+export function verbState(verb: string, at?: string, waitingOn?: string): CardState {
+  const icon = isIconVerb(verb) ? html`<${VerbIcon} verb=${verb} at=${at} waitingOn=${waitingOn} />` : undefined;
+  return { word: verbWord(verb), tone: verbTone(verb), mark: 'chip', icon };
+}
+
+/** verbState on its own, for a deck row: the icon, else the word in a chip. */
+export function VerbChip(verb: string, at?: string, waitingOn?: string): Children {
+  const s = verbState(verb, at, waitingOn);
+  return s.icon ?? html`<span class=${'gchip ' + s.tone}>${s.word}</span>`;
 }
 
 /** A dispatch's context line: 📁 its repo, 🪤 the trap that has it, and how long ago it last moved. */
@@ -722,7 +735,7 @@ export function trapRow(t: GlassTrap): TrapRowView {
   const listening = t.listening ?? (!!t.firstParkedAt && !stale);
   return {
     stale,
-    listen: listening ? [html`<span class="dot ok"></span>`, 'listening'] : [html`<span class="dot warn"></span>`, 'not listening'],
+    listen: listening ? [html`<span class="dot ok"></span>`, 'listening'] : [html`<span class="dot dim"></span>`, 'not listening'],
     hb: html`<span class=${stale ? 'bad' : 'ok'}>${stale && 'stale '}${Age(t.heartbeatAt)} ago</span>`,
   };
 }
@@ -751,14 +764,17 @@ function trapState(t: GlassTrap): TrapState {
   return { kind: 'working', current };
 }
 
-/** The state dot's tone: green working or listening, amber parked or starting, red start failed, grey not listening or signed off. */
+/**
+ * The state dot's tone, as a dispatch's verb is colored: amber working or
+ * starting, green idle and listening, red start failed, and grey parked (a
+ * turn in the heavy line too), not listening, signed off or requested.
+ */
 export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
   const s = trapState(t);
-  if (s.kind === 'working' || (s.kind === 'idle' && s.listening)) return 'ok';
+  if (s.kind === 'working' || s.kind === 'starting') return 'warn';
+  if (s.kind === 'idle' && s.listening) return 'ok';
   if (s.kind === 'start failed') return 'bad';
-  // Waiting for a slot is routine: nothing here needs a person.
-  if (s.kind === 'parked' && s.current.waiting?.on === 'heavy') return 'ok';
-  return s.kind === 'parked' || s.kind === 'starting' ? 'warn' : 'dim';
+  return 'dim';
 }
 
 /** A trap's state for its card's chip: one lowercase word, in the state dot's tone. */

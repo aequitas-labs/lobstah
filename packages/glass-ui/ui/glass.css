@@ -20,6 +20,8 @@
   --warn: #e2b93d;
   --bad: #e26d5c;
   --link: #6cb2e2;
+  /* Needs a decision: the one blue state. */
+  --info: #58a6ff;
   /* text on a filled badge */
   --on-fill: #fff;
   /* GitHub's dark-mode PR state colors */
@@ -946,6 +948,10 @@ tr.rowhead:hover {
 .gword.dim {
   color: var(--dim);
 }
+.gchip.info,
+.gword.info {
+  color: var(--info);
+}
 /* PR and review cards (components/prs.ts prShapedCard): the PR icon in its state's color, before the title. */
 .prstate {
   display: inline-flex;
@@ -1234,11 +1240,17 @@ tr.rowhead:hover {
 .v-done {
   color: var(--ok);
 }
-.v-working,
+/* A verb in the table, colored as its icon is: amber working, blue needs a decision, red blocked or failed, grey paused. */
+.v-working {
+  color: var(--warn);
+}
 .v-queued {
   color: var(--fg);
 }
-.v-needs-decision,
+.v-needs-decision {
+  color: var(--info);
+  font-weight: bold;
+}
 .v-blocked {
   color: var(--bad);
   font-weight: bold;
@@ -1261,6 +1273,9 @@ tr.rowhead:hover {
 }
 .bad {
   color: var(--bad);
+}
+.info {
+  color: var(--info);
 }
 .detail {
   display: none;
@@ -3027,6 +3042,13 @@ footer .glass-brand {
   .runicon .rundot {
     display: inline;
   }
+}
+/* A dispatch's verb icon (components/run-status.ts VerbIcon), in a pill of its color. */
+.verbicon {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 1px 6px;
+  line-height: 0;
 }
 .runstate {
   display: flex;
