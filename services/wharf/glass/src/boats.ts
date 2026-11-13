@@ -10,13 +10,16 @@ import { ExpandingCard } from '../../../../packages/glass-ui/ui/components/card.
 import type { CardState } from '../../../../packages/glass-ui/ui/components/card.js';
 import { MIRROR_STALE_MS } from '../../../../packages/glass-ui/ui/mirror-merge.js';
 import type { MirrorBoatView } from '../../../../packages/glass-ui/ui/mirror-merge.js';
+import { BOAT_STATE_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
 import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
 
 /** online, asleep or revoked, from its mirror snapshot's age where it mirrors, else its last check-in. */
 function boatState(b: Boat, mirror: MirrorBoatView | undefined, now = Date.now()): CardState {
-  if (b.revoked) return { word: 'revoked', tone: 'dim', mark: 'chip' };
   const asleep = mirror ? mirror.stale : !b.lastCheckIn || now - Date.parse(b.lastCheckIn) > MIRROR_STALE_MS;
-  return asleep ? { word: 'asleep', tone: 'dim', mark: 'chip' } : { word: 'online', tone: 'ok', mark: 'chip' };
+  const word = b.revoked ? 'revoked' : asleep ? 'asleep' : 'online';
+  const tone = word === 'online' ? 'ok' : 'dim';
+  return { word, tone, mark: 'chip', icon: html`<span class=${'gchip ' + tone}><span class="boat-state-icon" aria-hidden="true">${BOAT_STATE_ICON[word]}</span>${word}</span>` };
+
 }
 
 /**
@@ -35,7 +38,7 @@ export function Boats({
   mirrors?: MirrorBoatView[];
   action: Action;
   deleteAccount: () => Promise<void>;
-}) {
+}): ReturnType<typeof html> {
   const [confirmation, setConfirmation] = useState(''),
     [repo, setRepo] = useState('');
   const stop = (f: () => unknown) => (e: Event) => {
@@ -46,10 +49,10 @@ export function Boats({
     const mirror = mirrors.find((m) => m.boat === b.id);
     const access = b.revoked ? 'no access' : accessLabel(b.permissions);
     const age = mirror
-      ? ['mirrored ', Age(mirror.at), ' ago']
+      ? [Age(mirror.at), ' ago']
       : b.lastCheckIn
-        ? ['checked in ', Age(b.lastCheckIn), ' ago']
-        : ['never checked in'];
+        ? [Age(b.lastCheckIn), ' ago']
+        : ['Never'];
     const revoke =
       !b.revoked &&
       (confirmation === b.id
@@ -63,7 +66,7 @@ export function Boats({
       title=${b.name}
       titleAttr=${b.name}
       state=${boatState(b, mirror)}
-      context=${[access, ' · ', ...age]}
+      context=${html`<dl class="boat-details"><dt>Permissions</dt><dd class="boat-permissions">${access}</dd><dt>${mirror ? 'Last mirror' : 'Last check-in'}</dt><dd>${age}</dd></dl>`}
       contextTitle=${`${access} · last check-in ${when(b.lastCheckIn)}`}
       actions=${revoke}
       quiet=${!!b.revoked}
@@ -83,7 +86,7 @@ export function Boats({
       ]}
     />`;
   };
-  return html`<div class="sub">Enroll or change a boat's name/access with <code>lobstah wharf login</code> on that boat, then approve here. No browser edit or grants.</div><div class="cards">${boats.map(card)}</div>
-    <${SlackLinkSection} />
-    <div class="sec">account</div>${confirmation === 'account' ? html`<div class="bad">Delete this account's dispatches, messages, files, boats and sign-in data? This cannot be undone.<${Button} variant="danger" onClick=${deleteAccount}>confirm delete account<//><${Button} onClick=${() => setConfirmation('')}>keep account<//></div>` : html`<${Button} onClick=${() => setConfirmation('account')}>delete account…<//>`}`;
+  return html`<section class="boats-section" aria-labelledby="boats-heading"><h2 id="boats-heading">Boats</h2><p class="dim">Connect a boat with <code>lobstah wharf login</code>, then approve it here</p><div class="cards boats-grid">${boats.map(card)}</div></section>
+    <section class="boat-settings" aria-labelledby="slack-heading"><${SlackLinkSection} /></section>
+    <section class="boat-settings" aria-labelledby="account-heading"><h2 id="account-heading">Account</h2>${confirmation === 'account' ? html`<div class="bad">Delete this account's dispatches, messages, files, boats and sign-in data? This cannot be undone.<${Button} variant="danger" onClick=${deleteAccount}>confirm delete account<//><${Button} onClick=${() => setConfirmation('')}>keep account<//></div>` : html`<${Button} onClick=${() => setConfirmation('account')}>delete account…<//>`}</section>`;
 }

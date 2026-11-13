@@ -1,6 +1,7 @@
 import type { RunResult, RunState } from '@lobstah/core';
 import { html } from '../html.js';
 import { ageText } from './age.js';
+import { DISPATCH_STATE_ICON } from './icons.js';
 
 /**
  * A run card's state as an icon instead of words: a green check once it
@@ -99,7 +100,7 @@ export function RunStatusIcon({ status, result, startedAt }: { status: RunStatus
  * check when done, and a red X when it failed. Its accessible name and
  * tooltip say the verb, how long it has been in it, and what it waits on.
  */
-export type VerbIconVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed';
+export type VerbIconVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed' | 'queued' | 'limited' | 'unknown';
 
 /** A verb's tone, one meaning everywhere: amber in progress, blue needs a decision, red blocked or failed, grey paused, green done. */
 export type VerbTone = 'ok' | 'warn' | 'bad' | 'dim' | 'info';
@@ -111,6 +112,9 @@ const VERB_WORD: Record<VerbIconVerb, string> = {
   paused: 'Paused',
   done: 'Done',
   failed: 'Failed',
+  queued: 'Queued',
+  limited: 'Limited',
+  unknown: 'Unknown',
 };
 
 /** Amber working, blue needs a decision, red blocked or failed, grey paused (a turn in the heavy line too), green done. */
@@ -121,9 +125,12 @@ export const VERB_TONE: Record<VerbIconVerb, VerbTone> = {
   paused: 'dim',
   done: 'ok',
   failed: 'bad',
+  queued: 'dim',
+  limited: 'bad',
+  unknown: 'dim',
 };
 
-/** True for the six report verbs; a queued or unknown dispatch keeps its word. */
+/** True for every displayed dispatch verb, including queued, limited and unknown. */
 export const isIconVerb = (verb: string): verb is VerbIconVerb => Object.hasOwn(VERB_WORD, verb);
 
 /** The verb icon's words: "Paused · 12m · waiting on review". */
@@ -135,6 +142,7 @@ export function verbIconLabel(verb: VerbIconVerb, at?: string, waitingOn?: strin
 }
 
 const VERB_ICON: Record<VerbIconVerb, unknown> = {
+  ...DISPATCH_STATE_ICON,
   working: ICON.running,
   // A raised open hand: three fingers, then the little finger running into the palm and thumb.
   'needs-decision': svg(

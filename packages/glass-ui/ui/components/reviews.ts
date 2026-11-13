@@ -221,7 +221,9 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
 
 /** A posted review's verdict, as its card's status. */
 const POSTED: Record<string, string> = { approve: 'approved', request_changes: 'changes requested' };
-const posted = (r: GlassReview) => r.postedAt && html`<a href=${r.postedReviewUrl ?? r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>Posted ${Age(r.postedAt)}</a>`;
+const posted = (r: GlassReview) =>
+  r.postedAt &&
+  html`<a href=${r.postedReviewUrl ?? r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => e.stopPropagation()}>Posted ${Age(r.postedAt)}</a>`;
 
 /**
  * A review's status, as its card's chip says it: "draft ready" once drafted;
@@ -267,7 +269,12 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
     key: r.key,
     title: r.title,
     titleAttr: r.title,
-    status: [StatusChip(status.word, status.tone), r.needsYou && StatusChip('needs you', 'bad'), r.mutedAt && StatusChip('muted', 'dim'), posted(r)],
+    status: [
+      StatusChip(status.word, status.tone),
+      r.needsYou && StatusChip('needs you', 'bad'),
+      r.mutedAt && StatusChip('muted', 'dim'),
+      posted(r),
+    ],
     tone: reviewTone(r),
     repo: r.repo,
     number: r.number,

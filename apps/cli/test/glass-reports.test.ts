@@ -652,8 +652,10 @@ describe('glass: the report page route', () => {
   const get = (base: string, url: string, host?: string): Promise<{ status?: number; type?: string; body: string }> =>
     new Promise((resolve, reject) => {
       const req = httpRequest(`${base}${url}`, { headers: host ? { Host: host } : {} }, (res) => {
+        // Decode across chunks: a multi-byte character can straddle a network boundary.
+        res.setEncoding('utf8');
         let body = '';
-        res.on('data', (c: Buffer) => (body += c.toString('utf8')));
+        res.on('data', (chunk: string) => (body += chunk));
         res.on('end', () => resolve({ status: res.statusCode, type: String(res.headers['content-type'] ?? ''), body }));
       });
       req.on('error', reject);

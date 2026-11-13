@@ -447,8 +447,8 @@ export function verbTone(verb: string): VerbTone {
 
 /**
  * A dispatch's state for its card: its verb's icon in a pill, named with the
- * verb, how long it has been in it, and what it waits on. A queued or unknown
- * dispatch keeps its word.
+ * verb, how long it has been in it, and what it waits on. Queued, limited
+ * and unknown dispatches use their own icons.
  */
 export function verbState(verb: string, at?: string, waitingOn?: string): CardState {
   const icon = isIconVerb(verb) ? html`<${VerbIcon} verb=${verb} at=${at} waitingOn=${waitingOn} />` : undefined;

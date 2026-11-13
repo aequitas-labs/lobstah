@@ -550,7 +550,8 @@ export type ReviewRequestKind =
  */
 export async function reviewRequest(kind: ReviewRequestKind, payload: Record<string, unknown>): Promise<string | undefined> {
   // A source without review actions shows none; a view it records (review-seen) is skipped.
-  if (!can('review-request') && !can('review-dismiss') && !can('review-mute') && !can('review-unmute')) return 'Reviews are read-only here.';
+  if (!can('review-request') && !can('review-dismiss') && !can('review-mute') && !can('review-unmute'))
+    return 'Reviews are read-only here.';
   return glassRequest(kind, payload);
 }
 

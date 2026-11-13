@@ -13,12 +13,15 @@ import { html } from '../html.js';
 const svg = (body: string) =>
   html`<svg class="navicon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: body }}></svg>`;
 
+/** The dispatch kind: the selected simple side-view fish for Dispatches navigation. */
+export const DispatchIcon = html`<svg class="dispatch-icon navicon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12-4-4v8z"/><ellipse cx="13" cy="12" rx="8" ry="5"/><circle cx="17" cy="11.5" r=".8" fill="currentColor" stroke="none"/></svg>`;
+
 /** Each view's icon. Configuration (the `settings` tab) is lobstah's own settings: sliders, apart from the glass's gear. */
 export const TAB_ICON: Record<GlassTab, Children> = {
   deck: svg(
     '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
   ),
-  dispatches: svg('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>'),
+  dispatches: DispatchIcon,
   traps: svg(
     '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>',
   ),
@@ -53,3 +56,19 @@ export const ITEM_ICON = {
   ),
   newTrap: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
 } satisfies Record<string, Children>;
+
+/** Only the missing dispatch states; the six existing report icons stay unchanged. */
+export const DISPATCH_STATE_ICON = {
+  queued: html`<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12v10H2zM2 8h3l1.5 2h3L11 8h3"/></svg>`,
+  limited: html`<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h8M4 14.5h8M5 1.5v3L8 8l-3 3.5v3M11 1.5v3L8 8l3 3.5v3"/></svg>`,
+  unknown: html`<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M6 5.8a2 2 0 1 1 3 1.7L8 8.3v1.2M8 12h.01"/></svg>`,
+} satisfies Record<'queued' | 'limited' | 'unknown', Children>;
+
+/** The three Boats statuses; no other card state drawings are changed. */
+export const BOAT_STATE_ICON = {
+  online: svg(
+    '<circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4m8.4-8.4a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2m14.2-14.2a10 10 0 0 1 0 14.2"/>',
+  ),
+  asleep: svg('<path d="M21 13A9 9 0 0 1 11 3a9 9 0 1 0 10 10"/>'),
+  revoked: svg('<circle cx="12" cy="12" r="9"/><path d="m5.6 18.4 12.8-12.8"/>'),
+} satisfies Record<'online' | 'asleep' | 'revoked', Children>;

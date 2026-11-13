@@ -1126,7 +1126,7 @@ describe('glass page: On deck', () => {
     const flight = g.$$('#deck section')[1]!;
     // Two lines: the instruction and its status chip; the repo and trap, with the queue time at the right.
     const line = [...flight.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line.querySelector('.gchip'))).toBe('queued');
+    expect(line.querySelector('.verb-queued')?.getAttribute('aria-label')).toContain('Queued');
     expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
     expect(text(line.querySelector('.gright'))).toBe('60s ago');
   });
