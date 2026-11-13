@@ -48,7 +48,7 @@ export function reportCard(r: GlassReport) {
     contextTitle=${[lead, `${ageText(r.filedAt)} ago`].filter(Boolean).join(' · ')}
     open=${{ href: reportPageUrl(r.key), label: 'Open the report', here: openReport(r) }}
     quiet=${!!r.acked}
-    cls=${r.acked ? 'acked' : undefined}
+    cls=${r.acked ? 'acked report-card' : 'report-card'}
     onClick=${openReport(r)}
   />`;
 }

@@ -1145,10 +1145,9 @@ tr.rowhead:hover {
 }
 /*
  * The Button atom (components/button.ts): every button on the glass, local
- * and hosted. md is 32px tall with 12px words, the default everywhere; lg is
- * 40px with 14px words, for the decision dock and a run card's row. Variants
- * change color only; molecules (a split button, an option card, a segmented
- * control) add layout only. No rule elsewhere sizes a button.
+ * and hosted. Touch pointers keep md at 32px and lg at 40px; fine pointers
+ * use 26px and 32px. Variants change color only; molecules (a split button,
+ * an option card, a segmented control) add layout only.
  */
 .btn {
   display: inline-flex;
@@ -3259,9 +3258,8 @@ footer .glass-brand {
   margin-left: auto;
 }
 /*
- * Every button on a card is one size, 32px tall with 12px words, 6px apart,
- * in a tighter bar. It wins over the finger-sized Open (pointer: coarse),
- * which the table and the modals keep.
+ * Card buttons keep the shared pointer sizes, with 6px gaps in a tighter
+ * bar. Open follows the same size rule as the other card actions.
  */
 .gactions {
   gap: 6px;
@@ -3416,4 +3414,35 @@ footer .glass-brand {
   width: 100%;
   height: 100%;
   margin: 0;
+}
+
+/* Fine pointers get compact controls and larger hit areas for small links. */
+@media (pointer: fine) {
+  .btn {
+    min-height: 26px;
+  }
+  .btn-icon {
+    min-width: 26px;
+  }
+  .btn-lg {
+    min-height: 32px;
+  }
+  .btn-lg.btn-icon {
+    min-width: 32px;
+  }
+  .cmenuitem {
+    min-height: 28px;
+  }
+  .deckgrid h2 a,
+  .deckmore {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    min-height: 24px;
+  }
+  .report-card .gopen {
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+  }
 }
