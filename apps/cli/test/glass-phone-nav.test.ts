@@ -44,7 +44,7 @@ describe('the phone header', () => {
     const g = await page();
     expect(text(g.$('.phone-helm .helmpill'))).toContain('claude @ web');
     expect(g.$('.phone-helm .hdot')!.className).toBe('hdot ok');
-    expect(text(g.$('.phone-strip'))).toBe('🦞 4 · 🪤 3 traps · 2 of 4 · ⛰️ 1/2 +1');
+    expect(text(g.$('.phone-strip'))).toBe('🦞 4 · 🪤 3 traps · 🎣 2 of 4 · ⛰️ 1/2 +1');
     (g.$('.helmpill') as HTMLElement).click();
     await g.settle();
     expect(text(g.$('#modalbox'))).toContain('fleet');

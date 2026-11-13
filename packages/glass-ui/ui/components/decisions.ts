@@ -1,4 +1,3 @@
-import { DispatchIcon } from './icons.js';
 import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Attachment, RecentRun, RunResult } from '@lobstah/core';
@@ -181,7 +180,7 @@ function source(c: DecisionCard) {
         e.preventDefault();
         e.stopPropagation();
         opener('dispatch', lane + ':' + dispatch)();
-      }}>${DispatchIcon}${dispatch.slice(0, 8)}</a>`,
+      }}>${dispatch.slice(0, 8)}</a>`,
     c.repo && RepoName(c.repo),
   ].filter(Boolean);
   return parts.flatMap((m, i) => (i ? [' · ', m] : [m]));

@@ -166,8 +166,6 @@ const STACK_NUMBER = /^#\d+$/;
 function foldPrTitles(el: Element): Node {
   const copy = el.cloneNode(true) as Element;
   const doc = el.ownerDocument;
-  // The dispatch fish intentionally replaces the headless fishing-pole mark.
-  for (const mark of copy.querySelectorAll('[role=img][aria-label=headless]:has(.dispatch-icon)')) mark.textContent = '🎣';
   // Transparent branding and dark-only native controls are intentional changes.
   for (const img of copy.querySelectorAll('img.glass-brand')) img.replaceWith(doc.createTextNode('🦞✨'));
   for (const n of copy.querySelectorAll('[data-helm-chat]')) n.remove();
@@ -416,7 +414,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
           // Every button is the Button atom (components/button.ts), sized and colored there; glass-button.test.ts tests it.
           // A verb cell is colored as its icon is (components/run-status.ts VERB_TONE); glass-verb-icons.test.ts tests it.
-          .filter((el) => !el.matches('.dispatch-icon, .dispatch-icon *, .btn, .btn *, button, button *, .x, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *'))
+          .filter((el) => !el.matches('.btn, .btn *, button, button *, .x, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);

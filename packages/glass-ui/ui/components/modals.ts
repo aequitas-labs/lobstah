@@ -1,4 +1,3 @@
-import { DispatchIcon } from './icons.js';
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
@@ -94,11 +93,7 @@ function prModal(d: GlassSnapshot, key: string) {
         i ? ' → ' : '',
         c.culled
           ? html`<span class="dim">${c.id.slice(0, 8)} (culled)</span>`
-          : [
-              html`<a href="#" onClick=${follow(c.modalKey!)}>${DispatchIcon}${c.id.slice(0, 8)}</a>`,
-              ' ',
-              html`<span class="dim">${c.verb}</span>`,
-            ],
+          : [html`<a href="#" onClick=${follow(c.modalKey!)}>${c.id.slice(0, 8)}</a>`, ' ', html`<span class="dim">${c.verb}</span>`],
       ])
     : html`<span class="dim">none</span>`;
   const watch = w
@@ -151,7 +146,7 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
         capabilities().daemon && viewerHasTerminal() && [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [
     close,
-    html`<h3>${DispatchIcon}${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
+    html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
     html`<div class="sub">${x.repo} · ${x.lane} ${x.bucket} · ${Age(x.verbAt)}${x.for && [' · ', addrCell(x)]} ${prCell(x)}</div>`,
     session,
     x.worker && html`<${WorkerDetails} worker=${x.worker} headless=${!x.claimedBy?.startsWith('wt:')} />`,
@@ -273,7 +268,7 @@ function trapModal(t: GlassTrap) {
   const catches = t.catches.length
     ? t.catches.map(
         (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${DispatchIcon}${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prHeadCell(c)}</div>${
+          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prHeadCell(c)}</div>${
             c.note && html`<div class="loglines">${NamedText(c.note)}</div>`
           }</div>`,
       )

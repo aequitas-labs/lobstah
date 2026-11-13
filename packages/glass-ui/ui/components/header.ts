@@ -12,7 +12,7 @@ import { host } from '../host.js';
 import { getState } from '../store.js';
 import { prsNeedingYou } from './prs.js';
 import { Button } from './button.js';
-import { DispatchIcon, ITEM_ICON, TAB_ICON } from './icons.js';
+import { ITEM_ICON, TAB_ICON } from './icons.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -54,7 +54,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
     ),
     inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday}</span>`,
     d.slots &&
-      html`<span class="chip">active <span role="img" aria-label="headless" title="headless">${DispatchIcon}</span> ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
+      html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     d.heavy &&
       d.heavy.tickets.length > 0 &&
       html`<span class="chip" title="The machine's line for heavy commands">⛰️ ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` · ${d.heavy.waiting} waiting` : ''}</span>`,
@@ -239,7 +239,7 @@ function Strip({ d, inp }: { d: GlassSnapshot; inp: SectionInputs['chips'] }) {
   const parts = [
     inp.stats && html`<span title="catches today">🦞 ${inp.stats.catchesToday}</span>`,
     d.slots && html`<span title="traps">🪤 ${d.slots.traps} ${d.slots.traps === 1 ? 'trap' : 'traps'}</span>`,
-    d.slots && html`<span title="headless slots in use">${DispatchIcon} ${d.slots.headless} of ${d.slots.limit}</span>`,
+    d.slots && html`<span title="headless slots in use">🎣 ${d.slots.headless} of ${d.slots.limit}</span>`,
     d.heavy &&
       d.heavy.tickets.length > 0 &&
       html`<span title="The machine's line for heavy commands">⛰️ ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` +${d.heavy.waiting}` : ''}</span>`,

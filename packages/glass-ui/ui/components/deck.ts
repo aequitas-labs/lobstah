@@ -1,4 +1,3 @@
-import { DispatchIcon } from './icons.js';
 import type { GlassSnapshot, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
 import { DECK_TRAPS_MAX, INFLIGHT_MAX, LANDED_MAX, REPORTS_MAX, catchCount, goalLine, reportPageUrl } from '../../src/glass-diff.js';
 import type { DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
@@ -92,7 +91,7 @@ function dispatchRow(p: {
   open: () => void;
 }) {
   return html`<div key=${p.key} class="deckrow click" onClick=${p.open}>
-    <div class="gline"><b class="gtitle" title=${p.titleAttr}>${DispatchIcon}${p.title}</b><span class="gfill"></span>${VerbChip(p.verb, p.at, p.waitingOn)}</div>
+    <div class="gline"><b class="gtitle" title=${p.titleAttr}>${p.title}</b><span class="gfill"></span>${VerbChip(p.verb, p.at, p.waitingOn)}</div>
     <div class="gline dim"><span class="gtext">${p.context}</span>${p.at && html`<span class="gright">${Age(p.at)} ago</span>`}</div>
   </div>`;
 }
@@ -202,7 +201,6 @@ export function Deck({
       card: html`<${Card}
       key=${x.key}
       title=${title}
-      icon=${DispatchIcon}
       titleAttr=${`${x.id.slice(0, 8)} · ${title}`}
       state=${verbState(x.verb, x.at)}
       context=${[context, ' · ', Age(x.at), ' ago']}

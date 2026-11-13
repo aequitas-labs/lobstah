@@ -3349,13 +3349,6 @@ footer .glass-brand {
   color: var(--fg);
 }
 
-.dispatch-icon {
-  vertical-align: -3px;
-}
-.gtop > .dispatch-icon {
-  flex: 0 0 auto;
-}
-
 .boats-section > h2,
 .boat-settings > h2 {
   margin: 0 0 12px;
@@ -3410,4 +3403,17 @@ footer .glass-brand {
   .boat-settings {
     padding: 16px;
   }
+}
+
+.boat-state-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  vertical-align: -3px;
+  margin-right: 5px;
+}
+.boat-state-icon > svg {
+  width: 100%;
+  height: 100%;
+  margin: 0;
 }

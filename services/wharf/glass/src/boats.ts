@@ -10,13 +10,16 @@ import { ExpandingCard } from '../../../../packages/glass-ui/ui/components/card.
 import type { CardState } from '../../../../packages/glass-ui/ui/components/card.js';
 import { MIRROR_STALE_MS } from '../../../../packages/glass-ui/ui/mirror-merge.js';
 import type { MirrorBoatView } from '../../../../packages/glass-ui/ui/mirror-merge.js';
+import { BOAT_STATE_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
 import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
 
 /** online, asleep or revoked, from its mirror snapshot's age where it mirrors, else its last check-in. */
 function boatState(b: Boat, mirror: MirrorBoatView | undefined, now = Date.now()): CardState {
-  if (b.revoked) return { word: 'revoked', tone: 'dim', mark: 'chip' };
   const asleep = mirror ? mirror.stale : !b.lastCheckIn || now - Date.parse(b.lastCheckIn) > MIRROR_STALE_MS;
-  return asleep ? { word: 'asleep', tone: 'dim', mark: 'chip' } : { word: 'online', tone: 'ok', mark: 'chip' };
+  const word = b.revoked ? 'revoked' : asleep ? 'asleep' : 'online';
+  const tone = word === 'online' ? 'ok' : 'dim';
+  return { word, tone, mark: 'chip', icon: html`<span class=${'gchip ' + tone}><span class="boat-state-icon" aria-hidden="true">${BOAT_STATE_ICON[word]}</span>${word}</span>` };
+
 }
 
 /**
