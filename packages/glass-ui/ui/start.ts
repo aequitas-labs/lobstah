@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import type { GlassSnapshot } from '@lobstah/core';
-import { NO_OLDER, detailFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
+import { NO_OLDER, detailHash, detailFromHash, trapFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
 import {
   closeDecision,
   closeLightbox,
@@ -118,7 +118,11 @@ function openPending(): void {
   const { kind, id } = pendingOpen;
   pendingOpen = undefined;
   if (kind === 'trap') {
-    if (d.traps.some((t) => t.trapId === id)) showModal('trap', id);
+    if (d.traps.some((t) => t.trapId === id)) {
+      // Replace a legacy link so Back cannot reopen the same detail.
+      if (trapFromHash(location.hash) === id) history.replaceState(history.state, '', detailHash({ type: 'trap', key: id }));
+      showModal('trap', id);
+    }
   } else {
     const x = d.dispatches.find((v) => v.id === id);
     if (x) showModal('dispatch', `${x.lane}:${x.id}`);
@@ -150,6 +154,8 @@ function startReportPage(key: string): Array<() => void> {
 
 function startGlass(): Array<() => void> {
   initState(initialState());
+  const linkedTrap = trapFromHash(location.hash);
+  if (linkedTrap) pendingOpen = { kind: 'trap', id: linkedTrap };
 
   let paintedRoute: ReturnType<typeof currentRoute> | undefined;
   let hadSnapshot = false;
@@ -216,6 +222,11 @@ function startGlass(): Array<() => void> {
       focusDecision,
       ...(location.hash.startsWith('#review-') ? { prefs: { ...getState().prefs, repo: '', q: '' } } : {}),
     });
+    const linkedTrap = trapFromHash(location.hash);
+    if (linkedTrap) {
+      pendingOpen = { kind: 'trap', id: linkedTrap };
+      openPending();
+    }
     // A `#decision/<key>` link (a lob, the pet) opens that decision too.
     if (focusDecision) openDecision(focusDecision);
     if (route === 'stats') void loadStats();

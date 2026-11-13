@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { TodoView } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
-import type { GlassDom } from './glass-dom.js';
+import type { GlassDom, GlassDomOptions } from './glass-dom.js';
 import { emptyFleet, NOW } from './fixtures/glass-snapshots.js';
 
 const HOUR = 3600_000;
@@ -23,17 +23,34 @@ const todo = (fields: Partial<TodoView> & { id: number }): TodoView => ({
   ...fields,
 });
 
-async function open(todos: TodoView[], hash = '#todos') {
+async function open(todos: TodoView[], hash = '#todos', options: Partial<GlassDomOptions> = {}) {
   const d = emptyFleet();
   d.todos = todos;
   d.focusToken = 'page-token';
-  const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash });
+  const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash, ...options });
   pages.push(g);
   return g;
 }
 const row = (g: GlassDom, id: number) => g.$$('#todos .todo-check').find((el) => el.textContent?.includes(`#${id} `))!;
 const clickIn = async (g: GlassDom, root: Element, text: string) => {
   [...root.querySelectorAll('button')].find((b) => b.textContent === text)!.click();
+  await g.settle();
+};
+const editor = (g: GlassDom) => g.$('.todo-snooze-popover, .todo-snooze-sheet')!;
+const snooze = async (g: GlassDom, id: number) => {
+  (row(g, id).querySelector('.todo-schedule-open') as HTMLButtonElement).click();
+  await g.settle();
+};
+/** Touches exercise the row's real gesture handler without asserting its CSS. */
+const swipe = async (g: GlassDom, root: Element, from: [number, number], to: [number, number]) => {
+  for (const [type, point, property] of [
+    ['touchstart', from, 'touches'],
+    ['touchend', to, 'changedTouches'],
+  ] as const) {
+    const event = new g.window.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, property, { value: [{ clientX: point[0], clientY: point[1] }] });
+    root.dispatchEvent(event as unknown as Event);
+  }
   await g.settle();
 };
 
@@ -99,24 +116,27 @@ describe('todo chips', () => {
   });
 });
 
-describe('the schedule box', () => {
-  it('offers Set a time with no due, and Snooze with one', async () => {
+describe('snoozing a todo', () => {
+  it('offers one named clock with or without an existing due time, keeping the checkbox read-only', async () => {
     const g = await open([todo({ id: 1 }), todo({ id: 2, dueAt: new Date(NOW + HOUR).toISOString() })]);
-    expect(row(g, 1).querySelector('button')!.textContent).toBe('Set a time');
-    expect(row(g, 2).querySelector('button')!.textContent).toBe('Snooze');
+    for (const id of [1, 2]) {
+      const button = row(g, id).querySelector('button')!;
+      expect(button.getAttribute('aria-label')).toBe('Snooze');
+      expect((row(g, id).querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    }
   });
 
   it('offers Snooze on a todo that fired with no due of its own', async () => {
     const g = await open([todo({ id: 1, overdue: true, firedBy: 'pr:o/r#1 merged' })]);
-    expect(row(g, 1).querySelector('button')!.textContent).toBe('Snooze');
+    expect(row(g, 1).querySelector('button')!.getAttribute('aria-label')).toBe('Snooze');
   });
 
-  it('a preset fills the field; Save posts the storage grounds, the id and the time', async () => {
+  it('a preset fills the field; Snooze posts the storage grounds, the id and the time', async () => {
     const g = await open([todo({ id: 4 })]);
-    await clickIn(g, row(g, 4), 'Set a time');
-    await clickIn(g, row(g, 4), 'Tomorrow 09:00');
-    expect((row(g, 4).querySelector('input[name=until]') as HTMLInputElement).value).toBe('tomorrow 09:00');
-    row(g, 4)
+    await snooze(g, 4);
+    await clickIn(g, editor(g), 'Tomorrow 09:00');
+    expect((editor(g).querySelector('input[name=until]') as HTMLInputElement).value).toBe('tomorrow 09:00');
+    editor(g)
       .querySelector('form')!
       .dispatchEvent(new g.window.Event('submit', { bubbles: true, cancelable: true }) as unknown as Event);
     await g.settle();
@@ -125,25 +145,88 @@ describe('the schedule box', () => {
     expect(post.headers['x-lobstah-token']).toBe('page-token');
   });
 
-  it('the +2h preset sends a duration', async () => {
-    const g = await open([todo({ id: 4 })]);
-    await clickIn(g, row(g, 4), 'Set a time');
-    await clickIn(g, row(g, 4), '+2h');
-    expect((row(g, 4).querySelector('input[name=until]') as HTMLInputElement).value).toBe('2h');
+  it('keeps one save pending, then closes the editor and announces the resolved time', async () => {
+    let finish!: (answer: { status: number; body: unknown }) => void;
+    const g = await open([todo({ id: 4 })], '#todos', {
+      post: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await snooze(g, 4);
+    await clickIn(g, editor(g), '+2h');
+    const save = [...editor(g).querySelectorAll('button')].find((button) => button.textContent === 'Snooze') as HTMLButtonElement;
+    save.click();
+    await g.settle();
+    expect(save.disabled).toBe(true);
+    expect(save.getAttribute('aria-busy')).toBe('true');
+    save.click();
+    expect(g.posts()).toHaveLength(1);
+    const dueAt = new Date(NOW + 2 * HOUR).toISOString();
+    finish({ status: 201, body: { ok: true, dueAt } });
+    await g.settle();
+    expect(editor(g)).toBeNull();
+    expect(g.$$('[role="status"]').map((status) => status.textContent).find((text) => text?.startsWith('Snoozed #4'))).toMatch(/^Snoozed #4 until \w{3} \d{2}:\d{2}$/);
   });
 
-  it('Save is disabled until there is a time, and Cancel closes the box', async () => {
+  it('keeps a refused time editable and allows another attempt', async () => {
+    let attempts = 0;
+    const g = await open([todo({ id: 4 })], '#todos', {
+      post: () =>
+        ++attempts === 1
+          ? { status: 400, body: { ok: false, reason: "couldn't read 'mon 9'" } }
+          : { status: 201, body: { ok: true, dueAt: new Date(NOW + HOUR).toISOString() } },
+    });
+    await snooze(g, 4);
+    await clickIn(g, editor(g), '+2h');
+    await clickIn(g, editor(g), 'Snooze');
+    expect(editor(g).querySelector('[role="alert"]')?.textContent).toBe("couldn't read 'mon 9'");
+    await clickIn(g, editor(g), 'Snooze');
+    expect(editor(g)).toBeNull();
+    expect(attempts).toBe(2);
+  });
+
+  it('the +2h preset sends a duration', async () => {
     const g = await open([todo({ id: 4 })]);
-    await clickIn(g, row(g, 4), 'Set a time');
-    const save = [...row(g, 4).querySelectorAll('button')].find((b) => b.textContent === 'Save') as HTMLButtonElement;
+    await snooze(g, 4);
+    await clickIn(g, editor(g), '+2h');
+    expect((editor(g).querySelector('input[name=until]') as HTMLInputElement).value).toBe('2h');
+  });
+
+  it('Snooze is disabled until there is a time, and clicking outside closes the editor', async () => {
+    const g = await open([todo({ id: 4 })]);
+    await snooze(g, 4);
+    const save = [...editor(g).querySelectorAll('button')].find((b) => b.textContent === 'Snooze') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    await clickIn(g, row(g, 4), 'Cancel');
-    expect(row(g, 4).querySelector('form')).toBeNull();
+    g.document.body.dispatchEvent(new g.window.Event('pointerdown', { bubbles: true }) as unknown as Event);
+    await g.settle();
+    expect(editor(g)).toBeNull();
+  });
+
+  it('a horizontal phone swipe reveals Snooze and opens the shared sheet; vertical scrolling does not', async () => {
+    const g = await open([todo({ id: 4 })], '#todos', { prepare: (window) => Object.defineProperty(window, 'innerWidth', { value: 375 }) });
+    await swipe(g, row(g, 4), [220, 30], [180, 180]);
+    expect(row(g, 4).querySelector('.todo-swipe-snooze')).toBeNull();
+    await swipe(g, row(g, 4), [220, 30], [100, 35]);
+    (row(g, 4).querySelector('.todo-swipe-snooze') as HTMLButtonElement).click();
+    await g.settle();
+    expect(editor(g).getAttribute('aria-modal')).toBe('true');
+    expect(editor(g).querySelector('h3')!.textContent).toBe('Snooze #4 until');
+  });
+
+  it('Escape closes the desktop popover and returns focus to the clock', async () => {
+    const g = await open([todo({ id: 4 })]);
+    await snooze(g, 4);
+    expect(editor(g).getAttribute('aria-modal')).not.toBe('true');
+    g.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }) as unknown as Event);
+    await g.settle();
+    expect(editor(g)).toBeNull();
+    expect(g.document.activeElement).toBe(row(g, 4).querySelector('.todo-schedule-open'));
   });
 });
 
 describe('the Deck preview', () => {
-  it('still lists at most five rows, with chips and no button', async () => {
+  it('still lists at most five rows, with chips and a Snooze clock on every open row', async () => {
     const dueAt = new Date(NOW + HOUR).toISOString();
     const g = await open(
       Array.from({ length: 8 }, (_, i) => todo({ id: i + 1, dueAt })),
@@ -152,7 +235,7 @@ describe('the Deck preview', () => {
     const rows = g.$$('#deck .todo-check');
     expect(rows).toHaveLength(5);
     expect(rows[0]!.querySelector('.badge')).not.toBeNull();
-    expect(rows[0]!.querySelector('button')).toBeNull();
+    expect(rows.every((row) => row.querySelector('button')?.getAttribute('aria-label') === 'Snooze')).toBe(true);
     expect(g.$('#deck .todos .deckmore')!.textContent).toBe('+3 more →');
   });
 });

@@ -560,8 +560,34 @@ h2 {
 }
 /* Todos are one compact list row each, in table and card views alike. */
 .todo-check {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  touch-action: pan-y;
   padding: var(--space-2) 0;
   border-top: 1px solid var(--line);
+}
+.todo-row-body {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  background: var(--bg);
+}
+.todo-check.snooze-revealed .todo-row-body {
+  transform: translateX(-7rem);
+}
+.todo-swipe-action {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--seg-on);
+}
+.todo-swipe-snooze {
+  flex-direction: column;
 }
 /* Read-only boxes drawn by hand: a done goal or Todo shows a green check,
    not the browser's greyed-out disabled checkbox. */
@@ -604,6 +630,23 @@ h2 {
   padding: 0;
   margin: 0;
 }
+.todo-heading,
+.todo-pass {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.todo-heading {
+  align-items: baseline;
+}
+.todo-heading h2 {
+  flex: 1;
+}
+.todo-pass > .dim {
+  flex: 1;
+}
 /* Todos done today sit apart from the open ones, and no count includes them. */
 .todo-done-today {
   display: block;
@@ -625,28 +668,47 @@ h2 {
   overflow-wrap: anywhere;
 }
 .todo-actions {
-  margin-top: var(--space-2);
+  flex: 0 0 auto;
 }
-.todo-schedule {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+.todo-snooze-popover {
+  position: fixed;
+  z-index: var(--layer-modal);
+  width: min(320px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--modal-radius);
+  background: var(--card);
+  box-shadow: 0 8px 24px var(--scrim);
+}
+.todo-snooze-popover h3 {
+  margin: 0 0 var(--space-3);
+}
+.todo-snooze-form {
+  display: grid;
+  gap: var(--space-3);
+}
+.todo-snooze-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2);
 }
-.todo-schedule input[type='text'] {
+.todo-snooze-time {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+}
+.todo-snooze-form input[type='text'] {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--fg);
   font: inherit;
-  padding: 3px 9px;
+  padding: var(--space-2);
   min-width: 0;
-  flex: 1 1 8em;
-  /* Undo the hand-drawn checkbox rule, `.todo-check input`. */
-  width: auto;
-  height: auto;
-  margin: 0;
-  cursor: text;
+  width: 100%;
 }
 .deckgrid {
   display: flex;
@@ -3773,4 +3835,87 @@ footer .glass-brand {
 }
 .detail-identity .copy-id {
   vertical-align: baseline;
+}
+
+/* The Traps page groups existing rows and cards without changing their contents. */
+.trap-controls,
+.trap-overview-row,
+.trap-harness-count,
+.trap-group h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.trap-controls {
+  justify-content: space-between;
+}
+.trap-overview {
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-3);
+}
+.trap-group,
+.trap-inactive {
+  margin-top: var(--space-4);
+}
+.trap-group h3 {
+  margin-bottom: var(--space-2);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0 0 var(--space-2);
+}
+.section-head h2,
+.section-head h1 {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.section-head a {
+  color: inherit;
+  text-decoration: none;
+}
+.section-head a:hover {
+  color: var(--link);
+}
+.section-count {
+  color: var(--dim);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.section-action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.section-action .btn-icon {
+  margin: 0;
+}
+.page-head {
+  margin: 16px 0 12px;
+}
+.page-head + h2 {
+  margin-top: 0;
+}
+.page-head h1 {
+  font-size: 16px;
+}
+.deckgrid .section-head {
+  margin-bottom: 8px;
+}
+
+.section-action .deckmore {
+  margin: 0;
 }

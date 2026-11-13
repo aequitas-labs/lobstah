@@ -263,7 +263,7 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
  * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [
-  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'pr-merge', 'stack-merge', 'attention-ack',
+  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'helm-pass-request', 'pr-ack', 'pr-merge', 'stack-merge', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-dismiss', 'review-mute', 'review-unmute', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
   // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.

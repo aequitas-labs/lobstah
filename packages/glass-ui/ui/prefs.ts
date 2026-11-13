@@ -8,13 +8,24 @@ import type { GlassPrefs } from '../src/glass-diff.js';
  */
 
 export function loadPrefs(): GlassPrefs {
-  const st: GlassPrefs = { view: 'table', lane: '', repo: '', verb: '', q: '', lobs: true, chain: false, noticeKind: '' };
+  const st: GlassPrefs = {
+    view: 'table',
+    lane: '',
+    repo: '',
+    verb: '',
+    q: '',
+    lobs: true,
+    chain: false,
+    noticeKind: '',
+    trapGroup: 'repo',
+  };
   try {
     Object.assign(st, JSON.parse(localStorage.getItem('spyglass') || '{}'));
   } catch (e) {}
   // A stored value this page doesn't understand falls back to the default.
   if (st.view !== 'table' && st.view !== 'cards') st.view = 'table';
   st.lobs = st.lobs !== false;
+  if (st.trapGroup !== 'repo' && st.trapGroup !== 'harness' && st.trapGroup !== 'status') st.trapGroup = 'repo';
   return st;
 }
 

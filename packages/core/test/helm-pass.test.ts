@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { DEFAULT_HELM, loadConfig } from '../src/config.js';
 import { addTodo, closeTodo } from '../src/todos.js';
-import { helmPassStatus, readHelmPass, recordHelmPass } from '../src/helm-pass.js';
+import { helmPassStatus, readHelmPass, readHelmPassRequest, recordHelmPass, requestHelmPass } from '../src/helm-pass.js';
 import { takeHelm, heartbeatHelm } from '../src/helm.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -19,6 +19,30 @@ beforeEach(() => {
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 
 describe('the grounds todo/goals pass', () => {
+  it('persists one requested pass per grounds until delivery, without changing todos', () => {
+    const todo = addTodo('fleet', 'Review this item', NOW);
+    recordHelmPass('fleet', CONFIG, undefined, NOW);
+    const request = requestHelmPass('fleet', NOW + 100);
+    expect(requestHelmPass('fleet', NOW + 200)).toEqual(request);
+    expect(readHelmPassRequest('fleet')).toEqual({ at: new Date(NOW + 100).toISOString() });
+    expect(readHelmPassRequest('other')).toBeUndefined();
+    expect(helmPassStatus('fleet', CONFIG, NOW + 200).reasons).toEqual(['requested']);
+    recordHelmPass('fleet', CONFIG, undefined, NOW + 300);
+    expect(readHelmPassRequest('fleet')).toBeUndefined();
+    expect(helmPassStatus('fleet', CONFIG, NOW + 301).reasons).toEqual([]);
+    expect(readHelmPass('fleet')?.reviewedTodos).toEqual([]);
+    expect(todo.state).toBe('open');
+  });
+
+  it('keeps a request newer than the pass being delivered and validates its grounds', () => {
+    requestHelmPass('fleet', NOW + 200);
+    recordHelmPass('fleet', CONFIG, undefined, NOW + 100);
+    expect(readHelmPassRequest('fleet')).toBeDefined();
+    expect(() => requestHelmPass('../outside', NOW)).toThrow();
+    recordHelmPass('fleet', CONFIG, undefined, NOW + 300);
+    expect(readHelmPassRequest('fleet')).toBeUndefined();
+  });
+
   it('stands without a pass today, and a delivered pass clears it even with an empty fleet', () => {
     expect(helmPassStatus('fleet', CONFIG, NOW).reasons).toEqual(['daily']);
     recordHelmPass('fleet', CONFIG, 'Reviewed goals and todos', NOW);
