@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, signOnTrap, takeHelm } from '@lobstah/core';
+import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, signOnTrap, takeHelm, unseenNotices } from '@lobstah/core';
 import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { readCursor } from '../src/reported.js';
 import { landedCatches } from '../src/tend.js';
@@ -102,6 +102,7 @@ describe('man haul arm mode', () => {
     const worktree = path.join(home, 'backed-off-trap'); fs.mkdirSync(worktree);
     const signed = signOnTrap({ worktree, cwd: worktree, repo: 'web', harness: 'claude', sessionId: 'backed-off-trap', ttlMs: 60_000 });
     if (!('ok' in signed)) throw new Error('unexpected hold');
+    unseenNotices(true);
     for (const [sid, kind, trapId] of [[sessionId, 'man', undefined], ['backed-off-trap', 'trap', signed.ok.trapId]] as const) {
       for (let i = 0; i < 7; i++) new IdleWait(sid, DEFAULT_WAIT, undefined, 0).timedOut(14_400_000);
       expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(14400);
@@ -122,6 +123,13 @@ describe('man haul arm mode', () => {
   });
 
   it('allows a stop with nothing in flight', () => {
+    expect(JSON.parse(haul().stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
+  });
+
+  it('keeps a quiet fleet Stop to the arm line without pasting the trap roster', () => {
+    const worktree = path.join(home, 'wt-open'); fs.mkdirSync(worktree);
+    signOnTrap({ sessionId: 'open-trap', harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000 });
+    unseenNotices(true);
     expect(JSON.parse(haul().stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   });
 

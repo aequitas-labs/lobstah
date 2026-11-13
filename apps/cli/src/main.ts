@@ -232,7 +232,7 @@ import {
   decisionDir,
   telemetryCliRun,
 } from '@lobstah/core';
-import type { Descriptor, HarnessEnding, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, TodoDueEvent, Watch, WatchAttention } from '@lobstah/core';
+import type { Descriptor, HarnessEnding, Lane, Notice, NoticeKind, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, TodoDueEvent, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@lobstah/pick';
@@ -792,6 +792,20 @@ function noticeLine(n: Notice, prefix = 'notice '): string {
   if (answer) return decisionLine(answer);
   const r = trapRequestFields(n);
   return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: start it with \`lobstah man throw --new --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}${n.url ? ` ${n.url}` : ''}`;
+}
+
+const STOP_TRAP_CHANGES: readonly NoticeKind[] = [
+  'trap-signed-on', 'trap-listening', 'trap-available', 'trap-starting', 'trap-start-failed',
+  'trap-claim-idle', 'trap-claim-released', 'trap-not-receiving', 'trap-stowed', 'trap-defective', 'trap-ghosted',
+];
+
+type StopAttention = ReturnType<typeof attentionNow>[number];
+function stopAttentionLine(event: StopAttention, now = Date.now()): string {
+  const { id, entry } = event;
+  if (entry.verb === 'paused') {
+    return `- paused ${id} · waiting on ${entry.waitingOn ?? 'unspecified'} for ${ageLabel(now - Date.parse(entry.at))} — ${entry.note ?? '(no note)'}${entry.link ? ` ${entry.link}` : ''}`;
+  }
+  return `- ${entry.verb} ${id}${entry.note ? ` — ${entry.note}` : ''}`;
 }
 
 /** A haul line for a send's answer. */
@@ -3172,21 +3186,11 @@ async function mainCli(): Promise<void> {
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
         const dueDigest = () => (helm ? dueHelmDigest(helm, cfgHaul.helm.reportSecs) : undefined);
-        const trapsAtStop = () => {
-          const pauses = (['work', 'chore'] as Lane[]).flatMap((lane) => activeIds(lane).flatMap((id) => {
-            const entry = readStatusLog(id, lane).at(-1);
-            const repo = repoOf(id, lane);
-            if (entry?.verb !== 'paused' || (helm && repo !== undefined && !helm.repos.includes(repo))) return [];
-            return [`- paused ${id} · waiting on ${entry.waitingOn ?? 'unspecified'} for ${ageLabel(Date.now() - Date.parse(entry.at))} — ${entry.note ?? '(no note)'}${entry.link ? ` ${entry.link}` : ''}`];
-          }));
-          // Informational only: an already delivered pause never blocks a stop.
-          return [trapSummary(cfgHaul, helm?.repos), ...pauses].filter(Boolean).join('\n');
-        };
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
           if (helm) new IdleWait(helm.sessionId, cfgHaul.wait).woke(digestWakeKeys(d));
           advanceCursor(helm!.grounds, d.now);
           emit(
-            `Fleet report for grounds "${displayGrounds(helm!.grounds, cfgHaul)}":\n${renderDigest(d)}\n${trapsAtStop()}\n` +
+            `Fleet report for grounds "${displayGrounds(helm!.grounds, cfgHaul)}":\n${renderDigest({ ...d, traps: [] })}\n` +
               'Handle anything actionable; the Stop hook checks again at turn end.',
           );
         };
@@ -3198,6 +3202,7 @@ async function mainCli(): Promise<void> {
             true,
             helm ? noticeFilterForGrounds(helm.grounds, cfgHaul) : undefined,
             noticeWakes(helm),
+            STOP_TRAP_CHANGES,
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
             if (helm) new IdleWait(helm.sessionId, cfgHaul.wait).woke(helmWakeKeys({ notices: idleNotices }));
@@ -3205,7 +3210,6 @@ async function mainCli(): Promise<void> {
               [
                 'Fleet notices need a decision:',
                 ...idleNotices.map((n) => noticeLine(n, '')),
-                trapsAtStop(),
                 'Each notice names its own remedy. The Stop hook checks again at turn end.',
               ].join('\n'),
             );
@@ -3237,7 +3241,7 @@ async function mainCli(): Promise<void> {
           // block this stop even if a registration is still heartbeating.
           const evs = attentionNow(false, remindMs, Date.now(), matchHelm);
           const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
-          const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
+          const notices = unseenNotices(false, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES).filter((n) => n.by === undefined || n.by !== hook.session_id);
           const replies = takeReplies(false, matchHelm);
           // A sent line waits on the worker, not the helm: the worker's next
           // note wakes man wait. Alone it never blocks a stop that has a live
@@ -3251,17 +3255,20 @@ async function mainCli(): Promise<void> {
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
-                ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
+                ...evs.map(stopAttentionLine),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
                 ...notices.filter((n) => n.kind !== 'dispatch-progress' && n.kind !== 'trap-idle-working').map((n) => noticeLine(n)),
                 ...progress,
-                trapsAtStop(),
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
                 'Handle the standing item. The Stop hook will enforce a watcher at the next turn end.',
               ].join('\n'),
             );
+            // The blocking Stop output delivered these events to the helm;
+            // advance their cursors so the next turn does not repeat them.
+            attentionNow(true, remindMs, Date.now(), matchHelm);
+            unseenNotices(true, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES);
             break;
           }
           // A wait backgrounded just before the turn ended may still be starting.
@@ -3272,7 +3279,6 @@ async function mainCli(): Promise<void> {
             [
               ...(sent.length ? ['A send still waits on its reply:', ...sent.map(sentLine), SENT_HINT] : []),
               ...progressLines(),
-              trapsAtStop(),
               `Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
                 '(it wakes this session when the fleet needs you), then end your turn. ' +
                 armGraceNote(graceSecs),
@@ -3285,7 +3291,7 @@ async function mainCli(): Promise<void> {
         let evs = attentionNow(true, remindMs, Date.now(), matchHelm);
         let watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
         const notEcho = (n: Notice) => n.by === undefined || n.by !== hook?.session_id;
-        let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
+        let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES).filter(notEcho);
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
         const quiet = () =>
@@ -3307,7 +3313,7 @@ async function mainCli(): Promise<void> {
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
             runDueManWatches();
             watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
-            fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
+            fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES).filter(notEcho);
             replies = takeReplies(true, matchHelm);
             unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
             if (!quiet()) break;
@@ -3322,7 +3328,7 @@ async function mainCli(): Promise<void> {
         }
         idle.woke(helmWakeKeys({ events: evs, watches: watched, notices: fleetNotices, replies }));
         const lines = [
-          ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
+          ...evs.map(stopAttentionLine),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
           ...fleetNotices.filter((n) => n.kind !== 'dispatch-progress' && n.kind !== 'trap-idle-working').map((n) => noticeLine(n)),
           ...progressLines(),
@@ -3334,7 +3340,6 @@ async function mainCli(): Promise<void> {
           [
             'A lobstah dispatch, watched source, or fleet notice needs attention:',
             ...lines,
-            trapsAtStop(),
             'Check a dispatch with `lobstah status <id>`. For a needs-decision or blocked, send an answer with `lobstah send <id> "<answer>"` when you can decide, or frame it with `lobstah man ask <id>` when it needs the human.',
             'A watch line means an external source updated (e.g. a review round) — handle it directly.',
             'A notice line names its own decision or remedy.',
