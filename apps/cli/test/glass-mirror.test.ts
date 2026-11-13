@@ -30,6 +30,8 @@ function boatFleet(tag: 'n' | 's'): GlassFullSnapshot {
   d.reviewSetup = { enabled: true, mode: 'notify', publish: false, running: true, identity: 'reviewer', perRepo: { web: { mode: 'on-demand', publish: true, overridden: true } } };
   d.reports = [{ key: `report:work:${d.dispatches[0]!.id}`, dispatch: d.dispatches[0]!.id, lane: 'work', title: `${tag} findings`, author: `${tag}-crab`, filedAt: new Date(NOW - 60_000).toISOString(), stateHash: tag, bytes: 40, attachments: [] }];
   d.viewer = { onMachine: false, windowFocus: false, machine: '', device: 'desktop' };
+  d.helmPasses = [{ grounds: 'home', lastPassAt: new Date(NOW - 60_000).toISOString() }];
+  d.repoTraps = [{ repo: 'web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] }];
   return d;
 }
 
@@ -232,6 +234,16 @@ describe('two mirror boats in one fleet', () => {
     expect(answers[0]).toMatchObject({ boat: NORTH.boat, write: { payload: { key: 'decision:n0000000', option: 'main' } } });
   });
 
+  it('routes Recheck all to the selected boat with its original grounds name', async () => {
+    const page = await hosted('#todos');
+    const south = Array.from(page.doc.querySelectorAll('.todo-pass')).find((row) => text(row).startsWith('south · home'))!;
+    (south.querySelector('.helm-recheck') as unknown as HTMLButtonElement).click();
+    await page.settle();
+    const requests = page.relayed.filter((call) => call.write?.kind === 'helm-pass-request');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ boat: SOUTH.boat, write: { kind: 'helm-pass-request', payload: { grounds: 'home' } } });
+  });
+
   it('shows an asleep boat’s age in the header and its rows read-only', async () => {
     const h = await hosted('#dispatches', { southAt: NOW - MIRROR_STALE_MS - 60_000 });
     const south = Array.from(h.doc.querySelectorAll('.chip')).map(text).find((c) => c.startsWith('south'))!;
@@ -327,6 +339,14 @@ describe('mergeMirror', () => {
     const { snapshot } = mergeMirror([north!], NOW, viewer);
     const { mirror: _mirror, ...expected } = north!.snapshot;
     expect(snapshot).toEqual({ ...expected, viewer: { ...viewer, machine: 'north' } });
+  });
+
+  it('keeps each boat’s repo overview counts beside its labelled repo', () => {
+    const { snapshot } = mergeMirror(sources(), NOW, viewer);
+    expect(snapshot.repoTraps).toEqual([
+      { repo: 'north · web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] },
+      { repo: 'south · web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] },
+    ]);
   });
 
   it('routes each row’s key to its boat, takes labels back off, and refuses a call naming two boats', () => {
