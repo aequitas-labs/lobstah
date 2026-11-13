@@ -85,7 +85,10 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
 function withoutNewTabs(g: GlassDom): void {
   // Provider-limited workers add a filter state the frozen page did not have.
   for (const option of g.$$('#f-verb option')) if (option.textContent === 'limited') option.remove();
-  for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar')) el.remove();
+  for (const el of g.$$(
+    '.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar',
+  ))
+    el.remove();
   // The phone's header parts are new (glass-phone-nav.test.ts tests them); the filter row now names its tab for them.
   const controls = g.$('.controls');
   if (controls) controls.className = 'controls';
@@ -93,7 +96,11 @@ function withoutNewTabs(g: GlassDom): void {
   if (bar) bar.replaceWith(...Array.from(bar.childNodes));
 }
 /** The old page knew no viewer: it always offered what a page on the machine offers. */
-const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({ ...d, reports: [], viewer: { onMachine: true, windowFocus: false, machine: 'studio', device: 'desktop' } });
+const legacyShape = (d: GlassSnapshot): GlassSnapshot => ({
+  ...d,
+  reports: [],
+  viewer: { onMachine: true, windowFocus: false, machine: 'studio', device: 'desktop' },
+});
 /** The old page's wire shape: each trap's catch ids as the dispatch objects it read. */
 const legacyWire = (d: GlassSnapshot): GlassSnapshot => {
   const shaped = legacyShape(d);
@@ -152,7 +159,17 @@ function canon(node: Node, skeletonOnly = false): string {
       // A button's name that only repeats its title: the atom sets both on an icon button, the old page often only one.
       .filter((a) => !((el.tagName === 'BUTTON' || el.tagName === 'A') && a.name === 'aria-label' && a.value === el.getAttribute('title')))
       .filter((a) => !(external && (a.name === 'target' || a.name === 'rel')))
-      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )(long|extlink|btn|btn-(?:primary|secondary|danger|icon|lg))(?= |$)/g, '').trim() : a.value] as const)
+      .map(
+        (a) =>
+          [
+            a.name,
+            a.name === 'style'
+              ? normStyle(a.value)
+              : a.name === 'class'
+                ? a.value.replace(/(^| )(long|extlink|btn|btn-(?:primary|secondary|danger|icon|lg))(?= |$)/g, '').trim()
+                : a.value,
+          ] as const,
+      )
       .filter(([n, v]) => !((n === 'class' || n === 'style') && v === ''))
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([n, v]) => `${n}=${JSON.stringify(v)}`);
@@ -194,7 +211,8 @@ function foldPrTitles(el: Element): Node {
     const h3 = copy.querySelector('h3');
     if (h3?.textContent?.startsWith('🪤 ')) {
       const badge = h3.querySelector('.badge');
-      if (badge?.textContent === 'live' || badge?.textContent === 'signed off') badge.textContent = harness === 'unknown' ? 'signed off' : harness;
+      if (badge?.textContent === 'live' || badge?.textContent === 'signed off')
+        badge.textContent = harness === 'unknown' ? 'signed off' : harness;
     }
     if (h3?.textContent?.startsWith('⛵ ')) {
       const sub = copy.querySelectorAll('.sub')[1];
@@ -203,7 +221,9 @@ function foldPrTitles(el: Element): Node {
     n.remove();
   }
   for (const n of copy.querySelectorAll('.worker-harness')) {
-    n.removeAttribute('aria-label'); n.removeAttribute('tabindex'); n.classList.remove('worker-harness');
+    n.removeAttribute('aria-label');
+    n.removeAttribute('tabindex');
+    n.classList.remove('worker-harness');
     if (!n.className) n.replaceWith(...n.childNodes);
   }
   // Crawlers intentionally use the embedded pet art now.
@@ -283,6 +303,8 @@ function capture(g: GlassDom): Record<string, string> {
   if (tab === 'prs' && g.$('#prs .cards')) out.page = '(PR cards redrawn)';
   // The PRs tab now leads with Yours and folds the other PRs away (prs.ts); glass-prs-tab tests it.
   if (tab === 'prs') out.page = '(PRs tab split into Yours and Other PRs)';
+  // Shared page headings intentionally differ on these tabs; glass-sections.test.ts covers their labels and routes.
+  if (tab === 'dispatches' || tab === 'notices') out.page = '(shared page heading changed)';
   if (text(g.$('#modalbox h3')).startsWith('🪤')) out.modalbox = '(trap window action changed)';
   for (const id of CONTROLS) {
     const el = g.$('#' + id) as HTMLElement | null;
@@ -291,7 +313,10 @@ function capture(g: GlassDom): Record<string, string> {
   if (out.modalbox === '(settings in a dialog)') out['overlay.display'] = '(settings in a dialog)';
   for (const id of ['f-lane', 'f-repo', 'f-verb', 'f-kind', 'f-q']) out[`${id}.value`] = (g.$('#' + id) as HTMLInputElement).value;
   out.chain = String((g.$('#f-chain') as HTMLInputElement).checked);
-  out.tabs = g.$$('#tabs a, .tabpage').map((a) => `${a.getAttribute('href') ?? a.id}:${a.className}`).join(' ');
+  out.tabs = g
+    .$$('#tabs a, .tabpage')
+    .map((a) => `${a.getAttribute('href') ?? a.id}:${a.className}`)
+    .join(' ');
   return out;
 }
 
@@ -303,7 +328,9 @@ async function click(g: GlassDom, el: Element | null | undefined) {
   await g.settle();
 }
 async function escape(g: GlassDom) {
-  g.document.dispatchEvent(new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }));
+  g.document.dispatchEvent(
+    new (g.window as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent('keydown', { key: 'Escape' }),
+  );
   await g.settle();
 }
 async function control(g: GlassDom, id: string, value: string | boolean, type = 'change') {
@@ -424,11 +451,18 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
           // Every button is the Button atom (components/button.ts), sized and colored there; glass-button.test.ts tests it.
           // A verb cell is colored as its icon is (components/run-status.ts VERB_TONE); glass-verb-icons.test.ts tests it.
-          .filter((el) => !el.matches('.btn, .btn *, button, button *, .x, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *'))
+          .filter(
+            (el) =>
+              !el.matches(
+                '.btn, .btn *, button, button *, .x, h1, h2, .page-head, .page-head *, .section-head, .section-head *, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *',
+              ),
+          )
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);
-            const props = Array.from({ length: cs.length }, (_, k) => cs.item(k)).filter((p) => p !== 'color-scheme').sort();
+            const props = Array.from({ length: cs.length }, (_, k) => cs.item(k))
+              .filter((p) => p !== 'color-scheme')
+              .sort();
             // extlink only draws the ↗ after a link out of the glass (see canon); the link's own style is compared.
             const cls = el.className.replace(/(^| )extlink(?= |$)/, '').trim();
             out.push(`${label} ${i} ${el.tagName}.${cls} ` + props.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'));
@@ -450,7 +484,10 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
     // happy-dom reports verbatim; the value is the same.
     const norm = (s: string) => s.replace(/(?<![\d.])0\.(\d)/g, '.$1');
     const unaffected = (s: string) => /^table#(?:dispatches|prs|notices) /.test(s);
-    const [legacy, built] = [(await computed(LEGACY)).map(norm).filter(unaffected), (await computed(GLASS_PAGE)).map(norm).filter(unaffected)];
+    const [legacy, built] = [
+      (await computed(LEGACY)).map(norm).filter(unaffected),
+      (await computed(GLASS_PAGE)).map(norm).filter(unaffected),
+    ];
     expect(built.length).toBe(legacy.length);
     for (let i = 0; i < legacy.length; i++) expect(built[i]).toBe(legacy[i]);
   }, 60_000);

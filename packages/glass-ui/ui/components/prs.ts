@@ -78,7 +78,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
     (w) =>
       html`<tr key=${w.key}><td>${w.key}</td><td>${w.owner}</td><td title=${w.cursor}>${short(w.cursor)}</td><td>${w.lastCheckedAt && Age(w.lastCheckedAt)}</td><td>${LinkedText(w.lastError)}</td></tr>`,
   );
-  return [html`<h2>other watches</h2>`, Table(['key', 'owner', 'cursor', 'last check', 'error'], rows, 'no other watches')];
+  return [html`<h2>Other watches</h2>`, Table(['key', 'owner', 'cursor', 'last check', 'error'], rows, 'no other watches')];
 }
 
 function prTable(inp: PrsInputs, older: unknown) {

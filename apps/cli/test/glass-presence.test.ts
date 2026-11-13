@@ -68,7 +68,7 @@ describe('glassHost', () => {
 
 describe('validShowHash: what location.hash accepts', () => {
   it('takes a tab, a decision, a report, or nothing', () => {
-    for (const ok of ['', '#prs', '#deck', '#decision/fleet%2Fabc', '#decision/work:1234', '#report/r-1'])
+    for (const ok of ['', '#prs', '#deck', '#decisions', '#decision/fleet%2Fabc', '#decision/work:1234', '#report/r-1'])
       expect(validShowHash(ok), ok).toBe(true);
   });
   it('refuses anything else', () => {

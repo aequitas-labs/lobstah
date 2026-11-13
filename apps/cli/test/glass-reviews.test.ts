@@ -98,7 +98,7 @@ describe('the Reviews tab', () => {
     action.click();
     await g.settle();
     expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'review-approve', payload: { key: r.key } });
-    expect(g.$('.dalert-live .ok')?.textContent).toBe('Approved #7');
+    expect(g.$$('[role="status"]').map((status) => status.textContent)).toContain('Approved #7');
   });
 
   it('legacy deep links open Reviews despite stored filters and leave the draft pending', async () => {

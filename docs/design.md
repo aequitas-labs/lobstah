@@ -708,7 +708,7 @@ A new view goes in `packages/glass-ui/ui/components`, where both glasses get it.
 | `ui/store.ts` | the one store: the latest snapshot, the route, the prefs, the open modal, the stale flag, the lob state |
 | `ui/actions.ts` | every change the page can make (open or close a modal, set a preference, hide a lob, receive a snapshot) |
 | `ui/poll.ts` | snapshot polling: every 2s, one request at a time, paused while the tab is hidden; an unchanged answer applies only the beats (server time and heartbeats) |
-| `ui/route.ts` | the hash tabs (`#deck`, `#dispatches`, `#traps`, `#prs`, `#notices`) |
+| `ui/route.ts` | the hash tabs and decision list (`#deck`, `#decisions`, `#dispatches`, `#traps`, `#prs`, `#notices`) |
 | `ui/prefs.ts` | the per-browser preferences and lob hides, in localStorage |
 | `ui/components/*.ts` | `App`, `Header`, `Deck`, `Dispatches`, `Traps`, `PRs`, `Notices`, `Modal` (dispatch, trap, helm, PR, settings), `Lobs`, and the Markdown, link and harness-icon pieces |
 | `ui/html.ts` | htm bound to Preact's `h` |

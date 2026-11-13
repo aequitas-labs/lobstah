@@ -12,14 +12,20 @@ import { MIRROR_STALE_MS } from '../../../../packages/glass-ui/ui/mirror-merge.j
 import type { MirrorBoatView } from '../../../../packages/glass-ui/ui/mirror-merge.js';
 import { BOAT_STATE_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
 import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
+import { SectionHead } from '../../../../packages/glass-ui/ui/components/section-head.js';
+import { NewTrap } from '../../../../packages/glass-ui/ui/components/common.js';
 
 /** online, asleep or revoked, from its mirror snapshot's age where it mirrors, else its last check-in. */
 function boatState(b: Boat, mirror: MirrorBoatView | undefined, now = Date.now()): CardState {
   const asleep = mirror ? mirror.stale : !b.lastCheckIn || now - Date.parse(b.lastCheckIn) > MIRROR_STALE_MS;
   const word = b.revoked ? 'revoked' : asleep ? 'asleep' : 'online';
   const tone = word === 'online' ? 'ok' : 'dim';
-  return { word, tone, mark: 'chip', icon: html`<span class=${'gchip ' + tone}><span class="boat-state-icon" aria-hidden="true">${BOAT_STATE_ICON[word]}</span>${word}</span>` };
-
+  return {
+    word,
+    tone,
+    mark: 'chip',
+    icon: html`<span class=${'gchip ' + tone}><span class="boat-state-icon" aria-hidden="true">${BOAT_STATE_ICON[word]}</span>${word}</span>`,
+  };
 }
 
 /**
@@ -48,11 +54,7 @@ export function Boats({
   const card = (b: Boat) => {
     const mirror = mirrors.find((m) => m.boat === b.id);
     const access = b.revoked ? 'no access' : accessLabel(b.permissions);
-    const age = mirror
-      ? [Age(mirror.at), ' ago']
-      : b.lastCheckIn
-        ? [Age(b.lastCheckIn), ' ago']
-        : ['Never'];
+    const age = mirror ? [Age(mirror.at), ' ago'] : b.lastCheckIn ? [Age(b.lastCheckIn), ' ago'] : ['Never'];
     const revoke =
       !b.revoked &&
       (confirmation === b.id
@@ -86,7 +88,7 @@ export function Boats({
       ]}
     />`;
   };
-  return html`<section class="boats-section" aria-labelledby="boats-heading"><h2 id="boats-heading">Boats</h2><p class="dim">Connect a boat with <code>lobstah wharf login</code>, then approve it here</p><div class="cards boats-grid">${boats.map(card)}</div></section>
+  return html`<section class="boats-section" aria-labelledby="boats-heading"><${SectionHead} title="Boats" page id="boats-heading" action=${html`<${NewTrap} />`} /><p class="dim">Connect a boat with <code>lobstah wharf login</code>, then approve it here</p><div class="cards boats-grid">${boats.map(card)}</div></section>
     <section class="boat-settings" aria-labelledby="slack-heading"><${SlackLinkSection} /></section>
     <section class="boat-settings" aria-labelledby="account-heading"><h2 id="account-heading">Account</h2>${confirmation === 'account' ? html`<div class="bad">Delete this account's dispatches, messages, files, boats and sign-in data? This cannot be undone.<${Button} variant="danger" onClick=${deleteAccount}>confirm delete account<//><${Button} onClick=${() => setConfirmation('')}>keep account<//></div>` : html`<${Button} onClick=${() => setConfirmation('account')}>delete account…<//>`}</section>`;
 }
