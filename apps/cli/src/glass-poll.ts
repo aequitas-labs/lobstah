@@ -43,7 +43,7 @@ const cutNote = (note: string): string => (note.length > NOTE_MAX ? `${note.slic
 
 /** A dispatch as /data sends it. */
 export function dispatchSummary(x: GlassDispatch | GlassDispatchSummary): GlassDispatchSummary {
-  const { brief, attachments, messageAttachments, log, inbox, evidence, note, noteCut, ...rest } = x as GlassDispatch;
+  const { brief, attachments, messageAttachments, messages, log, inbox, evidence, note, noteCut, ...rest } = x as GlassDispatch;
   const cut = note !== undefined && note.length > NOTE_MAX;
   const ev = evidence && {
     ...(evidence.deliveredTo !== undefined ? { deliveredTo: evidence.deliveredTo } : {}),

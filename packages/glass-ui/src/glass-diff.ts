@@ -178,6 +178,8 @@ export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
   if (tab.startsWith('review-')) return 'reviews';
   if (tab.startsWith('pr/')) return 'prs';
+  if (tab.startsWith('dispatch/')) return 'dispatches';
+  if (tab.startsWith('trap-view/')) return 'traps';
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
 }
 
@@ -188,6 +190,14 @@ export function prFromHash(hash: string | undefined | null): string | null {
   if (!match) return null;
   try { return decodeURIComponent(match[1]!); } catch { return null; }
 }
+
+/** A shared detail route, including phone Back navigation between linked cards. */
+export function detailFromHash(hash: string | undefined | null): ModalRef | null {
+  const match = /^#(pr|dispatch|trap-view)\/(.+)$/.exec(hash ?? '');
+  if (!match) return null;
+  try { return { type: (match[1] === 'trap-view' ? 'trap' : match[1]) as 'pr' | 'dispatch' | 'trap', key: decodeURIComponent(match[2]!) }; } catch { return null; }
+}
+export const detailHash = (modal: ModalRef): string => `#${modal.type === 'trap' ? 'trap-view' : modal.type}/${encodeURIComponent(modal.key)}`;
 
 /** `#decision/<key>`: the deck, scrolled to that decision's card. */
 export const decisionHash = (key: string): string => `#decision/${encodeURIComponent(key)}`;

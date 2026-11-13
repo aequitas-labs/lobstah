@@ -118,6 +118,13 @@ export function dispatchDetail(detail: WharfDetail): GlassDispatch {
     messageAttachments: [],
     log,
     inbox: detail.messages.map((m) => m.text),
+    messages: detail.messages.map((message) => ({
+      file: message.id,
+      text: message.text,
+      from: 'unknown',
+      at: '',
+      state: message.received ? 'delivered' : 'pending',
+    })),
   };
 }
 

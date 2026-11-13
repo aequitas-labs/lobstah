@@ -300,6 +300,8 @@ export interface GlassDispatch extends GlassDispatchSummary {
   messageAttachments: Attachment[];
   log: StatusEntry[];
   inbox: string[];
+  /** Mail history with existing sender and delivery receipts, loaded with detail only. */
+  messages?: GlassMessage[];
   evidence?: Evidence;
 }
 

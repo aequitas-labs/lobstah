@@ -400,7 +400,7 @@ function steps(d: GlassSnapshot, view: 'table' | 'cards'): Step[] {
         );
       },
     });
-  out.push({ name: 'modal closed', run: (g) => escape(g) });
+  out.push({ name: 'modal closed', run: async (g) => { await escape(g); for (let i=0;i<50 && g.$('#overlay')?.className.includes('open');i++) await escape(g); } });
   out.push({ name: 'poll', run: (g) => g.poll() });
   return out;
 }
@@ -429,7 +429,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
         const [step, want] = legacy.views[i]!;
         const got = built.views[i]![1];
         for (const k of Object.keys(want)) {
-          if (step.startsWith('modal pr ') && k === 'modalbox') continue;
+          if (k === 'modalbox' && (/^modal (pr|dispatch|trap) /.test(step) || step === 'PR modal chain link')) continue;
           expect(got[k], `${name} · ${step} · ${k}`).toBe(want[k]);
         }
       }
