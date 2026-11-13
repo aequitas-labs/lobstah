@@ -26,7 +26,7 @@ const exec = promisify(execFile);
 export const USAGE_RESET_MESSAGE =
   'The usage limit has reset; continue where you stopped. Run `lobstah soak --wait --timeout 0` in the foreground first to restore your listener and read queued work.';
 type WakeTrap = Pick<TrapRegistration, 'harness' | 'sessionId' | 'window' | 'codexServer' | 'harnessProcess'>;
-type WakeResult = 'started' | 'busy' | { blocked: string };
+type WakeResult = 'started' | 'busy' | { blocked: string; unavailable?: true };
 
 /** A prompt may enter an idle harness composer, never a permission or trust dialog. */
 export function usageComposerReady(harness: string, screen: string): boolean {
@@ -89,16 +89,21 @@ export interface UsageLimitWatchOptions {
 
 /** Wake one existing session; a shared Codex thread receives a turn, never a second process. */
 export async function wakeUsageSession(trap: WakeTrap, options: UsageLimitWatchOptions = {}): Promise<WakeResult> {
-  if (trap.codexServer) return (options.startTurn ?? startCodexTurn)(trap.sessionId, USAGE_RESET_MESSAGE);
+  return sendSessionPrompt(trap, USAGE_RESET_MESSAGE, options);
+}
+
+/** Send one prompt to a verified harness composer; compaction may queue behind a running turn. */
+export async function sendSessionPrompt(trap: WakeTrap, text: string, options: UsageLimitWatchOptions & { allowBusy?: boolean } = {}): Promise<WakeResult> {
+  if (trap.codexServer) return (options.startTurn ?? startCodexTurn)(trap.sessionId, text);
   const alive = options.writerAlive ? options.writerAlive(trap) : !!trap.harnessProcess && harnessProcessAlive(trap.harnessProcess);
-  if (!alive) return { blocked: 'its recorded harness process is no longer running; open the saved session to continue' };
+  if (!alive) return { unavailable: true, blocked: 'its recorded harness process is no longer running; open the saved session to continue' };
   const window = trap.window;
   if (window?.tmuxPane && window.tmuxSocket && path.basename(window.tmuxSocket) === TMUX_SOCKET) {
     const run = options.tmux ?? tmuxRunner();
     const screen = await tmuxPaneTail(window.tmuxPane, 6, run);
-    if (screen && /esc to interrupt/i.test(screen)) return 'busy';
-    if (!screen || !usageComposerReady(trap.harness, screen)) return { blocked: 'its pane is not at an idle harness composer' };
-    await run(['send-keys', '-t', window.tmuxPane, '-l', USAGE_RESET_MESSAGE]);
+    if (screen && /esc to interrupt/i.test(screen) && !options.allowBusy) return 'busy';
+    if (!screen || !usageComposerReady(trap.harness, options.allowBusy ? screen.replace(/esc to interrupt/ig, '') : screen)) return { blocked: 'its pane is not at an idle harness composer' };
+    await run(['send-keys', '-t', window.tmuxPane, '-l', text]);
     await run(['send-keys', '-t', window.tmuxPane, 'Enter']);
     return 'started';
   }
@@ -110,11 +115,11 @@ export async function wakeUsageSession(trap: WakeTrap, options: UsageLimitWatchO
       (async (script: string, args: string[]): Promise<string> =>
         (await exec('osascript', ['-e', script, '--', ...args], { timeout: 5000, maxBuffer: 256 * 1024 })).stdout);
     const screen = (await native(read.script, [read.id])).split(/\r?\n/).filter(Boolean).slice(-8).join('\n');
-    if (!usageComposerReady(trap.harness, screen)) return { blocked: 'its tab is not at an idle harness composer' };
-    await native(write.script, [write.id, USAGE_RESET_MESSAGE]);
+    if (!usageComposerReady(trap.harness, options.allowBusy ? screen.replace(/esc to interrupt/ig, '') : screen)) return { blocked: 'its tab is not at an idle harness composer' };
+    await native(write.script, [write.id, text]);
     return 'started';
   }
-  return { blocked: 'open the recorded session and send the reset message; no supported input route is recorded' };
+  return { unavailable: true, blocked: 'no supported input route is recorded; open the session to send the prompt' };
 }
 
 /** Detect before ghost sweeping; retry reset prompts until their existing sessions receive them. */

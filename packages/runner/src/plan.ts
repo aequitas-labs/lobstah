@@ -83,6 +83,11 @@ export function planStart(input: PlanInput): StartPlan {
   const origin = resolveSessionHarness(originId, cfg);
   const originLane = origin.lane ?? lane;
   const originRef = { id: originId, lane: originLane };
+  if (descriptor.sessionMode === 'fresh') {
+    return { harness: resolvedHarness,
+      cold: { why: 'fresh session requested', fromHarness: origin.harness, origin: originRef },
+      note: `follow-up of ${short(originId)}: starting fresh on ${resolvedHarness} with a progress note` };
+  }
   if (!origin.sessionId) {
     return {
       harness: resolvedHarness,

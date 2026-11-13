@@ -28,6 +28,9 @@ export interface DescriptorPr {
   headSha?: string;
 }
 
+/** Whether a new dispatch starts with a clean conversation or keeps its worker's context. */
+export type DispatchSessionMode = 'fresh' | 'continue';
+
 export interface Descriptor {
   id: string;
   repo?: string;
@@ -36,6 +39,10 @@ export interface Descriptor {
   brief: string;
   /** Git progress and prior catch evidence carried into a cold trap handover. */
   handoff?: string;
+  /** Session choice made when queuing work; continuations default to continue. */
+  sessionMode?: DispatchSessionMode;
+  /** A claim-time handover starts a new task branch after inspecting the previous checkout. */
+  handoffFreshBranch?: boolean;
   harness?: string;
   /** `harness` was named on the command line (`dispatch`/`swap --harness`),
    * not inherited from a default. An explicit harness that differs from a

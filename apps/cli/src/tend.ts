@@ -123,6 +123,8 @@ export interface TendDispatch {
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
   state: string;
+  /** Conversation choice stored on the dispatch. */
+  sessionMode?: Descriptor['sessionMode'];
   /** Budget exhaustion is work saved for continuation, not a worker error. */
   outOfTimeWorkSaved?: boolean;
   note?: string;
@@ -698,6 +700,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     lane,
     bucket,
     state,
+    sessionMode: descriptor?.sessionMode ?? 'continue',
     ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
     note: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : held ?? last?.note,
     ...(bucket === 'queued' && descriptor ? { queueReason: dispatchQueueReason(descriptor, lane) } : {}),
@@ -1220,6 +1223,7 @@ export function renderTend(r: TendReport): string {
                 (d.awaitingReply ? ` (awaiting reply · ${ageLabel(Date.now() - (Date.parse(d.awaitingReply.sentAt) || Date.now()))})` : ''),
             )
             .join(' → '),
+          session: s.dispatches.map(d => `${d.sessionMode ?? 'continue'} session`).join(' → '),
           pr: s.prs ? s.prs.join('; ') : s.prState ? `${s.prState} ${s.prUrl ?? ''}`.trim() : (s.prUrl ?? ''),
           gate: s.gate ?? '',
           watch: s.watch ?? '',
@@ -1233,7 +1237,7 @@ export function renderTend(r: TendReport): string {
               .filter(Boolean).join(' · '))
             .filter(Boolean).join('; '),
         })),
-        ['key', 'dispatches', 'pr', 'gate', 'watch', 'activity', 'progress'],
+        ['key', 'dispatches', 'session', 'pr', 'gate', 'watch', 'activity', 'progress'],
       ),
     );
   }

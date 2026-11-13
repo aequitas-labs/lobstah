@@ -123,6 +123,18 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
 const idle = (seen: TerminalLaunch[]) => (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => void seen.push(l) });
 
 describe('man throw <name>', () => {
+  processTest('a fresh throw skips saved history even on the same harness', async () => {
+    const reg = stowedTrap(); stow(reg, true);
+    claudeTranscript(reg.worktree, SESSION);
+    expect(planThrow(loadConfig(), { names: ['amber-gull'] })[0]?.action).toBe('resume');
+    const seen: TerminalLaunch[] = [];
+    const result = await throwTrap({ address: 'amber-gull', cfg: loadConfig(), fresh: true,
+      adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(result.action).toBe('cold');
+    expect(seen[0]!.argv).not.toContain('--resume');
+    expect(result.registration.sessionId).toBe(OTHER);
+  });
+
   processTest('a Codex return supplies session folder trust for its soak-created checkout and reports it at launch', async () => {
     const reg = stowedTrap(); stow(reg, true);
     setRosterProfile(reg.trapId, { harness: 'codex' });

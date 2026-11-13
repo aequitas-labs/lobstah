@@ -106,6 +106,7 @@ describe('send wakes a finished dispatch', () => {
     expect(sticky.stdout).toContain(`busy on dispatch ${B}`);
     expect(lobstah('status', startedId(sticky.stdout)).stdout).toContain(`busy on dispatch ${B}`);
     expect(queuedDescriptor(startedId(sticky.stdout), 'work')?.for).toBe('wt:seat');
+    expect(queuedDescriptor(startedId(sticky.stdout), 'work')?.sessionMode).toBe('continue');
     fs.rmSync(path.join(home, 'soaking', 'seat.json'));
     const queuedId = startedId(sticky.stdout);
     expect(claimNext('work')).toBe(queuedId);
@@ -128,6 +129,7 @@ describe('send wakes a finished dispatch', () => {
     expect(sent.status, sent.stderr).toBe(0);
     const d = queuedDescriptor(startedId(sent.stdout), 'work')!;
     expect(d.for).toBeUndefined(); expect(d.pool).toBe('warm');
+    expect(d.sessionMode).toBe('continue');
     expect(sent.stdout).toContain('delivery: unaddressed (pool warm)');
   });
 

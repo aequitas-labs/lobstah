@@ -711,6 +711,11 @@ export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued
   return { requeued: id };
 }
 
+/** A newly claimed dispatch must reach its replacement session before the brief is delivered. */
+export function needsFreshTrapSession(descriptor: Descriptor): boolean {
+  return descriptor.sessionMode === 'fresh' && !descriptor.handoff && !descriptor.target;
+}
+
 /**
  * One cast of the line for a parked trap: claim the best matching bait, or
  * nothing. Addressed bait (`wt:<this trap>`) outranks the general queue;
@@ -958,7 +963,7 @@ export function baitBrief(id: string, d: Descriptor): string {
   return [
     `You are a lobstah worker session and have been assigned dispatch ${id}.`,
     '',
-    d.target ? CONFIGURED_TRAP_INSTRUCTION : d.handoff ? 'Continue in THIS worktree on its existing task branch; read the handover before changing it.' : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
+    d.target ? CONFIGURED_TRAP_INSTRUCTION : d.handoff && !d.handoffFreshBranch ? 'Continue in THIS worktree on its existing task branch; read the handover before changing it.' : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
     `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" ${d.target ? '[--report <file>] [--attach <file>]' : '[--pr <url>]'}\` (or \`failed\`).`,
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     '`working` means you are still executing and will report again. If the next move belongs to a person or to the helm, report `needs-decision` with the question. If you are waiting on an external await, report `paused` and name it. Never end a turn on `working`.',

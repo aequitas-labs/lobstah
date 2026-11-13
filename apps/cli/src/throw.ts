@@ -264,6 +264,8 @@ type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'term
 /** What every throw takes. */
 export interface ThrowOptions {
   cfg: Config;
+  /** Start without saved conversation history, after the usual writer and checkout checks. */
+  fresh?: boolean;
   /** An explicit named throw changes the saved launch harness and starts cold across harnesses. */
   harness?: string;
   by?: string;
@@ -440,6 +442,7 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   if (row.sessionHeld) throw new Error(`not throwing ${label}: ${row.why}`);
   if (row.action === 'skip') throw new TrapStartingError(`not throwing ${label}: ${row.why}`);
   if (row.action === 'unresolved') throw new Error(`cannot throw ${label}: ${row.why}`);
+  if (opts.fresh) { row.action = 'cold'; row.why = 'fresh session requested'; }
   if (opts.harness) {
     if (!['claude', 'codex'].includes(opts.harness)) throw new Error('--harness takes claude or codex');
     entry = setRosterProfile(entry.trapId, { harness: opts.harness }) ?? entry;
