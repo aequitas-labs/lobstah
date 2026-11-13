@@ -441,7 +441,8 @@ host processes:
 lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
   man tend [--json]               tend the whole string: fleet verdict (daemon
                                   up, stalled vs idle), unanswered questions
-                                  with ages, each work item's dispatch chain,
+                                  with ages, every open card and run card,
+                                  each work item's dispatch chain,
                                   PR, and merge-gate status from pick's last
                                   observation. Pure disk read — no forge calls.
   glass [--port <n>] [--detach]   the spyglass: tend as a live localhost web

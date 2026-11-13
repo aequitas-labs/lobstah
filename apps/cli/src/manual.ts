@@ -27,8 +27,9 @@ your working set:
   lobstah cancel <id>                           cut one away
   lobstah cull [--apply]                        sweep aged catch and lost gear
   lobstah man tend [--json]                     tend the string: fleet verdict,
-                                                unanswered questions, each work
-                                                item's chain + PR + merge gate
+                                                unanswered questions, open cards,
+                                                each work item's chain + PR +
+                                                merge gate
   lobstah glass [--port <n>] [--detach]         the spyglass: tend as a live
                                                 localhost page — traps with
                                                 their lifecycle and mail,

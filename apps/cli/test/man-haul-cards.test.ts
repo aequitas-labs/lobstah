@@ -71,6 +71,47 @@ function stop(...args: string[]): string {
   return JSON.parse(result.stdout).reason ?? '';
 }
 
+/** Runs `lobstah man tend` with the given flags and returns its stdout. */
+function tend(...args: string[]): string {
+  const result = spawnSync(process.execPath, [cli, 'man', 'tend', ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, LOBSTAH_HOME: home },
+    timeout: 10_000,
+  });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout;
+}
+
+it('man tend lists every open card and run card, in text and JSON, until each is answered', () => {
+  const run = askRun('Publish the package');
+  const plain = askCard('Choose the release', { options: ['Ship', 'Hold'] });
+  const other = askCard('Other grounds card', { grounds: 'beta' });
+
+  const text = tend();
+  expect(text).toContain('open-cards[3]{kind,key,grounds,title,age,link}:');
+  expect(text).toContain(`run,${run.key},alpha,Publish the package,`);
+  expect(text).toContain(`card,${plain.key},alpha,Choose the release,`);
+  expect(text).toContain(`card,${other.key},beta,Other grounds card,`);
+
+  const report = JSON.parse(tend('--json')) as { openCards?: Array<Record<string, unknown>> };
+  expect(report.openCards?.map((card) => [card.kind, card.key, card.grounds])).toEqual(
+    expect.arrayContaining([
+      ['run', run.key, 'alpha'],
+      ['card', plain.key, 'alpha'],
+      ['card', other.key, 'beta'],
+    ]),
+  );
+  expect(report.openCards?.find((card) => card.key === run.key)?.link).toBe(
+    `http://127.0.0.1:4949/#decision/decision%3A${run.key.slice('decision:'.length)}`,
+  );
+
+  answerDecision({ key: plain.key, option: 'Ship', by: 'cli', maxBytes: 1024 });
+  const after = JSON.parse(tend('--json')) as { openCards?: Array<{ key: string }> };
+  expect(after.openCards?.map((card) => card.key).sort()).toEqual([run.key, other.key].sort());
+  expect(tend()).toContain('open-cards[2]{');
+  expect(tend()).not.toContain(`card,${plain.key},`);
+});
+
 it('lists an unbound run and a paused dispatch card, excluding answered, settled, withdrawn and other grounds cards', () => {
   enqueue({ id: dispatchId, repo: 'web', brief: 'Paused work' });
   claimNext('work');
@@ -91,19 +132,19 @@ it('lists an unbound run and a paused dispatch card, excluding answered, settled
   const reason = stop();
   const listedCards = reason
     .split('\n')
-    .filter((line) => /^- (run|card) /.test(line))
+    .filter((line) => /^  (run|card),/.test(line))
     .join('\n');
-  expect(reason).toContain(`run ${run.key.slice('decision:'.length)} · Publish the package`);
-  expect(reason).toContain(`card ${regular.key.slice('decision:'.length)} · Choose the release`);
+  expect(reason).toContain(`run,${run.key},Publish the package,`);
+  expect(reason).toContain(`card,${regular.key},Choose the release,`);
   expect(reason).toContain(`http://127.0.0.1:4949/#decision/decision%3A${run.key.slice('decision:'.length)}`);
   expect(listedCards).not.toMatch(/Already answered|Finished run|Withdrawn card|Other grounds card/);
   expect(reason.split('\n').at(-1)).toBe(HELM_STOP_REMINDER);
-  expect(stop()).not.toContain('Open cards:');
+  expect(stop()).not.toContain('open-cards[');
 });
 
 it('lists a run card even when no dispatch is in flight, then lets the next quiet Stop end', () => {
   const run = askRun('Run the local check');
-  expect(stop()).toContain(`run ${run.key.slice('decision:'.length)} · Run the local check`);
+  expect(stop()).toContain(`run,${run.key},Run the local check,`);
   expect(stop()).toBe('');
 });
 
@@ -142,7 +183,7 @@ it('wakes a parked helm when an open run card appears', async () => {
     const run = askRun('Check the queued release');
     await ended;
     expect(child.exitCode).toBe(0);
-    expect(JSON.parse(output).reason).toContain(`run ${run.key.slice('decision:'.length)} · Check the queued release`);
+    expect(JSON.parse(output).reason).toContain(`run,${run.key},Check the queued release,`);
     expect(openCardsAtStop(helmOf(sessionId)!, loadConfig(), false)).toBe('');
   } finally {
     if (child.exitCode === null) {
