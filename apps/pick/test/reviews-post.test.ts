@@ -231,6 +231,20 @@ describe('posting from the reviews loop', () => {
     expect(posts(calls)).toEqual([]);
   });
 
+  it('stages an approval with an empty body without submitting it', async () => {
+    drafted();
+    const dir = reviewRoundDir(KEY, 'RRE_7')!;
+    fs.writeFileSync(path.join(dir, 'review.md'), '');
+    fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
+    const calls: Call[] = [];
+    expect(await stageReview(KEY, { token: tok, fetch: github(calls) })).toMatchObject({ staged: true });
+    expect(posts(calls)).toHaveLength(1);
+    expect(posts(calls)[0]?.body).toMatchObject({ body: `\n\n${MARKER}`, comments: [] });
+    expect(posts(calls)[0]?.body?.event).toBeUndefined();
+    expect(latestRound(readReview(KEY)!)?.state).toBe('drafted');
+  });
+
   it('post = "draft" stages the draft as a pending review, once, and never posts it', async () => {
     config('draft');
     drafted();
