@@ -17,7 +17,7 @@ import { getState, setState, viewOf } from './store.js';
 import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
 import { setDecisionBadge } from './app-badge.js';
-import { backend, can } from './backend.js';
+import { backend, can, type GlassVerdict } from './backend.js';
 import { RUN_LINE_SEAL_INFO, RUN_SEAL_INFO, runInputsText, runLineSignedText } from '../../core/src/run-inputs.js';
 import type { RunInputValues, SealedInput } from '../../core/src/run-inputs.js';
 
@@ -556,8 +556,15 @@ export async function reviewRequest(kind: ReviewRequestKind, payload: Record<str
 }
 
 /** Set or move a todo's time from its row. Resolves to the parser's message, or undefined on success. */
-export async function scheduleTodo(grounds: string, id: number, until: string): Promise<string | undefined> {
-  return glassRequest('todo-schedule', { grounds, id, until });
+export async function scheduleTodo(
+  grounds: string,
+  id: number,
+  until: string,
+  onScheduled?: (dueAt: string) => void,
+): Promise<string | undefined> {
+  return glassRequest<GlassVerdict & { dueAt?: string }>('todo-schedule', { grounds, id, until }, (result) => {
+    if (result.dueAt) onScheduled?.(result.dueAt);
+  });
 }
 
 /** Request a todo/goals pass on these grounds, leaving the review work to the helm. */
@@ -590,13 +597,18 @@ export async function unmuteReviewPr(key: string): Promise<string | undefined> {
   return glassRequest('review-unmute', { key });
 }
 
-async function glassRequest(kind: string, payload: Record<string, unknown>): Promise<string | undefined> {
+async function glassRequest<T extends GlassVerdict = GlassVerdict>(
+  kind: string,
+  payload: Record<string, unknown>,
+  onSuccess?: (result: T) => void,
+): Promise<string | undefined> {
   const snapshot = getState().snapshot;
   const token = snapshot?.focusToken;
   if (!token) return snapshot?.viewer?.onMachine === false ? READ_ONLY_REASON : 'The glass has no page token yet.';
   try {
-    const result = (await backend().request(kind, payload, token)).body;
+    const result = (await backend().request<T>(kind, payload, token)).body;
     if (!result.ok) return result.reason ?? 'The request was refused.';
+    onSuccess?.(result);
   } catch {
     return 'The request could not be sent.';
   }

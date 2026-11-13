@@ -562,8 +562,34 @@ h2 {
 }
 /* Todos are one compact list row each, in table and card views alike. */
 .todo-check {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  touch-action: pan-y;
   padding: var(--space-2) 0;
   border-top: 1px solid var(--line);
+}
+.todo-row-body {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  background: var(--bg);
+}
+.todo-check.snooze-revealed .todo-row-body {
+  transform: translateX(-7rem);
+}
+.todo-swipe-action {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--seg-on);
+}
+.todo-swipe-snooze {
+  flex-direction: column;
 }
 /* Read-only boxes drawn by hand: a done goal or Todo shows a green check,
    not the browser's greyed-out disabled checkbox. */
@@ -644,28 +670,47 @@ h2 {
   overflow-wrap: anywhere;
 }
 .todo-actions {
-  margin-top: var(--space-2);
+  flex: 0 0 auto;
 }
-.todo-schedule {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+.todo-snooze-popover {
+  position: fixed;
+  z-index: var(--layer-modal);
+  width: min(320px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--modal-radius);
+  background: var(--card);
+  box-shadow: 0 8px 24px var(--scrim);
+}
+.todo-snooze-popover h3 {
+  margin: 0 0 var(--space-3);
+}
+.todo-snooze-form {
+  display: grid;
+  gap: var(--space-3);
+}
+.todo-snooze-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2);
 }
-.todo-schedule input[type='text'] {
+.todo-snooze-time {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+}
+.todo-snooze-form input[type='text'] {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--fg);
   font: inherit;
-  padding: 3px 9px;
+  padding: var(--space-2);
   min-width: 0;
-  flex: 1 1 8em;
-  /* Undo the hand-drawn checkbox rule, `.todo-check input`. */
-  width: auto;
-  height: auto;
-  margin: 0;
-  cursor: text;
+  width: 100%;
 }
 .deckgrid {
   display: flex;
