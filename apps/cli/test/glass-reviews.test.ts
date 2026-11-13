@@ -82,6 +82,25 @@ describe('the Reviews tab', () => {
     expect(g.opened()).toHaveLength(0);
   });
 
+  it('posts a drafted verdict from the card in one click and shows its success message', async () => {
+    const r = review(7, { state: 'drafted', staged: true, verdict: 'approve' });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
+      now: NOW,
+      prefs: { view: 'cards' },
+      post: () => ({ status: 200, body: { ok: true } }),
+    });
+    open.push(g);
+    await g.go('#reviews');
+    const card = g.$('#reviews [data-review="review:acme/web#7"]')!;
+    expect(card.textContent).not.toContain('Keep');
+    expect(card.textContent).not.toContain('Post approval');
+    const action = card.querySelector('.gactions button') as unknown as HTMLElement;
+    action.click();
+    await g.settle();
+    expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'review-approve', payload: { key: r.key } });
+    expect(g.$('.dalert-live .ok')?.textContent).toBe('Approved #7');
+  });
+
   it('deep links open Reviews despite stored filters, mark the target seen, and keep needs-you', async () => {
     const r = review(7, { state: 'drafted', verdict: 'approve', needsYou: true, seenAt: ago(10) });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards', repo: 'other', q: 'unrelated' }, post: () => ({ status: 200, body: { ok: true } }) });

@@ -27,6 +27,7 @@ import { Dialog } from './dialog.js';
 import { ITEM_ICON } from './icons.js';
 import { Traps } from './traps.js';
 import { Todos } from './todos.js';
+import { ToastHost } from './toast.js';
 import { host } from '../host.js';
 
 /**
@@ -87,5 +88,6 @@ export function App({ state }: { state: GlassState }) {
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
     d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`,
+    html`<${ToastHost} />`,
   ];
 }

@@ -138,7 +138,10 @@ export interface MenuAction {
   icon?: Children;
   title?: string;
   disabled?: boolean;
-  onClick: (e: Event) => void;
+  action?: (event: Event) => Promise<string | undefined | void> | string | undefined | void;
+  sending?: string;
+  done?: string;
+  onClick?: (e: Event) => void;
 }
 
 /**
@@ -174,12 +177,17 @@ export function SplitButton({ main, more }: { main: Children; more: MenuAction[]
         onClick=${() => setOpen(!open)}
       >${ActionIcon.caret}<//>${
         open &&
-        html`<span class="cmenulist" role="menu">${more.map(
-          (m) =>
-            html`<button type="button" role="menuitem" class="cmenuitem" title=${m.title} disabled=${m.disabled} onClick=${(e: Event) => {
-              setOpen(false);
-              m.onClick(e);
-            }}>${m.icon}<span>${m.label}</span></button>`,
+        html`<span class="cmenulist" role="menu">${more.map((m) =>
+          m.action
+            ? html`<${Button} class="cmenuitem" role="menuitem" title=${m.title} disabled=${m.disabled} action=${async (e: Event) => {
+                const refusal = await m.action?.(e);
+                if (!refusal) setOpen(false);
+                return refusal;
+              }} sending=${m.sending} done=${m.done}>${m.icon}<span>${m.label}</span><//>`
+            : html`<button type="button" role="menuitem" class="cmenuitem" title=${m.title} disabled=${m.disabled} onClick=${(e: Event) => {
+                setOpen(false);
+                m.onClick?.(e);
+              }}>${m.icon}<span>${m.label}</span></button>`,
         )}</span>`
       }</span></span>`;
 }

@@ -177,11 +177,13 @@ function JobControls({ id }: { id: string }) {
     setSending(false);
     setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Queued for the helm; it expires in 10 minutes.' });
     if (!refusal) setMessage('');
+    return refusal;
   };
-  const cancel = async () => {
+  const cancel = async (e: Event) => {
+    e.stopPropagation();
     const refusal = await cancelJob(id);
     setConfirming(false);
-    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Dispatch cancelled.' });
+    return refusal;
   };
   return [
     can('message-helm') &&
@@ -198,11 +200,11 @@ function JobControls({ id }: { id: string }) {
           value=${message}
           onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}
           onKeyDown=${onSendKey(canSend, () => void send())}
-        ></textarea><div class="jobsend"><${Button} type="submit" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()}>Queue message for helm<//>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
+        ></textarea><div class="jobsend"><${Button} type="submit" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()} action=${send} showError=${false}>Queue message for helm<//>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
     can('cancel') &&
       html`<div class="sec">cancel</div>${
         confirming
-          ? html`<div>Cancel this dispatch? Its agent stops. <${Button} onClick=${cancel}>Cancel dispatch<//> <${Button} onClick=${() => setConfirming(false)}>Keep dispatch<//></div>`
+          ? html`<div>Cancel this dispatch? Its agent stops. <${Button} action=${cancel} done="Dispatch cancelled">Cancel dispatch<//> <${Button} onClick=${() => setConfirming(false)}>Keep dispatch<//></div>`
           : html`<${Button} onClick=${() => setConfirming(true)}>Cancel dispatch…<//>`
       }`,
     result && html`<div class=${result.ok ? 'ok' : 'bad'} role=${result.ok ? 'status' : 'alert'}>${result.text}</div>`,

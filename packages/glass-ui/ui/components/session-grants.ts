@@ -1,4 +1,3 @@
-import { useState } from 'preact/hooks';
 import type { Grant } from '@lobstah/core';
 import { html } from '../html.js';
 import { closeModal, reviewRequest } from '../actions.js';
@@ -56,11 +55,11 @@ function grantLead(grant: Grant): string {
 const midLine = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
 
 /** Revoke, at the right of a grant card's line 2: it never expands the card. */
-const revokeButton = (busy: boolean, revoke: () => void) =>
-  html`<${Button} disabled=${busy} onClick=${(e: Event) => {
+const revokeButton = (revoke: () => Promise<string | undefined>) =>
+  html`<${Button} action=${(e: Event) => {
     e.stopPropagation();
-    revoke();
-  }}>Revoke<//>`;
+    return revoke();
+  }} done="Grant revoked">Revoke<//>`;
 
 const usesText = (uses: number) => `${uses} ${uses === 1 ? 'use' : 'uses'}`;
 
@@ -69,7 +68,7 @@ const usesText = (uses: number) => `${uses} ${uses === 1 ? 'use' : 'uses'}`;
  * green edge, then who it covers and how long it has left, with Revoke. A tap
  * shows its uses, harness, patterns, last use and id.
  */
-function StandingGrant({ grant, busy, revoke }: { grant: Grant; busy: boolean; revoke: () => void }) {
+function StandingGrant({ grant, revoke }: { grant: Grant; revoke: () => Promise<string | undefined> }) {
   const patterns = grant.intent?.patterns ?? [];
   const context = `${grantScopeText(grant)} · ${midLine(grantExpiryText(grant.expiresAt))}`;
   return html`<${ExpandingCard}
@@ -80,7 +79,7 @@ function StandingGrant({ grant, busy, revoke }: { grant: Grant; busy: boolean; r
     state=${{ word: 'active', tone: 'ok', mark: 'edge' }}
     context=${[grantScope(grant), ` · ${midLine(grantExpiryText(grant.expiresAt))}`]}
     contextTitle=${context}
-    action=${revokeButton(busy, revoke)}
+    action=${revokeButton(revoke)}
     more=${[
       html`<div>${usesText(grant.uses)}${grant.harness === 'any' ? '' : ` · ${grant.harness === 'codex' ? 'Codex' : 'Claude Code'}`}${grant.lastUsedAt && [' · last used ', html`<time datetime=${grant.lastUsedAt}>${new Date(grant.lastUsedAt).toLocaleString()}</time>`]}</div>`,
       patterns.length > 0 &&
@@ -91,7 +90,7 @@ function StandingGrant({ grant, busy, revoke }: { grant: Grant; busy: boolean; r
 }
 
 /** A session's grant: its tools and `active` on a green edge, then its session and time left, with Revoke. A tap shows its uses, command, hosts and id. */
-function SessionGrant({ grant: g, busy, revoke }: { grant: Grant; busy: boolean; revoke: () => void }) {
+function SessionGrant({ grant: g, revoke }: { grant: Grant; revoke: () => Promise<string | undefined> }) {
   const context = `Session ${g.session} · ${midLine(grantExpiryText(g.expiresAt))}`;
   return html`<${ExpandingCard}
     key=${g.id}
@@ -100,7 +99,7 @@ function SessionGrant({ grant: g, busy, revoke }: { grant: Grant; busy: boolean;
     state=${{ word: 'active', tone: 'ok', mark: 'edge' }}
     context=${context}
     contextTitle=${context}
-    action=${revokeButton(busy, revoke)}
+    action=${revokeButton(revoke)}
     more=${[
       html`<div>${usesText(g.uses)} · expires <time datetime=${g.expiresAt}>${new Date(g.expiresAt!).toLocaleTimeString()}</time></div>`,
       g.command && html`<code class="grant-scope">${g.command} …</code>`,
@@ -114,12 +113,8 @@ const intentPatternLabel = (item: { kind: string; pattern: string }): string =>
   item.kind === 'command' ? item.pattern : `${item.kind}:${item.pattern}`;
 
 export function SessionGrants({ grants, standing = [] }: { grants: Grant[]; standing?: Grant[] }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | undefined>();
   const revoke = (id: string) => async () => {
-    setBusy(id);
-    setError(await reviewRequest('grant-revoke', { id }));
-    setBusy(null);
+    return reviewRequest('grant-revoke', { id });
   };
   const active = activeSessionGrants(grants);
   const audit = active
@@ -131,5 +126,5 @@ export function SessionGrants({ grants, standing = [] }: { grants: Grant[]; stan
     )
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 20);
-  return html`<section class="session-grants"><h2>Grants</h2>${!active.length && !standing.length && html`<div class="empty">No active grants</div>`}${standing.length > 0 && html`<div class="cards standing-grants">${standing.map((grant) => html`<${StandingGrant} key=${grant.id} grant=${grant} busy=${busy === grant.id} revoke=${revoke(grant.id)} />`)}</div>`}<div class="cards">${active.map((g) => html`<${SessionGrant} key=${g.id} grant=${g} busy=${busy === g.id} revoke=${revoke(g.id)} />`)}</div>${error && html`<div class="bad" role="alert">${error}</div>`}${audit.length > 0 && html`<h2>Use log</h2><ul class="grant-audit">${audit.map((a, i) => html`<li key=${a.id + ':' + i}><time datetime=${a.at}>${new Date(a.at).toLocaleTimeString()}</time><code>${a.tool}</code>${a.hosts?.length ? html`<span>${a.hosts.join(', ')}</span>` : null}<span class="dim">Session ${a.session}</span></li>`)}</ul>`}</section>`;
+  return html`<section class="session-grants"><h2>Grants</h2>${!active.length && !standing.length && html`<div class="empty">No active grants</div>`}${standing.length > 0 && html`<div class="cards standing-grants">${standing.map((grant) => html`<${StandingGrant} key=${grant.id} grant=${grant} revoke=${revoke(grant.id)} />`)}</div>`}<div class="cards">${active.map((g) => html`<${SessionGrant} key=${g.id} grant=${g} revoke=${revoke(g.id)} />`)}</div>${audit.length > 0 && html`<h2>Use log</h2><ul class="grant-audit">${audit.map((a, i) => html`<li key=${a.id + ':' + i}><time datetime=${a.at}>${new Date(a.at).toLocaleTimeString()}</time><code>${a.tool}</code>${a.hosts?.length ? html`<span>${a.hosts.join(', ')}</span>` : null}<span class="dim">Session ${a.session}</span></li>`)}</ul>`}</section>`;
 }

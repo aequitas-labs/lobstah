@@ -41,8 +41,8 @@ export function PermissionsProposalCard({ card, draft }: { card: ProposalCard; d
       </details>
     </div>
     <div class="doptions">
-      <${Button} size="lg" class="dopt proposal-approve" disabled=${busy || !selected.length || !reviewed} onClick=${() => void sendPermissionsProposal(card.key, 'Approve')}><span class="dlabel">${draft?.sending ? 'Applying…' : 'Approve'}</span><//>
-      <${Button} size="lg" class="dopt proposal-reject" disabled=${busy} onClick=${() => void sendPermissionsProposal(card.key, 'Reject')}><span class="dlabel">Reject</span><//>
+      <${Button} size="lg" class="dopt proposal-approve" disabled=${busy || !selected.length || !reviewed} action=${() => sendPermissionsProposal(card.key, 'Approve')} sending="Applying…" done="Permission changes applied" showError=${false}>Approve<//>
+      <${Button} size="lg" class="dopt proposal-reject" disabled=${busy} action=${() => sendPermissionsProposal(card.key, 'Reject')} done="Permission changes rejected" showError=${false}>Reject<//>
       <${Button} size="lg" class="dopt proposal-edit" aria-pressed=${editing ? 'true' : 'false'} disabled=${busy} onClick=${() => setDraft(card.key, { proposalEditing: true })}><span class="dlabel">Edit</span><//>
     </div>
     ${draft?.error && html`<div class="bad derr">${draft.error}</div>`}
