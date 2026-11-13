@@ -92,7 +92,7 @@ describe('title fields on trap commands', () => {
 
 describe('the sign-on title is a step the session confirms', () => {
   const stop = (extra: Record<string, unknown> = {}) =>
-    run(['hook', 'stop'], worktree, JSON.stringify({ session_id: 'own-session', hook_event_name: 'Stop', ...extra }));
+    run(['hook', 'stop', '--timeout', '0'], worktree, JSON.stringify({ session_id: 'own-session', hook_event_name: 'Stop', ...extra }));
   const brief = () =>
     (JSON.parse(run(['hook', 'session-start'], worktree, JSON.stringify({ session_id: 'own-session', hook_event_name: 'SessionStart' }))) as {
       hookSpecificOutput: { additionalContext: string };

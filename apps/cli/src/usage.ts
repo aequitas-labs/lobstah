@@ -402,9 +402,9 @@ installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
-  soak: `Volunteer as worker; --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
+  soak: `Volunteer as worker. End your turn: Stop waits without waking on quiet deadlines. --wait does the same for hookless sessions; --timeout 0 probes once. Idle traps auto-stow after [soak].idleStowMins (60 by default), keeping the worktree. --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; --remote-link: the https://claude.ai/code/… URL Claude printed.
---wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
+--wait renews quiet deadlines; \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
 \`trap bypass <trap> on|off\` (a person; --yes skips confirmation): the trap's next start runs with no permission checks
 (Claude Code --dangerously-skip-permissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.

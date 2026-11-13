@@ -175,6 +175,17 @@ describe('config precedence: descriptor > repo > global > default', () => {
       expect(() => loadConfig()).toThrow(error);
     }
   });
+  it('defaults auto-stow to 60 minutes and validates its override', () => {
+    expect(loadConfig().soak.idleStowMins).toBe(60);
+    for (const minutes of [0, 30, 120]) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[soak]\nidleStowMins = ${minutes}\n`);
+      expect(loadConfig().soak.idleStowMins).toBe(minutes);
+    }
+    for (const value of ['-1', '0.5', '"60"']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[soak]\nidleStowMins = ${value}\n`);
+      expect(() => loadConfig()).toThrow('soak.idleStowMins must be a nonnegative whole number');
+    }
+  });
   it('defaults the idle-claim notice grace to 180 seconds and honors the soak override', () => {
     expect(loadConfig().soak.claimIdleNoticeSecs).toBe(180);
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\nclaimIdleNoticeSecs = 240\n');

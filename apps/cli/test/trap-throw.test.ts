@@ -91,7 +91,7 @@ const only = (): TrapRegistration => {
 function stowedTrap(): TrapRegistration {
   expect(lobstah(primary, 'soak', '--session', SESSION, '--harness', 'claude', '--name', 'amber-gull').status).toBe(0);
   const reg = only();
-  lobstah(reg.worktree, 'soak', '--session', SESSION, '--wait', '--timeout', '1');
+  lobstah(reg.worktree, 'soak', '--session', SESSION, '--wait', '--timeout', '0');
   return reg;
 }
 function stow(reg: TrapRegistration, keep: boolean): void {
@@ -115,7 +115,7 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
       const ticket = /--ticket (\S+)/.exec(launch.argv.at(-1)!)![1]!;
       const on = lobstah(launch.cwd, 'soak', '--ticket', ticket, '--session', session, '--harness', launch.argv[0]!);
       expect(on.status, on.stderr || on.stdout).toBe(0);
-      const park = lobstah(launch.cwd, 'soak', '--session', session, '--wait', '--timeout', '2');
+      const park = lobstah(launch.cwd, 'soak', '--session', session, '--wait', '--timeout', '0');
       waitOut.push(park.stdout);
     },
   });
@@ -367,7 +367,7 @@ describe('man throw <name>', () => {
     const ticket = /--ticket (\S+)/.exec(seen[0]!.argv.at(-1)!)![1]!;
     const on = lobstah(reg.worktree, 'soak', '--ticket', ticket, '--session', OTHER, '--harness', 'codex');
     expect(on.status, on.stderr || on.stdout).toBe(0);
-    lobstah(reg.worktree, 'soak', '--session', OTHER, '--wait', '--timeout', '1');
+    lobstah(reg.worktree, 'soak', '--session', OTHER, '--wait', '--timeout', '0');
     expect(readTrap(reg.trapId)).toMatchObject({ sessionId: OTHER, harness: 'codex', firstParkedAt: expect.any(String) });
     expect(readReservation(reg.trapId)).toBeUndefined();
     expect(listNotices().some((n) => n.kind === 'trap-available' && n.refId === reg.trapId && !n.quiet)).toBe(true);
