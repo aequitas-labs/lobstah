@@ -52,6 +52,9 @@ export const STALE_SEAT_MS = 1800000;
 /** A trap's catch count as its badge shows it: capped at 999+. */
 export const catchCount = (count: number): string => (count > 999 ? '999+' : String(count));
 
+/** The Traps page's grouping, shared with its stored browser preference. */
+export type TrapGrouping = 'repo' | 'harness' | 'status';
+
 /** This browser's preferences and filters (localStorage `spyglass`). */
 export interface GlassPrefs {
   view: 'table' | 'cards';
@@ -62,6 +65,7 @@ export interface GlassPrefs {
   lobs: boolean;
   chain: boolean;
   noticeKind: string;
+  trapGroup?: TrapGrouping;
 }
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
@@ -513,7 +517,7 @@ export interface SectionInputs {
   chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[]; stats: GlassSnapshot['stats']; backends?: GlassSnapshot['backends'] };
   deck: DeckInputs;
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatchSummary[] };
-  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps'] };
+  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps']; groupBy?: TrapGrouping; overview?: GlassSnapshot['repoTraps'] };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
   reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[] };
@@ -577,6 +581,8 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
       configured: d.configuredTraps,
+      groupBy: st.trapGroup,
+      overview: d.repoTraps?.filter((row) => matchesRepo(row.repo, st)),
       view: st.view,
       list: traps.map((t) => seat(trapView(d, t))),
     },

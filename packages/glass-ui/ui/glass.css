@@ -3502,3 +3502,29 @@ footer .glass-brand {
   height: 100%;
   margin: 0;
 }
+
+/* The Traps page groups existing rows and cards without changing their contents. */
+.trap-controls,
+.trap-overview-row,
+.trap-harness-count,
+.trap-group h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.trap-controls {
+  justify-content: space-between;
+}
+.trap-overview {
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-3);
+}
+.trap-group,
+.trap-inactive {
+  margin-top: var(--space-4);
+}
+.trap-group h3 {
+  margin-bottom: var(--space-2);
+}

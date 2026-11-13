@@ -80,7 +80,7 @@ describe('the trap card', () => {
       prefs: { view: 'table' },
     });
     open.push(g);
-    expect(g.$$('#traps th').map((th) => text(th))).toEqual([
+    expect([...g.$('#traps table')!.querySelectorAll('th')].map((th) => text(th))).toEqual([
       'address',
       'repo',
       'worktree',

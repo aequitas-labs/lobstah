@@ -1,3 +1,4 @@
+import { trapAvailability } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
 import { requestHelmPass, resolveGrounds } from '@lobstah/core';
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
@@ -803,6 +804,18 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     // Dispatch progress is the helm's to act on; the glass lists it only when attentionKinds names it, as its attention walks.
     notices: (cfg.attentionKinds.includes('dispatch-progress') ? allNotices : allNotices.filter((n) => !progressNotice(n))).reverse(),
     repoKeys: Object.keys(cfg.repos),
+    repoTraps: Object.keys(cfg.repos).map((repo) => {
+      const inUse = [...new Map([...live, ...reserved].filter((trap) => trap.repo === repo).map((trap) => [trap.trapId, trap])).values()];
+      const harnesses = new Map<string, number>();
+      for (const trap of inUse) harnesses.set(trap.harness ?? '', (harnesses.get(trap.harness ?? '') ?? 0) + 1);
+      return {
+        repo,
+        used: inUse.length,
+        limit: cfg.repos[repo]!.traps,
+        free: live.filter((trap) => trap.repo === repo && trapAvailability(trap).state === 'free').length,
+        harnesses: [...harnesses].sort(([left], [right]) => left.localeCompare(right)).map(([harness, count]) => ({ harness, count })),
+      };
+    }),
     helmOn: liveHelms(cfg.helm.ttlSecs * 1000).length > 0,
     watches,
     dispatches,

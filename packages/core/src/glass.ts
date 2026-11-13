@@ -534,6 +534,15 @@ export interface GlassHeavy {
   tickets: GlassHeavyTicket[];
 }
 
+/** One repo's existing roster capacity and available workers, carried with the fleet snapshot. */
+export interface GlassRepoTraps {
+  repo: string;
+  used: number;
+  limit?: number;
+  free: number;
+  harnesses: Array<{ harness: string; count: number }>;
+}
+
 export interface GlassSnapshot {
   /** One banner per provider account and limit, shared by desktop and phone. */
   usageLimits?: import('./usage-limits.js').UsageLimitGroup[];
@@ -555,6 +564,8 @@ export interface GlassSnapshot {
   runPasskeys?: { count: number; newestAt?: string; hosted?: number };
   /** Configured repo keys, for the New trap form. */
   repoKeys?: string[];
+  /** Per-repo overview from the same registrations and reservations as the roster. */
+  repoTraps?: GlassRepoTraps[];
   /** A helm is signed on and beating: a trap request will be answered. */
   helmOn?: boolean;
   now: string;
