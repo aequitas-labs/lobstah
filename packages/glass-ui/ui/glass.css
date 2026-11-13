@@ -1969,6 +1969,29 @@ a.lob {
   bottom: var(--space-4);
   z-index: var(--layer-alert);
 }
+/* Shared action feedback stays visible after the action's editor closes. */
+.glass-toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-4);
+  transform: translateX(-50%);
+  z-index: var(--layer-alert);
+  max-width: calc(100vw - 2 * var(--space-4));
+  width: max-content;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: 0 8px 24px var(--scrim);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 699px) {
+  /* Leave the bottom navigation and the footer's wrapped links readable. */
+  .glass-toast {
+    bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + 5 * var(--space-4));
+  }
+}
 /* On a phone the bottom bar is pinned: the alert and the lobsters run just above it, never behind it. After their own rules, so this wins. */
 @media (max-width: 699px) {
   .dalert-live {

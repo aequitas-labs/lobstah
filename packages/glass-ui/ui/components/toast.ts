@@ -1,5 +1,5 @@
 import { useLayoutEffect, useState } from 'preact/hooks';
-import { html } from '../html.js';
+import { html, type Children } from '../html.js';
 
 type ToastMessage = { id: number; message: string };
 type ToastListener = (message: string) => void;
@@ -13,7 +13,7 @@ export function showToast(message: string): void {
 }
 
 /** The glass-wide live region keeps success feedback visible when an action closes its card. */
-export function ToastHost() {
+export function ToastHost(): Children {
   const [toast, setToast] = useState<ToastMessage>();
   useLayoutEffect(() => {
     const receive = (message: string) => {
@@ -25,5 +25,5 @@ export function ToastHost() {
       listeners.delete(receive);
     };
   }, []);
-  return toast && html`<div class="dalert-live" role="status" aria-live="polite"><span class="ok">${toast.message}</span></div>`;
+  return toast && html`<div class="glass-toast" role="status" aria-live="polite">${toast.message}</div>`;
 }
