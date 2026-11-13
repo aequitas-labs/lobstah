@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.10 — 2026-11-12
+## 0.8.10 — 2026-11-13
 
 **Upgrade every Mac to 0.8.10 before the wharf is redeployed.** The wharf, the
 hosted glass and the Mac's mirror now talk over one WebSocket (`lobstah.2`).
@@ -75,6 +75,51 @@ boat on wharf grounds falls back to reading every 30 seconds.
   harness loads, warns about a long one whose tool never registered a wait,
   and shows the waits lobstah runs, warning about one that keeps failing.
   (#469)
+- `lobstah doctor` and a stalled `lobstah throw` now name untrusted or changed
+  hooks installed by another Codex plugin, while respecting disabled hooks and
+  leaving the other plugin's trust alone. (#470)
+- A registered wait that exits with an error is a failure even when it takes
+  more than ten seconds; its stderr is kept for doctor and retries back off.
+  Quiet exit codes still retry at once. (#471)
+- When a heavy command finishes, its paused traps wake durably, including after
+  a restart. A failed wait does not lose the completion. (#477)
+
+### The glass
+
+- Run cards lead with a terminal icon on the deck. Run, Decline, Stop, Run
+  again and Dismiss sit in one row in the open card. (#472)
+- Reports open in a sheet over the glass, with Back, Escape, browser back and
+  the phone back gesture returning to the same tab and scroll position. (#473)
+- Card buttons share one size and one main action; Open is an icon at the right
+  of the bar. Opening a card acknowledges it. (#474)
+- PRs leave On deck for the PRs tab, where a whole stack can merge when every
+  PR is green. (#475)
+- Glass buttons use one shared Button component, keeping behavior and sizing
+  consistent. (#476)
+- Settings, dialogs and navigation are easier to use across desktop and phone;
+  boat actions, permissions and configuration have clearer sections. (#478)
+- The helm's turn-end reminder lists open cards, including standalone run
+  cards and cards attached to paused work. (#482)
+- Dispatches show queued, limited and unknown states with distinct icons, and
+  boat status, check-in details and actions are clearer. (#483)
+
+### Wharf mirrors
+
+- A mirror reloads its saved boat credential on reconnect, retries reads after
+  a socket failure and reports a long outage once, so replacing a credential
+  can recover without restarting the daemon. (#479)
+
+### Usage limits and harnesses
+
+- Claude allowance exhaustion appears as a limited state with a reason and
+  reset time; pickup avoids the limited account. Live catches can move between
+  harnesses with `lobstah swap`, retaining their work and inbox. (#481)
+
+### Reviews
+
+- Review rounds can be dismissed or muted, with per-verdict automatic posting
+  controls and a GitHub identity check. Posted reviews show their timestamp and
+  link. (#480)
 
 ### Also new
 
