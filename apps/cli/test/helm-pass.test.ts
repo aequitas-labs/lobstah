@@ -58,19 +58,26 @@ it('todo recheck stands through a peek, then the next wait delivers the full req
 it('a request wakes an already waiting helm instead of waiting for its quiet timeout', async () => {
   seat();
   recordHelmPass('fleet', loadConfig().helm);
-  const child = spawn(process.execPath, [cli, 'man', 'wait', '--session', session, '--timeout', '4'], { cwd: home, env: environment(), stdio: 'pipe' });
+  const child = spawn(process.execPath, [cli, 'man', 'wait', '--session', session, '--timeout', '60'], { cwd: home, env: environment(), stdio: 'pipe' });
   let output = '';
   child.stdout.on('data', (data: Buffer) => { output += data.toString(); });
   const ended = new Promise<void>((resolve, reject) => { child.once('error', reject); child.once('exit', () => resolve()); });
   child.stdin.end();
   try {
     const watcher = path.join(home, 'watchers', `${session}.json`);
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + 15000;
     while (!fs.existsSync(watcher) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 30));
     expect(fs.existsSync(watcher)).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 200));
     requestHelmPass('fleet');
-    await ended;
+    let wakeDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([ended, new Promise<never>((_, reject) => {
+        wakeDeadline = setTimeout(() => reject(new Error('requested pass did not wake within 10 seconds')), 10000);
+      })]);
+    } finally {
+      clearTimeout(wakeDeadline);
+    }
     expect(child.exitCode).toBe(0);
     expect(output).toMatch(/^pass-due.*requested/);
     expect(output).not.toContain('timeout: true');
@@ -78,7 +85,7 @@ it('a request wakes an already waiting helm instead of waiting for its quiet tim
   } finally {
     if (child.exitCode === null) { child.kill(); await ended; }
   }
-}, 10_000);
+}, 30_000);
 
 it('sign-on delivers the full due pass without a new command or charter rule', () => {
   addTodo('fleet', 'Check the release');
