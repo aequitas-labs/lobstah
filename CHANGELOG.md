@@ -1,5 +1,143 @@
 # Changelog
 
+## 0.8.10 — 2026-11-13
+
+**Upgrade every Mac to 0.8.10 before the wharf is redeployed.** The wharf, the
+hosted glass and the Mac's mirror now talk over one WebSocket (`lobstah.2`).
+Once the new wharf is up, it answers an older CLI's mirror with 426 or 410 and
+the minimum version, and that Mac's fleet stops showing on the hosted glass
+until it upgrades. Deploy the new wharf the same day: until it is up, a 0.8.10
+boat on wharf grounds falls back to reading every 30 seconds.
+
+### The wharf, the hosted glass and the mirror share one socket
+
+- The wharf speaks one socket protocol, `lobstah.2`, for both the Mac's mirror
+  and the hosted glass. A dropped socket resumes from where it was, so a drop,
+  a deploy or the wharf going idle loses nothing. One alarm replaces the wharf's
+  polling for expired calls and files. (#453)
+- The hosted glass reads its socket: each boat's snapshot is pushed to every
+  open tab, relayed calls and their answers go over the socket, and the page
+  polls nothing while the socket is open. It goes back to polling at once when
+  the socket drops. (#455)
+- The Mac's mirror keeps one socket open to the wharf, instead of polling every
+  two seconds. The wharf pushes the calls addressed to it, when a hosted glass
+  is watching, and the other boats' lists for the pet. While no hosted glass is
+  open, the mirror sends the wharf nothing. (#457)
+- A boat on wharf grounds, a hosted trap and a waiting helm learn of work from
+  events the wharf pushes on the socket, instead of polling it, and read over
+  HTTP only when something changed. (#459)
+
+### The PRs tab
+
+- A stack of several PRs is one card: its title, a summary ("ready to merge",
+  "1 failing", "2 of 3 green"), how many PRs it holds, its repo and last
+  update, and Ack stack. A click opens it to each PR's own card, the bottom of
+  the stack first. A lone PR is an ordinary card. (#456)
+- Every PR, review and stack card has a small avatar chip at its top right: the
+  PR's author, or who asked for the review. The name shows on hover. (#456)
+- A PR's "checks 3/4" chip shows the checks' breakdown on hover, and the card no
+  longer repeats it. (#458)
+- Merge when green is one click to ask and one to cancel ("Cancel merge"). It
+  always merges the repo's way, which its hover names. (#458)
+- ↗ Open sits at the right of the bottom bar on PR, stack, review and trap
+  cards. A report card opens from an arrow at its top right. A trap card shows
+  its catches on its repo line. (#458)
+
+### Dispatch and run cards
+
+- An in-flight dispatch shows its verb as an icon in a small pill: an amber
+  spinner while working, a blue hand when it needs a decision, a red stop sign
+  when blocked, a grey pause, a green check when done and a red X when it
+  failed. Its hover says the verb, how long it has been in it, and what it
+  waits on. (#468)
+- One colour meaning everywhere: amber is in progress, so a working trap is
+  now amber, not green. Green is done or idle and listening, grey is paused,
+  not listening or signed off, red is blocked or failed, and blue needs a
+  decision. Trap chips stay words, in these colours. (#468)
+- Recent runs shows each run's status icon, as the run card does: a check, an
+  X, a clock for a timeout, or a square when stopped. (#462)
+
+### Traps, hooks and waits
+
+- A lobstah hook fails open: on any error it writes one line to stderr,
+  records the error, and exits 0, so the turn goes on. `lobstah doctor` fails
+  the hooks row for a hook command this CLI doesn't know, or one that failed
+  since its last run. (#464)
+- `report paused --waiting-on review --link <url>` with a link that isn't a
+  GitHub PR (a plan or spec under review in its own tool) is accepted and
+  wakes nobody: no helm wake, reminder or card. A wait on a person is still
+  `needs-decision`. (#465)
+- Lobstah owns a trap's turn end. Other tools register a wait under
+  `~/.agent-turn/<session>/` instead of adding their own Stop hook, and the
+  daemon runs it and points the trap at what's new. `docs/turn-end.md` is the
+  contract. (#466)
+- `lobstah doctor` has a `turn waits` row. It lists every other Stop hook a
+  harness loads, warns about a long one whose tool never registered a wait,
+  and shows the waits lobstah runs, warning about one that keeps failing.
+  (#469)
+- `lobstah doctor` and a stalled `lobstah throw` now name untrusted or changed
+  hooks installed by another Codex plugin, while respecting disabled hooks and
+  leaving the other plugin's trust alone. (#470)
+- A registered wait that exits with an error is a failure even when it takes
+  more than ten seconds; its stderr is kept for doctor and retries back off.
+  Quiet exit codes still retry at once. (#471)
+- When a heavy command finishes, its paused traps wake durably, including after
+  a restart. A failed wait does not lose the completion. (#477)
+
+### The glass
+
+- Run cards lead with a terminal icon on the deck. Run, Decline, Stop, Run
+  again and Dismiss sit in one row in the open card. (#472)
+- Reports open in a sheet over the glass, with Back, Escape, browser back and
+  the phone back gesture returning to the same tab and scroll position. (#473)
+- Card buttons share one size and one main action; Open is an icon at the right
+  of the bar. Opening a card acknowledges it. (#474)
+- PRs leave On deck for the PRs tab, where a whole stack can merge when every
+  PR is green. (#475)
+- Glass buttons use one shared Button component, keeping behavior and sizing
+  consistent. (#476)
+- Settings, dialogs and navigation are easier to use across desktop and phone;
+  boat actions, permissions and configuration have clearer sections. (#478)
+- The helm's turn-end reminder lists open cards, including standalone run
+  cards and cards attached to paused work. (#482)
+- Dispatches show queued, limited and unknown states with distinct icons, and
+  boat status, check-in details and actions are clearer. (#483)
+
+### Wharf mirrors
+
+- A mirror reloads its saved boat credential on reconnect, retries reads after
+  a socket failure and reports a long outage once, so replacing a credential
+  can recover without restarting the daemon. (#479)
+
+### Usage limits and harnesses
+
+- Claude allowance exhaustion appears as a limited state with a reason and
+  reset time; pickup avoids the limited account. Live catches can move between
+  harnesses with `lobstah swap`, retaining their work and inbox. (#481)
+
+### Reviews
+
+- Review rounds can be dismissed or muted, with per-verdict automatic posting
+  controls and a GitHub identity check. Posted reviews show their timestamp and
+  link. (#480)
+
+### Also new
+
+- `lobstah man wait` with a short timeout ends on time: `--timeout 1` takes
+  about a second, not 1.7. (#454)
+
+### Docs
+
+- The README's "Choose your approach 🧭" puts the background router and the
+  lobstah man side by side in a table. A new Glass section shows the glass at
+  phone size with On deck in view, and covers the hosted glass. Telemetry is
+  one paragraph, with the full text in `docs/telemetry.md`. (#463, #467)
+
+### Maintenance
+
+- CI runs the Windows tests only when a change can affect Windows; a push to
+  main always runs them. (#451)
+
 ## 0.8.9 — 2026-11-12
 
 ### The PRs tab leads with yours
