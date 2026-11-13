@@ -1,4 +1,3 @@
-import { StateIcon } from './icons.js';
 import { useEffect, useState } from 'preact/hooks';
 import type { GlassCard, GlassCardItem } from '@lobstah/core';
 import { safeHref } from '../../src/glass-markdown.js';
@@ -57,7 +56,7 @@ export function CardDetail({
   const source = card.source === 'wharf' ? 'wharf' : `boat ${boatName(boat) ?? boat}`;
   return html`<div class="sub">${card.family} · ${source}${card.grounds ? ' · ' + card.grounds : ''} · revision ${card.revision} · ${cardTime(card.sourceAt)}</div>
     <h3>${LinkedText(card.title)}</h3>
-    <div class="meta"><${StateIcon} state=${card.terminal?.state ?? (card.seen ? 'seen' : card.quiet ? 'in progress' : 'standing')} />${cardState(card)}</div>
+    <div class="meta">${cardState(card)}</div>
     ${card.summary && html`<div class="note">${LinkedText(card.summary)}</div>`}
     ${card.links.map((l) => html`<div><a href=${safeHref(l.url)} target="_blank" rel="noopener">${l.label}</a></div>`)}`;
 }

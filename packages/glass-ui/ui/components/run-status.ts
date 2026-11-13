@@ -1,7 +1,7 @@
 import type { RunResult, RunState } from '@lobstah/core';
 import { html } from '../html.js';
 import { ageText } from './age.js';
-import { STATE_ICON, RunKindDrawing } from './icons.js';
+import { DISPATCH_STATE_ICON } from './icons.js';
 
 /**
  * A run card's state as an icon instead of words: a green check once it
@@ -67,13 +67,30 @@ export function runStatusLabel(status: RunStatus, result?: RunResult, startedAt?
   return parts.join(' · ');
 }
 
+const svg = (body: string) =>
+  html`<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: body }}></svg>`;
+
+const ICON: Record<RunStatus, unknown> = {
+  succeeded: svg('<path d="M3 8.5l3.2 3.2L13 4.8"/>'),
+  failed: svg('<path d="M4 4l8 8M12 4l-8 8"/>'),
+  'timed-out': svg('<circle cx="8" cy="8" r="6.2"/><path d="M8 4.6V8l2.4 1.6"/>'),
+  // A spinning arc; with reduced motion, glass.css shows the still dot instead.
+  running: svg(
+    '<g class="runspin"><circle cx="8" cy="8" r="6" stroke-opacity="0.3"/><path d="M8 2a6 6 0 0 1 6 6"/></g><circle class="rundot" cx="8" cy="8" r="4" fill="currentColor" stroke="none"/>',
+  ),
+  stopped: svg('<rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor" stroke="none"/>'),
+  declined: svg('<circle cx="8" cy="8" r="6.2"/><path d="M3.6 12.4l8.8-8.8"/>'),
+};
+
 /** A run card's mark on the deck: a terminal before its title, in the row's grey. Its status stays at the row's end. */
-export const RunKindIcon = html`<span class="runkind" role="img" aria-label="Run card" title="Run card">${RunKindDrawing}</span>`;
+export const RunKindIcon = html`<span class="runkind" role="img" aria-label="Run card" title="Run card">${svg(
+  '<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6" stroke-width="1.5"/><path d="M4.6 6.3l2 1.7-2 1.7M8.4 10h3" stroke-width="1.5"/>',
+)}</span>`;
 
 /** The icon, named and titled with its words. */
 export function RunStatusIcon({ status, result, startedAt }: { status: RunStatus; result?: RunResult; startedAt?: string }) {
   const label = runStatusLabel(status, result, startedAt);
-  return html`<span class=${`runicon run-${status} ${TONE[status]}`} role="img" aria-label=${label} title=${label}>${STATE_ICON[status]}</span>`;
+  return html`<span class=${`runicon run-${status} ${TONE[status]}`} role="img" aria-label=${label} title=${label}>${ICON[status]}</span>`;
 }
 
 /**
@@ -113,7 +130,7 @@ export const VERB_TONE: Record<VerbIconVerb, VerbTone> = {
   unknown: 'dim',
 };
 
-/** True for every dispatch state with a shared icon, including queued, limited and unknown. */
+/** True for every displayed dispatch verb, including queued, limited and unknown. */
 export const isIconVerb = (verb: string): verb is VerbIconVerb => Object.hasOwn(VERB_WORD, verb);
 
 /** The verb icon's words: "Paused · 12m · waiting on review". */
@@ -124,6 +141,22 @@ export function verbIconLabel(verb: VerbIconVerb, at?: string, waitingOn?: strin
   return parts.join(' · ');
 }
 
+const VERB_ICON: Record<VerbIconVerb, unknown> = {
+  ...DISPATCH_STATE_ICON,
+  working: ICON.running,
+  // A raised open hand: three fingers, then the little finger running into the palm and thumb.
+  'needs-decision': svg(
+    '<g transform="scale(0.6667)" stroke-width="2.4"><path d="M7.5 12.5V6a1.5 1.5 0 0 1 3 0v5"/><path d="M10.5 10.5V4a1.5 1.5 0 0 1 3 0v6.5"/><path d="M13.5 10.5V5.5a1.5 1.5 0 0 1 3 0v5.5"/><path d="M16.5 11V8.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a6 6 0 0 1-4.6-2.2L3.4 16a1.6 1.6 0 0 1 2.5-2l1.6 1.5v-3"/></g>',
+  ),
+  // A stop sign: an octagon with a bar.
+  blocked: svg('<path d="M5.6 2.2h4.8l3.4 3.4v4.8l-3.4 3.4H5.6l-3.4-3.4V5.6z" stroke-width="1.6"/><path d="M5.2 8h5.6"/>'),
+  paused: svg(
+    '<rect x="4" y="3.5" width="2.6" height="9" rx="0.8" fill="currentColor" stroke="none"/><rect x="9.4" y="3.5" width="2.6" height="9" rx="0.8" fill="currentColor" stroke="none"/>',
+  ),
+  done: ICON.succeeded,
+  failed: ICON.failed,
+};
+
 /**
  * A dispatch's verb icon in its pill, named and titled with its words. `at`
  * is when it took the verb; `waitingOn` what a paused or questioning
@@ -131,5 +164,5 @@ export function verbIconLabel(verb: VerbIconVerb, at?: string, waitingOn?: strin
  */
 export function VerbIcon({ verb, at, waitingOn }: { verb: VerbIconVerb; at?: string; waitingOn?: string }) {
   const label = verbIconLabel(verb, at, waitingOn);
-  return html`<span class=${`runicon verbicon verb-${verb} ${VERB_TONE[verb]}`} role="img" aria-label=${label} title=${label}>${STATE_ICON[verb]}</span>`;
+  return html`<span class=${`runicon verbicon verb-${verb} ${VERB_TONE[verb]}`} role="img" aria-label=${label} title=${label}>${VERB_ICON[verb]}</span>`;
 }

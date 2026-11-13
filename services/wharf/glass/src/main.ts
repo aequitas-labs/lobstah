@@ -19,7 +19,7 @@ import { PasskeyPairing } from './pairing.js';
 import { requestState } from './model.js';
 import { glassSocket } from './socket.js';
 import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
-import { DispatchIcon, StateIcon, ITEM_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
+import { ITEM_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
 
 /**
  * The hosted glass: GitHub sign-in around the shared glass, which runs on the
@@ -137,7 +137,7 @@ function HumanRequests({ backend }: { backend: HostedBackend }) {
   if (!requests.length) return null;
   return html`<div class="sec">Your requests</div>${requests.map(
     (r) =>
-      html`<div class="msg" key=${r.id}><b>${r.kind}</b> · ${r.dispatch && DispatchIcon}${r.dispatch ?? r.boat ?? r.document ?? 'new work'} · <${StateIcon} state=${r.state} />${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`,
+      html`<div class="msg" key=${r.id}><b>${r.kind}</b> · ${r.dispatch ?? r.boat ?? r.document ?? 'new work'} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`,
   )}`;
 }
 

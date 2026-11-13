@@ -5,7 +5,6 @@ import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, acceptanceFleet, ago, trapStatesFleet } from './fixtures/glass-snapshots.js';
 import { VERB_TONE, isIconVerb, verbIconLabel } from '../../../packages/glass-ui/ui/components/run-status.js';
-import { stateIconName } from '../../../packages/glass-ui/ui/components/icons.js';
 import type { VerbIconVerb } from '../../../packages/glass-ui/ui/components/run-status.js';
 
 /**
@@ -67,19 +66,6 @@ function verbsFleet(): GlassFullSnapshot {
 }
 
 describe('a verb icon', () => {
-  it('distinguishes a usage limit from paused or failed and resolves domain state labels', () => {
-    expect(stateIconName('limited')).toBe('limited');
-    expect(stateIconName('paused')).toBe('paused');
-    expect(stateIconName('failed')).toBe('failed');
-    expect(stateIconName('not listening')).toBe('not-listening');
-    expect(stateIconName('request_changes')).toBe('changes-requested');
-    expect(stateIconName('checks 2/3 failed')).toBe('failed');
-    expect(stateIconName('checks 2/3')).toBe('waiting');
-    expect(stateIconName('checks unknown')).toBe('unknown');
-    expect(stateIconName('needs-app-start')).toBe('starting');
-    expect(stateIconName('toString')).toBe('unknown');
-  });
-
   it('says the verb, how long it has been in it, and what it waits on', () => {
     const at = new Date(Date.now() - 12 * MIN).toISOString();
     expect(verbIconLabel('working', at)).toBe('Working · 12m');

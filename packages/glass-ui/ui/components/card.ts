@@ -1,4 +1,3 @@
-import { StateIcon } from './icons.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Children } from '../html.js';
 import { html } from '../html.js';
@@ -26,8 +25,6 @@ export interface CardState {
   /** One lowercase word or short phrase: "working", "idle", "signed off". */
   word: string;
   tone: CardTone;
-  /** A more specific drawing when the label combines states, such as idle but not listening. */
-  iconState?: string;
   /** chip: state you read. edge: state you act on. */
   mark: 'chip' | 'edge';
   /** Shown in place of the chip: a dispatch's verb icon in its pill, which carries the word as its name. */
@@ -257,7 +254,7 @@ export function Card(p: CardProps) {
   const state =
     p.state &&
     (p.state.icon ??
-      html`<span class=${(mark === 'chip' ? 'gchip ' : 'gword ') + p.state.tone + (long ? ' long' : '')} title=${long ? p.state.word : undefined}><${StateIcon} state=${p.state.iconState ?? p.state.word} />${p.state.word}</span>`);
+      html`<span class=${(mark === 'chip' ? 'gchip ' : 'gword ') + p.state.tone + (long ? ' long' : '')} title=${long ? p.state.word : undefined}>${p.state.word}</span>`);
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
     <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}${p.person && html`<${PersonChip} person=${p.person} />`}${p.open && html`<${OpenArrow} open=${p.open} />`}</div>
     ${p.status && html`<div class="gline gstate">${p.status}</div>`}

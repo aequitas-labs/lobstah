@@ -422,7 +422,7 @@ it('a boat card shows its name and state chip, then its access and age; a revoke
     ['old-mini', 'revoked'],
   ]);
   expect(line(cards[0]!, '.boat-permissions')).toBe('Work, see and steer');
-  expect(line(cards[0]!, '.boat-details')).toMatch(/Last check-inchecked in \d+\w ago/);
+  expect(line(cards[0]!, '.boat-details')).toMatch(/Last check-in\d+\w ago/);
   // Asleep is a grey chip, with no status edge.
   expect(cards[0]!.querySelector('.gchip')!.className).toBe('gchip dim');
   expect(cards[0]!.className).not.toContain('gcard-edge');

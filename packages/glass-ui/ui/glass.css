@@ -3349,53 +3349,11 @@ footer .glass-brand {
   color: var(--fg);
 }
 
-/* Shared state marks keep their words (or the enclosing accessible name) at every width. */
-.state-icon {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  vertical-align: -3px;
-  margin-right: 5px;
-}
-.state-icon > svg {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-}
-.trapdot {
-  display: inline-flex;
-}
-.trapdot .state-icon {
-  margin-right: 5px;
-}
 .dispatch-icon {
   vertical-align: -3px;
 }
 .gtop > .dispatch-icon {
   flex: 0 0 auto;
-}
-
-.verbicon > svg {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-}
-
-.state-icon .rundot {
-  display: none;
-}
-.state-icon .runspin {
-  transform-origin: 8px 8px;
-  animation: runspin 0.9s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .state-icon .runspin {
-    display: none;
-  }
-  .state-icon .rundot {
-    display: inline;
-  }
 }
 
 .boats-section > h2,

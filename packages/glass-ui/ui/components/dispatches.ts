@@ -1,4 +1,4 @@
-import { DispatchIcon, StateIcon } from './icons.js';
+import { DispatchIcon } from './icons.js';
 import type { GlassDispatchSummary as GlassDispatch, GlassDispatchSummary } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
@@ -49,7 +49,7 @@ export function chainRows(list: GlassDispatch[], chain: boolean | undefined): Gl
 
 function row(x: GlassDispatch, chain: boolean | undefined) {
   const key = x.lane + ':' + x.id;
-  return html`<tr key=${key} class="rowhead" onClick=${opener('dispatch', key)}><td>${chain && x.followUp && html`<span class="dim">↳ </span>`}${DispatchIcon}${x.id.slice(0, 8)}</td><td>${x.lane} / ${x.bucket}</td><td>${x.repo}</td><td class=${'v-' + x.verb}><${StateIcon} state=${x.verb} />${x.verb}${heavyPlace({ dispatch: x.id }) ? html`<div class="dim">${heavyPlace({ dispatch: x.id })}</div>` : ''}</td><td class="grow">${NamedText(x.note ?? '', 90)}${WaitingLine(x)}${WorkerIndicator(x)}${ActivityLine(x)}</td><td>${Age(x.verbAt)}</td><td>${addrCell(x)}</td><td>${(x.prList?.length ?? 0) > 1 || (x.evidence?.prUrls?.length ?? 0) > 1 ? prCell(x) : prHeadCell(x)}</td></tr>`;
+  return html`<tr key=${key} class="rowhead" onClick=${opener('dispatch', key)}><td>${chain && x.followUp && html`<span class="dim">↳ </span>`}${DispatchIcon}${x.id.slice(0, 8)}</td><td>${x.lane} / ${x.bucket}</td><td>${x.repo}</td><td class=${'v-' + x.verb}>${x.verb}${heavyPlace({ dispatch: x.id }) ? html`<div class="dim">${heavyPlace({ dispatch: x.id })}</div>` : ''}</td><td class="grow">${NamedText(x.note ?? '', 90)}${WaitingLine(x)}${WorkerIndicator(x)}${ActivityLine(x)}</td><td>${Age(x.verbAt)}</td><td>${addrCell(x)}</td><td>${(x.prList?.length ?? 0) > 1 || (x.evidence?.prUrls?.length ?? 0) > 1 ? prCell(x) : prHeadCell(x)}</td></tr>`;
 }
 
 /**

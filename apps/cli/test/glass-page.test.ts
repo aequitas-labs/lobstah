@@ -649,7 +649,7 @@ describe('glass page: tabs and hash routing', () => {
   it('gives a signed-off trap a grey state dot', async () => {
     const g = await page(acceptanceFleet(), { hash: '#traps', prefs: { view: 'table' } });
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
-    expect([...t2.querySelector('.trapdot')!.classList]).toEqual(['trapdot', 'dim']);
+    expect([...t2.querySelector('.trapdot')!.classList]).toEqual(['dot', 'trapdot', 'dim']);
   });
 
   it('shows the ↗ Open button on live traps in the table, cards, deck, and modal only', async () => {

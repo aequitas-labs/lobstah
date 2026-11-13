@@ -1,4 +1,4 @@
-import { DispatchIcon, StateIcon } from './icons.js';
+import { DispatchIcon } from './icons.js';
 import type { GlassSnapshot, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
 import { DECK_TRAPS_MAX, INFLIGHT_MAX, LANDED_MAX, REPORTS_MAX, catchCount, goalLine, reportPageUrl } from '../../src/glass-diff.js';
 import type { DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
@@ -195,7 +195,7 @@ export function Deck({
     const trap = getState().snapshot?.dispatches.find((d) => d.id === x.id);
     const context = [
       dispatchContext(x.repo, trap?.for || trap?.claimedBy),
-      x.unreported && [' ', html`<span class="badge warn unreported"><${StateIcon} state="unreported" />unreported</span>`],
+      x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`],
     ];
     const open = opener('dispatch', x.lane + ':' + x.id);
     return {
@@ -210,12 +210,7 @@ export function Deck({
     />`,
       row: dispatchRow({ key: x.key, title, titleAttr: `${x.id.slice(0, 8)} · ${title}`, verb: x.verb, context, at: x.at, open }),
       key: x.key,
-      title: [
-        x.id.slice(0, 8),
-        ' ',
-        x.repo || '',
-        x.unreported && [' ', html`<span class="badge warn unreported"><${StateIcon} state="unreported" />unreported</span>`],
-      ],
+      title: [x.id.slice(0, 8), ' ', x.repo || '', x.unreported && [' ', html`<span class="badge warn unreported">unreported</span>`]],
       badge: { text: x.verb, tone: verbTone(x.verb) },
       meta: [NamedText(x.note || '', 90), ' · ', Age(x.at), ' ago'],
       metaText: `${namedText(x.note || '')} · ${ageText(x.at)} ago`,

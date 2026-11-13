@@ -1,4 +1,3 @@
-import { StateIcon } from './icons.js';
 import { HarnessIcon } from './harness-icon.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Grant } from '@lobstah/core';
@@ -55,7 +54,7 @@ export function trapCard(t: GlassTrap) {
     title=${trapDisplayName(t)}
     titleAttr=${`wt:${t.trapId}`}
     icon=${t.harness && html`<${Harness} worker=${t} cls="" compact />`}
-    state=${{ ...status, mark: 'chip' }}
+    state=${{ word: status.word, tone: status.tone, mark: 'chip' }}
     context=${[
       t.repo && !t.configured ? RepoName(t.repo) : scope,
       html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`,
@@ -76,7 +75,7 @@ export function Traps({ inp, grants = [] }: { inp: SectionInputs['traps']; grant
   const list = inp.list.map((t) => t.x);
   const head = html`<div class="tabhead"><${NewTrap} /></div>`;
   const configured = inp.configured?.length
-    ? html`<div class="cards configured-traps">${inp.configured.map((profile) => html`<div class="card"><div class="top"><b>trap:${profile.profile}</b><span class="badge"><${StateIcon} state=${profile.state} />${profile.state}</span></div><div class="meta">${profile.grounds} · <${HarnessIcon} harness=${profile.harness} /> · ${profile.surface} · ${profile.capacity}</div>${profile.cwd && html`<div class="note">${profile.cwd}</div>`}${profile.pending?.length && html`<div class="note">Queued: ${profile.pending.join(', ')}</div>`}${profile.start && validDesktopStartLink(profile.start.url) && html`<${DesktopStartAction} url=${profile.start.url} />`}</div>`)}</div>`
+    ? html`<div class="cards configured-traps">${inp.configured.map((profile) => html`<div class="card"><div class="top"><b>trap:${profile.profile}</b><span class="badge">${profile.state}</span></div><div class="meta">${profile.grounds} · <${HarnessIcon} harness=${profile.harness} /> · ${profile.surface} · ${profile.capacity}</div>${profile.cwd && html`<div class="note">${profile.cwd}</div>`}${profile.pending?.length && html`<div class="note">Queued: ${profile.pending.join(', ')}</div>`}${profile.start && validDesktopStartLink(profile.start.url) && html`<${DesktopStartAction} url=${profile.start.url} />`}</div>`)}</div>`
     : null;
   if (inp.view === 'cards')
     return [

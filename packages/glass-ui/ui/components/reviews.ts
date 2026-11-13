@@ -1,4 +1,3 @@
-import { StateIcon } from './icons.js';
 import { useState } from 'preact/hooks';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
@@ -175,7 +174,7 @@ function Actions({
 }
 
 const badge = (r: GlassReview) =>
-  html`<span class=${'badge ' + (TONE[r.state] ?? '')}><${StateIcon} state=${r.state} />${reviewState(r)}</span>${r.verdict && html`<span class="badge"><${StateIcon} state=${r.verdict} />${r.verdict.replace('_', ' ')}</span>`}${r.needsYou && html`<span class="badge warn"><${StateIcon} state="needs you" />needs you</span>`}${r.mutedAt && html`<span class="badge dim"><${StateIcon} state="muted" />muted</span>`}`;
+  html`<span class=${'badge ' + (TONE[r.state] ?? '')}>${reviewState(r)}</span>${r.verdict && html`<span class="badge">${r.verdict.replace('_', ' ')}</span>`}${r.needsYou && html`<span class="badge warn">needs you</span>`}`;
 const findings = (r: GlassReview) =>
   html`${r.summary && html`<details onClick=${(e: Event) => e.stopPropagation()}><summary>Summary</summary><div class="rv-reason">${r.summary}</div></details>`}${r.blocking?.map((b) => html`<div class="rv-reason bad">${b.path}:${b.line} · ${b.body}</div>`)}`;
 

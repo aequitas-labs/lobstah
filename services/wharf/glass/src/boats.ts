@@ -46,10 +46,10 @@ export function Boats({
     const mirror = mirrors.find((m) => m.boat === b.id);
     const access = b.revoked ? 'no access' : accessLabel(b.permissions);
     const age = mirror
-      ? ['mirrored ', Age(mirror.at), ' ago']
+      ? [Age(mirror.at), ' ago']
       : b.lastCheckIn
-        ? ['checked in ', Age(b.lastCheckIn), ' ago']
-        : ['never checked in'];
+        ? [Age(b.lastCheckIn), ' ago']
+        : ['Never'];
     const revoke =
       !b.revoked &&
       (confirmation === b.id
@@ -63,7 +63,7 @@ export function Boats({
       title=${b.name}
       titleAttr=${b.name}
       state=${boatState(b, mirror)}
-      context=${html`<dl class="boat-details"><dt>Permissions</dt><dd class="boat-permissions">${access}</dd><dt>Last check-in</dt><dd>${age}</dd></dl>`}
+      context=${html`<dl class="boat-details"><dt>Permissions</dt><dd class="boat-permissions">${access}</dd><dt>${mirror ? 'Last mirror' : 'Last check-in'}</dt><dd>${age}</dd></dl>`}
       contextTitle=${`${access} · last check-in ${when(b.lastCheckIn)}`}
       actions=${revoke}
       quiet=${!!b.revoked}
