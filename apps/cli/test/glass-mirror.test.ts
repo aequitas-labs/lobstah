@@ -31,6 +31,7 @@ function boatFleet(tag: 'n' | 's'): GlassFullSnapshot {
   d.reports = [{ key: `report:work:${d.dispatches[0]!.id}`, dispatch: d.dispatches[0]!.id, lane: 'work', title: `${tag} findings`, author: `${tag}-crab`, filedAt: new Date(NOW - 60_000).toISOString(), stateHash: tag, bytes: 40, attachments: [] }];
   d.viewer = { onMachine: false, windowFocus: false, machine: '', device: 'desktop' };
   d.helmPasses = [{ grounds: 'home', lastPassAt: new Date(NOW - 60_000).toISOString() }];
+  d.repoTraps = [{ repo: 'web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] }];
   return d;
 }
 
@@ -338,6 +339,14 @@ describe('mergeMirror', () => {
     const { snapshot } = mergeMirror([north!], NOW, viewer);
     const { mirror: _mirror, ...expected } = north!.snapshot;
     expect(snapshot).toEqual({ ...expected, viewer: { ...viewer, machine: 'north' } });
+  });
+
+  it('keeps each boat’s repo overview counts beside its labelled repo', () => {
+    const { snapshot } = mergeMirror(sources(), NOW, viewer);
+    expect(snapshot.repoTraps).toEqual([
+      { repo: 'north · web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] },
+      { repo: 'south · web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] },
+    ]);
   });
 
   it('routes each row’s key to its boat, takes labels back off, and refuses a call naming two boats', () => {

@@ -128,6 +128,7 @@ const KEY_FIELDS = ['id', 'key', 'trapId', 'url', 'sessionId', 'dispatch', 'prof
 /** The lists concatenated across boats. */
 const LISTS: ReadonlyArray<keyof GlassSnapshot> = [
   'usageLimits',
+  'repoTraps',
   'helmPasses',
   'goals',
   'backends',
@@ -154,6 +155,7 @@ const LABELLED: ReadonlyArray<[keyof GlassSnapshot, string, boolean]> = [
   ['usageLimits', 'account', true],
   ['dispatches', 'repo', true],
   ['traps', 'repo', true],
+  ['repoTraps', 'repo', true],
   ['attention', 'repo', true],
   ['decisions', 'repo', true],
   ['recentRuns', 'repo', false],

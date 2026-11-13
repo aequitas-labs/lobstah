@@ -48,7 +48,7 @@ describe('the trap card', () => {
 
   it('shows the same card on the deck', async () => {
     const { card: c } = await card(fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }), '#deck');
-    expect(text(c.querySelector('.gchip'))).toBe('working');
+    expect(text(c.querySelector('.gchip'))).toBe('needs decision');
     expect(text(c.querySelector('.gfoot'))).toContain('⛵ studio');
   });
 
@@ -80,7 +80,7 @@ describe('the trap card', () => {
       prefs: { view: 'table' },
     });
     open.push(g);
-    expect(g.$$('#traps th').map((th) => text(th))).toEqual([
+    expect([...g.$('#traps table')!.querySelectorAll('th')].map((th) => text(th))).toEqual([
       'address',
       'repo',
       'worktree',

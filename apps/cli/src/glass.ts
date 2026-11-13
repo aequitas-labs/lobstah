@@ -1,3 +1,4 @@
+import { trapAvailability } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
 import { requestHelmPass, resolveGrounds } from '@lobstah/core';
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
@@ -715,6 +716,8 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
     const roster = readRoster(t.trapId);
+    // A departed registration retains the repo and folder already known to its roster.
+    const repo = t.repo ?? roster?.repo;
     const name = t.name ?? names(t.trapId);
     const window = t.window ?? (!registered ? roster?.window : undefined);
     const link = t.link ?? (!registered ? roster?.link : undefined);
@@ -724,11 +727,14 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
+      repo,
+      worktree: t.worktree ?? roster?.worktree,
+      rosterState: roster?.state,
       ...(roster?.configured ? { configured: roster.configured, cwd: roster.worktree } : {}),
       name,
       totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
-      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo: t.repo }),
+      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       window,
@@ -803,6 +809,18 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     // Dispatch progress is the helm's to act on; the glass lists it only when attentionKinds names it, as its attention walks.
     notices: (cfg.attentionKinds.includes('dispatch-progress') ? allNotices : allNotices.filter((n) => !progressNotice(n))).reverse(),
     repoKeys: Object.keys(cfg.repos),
+    repoTraps: Object.keys(cfg.repos).map((repo) => {
+      const inUse = [...new Map([...live, ...reserved].filter((trap) => trap.repo === repo).map((trap) => [trap.trapId, trap])).values()];
+      const harnesses = new Map<string, number>();
+      for (const trap of inUse) harnesses.set(trap.harness ?? '', (harnesses.get(trap.harness ?? '') ?? 0) + 1);
+      return {
+        repo,
+        used: inUse.length,
+        limit: cfg.repos[repo]!.traps,
+        free: live.filter((trap) => trap.repo === repo && trapAvailability(trap).state === 'free').length,
+        harnesses: [...harnesses].sort(([left], [right]) => left.localeCompare(right)).map(([harness, count]) => ({ harness, count })),
+      };
+    }),
     helmOn: liveHelms(cfg.helm.ttlSecs * 1000).length > 0,
     watches,
     dispatches,

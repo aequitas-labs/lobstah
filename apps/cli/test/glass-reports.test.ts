@@ -468,7 +468,7 @@ describe('glass: cards keep their text inside', () => {
     expect(rule).toMatch(/-webkit-line-clamp: 2;/);
     expect(rule).toMatch(/overflow: hidden;/);
     // A short status word carries no title.
-    const short = g.$$('#deck .card .gchip').find((b) => text(b) === 'working');
+    const short = g.$$('#deck .card .gchip').find((b) => text(b) === 'ghosted');
     expect(short).toBeTruthy();
     expect(short!.getAttribute('title')).toBeNull();
   });
