@@ -594,7 +594,7 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   expect(buttons).toEqual(['Mute this PR', 'Dismiss', 'Mute this PR']);
   await g.click('#reviews button', 'Dismiss');
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
-  expect(g.doc.querySelectorAll('.dalert-live').item(1)?.textContent).toContain('Sent to the boat that drafted it');
+  expect(g.doc.querySelector('.glass-toast[role="status"]')?.textContent).toContain('Sent to the boat that drafted it');
   await g.go('#review/7');
   expect(g.activeTab()).toBe('reviews');
 });
