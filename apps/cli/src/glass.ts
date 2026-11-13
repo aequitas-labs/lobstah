@@ -716,6 +716,8 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
     const roster = readRoster(t.trapId);
+    // A departed registration retains the repo and folder already known to its roster.
+    const repo = t.repo ?? roster?.repo;
     const name = t.name ?? names(t.trapId);
     const window = t.window ?? (!registered ? roster?.window : undefined);
     const link = t.link ?? (!registered ? roster?.link : undefined);
@@ -725,11 +727,14 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
+      repo,
+      worktree: t.worktree ?? roster?.worktree,
+      rosterState: roster?.state,
       ...(roster?.configured ? { configured: roster.configured, cwd: roster.worktree } : {}),
       name,
       totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
-      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo: t.repo }),
+      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       window,

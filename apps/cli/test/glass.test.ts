@@ -97,16 +97,16 @@ describe('glass snapshot', () => {
     expect(t?.notices.map((n) => n.kind)).toContain('trap-stowed');
   });
 
-  it('uses the roster session and harness after sign-off, not an old notice', () => {
+  it('uses the roster state, session and harness after sign-off, not an old notice', () => {
     fs.mkdirSync(path.join(home, 'roster'), { recursive: true });
     fs.writeFileSync(path.join(home, 'roster', 'deadbeef.json'), JSON.stringify({
-      trapId: 'deadbeef', name: 'fresh-cove', harness: 'codex', sessionId: 'current-session',
+      trapId: 'deadbeef', name: 'fresh-cove', harness: 'codex', sessionId: 'current-session', state: 'ghosted', repo: 'web', worktree: '/tmp/saved-trap',
       link: 'codex://threads/current-session', window: { bundleId: 'com.openai.codex' },
     }));
     postNotice({ kind: 'trap-signed-on', text: 'trap signed on (claude, web, wt)', refId: 'deadbeef', by: 'old-session' });
     postNotice({ kind: 'trap-stowed', text: 'gone', refId: 'deadbeef' });
     expect(buildGlassSnapshot().traps.find((t) => t.trapId === 'deadbeef')).toMatchObject({
-      live: false, harness: 'codex', sessionId: 'current-session',
+      live: false, harness: 'codex', sessionId: 'current-session', rosterState: 'ghosted', repo: 'web', worktree: '/tmp/saved-trap',
       link: 'codex://threads/current-session', window: { bundleId: 'com.openai.codex' },
     });
   });
