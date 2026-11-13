@@ -1,6 +1,6 @@
-# Dispatch icons and Boats demo
+# Dispatch icons and Boats
 
-Only queued, limited and unknown gain state icons. The original six dispatch icons stay unchanged. Trap, review, PR, generic-card, wharf-request and boat status icons match main. 
+Queued, limited and unknown dispatch cards gain status icons. The original six dispatch icons stay unchanged. Trap, review, PR, generic-card and wharf-request state icons match main.
 
 | Dispatch state | Before | After |
 | --- | --- | --- |
@@ -10,23 +10,23 @@ Only queued, limited and unknown gain state icons. The original six dispatch ico
 | paused | Pause bars | Unchanged |
 | done | Check | Unchanged |
 | failed | X | Unchanged |
-| queued | Text chip | Tray — new |
-| limited | Text chip | Hourglass — new |
-| unknown | Text chip | Question circle — new |
+| queued | Text chip | Tray |
+| limited | Text chip | Hourglass |
+| unknown | Text chip | Question circle |
 
-`unknown` can appear on a real dispatch card. [Local glass](https://github.com/aequitas-labs/lobstah/blob/58c2c5e5/apps/cli/src/glass.ts#L373) uses it when there is neither a report nor a claim; [wharf glass](https://github.com/aequitas-labs/lobstah/blob/58c2c5e5/packages/glass-ui/ui/wharf-snapshot.ts#L55) uses it for a non-queued job without a report. `active` is a bucket, not a displayed dispatch verb; it gets no new icon.
+`unknown` is real: [local glass](https://github.com/aequitas-labs/lobstah/blob/58c2c5e5/apps/cli/src/glass.ts#L373) uses it without a report or claim, and [wharf glass](https://github.com/aequitas-labs/lobstah/blob/58c2c5e5/packages/glass-ui/ui/wharf-snapshot.ts#L55) uses it without a report. `active` is a bucket and gets no new state icon.
 
-Boats keeps its grid and Slack/Account sections; the value now says “Last check-in: 30s ago” without repeating “checked in”. 
+## Navigation and Boats
 
-## Dispatch fish
+The selected [original simple side-view fish](simple-side-view.svg) appears only in Dispatches navigation, on desktop and phone. Dispatch cards, rows, links, notices and slot chips keep their existing kind presentation.
 
-The selected simple side-view fish is an original body, tail and eye drawing. One inline SVG is shared by navigation, dispatch cards, deck chips, source links and notices.
+Boats has aligned permissions and check-in details, actions on their own row, and separate Slack and Account sections. Its statuses are online (radio), asleep (moon) and revoked (slashed circle). The label/value reads “Last check-in: 30s ago”.
 
-[16, 20 and 32px](after-desktop-fish-sizes.png) · [Original SVG](simple-side-view.svg) · [Source e5771328](https://github.com/aequitas-labs/lobstah/tree/e5771328)
+Source: [f0d71932](https://github.com/aequitas-labs/lobstah/tree/f0d71932).
 
-## Before and after
+## Screenshots
 
-Playwright CLI only, with fixtures. Desktop: 1440×1000. Phone: 375px wide; the Dispatches capture is 1400px tall so all nine states fit, and Boats is 1000px tall.
+Playwright CLI, fixtures, dark theme. Desktop is 1440×1000. Phone is 375px wide; tall captures show every dispatch state and all Boats sections.
 
 | View | Desktop before | Desktop after | Phone before | Phone after |
 | --- | --- | --- | --- | --- |
@@ -34,8 +34,8 @@ Playwright CLI only, with fixtures. Desktop: 1440×1000. Phone: 375px wide; the 
 | Fish at 16, 20 and 32px | [Before](before-desktop-fish-sizes.png) | [After](after-desktop-fish-sizes.png) | [Before](before-mobile-fish-sizes.png) | [After](after-mobile-fish-sizes.png) |
 | Boats | [Before](before-desktop-boats.png) | [After](after-desktop-boats.png) | [Before](before-mobile-boats.png) | [After](after-mobile-boats.png) |
 
+[Phone navigation menu](after-mobile-menu.png)
+
 ## Validation
 
-Full build and lint pass. Root: 3,920/3,920 tests across 320 files. Wharf: 169/169 tests across 16 files. The reduced branch also passes 163 focused behavior tests. Three formatting fixes inherited from main are retained because the required lint check flags those files; they change no behavior or icons.
-
-The selected SVG also passes the shared UI build and 67 focused behavior tests. The after screenshots show the selected fish.
+Final full build and lint pass. The minimal set passed 3,920 root tests and 169 wharf tests; the final presentation passes all 713 glass tests across 51 files. The report HTTP-test helper now decodes UTF-8 across chunk boundaries, so complete-page comparisons preserve split multi-byte characters. Three formatting-only changes inherited from main satisfy lint.
