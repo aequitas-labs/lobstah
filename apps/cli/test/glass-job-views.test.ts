@@ -35,6 +35,7 @@ describe('the dispatch view', () => {
   it('shows current work and shared output cards before the Markdown brief and newest-first activity', async () => {
     const f=fleet(); const {g,x}=await page('#dispatch/'+encodeURIComponent('work:'+f.x.id));
     expect(text(g.$('.pr-view-head h2'))).toBe(x.title);
+    expect(text(g.$('.view-meta'))).toContain('steady-crab');
     expect(g.$$('.detail-scroll > section > h4').map(text)).toEqual(['Now 2m ago','PRs','Report','Brief','Activity','Messages']);
     expect(g.$('.dispatch-brief strong')?.textContent).toBe('complete brief');
     expect(g.$('.dispatch-prs .card .pricon')).not.toBeNull();

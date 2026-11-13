@@ -392,7 +392,8 @@ export const attachmentRows = (items: readonly Attachment[], fileUrl?: (name: st
 const TRAP_ADDRESS = /\bwt:([a-z0-9][a-z0-9-]*)/g;
 
 /** The trap's name from the snapshot (the live registration's, else the name registry's), if known. */
-const knownTrapName = (trapId: string): string | undefined => getState().snapshot?.trapNames?.[trapId];
+const knownTrapName = (trapId: string): string | undefined =>
+  getState().snapshot?.trapNames?.[trapId] ?? getState().snapshot?.traps.find((trap) => trap.trapId === trapId)?.name;
 
 /** Text with each `wt:<id>` shown by the trap's name; `wt:<id>` stays where no name is known. */
 export const namedText = (text: string): string =>
