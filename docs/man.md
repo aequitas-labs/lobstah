@@ -594,6 +594,8 @@ Under 700px, Helm and Menu open as sheets: drag the header down, use Back or
 press Escape to close them. A lightbox opens the images from the same card,
 report or description; swipe sideways or use ← and → to step between them.
 It shows a position count only when there is more than one image.
+In card view, Skip and Mute PR are in the card's More actions menu; a muted
+card keeps its Muted chip and Unmute action on the bar.
 Reading the glass consumes no cursor. Each
 live trap has a **↗ open** button at the end of its foot line. It asks the local server to focus
 that trap's reported session link, iTerm2 session, Terminal tab, editor
