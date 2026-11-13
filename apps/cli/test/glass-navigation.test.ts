@@ -40,7 +40,7 @@ describe('TODO preview and page', () => {
     const more = g.$('#deck .todos .deckmore');
     expect(!!more).toBe(count > 5);
     if (more) {
-      expect(more.textContent).toBe(`More (${count - 5})`);
+      expect(more.textContent).toBe(`+${count - 5} more →`);
       expect(more.getAttribute('href')).toBe('#todos');
       await click(g, '#deck .todos .deckmore');
       expect(g.window.location.hash).toBe('#todos');
@@ -70,7 +70,7 @@ describe('TODO preview and page', () => {
     await g.go('#deck');
     expect(open('deck').some((el) => el.classList.contains('done'))).toBe(false);
     expect(open('deck')).toHaveLength(5);
-    expect(g.$('#deck .todos .deckmore')?.textContent).toBe('More (2)');
+    expect(g.$('#deck .todos .deckmore')?.textContent).toBe('+2 more →');
     expect(g.$('#deck .todo-done-today')?.textContent).toBe('1 done today');
   });
 });

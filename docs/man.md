@@ -570,7 +570,7 @@ dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
 and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
-PRs, Reviews, Reports, Grants, Notices, Stats, and Settings, a read-only view of the
+PRs, Reviews, Reports, Grants, Todos, Notices, Stats, and Settings, a read-only view of the
 effective config with its secrets masked. The Stats tab shows catches per day as a
 53-week heatmap, with today, this week, the total, and the top traps; it
 reads `stats.json` from `GET /data/stats` and sends nothing. The Reports tab lists every report, unacked first,
@@ -599,13 +599,15 @@ only a trap id in a same-origin, token-protected POST. The ⚙ popover's two
 preferences — table or cards, and whether lobsters crawl the page — are
 per-browser, kept in that browser's localStorage and never on disk.
 
+On deck caps each list and links its section heading to the full list. A `+N more →` link opens the rest when a list has more rows than its cap. Decisions show the three newest; `#decisions` opens all open decisions and recent runs. Page and section headings use sentence case.
+
 Each open glass page, and each report's page, reports its presence: every
 poll, and every 30 s while its tab is hidden, it sends the server a random
 page id and whether it is visible; the server reads the browser's user
 agent from the request and forgets a page three minutes after it last
 reported, or at once when the page closes. `lobstah glass show '<#hash>'`
 asks the page most likely in front of you (the latest visible one, else the
-latest seen) to show a tab (`#prs`), a decision (`#decision/<key>`), or a
+latest seen) to show a tab (`#prs` or `#decisions`), a decision (`#decision/<key>`), or a
 report (`#report/<key>`). The page applies each show once, on its next poll
 or as soon as its tab is visible again. The command prints whether a page
 was seen and in which app (`claude` for the Claude desktop app's Browser

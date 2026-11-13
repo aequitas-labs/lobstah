@@ -20,6 +20,7 @@ import { requestState } from './model.js';
 import { glassSocket } from './socket.js';
 import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
 import { ITEM_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
+import { SectionHead } from '../../../../packages/glass-ui/ui/components/section-head.js';
 
 /**
  * The hosted glass: GitHub sign-in around the shared glass, which runs on the
@@ -135,27 +136,34 @@ async function deleteAccount(): Promise<void> {
 function HumanRequests({ backend }: { backend: HostedBackend }) {
   const requests = backend.account()?.requests ?? [];
   if (!requests.length) return null;
-  return html`<div class="sec">Your requests</div>${requests.map(
+  return html`<section class="human-requests"><${SectionHead} title="Your requests" count=${requests.length} />${requests.map(
     (r) =>
       html`<div class="msg" key=${r.id}><b>${r.kind}</b> · ${r.dispatch ?? r.boat ?? r.document ?? 'new work'} · ${requestState(r)}<div>${LinkedText(r.text ?? r.repo ?? r.document)}</div></div>`,
-  )}`;
+  )}</section>`;
 }
 
 /** Each mirror boat in the header, with how old its snapshot is: an asleep boat's rows are read-only. */
 function MirrorChips({ backend }: { backend: MirrorBackend }) {
-  return backend.boats().map(
-    (b) => html`<span key=${b.boat} class=${b.stale ? 'chip warn' : 'chip dim'} title=${b.stale ? 'asleep: its rows are read-only' : 'mirrored from this boat'}>${b.name} · mirrored ${Age(b.at)} ago${b.stale ? ' · asleep' : ''}</span>`,
-  );
+  return backend
+    .boats()
+    .map(
+      (b) =>
+        html`<span key=${b.boat} class=${b.stale ? 'chip warn' : 'chip dim'} title=${b.stale ? 'asleep: its rows are read-only' : 'mirrored from this boat'}>${b.name} · mirrored ${Age(b.at)} ago${b.stale ? ' · asleep' : ''}</span>`,
+    );
 }
 
 /** A canonical card link stays inside the signed-in glass after the shared UI migration. */
 function HostedCard({ backend }: { backend: HostedBackend }): ReturnType<typeof html> | null {
   const match = /^#card\/(c\d{1,15})$/.exec(location.hash);
   if (!match) return null;
-  return html`<section class="card"><${Button} onClick=${() => { location.hash = '#deck'; }}>Close card<//><${CardDetail}
+  return html`<section class="card"><${Button} onClick=${() => {
+    location.hash = '#deck';
+  }}>Close card<//><${CardDetail}
     id=${match[1]}
     load=${(id: string) => json<import('../../../../packages/core/src/backend-model.js').GlassCard>(`/api/glass/cards/${encodeURIComponent(id)}`)}
-    open=${(item: import('../../../../packages/core/src/backend-model.js').GlassCardItem) => { location.hash = `#${item.kind}/${item.id}`; }}
+    open=${(item: import('../../../../packages/core/src/backend-model.js').GlassCardItem) => {
+      location.hash = `#${item.kind}/${item.id}`;
+    }}
     boatName=${(id: string) => backend.account()?.boats.find((boat) => boat.id === id)?.name}
   /></section>`;
 }
@@ -183,7 +191,9 @@ function start(mirror = false): void {
   window.addEventListener('hashchange', follow);
   page = startGlassPage(backend, {
     chips: () => [
-      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">${backend.account()?.helmLive ? 'helm live' : 'no helm signed on'}</span>`,
+      'boats' in backend
+        ? html`<${MirrorChips} backend=${backend} />`
+        : html`<span class="chip">${backend.account()?.helmLive ? 'helm live' : 'no helm signed on'}</span>`,
       html`<${Button} onClick=${() => void signOut()}>${ITEM_ICON.signOut}Sign out<//>`,
     ],
     banner: () => [
@@ -191,10 +201,13 @@ function start(mirror = false): void {
       html`<${HostedCard} backend=${backend} />`,
     ],
     deck: () => html`<${HumanRequests} backend=${backend} />`,
-    boats: () => html`<${Boats} boats=${backend.account()?.boats ?? []} mirrors=${mirror ? (backend as MirrorBackend).boats() : []} action=${action} deleteAccount=${deleteAccount} />`,
+    boats: () =>
+      html`<${Boats} boats=${backend.account()?.boats ?? []} mirrors=${mirror ? (backend as MirrorBackend).boats() : []} action=${action} deleteAccount=${deleteAccount} />`,
     footer: 'wharf · PR watches and repair run on your boats',
     fleet: () =>
-      'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">helm ${backend.account()?.helmLive ? 'live' : 'unknown / no live lease'}</span>`,
+      'boats' in backend
+        ? html`<${MirrorChips} backend=${backend} />`
+        : html`<span class="chip">helm ${backend.account()?.helmLive ? 'live' : 'unknown / no live lease'}</span>`,
     signOut: () => void signOut(),
     asleep: () => mirror && (backend as MirrorBackend).boats().some((b) => b.stale),
   });

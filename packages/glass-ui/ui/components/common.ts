@@ -921,7 +921,7 @@ export function NewTrap() {
     if (!error) setOpen(false);
     return error;
   };
-  const trigger = html`<${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//>`;
+  const trigger = html`<${Button} variant="icon" class="new-trap" label="New trap" onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+<//>`;
   // A modal on a desktop, a sheet on a phone (Dialog); the form's fields stack in it.
   return html`<span class="newtrap">${trigger}${
     open &&

@@ -9,7 +9,7 @@ import { viewOf } from '../store.js';
 import type { GlassState } from '../store.js';
 import type { OlderControl } from './common.js';
 import { Deck } from './deck.js';
-import { DecisionAlert, DecisionModal } from './decisions.js';
+import { DeckDecisions, DecisionAlert, DecisionModal } from './decisions.js';
 import { Dispatches } from './dispatches.js';
 import { Footer, Header } from './header.js';
 import { Lobs } from './lobs.js';
@@ -21,12 +21,14 @@ import { PRs } from './prs.js';
 import { Reports } from './reports.js';
 import { Reviews } from './reviews.js';
 import { Stats } from './stats.js';
-import { SessionGrants } from './session-grants.js';
+import { activeSessionGrants, SessionGrants } from './session-grants.js';
 import { Settings } from './settings.js';
 import { Dialog } from './dialog.js';
 import { ITEM_ICON } from './icons.js';
 import { Traps } from './traps.js';
 import { Todos } from './todos.js';
+import { SectionHead } from './section-head.js';
+import { NewTrap } from './common.js';
 import { ToastHost } from './toast.js';
 import { host } from '../host.js';
 
@@ -37,7 +39,7 @@ import { host } from '../host.js';
  */
 export function App({ state }: { state: GlassState }) {
   const d = viewOf(state);
-  const tab = state.route;
+  const tab = state.route === 'decisions' ? 'deck' : state.route;
   const unread = d ? unreadOrder() : [];
   const inp = d && sectionInputs(d, { st: state.prefs, modal: state.modal, detail: state.detail }, Date.now());
   const more = (kind: GlassOlderKind): OlderControl => ({
@@ -47,23 +49,59 @@ export function App({ state }: { state: GlassState }) {
   });
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
+    if (t === 'deck' && state.route === 'decisions')
+      return html`<${DeckDecisions} page cards=${inp.deck.decisions} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} recentRuns=${inp.deck.recentRuns} />`;
     if (t === 'deck')
       return [
         html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} grants=${d?.sessionGrants ?? []} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
         host().deck?.(),
       ];
     if (t === 'boats') return host().boats?.() ?? null;
-    if (t === 'dispatches') return html`<${Dispatches} inp=${inp.dispatches} more=${more('dispatches')} />`;
-    if (t === 'traps') return html`<${Traps} inp=${inp.traps} grants=${d?.sessionGrants ?? []} />`;
-    if (t === 'prs') return html`<${PRs} inp=${inp.prs} more=${more('prs')} />`;
-    if (t === 'reports') return html`<${Reports} inp=${inp.reports} />`;
-    if (t === 'reviews') return html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`;
-    if (t === 'todos') return html`<${Todos} passes=${d?.helmPasses} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`;
-    if (t === 'grants') return html`<${SessionGrants} grants=${d?.sessionGrants ?? []} standing=${d?.standingGrants ?? []} />`;
+    if (t === 'dispatches')
+      return [
+        html`<${SectionHead} title="Dispatches" count=${inp.dispatches.list.length} page />`,
+        html`<${Dispatches} inp=${inp.dispatches} more=${more('dispatches')} />`,
+      ];
+    if (t === 'traps')
+      return [
+        html`<${SectionHead} title="Traps" count=${inp.traps.list.length} action=${html`<${NewTrap} />`} page />`,
+        html`<${Traps} inp=${inp.traps} grants=${d?.sessionGrants ?? []} />`,
+      ];
+    if (t === 'prs')
+      return [html`<${SectionHead} title="PRs" count=${inp.prs.prs.length} page />`, html`<${PRs} inp=${inp.prs} more=${more('prs')} />`];
+    if (t === 'reports')
+      return [html`<${SectionHead} title="Reports" count=${inp.reports.list.length} page />`, html`<${Reports} inp=${inp.reports} />`];
+    if (t === 'reviews')
+      return [
+        html`<${SectionHead} title="Reviews" count=${inp.reviews.list.length} page />`,
+        html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`,
+      ];
+    if (t === 'todos')
+      return [
+        html`<${SectionHead} title="Todos" count=${inp.deck.todos.filter((todo) => !todo.done).length} page />`,
+        html`<${Todos} passes=${d?.helmPasses} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`,
+      ];
+    if (t === 'grants') {
+      const grants = d?.sessionGrants ?? [];
+      const standing = d?.standingGrants ?? [];
+      return [
+        html`<${SectionHead} title="Grants" count=${activeSessionGrants(grants).length + standing.length} page />`,
+        html`<${SessionGrants} grants=${grants} standing=${standing} />`,
+      ];
+    }
     if (t === 'settings')
       return html`<${Settings} page=${state.settings} error=${state.settingsError} passkeys=${state.snapshot?.runPasskeys} passkey=${state.runPasskey} helms=${d?.helms ?? []} reviewSetup=${state.snapshot?.reviewSetup} />`;
-    if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
-    return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
+    if (t === 'notices')
+      return [
+        html`<${SectionHead} title="Notices" count=${inp.notices.list.length} page />`,
+        html`<${Notices} inp=${inp.notices} more=${more('notices')} />`,
+      ];
+    if (t === 'stats')
+      return [
+        html`<${SectionHead} title="Stats" page />`,
+        html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`,
+      ];
+    return null;
   };
   // The glass's own settings open in a Dialog (a sheet on a phone), not the overlay's modal.
   const settingsOpen = state.modal?.type === 'settings';

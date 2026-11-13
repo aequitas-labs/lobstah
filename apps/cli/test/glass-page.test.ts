@@ -1035,7 +1035,7 @@ describe('glass page: PRs', () => {
     expect(rows[1]![6]).toBe('watching · 60s ago');
     expect(text(g.$('#prs'))).not.toContain('a-long-opaque-cursor');
     // None of these PRs is the person's, so they sit under Other PRs; non-PR watches list below, cursor shortened.
-    expect(g.$$('#prs h2').map(text)).toEqual(['Yours · 0', 'Other PRs · 3', 'other watches']);
+    expect(g.$$('#prs h2').map(text)).toEqual(['Yours · 0', 'Other PRs · 3', 'Other watches']);
     expect(text(g.$$('#prs table')[1]!)).toContain('ci-nightly');
   });
 
@@ -1109,13 +1109,14 @@ describe('glass page: On deck', () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
     // The decisions heading carries the unread count as a badge.
-    const heading = (s: Element) => text(s.querySelector('h2')).replace(/\d+$/, '');
-    expect(sections.map(heading)).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →']);
+    const heading = (s: Element) => s.querySelector('.section-head h2 a')?.firstChild?.textContent?.trim();
+    expect(sections.map(heading)).toEqual(['Decisions', 'In flight', 'Landed · 24h', 'Reports', 'Traps']);
     // Only raw questions (and framed decisions) are rows; PR kinds stay with the PRs.
     const rows = [...sections[0]!.querySelectorAll('.drow')];
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.querySelector('.badge'))).toBe(true);
-    expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(String(rows.length));
+    expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(text(g.$('#tabs a[data-tab="deck"] .dbadge')));
+    expect(rows.length).toBeLessThanOrEqual(3);
     // PRs live on the PRs tab, as stack cards: the deck shows none.
     expect(g.$$('#deck .prcard, #deck .stackcard')).toHaveLength(0);
     expect(text(g.$('#deck'))).not.toContain('#41 → #42 → #43');

@@ -26,7 +26,7 @@ const TAB_LABEL: Record<GlassTab, string> = {
   reviews: 'Reviews',
   reports: 'Reports',
   grants: 'Grants',
-  todos: 'TODOs',
+  todos: 'Todos',
   notices: 'Notices',
   stats: 'Stats',
   // lobstah's own settings; Settings is the glass's (this device and this view, behind the gear).

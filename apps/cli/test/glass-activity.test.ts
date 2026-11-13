@@ -37,7 +37,10 @@ describe('glass: the activity line sits under the verb and note', () => {
       // A dispatch card keeps its activity for its modal (components/card.ts); a table row shows it inline.
       if (view === 'cards') {
         expect(g.$$('#dispatches .card .activity')).toHaveLength(0);
-        await click(g, g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb')));
+        await click(
+          g,
+          g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb')),
+        );
       }
       const el = g.$$(view === 'cards' ? '#modalbox .activity' : '#dispatches .activity')[0];
       expect(text(el)).toBe('Edit src/parse.ts · 12s ago');
@@ -47,7 +50,10 @@ describe('glass: the activity line sits under the verb and note', () => {
 
   it('stale activity is dim and says so, with its age', async () => {
     const g = await page(fleet(true), { hash: '#dispatches', prefs: { view: 'cards' } });
-    await click(g, g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb')));
+    await click(
+      g,
+      g.$$('#dispatches .card').find((c) => text(c).includes('bbbbbbbb')),
+    );
     const el = g.$('#modalbox .activity')!;
     expect(el.className).toBe('activity stale');
     expect(text(el)).toBe('stale · Edit src/parse.ts · 20m ago');
@@ -105,7 +111,10 @@ describe('glass: a reserved trap shows as starting, then as failed', () => {
   for (const view of ['cards', 'table'] as const) {
     it(`${view}: starting, with no window action`, async () => {
       const g = await page(reserved(false), { hash: '#traps', prefs: { view } });
-      const el = view === 'cards' ? g.$$('#traps .card').find((c) => text(c).includes('amber-gull')) : g.$$('#traps tr').find((c) => text(c).includes('amber-gull'));
+      const el =
+        view === 'cards'
+          ? g.$$('#traps .card').find((c) => text(c).includes('amber-gull'))
+          : g.$$('#traps tr').find((c) => text(c).includes('amber-gull'));
       if (view === 'cards') {
         // The card's chip says starting; its third line says what it waits for; no note stands in for Open.
         expect(text(el?.querySelector('.gchip'))).toBe('starting');
@@ -134,7 +143,16 @@ describe('glass: a requested trap, and the start command on a starting card only
     d.helmOn = helmOn;
     d.repoKeys = ['web'];
     d.traps.push(
-      { trapId: '11111111-2222-4333-8444-555555555555', repo: 'web', harness: 'claude', live: false, requested: { at: ago(5_000) }, messages: [], notices: [], catches: [] },
+      {
+        trapId: '11111111-2222-4333-8444-555555555555',
+        repo: 'web',
+        harness: 'claude',
+        live: false,
+        requested: { at: ago(5_000) },
+        messages: [],
+        notices: [],
+        catches: [],
+      },
       {
         trapId: 'abcd1234',
         name: 'amber-gull',
@@ -142,7 +160,11 @@ describe('glass: a requested trap, and the start command on a starting card only
         repo: 'web',
         harness: 'claude',
         live: false,
-        starting: { reservedAt: ago(5_000), deadline: ago(-170_000), commands: [{ harness: 'claude', command: 'cd /r && claude "/lobstah:trap soak --ticket abcd1234-00"' }] },
+        starting: {
+          reservedAt: ago(5_000),
+          deadline: ago(-170_000),
+          commands: [{ harness: 'claude', command: 'cd /r && claude "/lobstah:trap soak --ticket abcd1234-00"' }],
+        },
         messages: [],
         notices: [],
         catches: [],
@@ -170,13 +192,17 @@ describe('glass: a requested trap, and the start command on a starting card only
       expect(blocks).toHaveLength(1);
       expect(items.find((c) => c.contains(blocks[0]!))?.textContent).toContain('amber-gull');
       expect(text(blocks[0])).toContain('/lobstah:trap soak --ticket abcd1234-00');
-      expect(g.$$('#traps .newtrap button').map(text)).toEqual(['+ New trap']);
+      expect(g.$$('#traps .newtrap button').map((button) => button.getAttribute('aria-label'))).toEqual(['New trap']);
     });
   }
   it('with no helm signed on, the requested card says so; the deck has the New trap button', async () => {
     const g = await page(fleetWith(false), { hash: '#traps', prefs: { view: 'cards' } });
-    expect(g.$$('#traps .card').some((c) => text(c.querySelector('.gchip')) === 'requested' && text(c.querySelector('.gnow')) === 'waiting for a helm')).toBe(true);
+    expect(
+      g
+        .$$('#traps .card')
+        .some((c) => text(c.querySelector('.gchip')) === 'requested' && text(c.querySelector('.gnow')) === 'waiting for a helm'),
+    ).toBe(true);
     await g.go('#deck');
-    expect(g.$$('#deck .newtrap button').map(text)).toEqual(['+ New trap']);
+    expect(g.$$('#deck .newtrap button').map((button) => button.getAttribute('aria-label'))).toEqual(['New trap']);
   });
 });
