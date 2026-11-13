@@ -41,13 +41,15 @@ describe('notifications', () => {
     expect(pendingNotifications('review-job', 'chore')).toEqual([]);
   });
 
-  it('a pause before arming wakes once, without reminders; a later pause wakes again', () => {
+  it('a pause before arming wakes once, then reminds on the configured cadence', () => {
     fs.mkdirSync(path.join(home, 'active', 'pause'));
     appendStatus('pause', 'work', 'paused', 'CI pending', undefined, { waitingOn: 'pr', link: 'https://github.com/o/r/pull/1' });
     const now = Date.now();
     expect(attentionNow(false)).toHaveLength(1);
-    expect(attentionNow(true, 1, now)).toMatchObject([{ id: 'pause', entry: { waitingOn: 'pr', note: 'CI pending' } }]);
-    expect(attentionNow(true, 1, now + 86400_000)).toEqual([]);
+    expect(attentionNow(true, 1000, now)).toMatchObject([{ id: 'pause', entry: { waitingOn: 'pr', note: 'CI pending' } }]);
+    expect(attentionNow(true, 1000, now + 999)).toEqual([]);
+    expect(attentionNow(true, 1000, now + 1000)).toMatchObject([{ id: 'pause', entry: { waitingOn: 'pr', note: 'CI pending' } }]);
+    expect(attentionNow(true, 1000, now + 1999)).toEqual([]);
     expect(pendingNotifications('pause', 'work')).toHaveLength(1);
     expect(pendingNotifications('pause', 'work')).toEqual([]);
     appendStatus('pause', 'work', 'working');
@@ -63,7 +65,7 @@ describe('notifications', () => {
     expect(freshWakeEvents(baseline, undefined, () => false)).toEqual([]);
     expect(freshWakeEvents(baseline)).toMatchObject([{ entry: { verb: 'paused', waitingOn: 'external', note: 'waiting outside' } }]);
     expect(freshWakeEvents(baseline)).toEqual([]);
-    expect(attentionNow(true, 1, Date.now() + 86400_000)).toEqual([]);
+    expect(attentionNow(true, 1, Date.now() + 86400_000)).toMatchObject([{ id: 'pause', entry: { verb: 'paused' } }]);
   });
 
   it('a push in the heavy line wakes nobody and notifies nobody', () => {

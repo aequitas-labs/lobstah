@@ -983,6 +983,11 @@ before the worker reads it; `man tend` then shows the dispatch as
 A newer `needs-decision` from the worker stands again. Set `remindSecs = 0`
 for pure at-most-once.
 
+The helm's Stop block lists standing items that need action, open cards at
+their reminder cadence, and one-line trap state changes since the previous
+block. A paused dispatch is reported once, then again every `remindSecs` while
+it remains paused. Use `lobstah man tend` for the full trap roster.
+
 A send still waiting on its reply is listed in the `man haul` block as
 `sent · <id> · <first line> · <age>`. Alone, it blocks a stop only when no
 watcher is live, beside the arm command. It is listed once, then every
