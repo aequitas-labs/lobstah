@@ -29,7 +29,7 @@ function fleet(viewer: GlassFullSnapshot['viewer']): GlassFullSnapshot {
 async function card(d: GlassFullSnapshot, hash = '#traps') {
   const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash, prefs: { view: 'cards' } });
   open.push(g);
-  return { g, card: g.$$(`${hash === '#deck' ? '#deck' : '#traps'} .card`).find((c) => text(c).includes('hardy-kelp'))! };
+  return { g, card: g.$$(`${hash === '#deck' ? '#deck' : '#traps'} .card`).find((c) => text(c.querySelector('.gtitle')) === 'hardy-kelp')! };
 }
 
 describe('the trap card', () => {

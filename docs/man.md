@@ -584,6 +584,16 @@ review to edit or send it there. Review and draft lobs, and the pet's review
 and draft bubbles, open this view too. Opening a draft leaves it pending;
 only an explicit action acknowledges it. The actions use the page-token-guarded
 `/requests` endpoint. Legacy `#review-…` links still scroll the Reviews tab.
+Dispatch and trap cards open detail views with their current work first.
+A dispatch shows its PR and report cards, its Markdown brief and newest-first
+activity; a trap shows its current dispatch and recent catches as the same
+cards as their tabs. Lifecycle and session details stay folded. Under 700px
+these views fill the screen, and Back returns to the card or tab you opened
+them from.
+Under 700px, Helm and Menu open as sheets: drag the header down, use Back or
+press Escape to close them. A lightbox opens the images from the same card,
+report or description; swipe sideways or use ← and → to step between them.
+It shows a position count only when there is more than one image.
 Reading the glass consumes no cursor. Each
 live trap has a **↗ open** button at the end of its foot line. It asks the local server to focus
 that trap's reported session link, iTerm2 session, Terminal tab, editor

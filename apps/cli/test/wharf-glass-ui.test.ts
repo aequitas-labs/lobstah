@@ -285,7 +285,7 @@ it('shows jobs, notes, reports, PR links and messages in the dispatch modal, wit
   expect(g.doc.querySelector("#modalbox a[href='https://github.com/aequitas-labs/lobstah/pull/205']")).toBeTruthy();
   expect(g.doc.querySelector('#modalbox button.btn.open')).toBeNull();
   expect(g.reads).toContain('/api/glass/dispatches/job/detail');
-  await g.click('#modalbox .x');
+  await g.click('#modalbox .detail-close');
   await g.go('#traps');
   expect(g.doc.querySelector('#traps .harness-icon')?.getAttribute('aria-label')).toBe('Codex');
   expect(g.text('#traps')).toContain('kind-crab');
@@ -331,22 +331,16 @@ it('renders decisions as safe elements, requests only their own attachment image
   expect(g.doc.querySelector('.dmodal .dattach')).toBeNull();
 });
 
-it('queues messages, confirms direct cancellation, and sends no bearer or helm takeover', async () => {
+it('confirms cancellation from the dispatch menu and sends no bearer or helm takeover', async () => {
   const g = await page('/#dispatches');
   await g.click('#dispatches tr', 'job');
-  g.input('message to helm', 'Please retry');
-  await g.settle();
-  await g.click('#modalbox button', 'Queue message for helm');
-  expect(g.writes[0]).toMatchObject({
-    path: '/api/glass/requests',
-    body: { kind: 'message', dispatch: 'job', text: 'Please retry' },
-    credentials: 'same-origin',
-  });
+  expect(g.doc.querySelector('.jobmsg')).toBeNull();
+  await g.click('#modalbox button[aria-label="More actions"]');
   await g.click('#modalbox button', 'Cancel dispatch…');
-  expect(g.writes).toHaveLength(1);
-  expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its agent stops.');
+  expect(g.writes).toHaveLength(0);
+  expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its worker stops.');
   await g.click('#modalbox button', 'Cancel dispatch');
-  expect(g.writes[1]).toMatchObject({ path: '/api/glass/dispatches/job/cancel', body: {} });
+  expect(g.writes[0]).toMatchObject({ path: '/api/glass/dispatches/job/cancel', body: {} });
   for (const write of g.writes) {
     expect(write.headers['Idempotency-Key']).toBeTruthy();
     expect(write.headers.Authorization).toBeUndefined();
@@ -356,30 +350,11 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
   expect(g.writes.some((w) => w.path.includes('helm/'))).toBe(false);
 });
 
-it('Ctrl+Enter queues the helm message as its button does, only when there is one to send, and once', async () => {
+it('leaves helm messaging out of dispatch details', async () => {
   const g = await page('/#dispatches');
   await g.click('#dispatches tr', 'job');
-  const box = g.doc.querySelector("[aria-label='message to helm']")!;
-  const press = async (opts: { ctrlKey?: boolean; repeat?: boolean }) => {
-    const ev = new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...opts });
-    box.dispatchEvent(ev as unknown as Event);
-    await g.settle();
-    return ev;
-  };
-  expect(g.text('#modalbox .jobsend .sendhint')).toMatch(/↵ to send$/);
-  // An empty box: its button is disabled, and so is the shortcut.
-  await press({ ctrlKey: true });
-  expect(g.writes).toHaveLength(0);
-  g.input('message to helm', 'Please retry');
-  await g.settle();
-  // Plain Enter is a newline.
-  expect((await press({})).defaultPrevented).toBe(false);
-  await press({ ctrlKey: true, repeat: true });
-  expect(g.writes).toHaveLength(0);
-  expect((await press({ ctrlKey: true })).defaultPrevented).toBe(true);
-  expect(g.writes).toHaveLength(1);
-  expect(g.writes[0]).toMatchObject({ path: '/api/glass/requests', body: { kind: 'message', dispatch: 'job', text: 'Please retry' } });
-  expect(g.text('#modalbox')).toContain('Queued for the helm');
+  expect(g.doc.querySelector('[aria-label="message to helm"]')).toBeNull();
+  expect(g.writes).toEqual([]);
 });
 
 it('boats show repos and check-in, no edit/grant controls; revoke and delete each require confirmation', async () => {
@@ -622,7 +597,7 @@ it('links bare http(s) URLs in decisions, notes, briefs and messages as text, ne
   expect(row.textContent).toContain('<script>alert(1)</script> review ');
   await g.click('#dispatches tr', 'job');
   const modal = g.doc.querySelector('#modalbox')!;
-  expect(links(modal)).toEqual(expect.arrayContaining([LOCAL, PR]));
+  expect(Array.from(modal.querySelectorAll('a')).map(a => a.getAttribute('href'))).toEqual(expect.arrayContaining([LOCAL, PR]));
   expect(modal.textContent).toContain('<b>keep</b>');
   expect(modal.querySelector("a[href^='javascript:']")).toBeNull();
 });

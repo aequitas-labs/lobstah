@@ -298,8 +298,8 @@ describe('glass: a report page', () => {
   it("a dispatch's modal names its report and links to the page; it renders no markdown", async () => {
     const g = await page(everyAttentionFleet(), { hash: '#dispatches' });
     await click(g, g.$$('#dispatches tr.rowhead').find((r) => text(r).includes('cccccccc')) ?? null);
-    expect(g.$$('#modalbox .sec').map(text)).toContain('report · Tray findings');
-    const link = [...g.$$('#modalbox a')].find((a) => text(a) === 'open the report')!;
+    expect(text(g.$('.dispatch-report .card'))).toContain('Tray findings');
+    const link = g.$('.dispatch-report .card .gopen')!;
     expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([
       pagePath(TRAP_KEY),
       '_blank',

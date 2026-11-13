@@ -5,11 +5,12 @@ import {
   answerSummary,
   applyBeats,
   decisionCards,
+  decisionFromHash,
   decisionNeighbours,
   filteredDecisionCards,
   modalItem,
-  prHash,
-  prFromHash,
+  detailHash,
+  detailFromHash,
   openDecisionOrder,
   unreadDecisions,
 } from '../src/glass-diff.js';
@@ -151,7 +152,10 @@ export function stepDecision(dir: -1 | 1): void {
   if (next) setState({ decisionModal: { key: next.key } });
 }
 
-export const closeDecision = (): void => setState({ decisionModal: null });
+export const closeDecision = (): void => {
+  setState({ decisionModal: null });
+  if (isDetail(getState().modal) && decisionFromHash(location.hash)) history.back();
+};
 
 /** Hotkeys reach the first nine answers only: 1–9. */
 export const HOTKEY_MAX = 9;
@@ -477,67 +481,74 @@ export async function sendAnswer(key: string): Promise<string | undefined> {
 export const markStale = (): void => setState({ stale: true });
 
 /** Show an image in the in-page overlay. */
-export const openLightbox = (src: string, name: string): void => setState({ lightbox: { src, name } });
+export const openLightbox = (src: string, name: string, origin?: Element): void => {
+  const selector = '.mdimg img, .thumb img, .dimg img';
+  const thumbnails = [...document.querySelectorAll<HTMLImageElement>(selector)];
+  const image = origin?.querySelector<HTMLImageElement>('img') ?? thumbnails.find((image) => image.getAttribute('src') === src);
+  const container =
+    image?.closest('.github-description, .reportview, .rsheet, .dmodal, .drow, .card, .detail-scroll, #modalbox') ?? image?.closest('.md');
+  const images = container
+    ? [...container.querySelectorAll<HTMLImageElement>(selector)].map((image) => ({
+        src: image.getAttribute('src')!,
+        name: image.alt || image.getAttribute('src')!,
+      }))
+    : [{ src, name }];
+  const index = images.findIndex((image) => image.src === src);
+  setState({ lightbox: index >= 0 ? { src, name, images, index } : { src, name } });
+};
+/** Step only within the images of the card, report or description that opened the overlay. */
+export const stepLightbox = (direction: -1 | 1): void => {
+  const box = getState().lightbox;
+  if (!box?.images || box.images.length < 2) return;
+  const index = ((box.index ?? 0) + direction + box.images.length) % box.images.length;
+  setState({ lightbox: { ...box, ...box.images[index]!, index } });
+};
 export const closeLightbox = (): void => setState({ lightbox: null });
 
-let prPushed = false;
-let prScroll: number | undefined;
+let detailScroll: number | undefined;
+const isDetail = (modal: ModalRef | null) => modal && ['pr', 'dispatch', 'trap'].includes(modal.type);
 
-/** Keep the tab and its scroll position under a PR route, including browser Back. */
-export function routePrView(key: string | null): void {
-  const modal = getState().modal;
-  if (key) {
-    if (modal?.type !== 'pr' || modal.key !== key) setState({ modal: { type: 'pr', key }, detail: null });
-  } else if (modal?.type === 'pr') {
-    prPushed = false;
+/** Keep the current tab under linked detail views, including browser Back. */
+export function routeDetailView(modal: ModalRef | null): void {
+  const state = getState();
+  if (modal) {
+    if (state.modal?.type === modal.type && state.modal.key === modal.key) return;
+    setState({ modal, detail: modal.type === 'dispatch' ? { key: modal.key } : null });
+    if (modal.type === 'dispatch') void refreshDetail();
+  } else if (isDetail(state.modal)) {
     setState({ modal: null, detail: null });
-    const y = prScroll;
-    prScroll = undefined;
+    const y = detailScroll;
+    detailScroll = undefined;
     if (y !== undefined) setTimeout(() => window.scrollTo(0, y), 0);
   }
 }
 
-/** Close a PR opened here through browser history, or keep a direct link inside the glass. */
-function closePrView(): void {
-  if (prPushed) {
-    prPushed = false;
-    history.back();
-    return;
-  }
-  history.replaceState(null, '', '#' + getState().route);
-  routePrView(null);
-}
-
 export function showModal(type: ModalType, key: string): void {
-  const state = getState();
   if (type === 'review') {
     showModal('pr', key.replace('review:', 'pr:'));
     return;
   }
-  if (type === 'pr') {
-    if (!prFromHash(location.hash)) {
-      prPushed = true;
-      prScroll = window.scrollY;
-    }
-    location.hash = prHash(key);
-    routePrView(key);
-    return;
-  }
+  const state = getState();
   const modal = { type, key };
-  if (type === 'dispatch') {
-    // Its detail loads now; the modal shows the summary meanwhile.
-    setState({ modal, detail: state.detail?.key === key ? state.detail : { key } });
-    void refreshDetail();
+  if (isDetail(modal)) {
+    if (!detailFromHash(location.hash)) detailScroll = window.scrollY;
+    if (detailHash(modal) !== location.hash) history.pushState({ ...history.state, glassDetail: true }, '', detailHash(modal));
+    routeDetailView(modal);
     return;
   }
   const view = viewOf(state);
   setState({ modal: !view || modalItem(view, modal) ? modal : null, detail: null });
 }
 
-/** Close the modal. */
+/** Back returns to the linked detail or tab this page opened from. Direct links stay in the glass. */
 export function closeModal(): void {
-  if (getState().modal?.type === 'pr') {
-    closePrView();
+  if (isDetail(getState().modal)) {
+    if (history.state?.glassDetail) {
+      history.back();
+      return;
+    }
+    history.replaceState(null, '', '#' + getState().route);
+    routeDetailView(null);
     return;
   }
   setState({ modal: null, detail: null });
@@ -547,14 +558,16 @@ export function closeModal(): void {
 export const READ_ONLY_REASON = 'This glass is read-only from here';
 
 /** Ask the local server to focus one live trap; it accepts no path, URL, or command. */
-export async function openTrapWindow(trapId: string): Promise<void> {
+export async function openTrapWindow(trapId: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
-  if (!token) return;
+  if (!token) return 'The glass has no page token yet.';
   try {
     const result = (await backend().focus(trapId, token)).body;
     setState({ focusResults: { ...getState().focusResults, [trapId]: result.message ?? result.reason ?? 'Window focus failed' } });
+    return result.focused ? undefined : (result.reason ?? 'Window focus failed');
   } catch {
     setState({ focusResults: { ...getState().focusResults, [trapId]: 'Window focus failed' } });
+    return 'Window focus failed';
   }
 }
 

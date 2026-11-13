@@ -71,7 +71,7 @@ describe('glass: a paused dispatch says what it waits on', () => {
     expect(card.querySelector('.verbicon')!.getAttribute('aria-label')).toMatch(/^Paused · \S+ · waiting on review$/);
     await click(g, card);
     const w = g.$('#modalbox .waiting')!;
-    expect(text(w)).toBe('paused: waiting on review · 12m · ume.example.com/s/abc');
+    expect(text(w)).toBe('paused: waiting on review · 12m ago · ume.example.com/s/abc');
     const a = w.querySelector('a')!;
     expect(a.getAttribute('href')).toBe('https://ume.example.com/s/abc');
     expect(a.getAttribute('target')).toBe('_blank');

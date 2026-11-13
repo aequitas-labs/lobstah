@@ -12,7 +12,7 @@ import { Button } from './button.js';
 type Image = (name: string, alt: string) => Children;
 
 /** Opens an image larger, in the page's own overlay. */
-type OpenImage = (src: string, alt: string) => void;
+type OpenImage = (src: string, alt: string, origin?: Element) => void;
 
 /** How one Markdown body renders: where its images come from, and whether its code can be copied. */
 interface RenderOptions {
@@ -112,7 +112,7 @@ function RemoteImage({ url, alt, open }: { url: string; alt: string; open?: Open
   const click = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    open(url, alt || url);
+    open(url, alt || url, e.currentTarget as Element);
   };
   return html`<button type="button" class="mdimg" title=${'view ' + (alt || url)} onClick=${click}>${img}</button>`;
 }
