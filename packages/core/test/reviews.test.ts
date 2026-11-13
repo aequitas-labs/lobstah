@@ -242,6 +242,18 @@ describe('drafts', () => {
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
   });
 
+  it('accepts an empty body only with an explicit approve verdict and no blockers', () => {
+    observeReviewRequest(seen(), T0);
+    const dir = reviewRoundDir('review:acme/web#7', 'RRE_1')!; fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), '');
+    fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ error: 'review.md is empty' });
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ body: '', comments: [], verdict: 'approve', blocking: [] });
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [] }));
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ error: 'review.md is empty' });
+  });
+
   it('the brief drafts into the round directory and forbids every write to the PR', () => {
     observeReviewRequest(seen(), T0);
     const item = readReview('review:acme/web#7')!;
@@ -265,7 +277,10 @@ describe('drafts', () => {
     expect(brief).toContain('Judge the code alone.');
     expect(brief).toContain('A merge gate, required check, submit or approval label, or CI status that is red, pending or older than the head');
     expect(brief).toContain('it never changes the verdict, and the review never mentions it or asks anyone to rerun it.');
-    expect(brief).toContain('approve when the code is sound with no blockers');
+    expect(brief).toContain('approve when there are no blockers or inline comments worth posting');
+    expect(brief).toContain('comment only for real non-blocking findings in the diff');
+    expect(brief).toContain('For approve, leave review.md empty or use at most one short line.');
+    expect(brief).toContain('Process items outside the diff—issue checklists, manual or real-world verification still to do, and whether you ran tests—never change the verdict or go in the body.');
     expect(brief).not.toContain('ready to merge');
     // A test this change breaks is still a finding, with its file and line.
     expect(brief).toContain('A test that fails because of this change is a code finding: give its file and line.');
