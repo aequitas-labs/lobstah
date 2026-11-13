@@ -186,10 +186,12 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
     const resize = () => {
       if (window.matchMedia(ALL_TABS_FIT).matches) setOpen(false);
     };
+    document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', key, true);
     window.addEventListener('hashchange', close);
     window.addEventListener('resize', resize);
     return () => {
+      document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', key, true);
       window.removeEventListener('hashchange', close);
       window.removeEventListener('resize', resize);
