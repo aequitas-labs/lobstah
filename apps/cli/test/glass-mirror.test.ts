@@ -385,3 +385,14 @@ describe('mergeMirror', () => {
     if (one.slots) expect(snapshot.slots?.limit).toBe(one.slots.limit * 2);
   });
 });
+
+
+describe('a PR description on the hosted glass', () => {
+  it('relays the description read to the row’s boat', async () => {
+    const key = boatFleet('s').prs[0]!.key;
+    const h = await hosted('#pr/' + encodeURIComponent(key), { boats: [[SOUTH, 's']], relay: call => call.read?.startsWith('/data/pr/') ? Response.json({ key, title: 'Fresh PR', url: boatFleet('s').prs[0]!.url, bodyHtml: '<p>A fresh description.</p>' }) : undefined });
+    expect(text(h.doc.querySelector('.github-description'))).toBe('A fresh description.');
+    expect(h.relayed.filter(call => call.read).map(({boat, read}) => ({boat, read}))).toEqual([{ boat: SOUTH.boat, read: '/data/pr/' + encodeURIComponent(key) }]);
+    expect(h.relayed.filter(call => call.write)).toEqual([]);
+  });
+});

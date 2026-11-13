@@ -58,7 +58,7 @@ describe('lobItems (the crawling lobs on the spyglass page)', () => {
       { id: 'b', lane: 'work', verb: 'needs-decision', kind: 'question', key: 'work:b', stateHash: 'q1', acked: { at: 'x', by: 'pet' } },
     ];
     const shown = lobItems(att, { lobs: true, preview: false,  });
-    expect(shown.map((i) => [i.key, i.hideKey, i.hideHash])).toEqual([['pr:draft:pr:o/r#1', 'pr:o/r#1', 'h1']]);
+    expect(shown.map((i) => [i.key, i.hideKey, i.hideHash])).toEqual([['pr:draft:pr:o/r#1', undefined, undefined]]);
     expect(lobItems(att, { lobs: true, hidden: { 'pr:o/r#1': 'h1' }, preview: false,  })).toEqual([]);
     expect(lobItems(att, { lobs: true, hidden: { 'pr:o/r#1': 'h0' }, preview: false,  })).toHaveLength(1);
   });

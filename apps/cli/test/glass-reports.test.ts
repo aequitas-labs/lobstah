@@ -75,14 +75,15 @@ const click = async (g: GlassDom, el: Element | null) => {
   (el as HTMLElement).click();
   await g.settle();
 };
-const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports →')!;
+const reportsSection = (g: GlassDom) =>
+  g.$$('#deck .deckgrid > section').find((s) => s.querySelector('.section-head h2 a')?.firstChild?.textContent?.trim() === 'Reports')!;
 
 describe('glass: the deck reports block', () => {
   it('lists reports after Landed, newest first regardless of acknowledgment: title, then who filed it, the age, and acked; no badge', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
-      const headings = g.$$('#deck .deckgrid > section').map((s) => text(s.querySelector('h2')));
-      expect(headings.indexOf('reports →')).toBe(headings.indexOf('Landed · 24h →') + 1);
+      const headings = g.$$('#deck .deckgrid > section').map((s) => s.querySelector('.section-head h2 a')?.firstChild?.textContent?.trim());
+      expect(headings.indexOf('Reports')).toBe(headings.indexOf('Landed · 24h') + 1);
       const rows = [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
       expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
       expect(reportsSection(g).querySelectorAll('.badge')).toHaveLength(0);
@@ -297,8 +298,8 @@ describe('glass: a report page', () => {
   it("a dispatch's modal names its report and links to the page; it renders no markdown", async () => {
     const g = await page(everyAttentionFleet(), { hash: '#dispatches' });
     await click(g, g.$$('#dispatches tr.rowhead').find((r) => text(r).includes('cccccccc')) ?? null);
-    expect(g.$$('#modalbox .sec').map(text)).toContain('report · Tray findings');
-    const link = [...g.$$('#modalbox a')].find((a) => text(a) === 'open the report')!;
+    expect(text(g.$('.dispatch-report .card'))).toContain('Tray findings');
+    const link = g.$('.dispatch-report .card .gopen')!;
     expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([
       pagePath(TRAP_KEY),
       '_blank',

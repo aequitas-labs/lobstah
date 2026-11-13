@@ -30,7 +30,7 @@ import { getState, setState } from '../store.js';
 import type { Children } from '../html.js';
 import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
 import type { CardPerson, CardTone } from './card.js';
-import { Button } from './button.js';
+import { Button, type ButtonSize } from './button.js';
 
 /**
  * The PRs tab: Yours first (the stacks holding a PR of the person's own,
@@ -78,7 +78,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
     (w) =>
       html`<tr key=${w.key}><td>${w.key}</td><td>${w.owner}</td><td title=${w.cursor}>${short(w.cursor)}</td><td>${w.lastCheckedAt && Age(w.lastCheckedAt)}</td><td>${LinkedText(w.lastError)}</td></tr>`,
   );
-  return [html`<h2>other watches</h2>`, Table(['key', 'owner', 'cursor', 'last check', 'error'], rows, 'no other watches')];
+  return [html`<h2>Other watches</h2>`, Table(['key', 'owner', 'cursor', 'last check', 'error'], rows, 'no other watches')];
 }
 
 function prTable(inp: PrsInputs, older: unknown) {
@@ -114,7 +114,7 @@ const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', r
  * choice made here; the hover text names it. A PR repair works a failing or
  * conflicting PR back to green first (the boat's pass).
  */
-export function MergeWhenGreen({ p }: { p: GlassPr }) {
+export function MergeWhenGreen({ p, size = 'md' }: { p: GlassPr; size?: ButtonSize }) {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('pr-merge') || !p.mine || p.state !== 'OPEN') return null;
   const send = (cancel: boolean) => async (e: Event) => {
@@ -124,8 +124,8 @@ export function MergeWhenGreen({ p }: { p: GlassPr }) {
   const method = p.mergeRequest?.method ?? p.mergeMethod;
   const how = `#${p.number} into ${p.baseRefName ?? 'its base'}${method ? ` as ${METHOD_WORDS[method]}` : ''}`;
   const button = p.mergeRequest
-    ? html`<${Button} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} action=${send(true)} sending="Cancelling merge…" done="Merge cancelled">${ActionIcon.merge}Cancel merge<//>`
-    : html`<${Button} variant="primary" aria-pressed="false" title=${`Merges ${how} once green`} action=${send(false)} sending="Requesting merge…" done=${`Merges #${p.number} when green`}>${ActionIcon.merge}Merge when green<//>`;
+    ? html`<${Button} size=${size} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} action=${send(true)} sending="Cancelling merge…" done="Merge cancelled">${ActionIcon.merge}Cancel merge<//>`
+    : html`<${Button} size=${size} variant="primary" aria-pressed="false" title=${`Merges ${how} once green`} action=${send(false)} sending="Requesting merge…" done=${`Merges #${p.number} when green`}>${ActionIcon.merge}Merge when green<//>`;
   return html`<span class="prmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}</span>`;
 }
 

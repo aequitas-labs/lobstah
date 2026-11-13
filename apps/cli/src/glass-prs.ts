@@ -86,7 +86,7 @@ export function deriveGlassPrs(
       key: ref.key, url, number: pr.number, repo: repoKey ?? `${ref.owner}/${ref.repo}`,
       forgeRepo: `${ref.owner}/${ref.repo}`,
       ...(pr.title ? { title: pr.title } : {}),
-      state: pr.state, draft: pr.draft, checks: pr.checks, review: pr.review,
+      state: pr.state, draft: pr.draft, checks: pr.checks, failingChecks: pr.failingChecks, review: pr.review,
       reviewDecision: pr.reviewDecision, mergeStateStatus: pr.mergeStateStatus,
       baseRefName: pr.baseRefName, headRefName: pr.headRefName, observedAt: pr.observedAt,
       ...(pr.isCrossRepository !== undefined ? { isCrossRepository: pr.isCrossRepository } : {}),

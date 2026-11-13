@@ -1,5 +1,6 @@
 import type {
   GlassBeats,
+  GlassPrDetails,
   GlassDecision,
   GlassDispatch,
   GlassOlderKind,
@@ -31,6 +32,8 @@ export interface GlassBackend {
   poll(etag: string | null): Promise<GlassPoll>;
   /** The whole snapshot now, read once after a write so its result shows. */
   snapshot(): Promise<GlassSnapshot>;
+  /** Fresh PR description; optional on sources without GitHub reads. */
+  prDetails?(key: string): Promise<GlassRead<GlassPrDetails>>;
   /** One dispatch's full record: its brief, log, inbox and evidence. */
   dispatch(id: string): Promise<GlassRead<GlassDispatch>>;
   /** A closed decision, opened by its deep link outside the live queue. */
@@ -44,7 +47,7 @@ export interface GlassBackend {
   /** One glass request (an answer, a view, an ack, a trap request…), with the page's write token. */
   request<T extends GlassVerdict>(kind: string, payload: unknown, token: string): Promise<GlassWrite<T>>;
   /** Raise one live trap's window on this machine. */
-  focus(trapId: string, token: string): Promise<GlassWrite<{ message?: string; reason?: string }>>;
+  focus(trapId: string, token: string): Promise<GlassWrite<{ focused?: boolean; message?: string; reason?: string }>>;
   /** Report this page as open (and visible or not); the answer may hold a show for it. */
   presence(page: string, visible: boolean, app: boolean): Promise<GlassRead<{ show?: unknown } | null>>;
   /** A report's row, and the write token its page acks with. */

@@ -137,11 +137,15 @@ for (const view of ['cards', 'table'])
     expect(page.$('#modalbox')?.textContent).toContain('blocked-crab');
     const fresh = await open(fleet(), '#trap/blocked', view);
     expect(fresh.$('#modalbox')?.textContent).toContain('blocked-crab');
-    (fresh.$('#overlay button[aria-label="close"]') as HTMLButtonElement).click();
+    (fresh.$('#overlay button[aria-label="Close"]') as HTMLButtonElement).click();
     await fresh.settle();
+    expect(fresh.$('#overlay')?.classList.contains('open')).toBe(false);
     (fresh.$('#deck .deck-traps a[href="#trap/blocked"]') as HTMLAnchorElement).click();
     await fresh.settle();
     expect(fresh.$('#overlay')?.classList.contains('open')).toBe(true);
+    (fresh.$('#overlay button[aria-label="Close"]') as HTMLButtonElement).click();
+    await fresh.settle();
+    expect(fresh.$('#overlay')?.classList.contains('open')).toBe(false);
   });
 
 it('removes recovered attention cases on a live update and keeps the fleet overview', async () => {

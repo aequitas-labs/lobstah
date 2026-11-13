@@ -15,8 +15,15 @@ function fixture() {
   return d;
 }
 function details(values: string[]) {
-  expect(g!.$$('#modalbox .worker-details')).toHaveLength(1);
-  expect(g!.$$('#modalbox .worker-details dd').map(n => n.textContent)).toEqual(values);
+  if (g!.$('#modalbox .worker-details')) {
+    expect(g!.$$('#modalbox .worker-details dd').map(n => n.textContent)).toEqual(values);
+    return;
+  }
+  expect(g!.$$('#modalbox .view-worker')).toHaveLength(1);
+  const worker = g!.$('#modalbox .view-worker')!;
+  expect(worker.querySelector('.harness-icon')?.getAttribute('aria-label')?.toLowerCase()).toBe(values[0]);
+  for (const value of values.slice(1,4).filter(value => value !== 'unknown' && value !== 'model unknown')) expect(worker.textContent).toContain(value);
+  expect(worker.textContent).not.toMatch(/2026-\d\d-\d\dT/);
 }
 async function close() {
   g!.document.dispatchEvent(new g!.window.KeyboardEvent('keydown', { key: 'Escape' }));
@@ -62,7 +69,7 @@ describe('worker metadata in the glass', () => {
       (g.$(`#dispatches ${view === 'cards' ? '.card' : '.rowhead'}`) as HTMLElement).click(); await g.settle();
       details(['codex', 'gpt-5.4', 'high', 'unknown', observedAt]);
       expect(g.$('#modalbox')?.textContent?.match(/gpt-5\.4/g)).toHaveLength(1);
-      expect(g.$('.worker-details')?.textContent).toContain('headless worker · launch / observation');
+      expect(g.$('#modalbox .view-worker')?.textContent).toContain('gpt-5.4');
       await close();
       await g.go('#deck');
       expect(g.$('#deck')?.textContent).not.toContain('my-model');

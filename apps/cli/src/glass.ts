@@ -6,6 +6,7 @@ import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
+import { readPrDetails } from './pr-details.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
@@ -293,6 +294,20 @@ function trapMessages(trapId: string): GlassMessage[] {
   return rows.filter((m): m is GlassMessage => m !== undefined).sort((a, b) => a.file.localeCompare(b.file));
 }
 
+/** A dispatch's existing mail and sidecars, including delivered envelopes, read with its detail. */
+function dispatchMessages(dir: string): GlassMessage[] {
+  const rows: GlassMessage[] = [];
+  for (const [folder, state] of [[dir, 'pending'], [path.join(dir, 'handled'), 'delivered']] as const) {
+    for (const file of listDir(folder).filter(file => file.endsWith('.msg'))) {
+      try {
+        const meta = readJson<{from?: string; at?: string; attachments?: Attachment[]}>(path.join(folder, file.replace(/\.msg$/, '.meta.json')));
+        rows.push({file, state, from: meta?.from ?? 'unknown', at: meta?.at ?? '', text: fs.readFileSync(path.join(folder, file), 'utf8').trim(), attachments: meta?.attachments});
+      } catch { /* A message moved to handled while this detail was read. The next read sees it. */ }
+    }
+  }
+  return rows.sort((a,b) => a.file.localeCompare(b.file));
+}
+
 /** Activity older than this shows stale. A config error falls back to the default. */
 function wedgeSecs(): number {
   try {
@@ -349,7 +364,7 @@ function dispatchOnDisk(id: string): DispatchOnDisk | undefined {
   return undefined;
 }
 
-function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, staleSecs: number): Omit<GlassDispatch, 'prBadge' | 'prGate'> {
+function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, staleSecs: number, withMessages = false): Omit<GlassDispatch, 'prBadge' | 'prGate'> {
   const id = r.d.id;
   const log = readStatusLog(id, r.lane);
   const last = log.at(-1);
@@ -369,6 +384,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     brief: r.d.brief,
     attachments: r.d.attachments ?? [],
     messageAttachments: messageAttachments(inboxDir),
+    ...(withMessages ? { messages: dispatchMessages(inboxDir) } : {}),
     // A queued descriptor with no log is waiting, not unknown; its time
     // is the queue time.
     // An active dispatch a trap claimed, with no log, is working since
@@ -419,7 +435,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
  */
 export function dispatchDetail(id: string): Omit<GlassDispatch, 'prBadge' | 'prGate'> | undefined {
   const r = dispatchOnDisk(id);
-  return r && dispatchRow(r, readHold(), wedgeSecs());
+  return r && dispatchRow(r, readHold(), wedgeSecs(), true);
 }
 
 function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
@@ -939,6 +955,8 @@ export function serveGlass(
     focus?: (reg: TrapRegistration) => Promise<FocusResult>;
     snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
     presence?: GlassPresence;
+    /** Read a fresh PR description with this server's forge sign-in. */
+    prDetails?: typeof readPrDetails;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
     runWindows?: RunWindows;
@@ -1549,6 +1567,21 @@ export function serveGlass(
       const ok = req.method === 'GET';
       res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(ok ? glassSettings() : { error: 'GET required' }));
+    } else if (req.url?.startsWith('/data/pr/')) {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'GET required' })); return;
+      }
+      let key: string;
+      try { key = decodeURIComponent(req.url.slice('/data/pr/'.length)); }
+      catch { res.writeHead(400); res.end(); return; }
+      const fleet = snapshot({ local: false });
+      if (!fleet.prs.some(pr => pr.key === key) && !fleet.reviews?.some(review => review.key.replace(/^review:/, 'pr:') === key)) {
+        res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ error: 'PR not found' })); return;
+      }
+      void (options.prDetails ?? readPrDetails)(key).then(details => {
+        res.writeHead(details ? 200 : 404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(details ?? { error: 'PR description could not be read' }));
+      }).catch(error => fail(req, res, error));
     } else if (req.url?.startsWith('/data/')) {
       // History the poll leaves out, and one dispatch's detail: built on the
       // snapshot thread when there is one. Nothing else lives under /data/.

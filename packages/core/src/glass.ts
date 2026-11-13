@@ -153,6 +153,8 @@ export interface GlassPr {
   state: string;
   draft: boolean;
   checks: PrEvidence['checks'];
+  /** Failed checks with links to their runs, as last observed. */
+  failingChecks?: PrEvidence['failingChecks'];
   review: PrEvidence['review'];
   reviewDecision: string;
   mergeStateStatus: string;
@@ -185,6 +187,20 @@ export interface GlassPr {
   mergeRequest?: { at: string; method: 'merge' | 'squash' | 'rebase' };
   /** How Merge when green would merge this open PR of yours: its repo's method. */
   mergeMethod?: 'merge' | 'squash' | 'rebase';
+}
+
+/** Fresh GitHub description and byline, read only when a PR view opens. Never cached. */
+export interface GlassPrDetails {
+  key: string;
+  url: string;
+  title: string;
+  bodyHtml: string;
+  author?: { login: string; avatarUrl?: string; name?: string };
+  baseRefName?: string;
+  headRefName?: string;
+  updatedAt?: string;
+  state?: string;
+  draft?: boolean;
 }
 
 export interface GlassStack {
@@ -284,6 +300,8 @@ export interface GlassDispatch extends GlassDispatchSummary {
   messageAttachments: Attachment[];
   log: StatusEntry[];
   inbox: string[];
+  /** Mail history with existing sender and delivery receipts, loaded with detail only. */
+  messages?: GlassMessage[];
   evidence?: Evidence;
 }
 
@@ -350,6 +368,8 @@ export interface GlassReview {
   verdict?: import('./reviews.js').ReviewVerdict;
   blocking?: import('./reviews.js').BlockingFinding[];
   summary?: string;
+  /** Every inline finding, with its full body, separate from the blocking findings. */
+  comments?: import('./reviews.js').ReviewComment[];
   needsYou?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;
