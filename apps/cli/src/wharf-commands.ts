@@ -135,6 +135,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
   };
   switch (cmd) {
     case 'dispatch': {
+      if (opts.has('--fresh') || opts.has('--continue')) throw new Error('session choices require local grounds');
       noFiles();
       if (opts.opt('--pool')) throw new Error('local worktree pools cannot run on wharf grounds');
       const repo = opts.opt('--repo'); const file = opts.opt('--brief') ?? opts.opt('--bait');
@@ -177,7 +178,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       const { forgetTrap } = await import('./forget.js'); print(await forgetTrap(pos[1], config)); break;
     }
     case 'cancel': print(await backend.request(`dispatches/${id()}/cancel`, {}, key())); break;
-    case 'send': noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); print({ sent: true }); break;
+    case 'send': if (opts.has('--compact')) throw new Error('--compact requires local grounds'); noFiles(); await backend.send(pos[0] ?? '', pos.slice(1).join(' '), key()); print({ sent: true }); break;
     case 'inbox': print(await backend.messages(pos[0] ?? '')); break; // Explicit receipt, never implicit acknowledgement.
     case 'report': {
       const verb = pos[1]; if (!verb || !isVerb(verb)) throw new Error('report requires one of the six verbs');

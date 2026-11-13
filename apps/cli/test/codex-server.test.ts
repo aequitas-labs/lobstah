@@ -3,12 +3,13 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'smol-toml';
 import { WebSocketServer } from 'ws';
-import { baitBrief, ensureLayout, listTraps, reservationForTicket, reserveTrap, signOnTrap, stowTrap, TRAP_INSTRUCTION_RULE, type TrapRegistration } from '@lobstah/core';
-import { codexRestartMessage, createCodexServerWatch, setTomlTableFields, stopCodexThread, trustForCodexServer } from '../src/codex-server.js';
+import { claimBait, enqueue, readSessionClaim, unhandled, baitBrief, ensureLayout, listTraps, reservationForTicket, reserveTrap, signOnTrap, stowTrap, TRAP_INSTRUCTION_RULE, type TrapRegistration } from '@lobstah/core';
+import { compactCodexThread, codexRestartMessage, createCodexServerWatch, setTomlTableFields, stopCodexThread, trustForCodexServer } from '../src/codex-server.js';
 import type { CodexHookList } from '../src/codex-hook-list.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -369,4 +370,25 @@ describe('whose word a trap acts on', () => {
   it('says the same in the brief a dispatch delivers', () => {
     expect(baitBrief('d-1', { id: 'd-1', repo: 'r', brief: 'the task' })).toContain(TRAP_INSTRUCTION_RULE);
   });
+});
+
+it.skipIf(process.platform === 'win32')('queues compaction on the same Codex thread without starting a new turn', async () => {
+  await startServer();
+  await compactCodexThread('t1');
+  expect(methods()).toEqual(['thread/resume', 'thread/compact/start', 'thread/unsubscribe']);
+  expect(received.filter(request => request.method !== 'initialize').every(request => request.params.threadId === 't1')).toBe(true);
+});
+
+it.skipIf(process.platform === 'win32')('send --compact queues compaction and steering on the claimed Codex session', async () => {
+  await startServer();
+  const reg = trap('compact-thread', true);
+  enqueue({ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', repo: 'r', brief: 'work', for: `wt:${reg.trapId}` });
+  claimBait(reg);
+  const claim = readSessionClaim('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'work');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CLAUDE|CODEX_THREAD_ID|LOBSTAH_TRAP_TICKET)/.test(key)));
+  const result = await promisify(execFile)(process.execPath, [cli, 'send', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', '--compact'], { env, cwd: home, timeout: 10_000 });
+  expect(result.stdout).toContain('compact: thread/compact/start');
+  expect(methods()).toEqual(['thread/resume', 'thread/compact/start', 'thread/unsubscribe']);
+  expect(readSessionClaim('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'work')).toEqual(claim);
+  expect(unhandled('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'work')[0]?.text).toContain('Compact your context');
 });

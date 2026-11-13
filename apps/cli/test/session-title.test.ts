@@ -50,18 +50,18 @@ describe('title fields on trap commands', () => {
   it('prints the name at sign-on, work on delivery, and the name after done or failed', () => {
     signOn();
     expect(run(['soak', '--session', 'own-session'])).toContain('title: amber-gull');
-    enqueue({ id: 'title-work', repo: 'web', brief: '# Ship a short feature\nIgnore this line' });
+    enqueue({ id: 'title-work', repo: 'web', sessionMode: 'continue', brief: '# Ship a short feature\nIgnore this line' });
     expect(run(['soak', '--wait', '--timeout', '0', '--session', 'own-session'])).toContain('title: amber-gull · Ship a short feature');
     expect(run(['report', 'title-work', 'done', 'finished'])).toContain('title: amber-gull');
 
-    enqueue({ id: 'second-work', repo: 'web', brief: '# Another feature' });
+    enqueue({ id: 'second-work', repo: 'web', sessionMode: 'continue', brief: '# Another feature' });
     expect(run(['soak', '--wait', '--timeout', '0', '--session', 'own-session'])).toContain('title: amber-gull · Another feature');
     expect(run(['report', 'second-work', 'failed', 'cannot finish'])).toContain('title: amber-gull');
   });
 
   it('a done with --report keeps the trap name as the title and prints the report title apart', () => {
     signOn();
-    enqueue({ id: 'report-work', repo: 'web', brief: '# Research trays' });
+    enqueue({ id: 'report-work', repo: 'web', sessionMode: 'continue', brief: '# Research trays' });
     run(['soak', '--wait', '--timeout', '0', '--session', 'own-session']);
     const page = path.join(home, 'findings.md');
     fs.writeFileSync(page, '# Tray findings\n\nnotes');
@@ -72,7 +72,7 @@ describe('title fields on trap commands', () => {
 
   it('prints the cleaned, capped first brief line when work is delivered', () => {
     signOn();
-    enqueue({ id: 'clean-work', repo: 'web', brief: '## \u001b[31mShip safe work\u001b[0m ' + 'long '.repeat(100) + '\nignore this' });
+    enqueue({ id: 'clean-work', repo: 'web', sessionMode: 'continue', brief: '## \u001b[31mShip safe work\u001b[0m ' + 'long '.repeat(100) + '\nignore this' });
     const output = run(['soak', '--wait', '--timeout', '0', '--session', 'own-session']);
     const title = output.split('\n').filter((line) => line.startsWith('title: ')).at(-1)?.slice(7) ?? '';
     expect(title).toContain('amber-gull · Ship safe work');

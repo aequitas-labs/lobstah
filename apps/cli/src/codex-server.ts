@@ -231,6 +231,15 @@ export async function startCodexTurn(threadId: string, text: string): Promise<'s
   });
 }
 
+/** Queue compaction on the existing thread; Codex serializes it with the thread's operations. */
+export async function compactCodexThread(threadId: string): Promise<void> {
+  await withCodexServer(async call => {
+    await call('thread/resume', { threadId });
+    await call('thread/compact/start', { threadId });
+    await call('thread/unsubscribe', { threadId }).catch(() => undefined);
+  });
+}
+
 /** Tell one trap its server restarted, by a turn on its own thread. */
 async function wakeCodexTrap(trap: TrapRegistration): Promise<void> {
   await withCodexServer(async (call) => {

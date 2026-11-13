@@ -58,6 +58,7 @@ import {
   baitBrief,
   cancelRequested,
   claimBait,
+  needsFreshTrapSession,
   unreportedTrapBait,
   codexInvocation,
   hasOpenCatch,
@@ -243,6 +244,7 @@ import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
 import { createUsageLimitWatch } from './usage-limit-watch.js';
+import { compactDispatchSession, compactTrapSession } from './trap-compact.js';
 import { swapTrapCatch } from './trap-swap.js';
 import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
 import { createTurnWaits } from './turn-waits.js';
@@ -331,11 +333,15 @@ work (humans and agents):
   dispatch (--repo <key> | --pool <name>) (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
            [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any] [--chore] [--id <uuid>]
-           [--pr <url|number>]
+           [--pr <url|number>] [--fresh | --continue]
                                   queue a supervised dispatch; prints the id.
                                   --pr works on that open PR: the runner
                                   pushes no lobstah/<id> branch and opens no
                                   PR; the worker pushes to the PR's branch.
+                                  --fresh starts without prior conversation;
+                                  --continue keeps the session. Default: fresh
+                                  for unaddressed work, continue for --for
+                                  and follow-ups.
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
                                   never falls back headless; session:<id>
@@ -360,7 +366,7 @@ work (humans and agents):
   tmux [repo]                     open a new Terminal view of the tmux trap session
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--] <message>
+  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--compact] [--] [<message>]
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
                                   (arrives at its next park; undeliverable
@@ -666,7 +672,8 @@ function confirmTitle(sessionFlag: string | undefined): void {
 type ParkEnd = 'woke' | 'gone' | 'timeout';
 
 async function soakPark(trapId: string, timeout: string | undefined, plain = false): Promise<ParkEnd> {
-  const idle = new IdleWait(readTrap(trapId)?.sessionId, loadConfig().wait, timeout);
+  const sessionId = readTrap(trapId)?.sessionId;
+  const idle = new IdleWait(sessionId, loadConfig().wait, timeout);
   const rearm = `lobstah soak --wait${timeout === undefined ? '' : ` --timeout ${timeout}`}`;
   // Self-instructive in plain mode (axi.md P9): every exit tells the session
   // its own next command — a foreground park has no hook to re-arm it.
@@ -678,6 +685,7 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
       }
     : (reason: string) => { idle.woke(); console.log(JSON.stringify({ decision: 'block', reason })); };
   while (true) {
+    if (readTrap(trapId)?.sessionId !== sessionId) return 'gone';
     const reg = heartbeatTrap(trapId, { parked: true });
     if (!reg) {
       if (plain) {
@@ -717,7 +725,9 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
       const instruction = unhandled(id, lane).length > 0
         ? `New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`
         : undefined;
-      if (pending || instruction) {
+      // The daemon swaps outside this process; the old conversation never receives fresh work.
+      const awaitingFreshSession = pending && needsFreshTrapSession(pending.descriptor);
+      if (!awaitingFreshSession && (pending || instruction)) {
         // Another waiter may have claimed while this Stop hook was parked,
         // or exited after claiming without waking the session. An initial
         // brief is not consumed until the worker's first report, so recover
@@ -731,7 +741,7 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
         return 'gone'; // one catch was the deal — the trap comes out of the water
       }
       const caught = claimBait(reg);
-      if (caught) {
+      if (caught && !needsFreshTrapSession(caught.descriptor)) {
         if (plain) {
           const title = trapSessionTitle({ sessionId: reg.sessionId, cwd: reg.worktree })?.title;
           if (title) console.log(toonKV({ title }));
@@ -948,6 +958,7 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
       lane,
       bucket,
       state,
+      sessionMode: storedDescriptor(id, lane)?.sessionMode ?? 'continue',
       updated,
       waiting: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : waiting ? waitingText(waiting) : '',
       activity: activity ? activityLine(activity) : '',
@@ -1307,6 +1318,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'dispatch': {
+      if (has('--fresh') && has('--continue')) throw new UsageError('Choose --fresh or --continue');
       if (opt('--request') !== undefined) throw new UsageError('--request names a person\'s work request on a wharf: dispatch it on that wharf\'s grounds');
       const configuredAddress = opt('--for');
       if (configuredAddress?.startsWith('trap:')) {
@@ -1316,7 +1328,7 @@ async function mainCli(): Promise<void> {
         if (!caller || helmOf(caller.id)?.grounds !== profile.grounds) throw new UsageError('only the helm of the configured profile grounds may dispatch to it');
         gateHelm(caller, profile.grounds);
         if (opt('--grounds') !== undefined && storageGrounds(opt('--grounds')!, cfg) !== profile.grounds) throw new UsageError(`trap:${name} serves grounds ${profile.grounds}`);
-        for (const flag of ['--repo', '--pool', '--trap-any', '--pr', '--follow-up', '--harness', '--model', '--effort']) if (has(flag)) throw new UsageError(`${flag} does not apply to a configured trap dispatch`);
+        for (const flag of ['--repo', '--pool', '--trap-any', '--pr', '--follow-up', '--harness', '--model', '--effort', '--fresh', '--continue']) if (has(flag)) throw new UsageError(`${flag} does not apply to a configured trap dispatch`);
         const briefFile = opt('--brief') ?? opt('--bait'), briefText = opt('--brief-text');
         if (!briefFile && !briefText) throw new UsageError('dispatch requires --brief <file> or --brief-text');
         const descriptor: Descriptor = { id: opt('--id') ?? randomUUID(), brief: briefText ?? fs.readFileSync(briefFile!, 'utf8'), for: configuredAddress,
@@ -1351,6 +1363,7 @@ async function mainCli(): Promise<void> {
         harness: opt('--harness'),
         model: opt('--model'),
         effort: opt('--effort'),
+        sessionMode: has('--fresh') ? 'fresh' : has('--continue') ? 'continue' : undefined,
         followUp: opt('--follow-up'),
         for: opt('--for'),
         ...(poolName !== undefined ? { pool: poolName } : {}),
@@ -1396,7 +1409,7 @@ async function mainCli(): Promise<void> {
       const id = pos[0];
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
-        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
+        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'sessionMode', 'updated', 'waiting', 'activity']));
         for (const p of dispatchProgress()) console.log(p.text);
         console.log(trapSummary(loadConfig()));
         const pools = poolViews(loadConfig());
@@ -1444,6 +1457,7 @@ async function mainCli(): Promise<void> {
         toonKV({
           id,
           lane,
+          sessionMode: descriptor?.sessionMode ?? 'continue',
           state,
           ...(limited ? { usageLimit: limited.reason, resetAt: limited.resetAt } : {}),
           ...(progress ? { attention: progress.state, reason: progress.text } : {}),
@@ -1519,7 +1533,7 @@ async function mainCli(): Promise<void> {
       // --session (anywhere) identifies the sender; the positionals after the
       // target are the message.
       const [target, ...rest] = pos;
-      if (!target || (rest.length === 0 && !has('--attach')))
+      if (!target || (rest.length === 0 && !has('--attach') && !has('--compact')))
         throw new Error('send requires a target (dispatch id, wt:<trap>, or session:<id>) and a message or --attach <file>');
       // Sending is steering: with a helm claimed, only the helm steers — a
       // worker processing untrusted content must not be able to instruct a
@@ -1529,7 +1543,7 @@ async function mainCli(): Promise<void> {
       const sid = sender?.id;
       gateHelm(sender);
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
-      const text = rest.join(' ');
+      const text = rest.join(' ') || (has('--compact') ? 'Compact your context before continuing the dispatch.' : '');
       const prOnlyForFollowUp = '--pr applies only when send starts a follow-up of a finished dispatch; to work on a PR, dispatch with --pr';
       if (target.startsWith('wt:') || target.startsWith('session:') || trapByAddress(target) || /^[a-z]+-[a-z]+$/.test(target)) {
         if (opt('--pr') !== undefined) throw new UsageError(prOnlyForFollowUp);
@@ -1553,6 +1567,7 @@ async function mainCli(): Promise<void> {
         const reg = readTrap(trapId);
         const off = reg ? undefined : recentlySignedOff(trapId, graceMs);
         if (!reg && off) {
+          if (has('--compact')) throw new UsageError('--compact needs a live trap session');
           const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
           const name = sendTrapMessage(trapId, from, [text, attachmentBlock(attachments)].filter(Boolean).join('\n\n'), attachments);
           const leftSecs = Math.max(0, Math.round((Date.parse(off.at) + graceMs - Date.now()) / 1000));
@@ -1565,6 +1580,7 @@ async function mainCli(): Promise<void> {
           break;
         }
         if (!reg) throw new Error(`${unknownTrapMessage(target)} — \`lobstah man tend\` lists live traps`);
+        if (has('--compact')) console.log(toonKV({ compact: await compactTrapSession(reg, reg.claimed ? { id: reg.claimed, lane: laneOf(reg.claimed) ?? 'work' } : undefined) }));
         const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
         const block = attachmentBlock(attachments);
         const name = sendTrapMessage(trapId, from, [text, block].filter(Boolean).join('\n\n'), attachments);
@@ -1586,6 +1602,7 @@ async function mainCli(): Promise<void> {
       if (recipient) {
         if (opt('--pr') !== undefined) throw new UsageError(prOnlyForFollowUp);
         const member = recipient;
+        if (has('--compact')) console.log(toonKV({ compact: await compactDispatchSession(member.id, member.lane) }));
         const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(member.id, member.lane)) ?? [];
         const block = attachmentBlock(attachments);
         const name = sendMessage(
@@ -1624,12 +1641,17 @@ async function mainCli(): Promise<void> {
       const trap = claimedBy?.startsWith('wt:') ? readTrap(claimedBy.slice('wt:'.length)) : undefined;
       if (trap && Date.now() - (Date.parse(trap.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000) address = claimedBy;
       else headless = true;
+      if (has('--compact')) {
+        if (!trap) throw new UsageError('--compact needs a live trap session');
+        console.log(toonKV({ compact: await compactTrapSession(trap) }));
+      }
       if (origin.descriptor.target && opt('--pr')) throw new UsageError('configured trap results do not accept PR evidence');
       const followUp: Descriptor = {
         id: randomUUID(),
         repo: origin.descriptor.repo,
         ...(origin.descriptor.target ? { target: origin.descriptor.target } : {}),
         brief: `Follow-up instruction from ${from} on dispatch ${origin.id}:\n${text}`,
+        sessionMode: 'continue',
         followUp: origin.descriptor.target ? undefined : origin.id,
         for: origin.descriptor.target ? `trap:${origin.descriptor.target.profile}` : address,
         ...(!address && origin.descriptor.pool ? { pool: origin.descriptor.pool } : {}),
