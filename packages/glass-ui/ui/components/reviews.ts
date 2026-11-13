@@ -8,6 +8,7 @@ import { can } from '../backend.js';
 import { getState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone } from './card.js';
+import type { MenuAction } from './card.js';
 import { StatusChip, dispatchTrap, prShapedCard } from './prs.js';
 import { Button } from './button.js';
 
@@ -66,6 +67,22 @@ function MuteAction({ r }: { r: GlassReview }) {
   return html`<${Button} action=${change} done=${r.mutedAt ? 'Unmuted' : 'Muted'}>${r.mutedAt ? 'Unmute' : 'Mute this PR'}<//>`;
 }
 
+/** Mute belongs in the card's menu; Unmute stays on the bar. */
+function muteMenuAction(r: GlassReview): MenuAction | undefined {
+  if (r.mutedAt || !can('review-mute')) return undefined;
+  return {
+    label: 'Mute PR',
+    icon: ActionIcon.mute,
+    title: 'Stop new review requests until you unmute this PR',
+    action: async (e) => {
+      e.stopPropagation();
+      return muteReviewPr(r.key);
+    },
+    sending: 'Muting…',
+    done: 'Muted',
+  };
+}
+
 /** Sending a drafted review: the request, the button, and what a card's second tap says it posts. */
 const SEND = {
   approve: { kind: 'review-approve', label: 'Approve', posts: 'approval' },
@@ -77,9 +94,8 @@ const SEND = {
 const SEND_ICON = { approve: ActionIcon.approve, request_changes: ActionIcon.changes, comment: ActionIcon.publish } as const;
 
 /**
- * The review's actions. On a card (`confirm`), sending the review takes a
- * second tap that names what it posts, as Merge when green does; the modal
- * sends on the first, from beside the findings.
+ * The review's actions. A card keeps its main action on the bar and puts
+ * Skip and Mute PR in its menu; the modal keeps its actions beside findings.
  */
 function Actions({
   r,
@@ -90,11 +106,31 @@ function Actions({
   r: GlassReview;
   canDraft: boolean;
   publish: boolean;
-  /** A card's bar: the main action as a big button, Dismiss in its ▾ menu. */
+  /** A card's bar: the main action as a big button; Skip and Mute PR in its menu. */
   split?: boolean;
 }) {
   // A source without review actions may still dismiss or mute through its boat.
-  if (!can('review-request')) return html`<${MuteAction} r=${r} />${can('review-dismiss') && html`<${Dismiss} r=${r} />`}`;
+  if (!can('review-request')) {
+    if (r.mutedAt) return html`<span class="rv-actions"><span class="badge dim">Muted</span><${MuteAction} r=${r} /></span>`;
+    if (!split) return html`<${MuteAction} r=${r} />${can('review-dismiss') && html`<${Dismiss} r=${r} />`}`;
+    const more: MenuAction[] = [];
+    if (can('review-dismiss') && DISMISSABLE.includes(r.state)) {
+      more.push({
+        label: 'Dismiss',
+        icon: ActionIcon.skip,
+        title: 'Send the dismissal to the boat that drafted this review',
+        action: async (e) => {
+          e.stopPropagation();
+          return dismissReview(r.key);
+        },
+        sending: 'Dismissing…',
+        done: 'Sent to the boat that drafted it',
+      });
+    }
+    const mute = muteMenuAction(r);
+    if (mute) more.push(mute);
+    return html`<span class=${'rv-actions' + (more.length ? ' rv-menu-only' : '')}>${more.length && html`<${SplitButton} more=${more} />`}</span>`;
+  }
   const act = (kind: ReviewRequestKind) => async (e: Event) => {
     e.stopPropagation();
     return reviewRequest(kind, { key: r.key });
@@ -119,7 +155,9 @@ function Actions({
         ? 'Requesting changes…'
         : kind === 'review-comment'
           ? 'Publishing…'
-          : 'Sending…';
+          : kind === 'review-skip'
+            ? 'Skipping…'
+            : 'Sending…';
   if (r.mutedAt) return html`<span class="rv-actions"><span class="badge dim">Muted</span><${MuteAction} r=${r} /></span>`;
   const sendButton =
     r.state === 'drafted' &&
@@ -134,14 +172,20 @@ function Actions({
         ? html`<${Button} variant="primary" action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${SEND_ICON[r.verdict ?? 'comment']}${send.label}<//>`
         : drafts
           ? html`<${Button} variant="primary" action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`
-          : skips
-            ? html`<${Button} variant="primary" action=${act('review-skip')} sending="Dismissing…" done=${done('review-skip')} title=${skipTitle}>${ActionIcon.skip}Dismiss<//>`
-            : null;
-    const more =
-      main && skips && (r.state === 'drafted' || drafts)
-        ? [{ label: 'Dismiss', icon: ActionIcon.skip, title: skipTitle, action: act('review-skip'), done: done('review-skip') }]
-        : [];
-    return html`<span class="rv-actions">${main && html`<${SplitButton} main=${main} more=${more} />`}<${MuteAction} r=${r} /></span>`;
+          : null;
+    const more: MenuAction[] = [];
+    if (skips)
+      more.push({
+        label: 'Skip',
+        icon: ActionIcon.skip,
+        title: skipTitle,
+        action: act('review-skip'),
+        sending: sending('review-skip'),
+        done: done('review-skip'),
+      });
+    const mute = muteMenuAction(r);
+    if (mute) more.push(mute);
+    return html`<span class=${'rv-actions' + (!main && more.length ? ' rv-menu-only' : '')}>${(main || more.length) && html`<${SplitButton} main=${main} more=${more} />`}</span>`;
   }
   return html`<span class="rv-actions">
     ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}

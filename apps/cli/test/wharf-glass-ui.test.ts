@@ -25,6 +25,7 @@ type Data = {
   detail?: typeof detail;
   badge?: (count: number) => Promise<void>;
   userAgent?: string;
+  prefs?: Record<string, unknown>;
   card?: unknown;
   slack?: unknown;
 };
@@ -43,6 +44,7 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     },
   } as ConstructorParameters<typeof Window>[0]);
   windows.push(window);
+  if (data.prefs) window.localStorage.setItem('spyglass', JSON.stringify(data.prefs));
   const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; method: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] =
     [];
@@ -585,17 +587,32 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   s.documents.push(review('8', 'posted', false, '2026-10-15T12:00:00.000Z'), review('7', 'drafted', true, '2026-10-15T10:00:00.000Z'));
   const g = await page('/#reviews', false, {
     snapshot: s,
+    prefs: { view: 'cards' },
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15',
   });
   expect(g.text('#reviews')).toContain('acme/web#7 Add the thing');
   expect(g.text('#reviews')).toContain('acme/web#8 Add the thing');
   expect(g.text('#reviews').indexOf('#7 Add')).toBeLessThan(g.text('#reviews').indexOf('#8 Add'));
-  // The open round can be dismissed, and each PR can be muted.
-  const buttons = Array.from(g.doc.querySelectorAll('#reviews button')).map((b) => b.textContent?.trim());
-  expect(buttons).toEqual(['Mute this PR', 'Dismiss', 'Mute this PR']);
-  await g.click('#reviews button', 'Dismiss');
+  // Boat actions stay behind the card menu; Open remains available on each card.
+  const buttons = Array.from(g.doc.querySelectorAll('#reviews button')).map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim());
+  expect(buttons).toEqual(['More actions', 'More actions']);
+  const reviewCards = Array.from(g.doc.querySelectorAll('#reviews .rv-card'));
+  (reviewCards[0]!.querySelector('.gactions button[aria-label="More actions"]') as unknown as HTMLElement).click();
+  await g.settle();
+  expect(Array.from(reviewCards[0]!.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent?.trim())).toEqual([
+    'Dismiss',
+    'Mute PR',
+  ]);
+  (reviewCards[0]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
+  await g.settle();
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
   expect(g.doc.querySelector('.glass-toast[role="status"]')?.textContent).toContain('Sent to the boat that drafted it');
+  (reviewCards[1]!.querySelector('.gactions button[aria-label="More actions"]') as unknown as HTMLElement).click();
+  await g.settle();
+  (reviewCards[1]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
+  await g.settle();
+  expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-mute', document: '8' } });
+  expect(g.doc.querySelector('.glass-toast[role="status"]')?.textContent).toContain('Muted');
   await g.go('#review/7');
   expect(g.activeTab()).toBe('reviews');
 });
