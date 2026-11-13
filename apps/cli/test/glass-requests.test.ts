@@ -22,6 +22,7 @@ import {
   shellQuote,
   signOnTrap,
   readPr,
+  readHelmPassRequest,
   upsertPr,
   syncStackReadiness,
 } from '@lobstah/core';
@@ -435,6 +436,24 @@ describe('todo-schedule: set or move a todo time from the glass', () => {
     addTodo(grounds, 'Retry');
     const snapshot = (await (await fetch(`${base}/data`)).json()) as GlassSnapshot;
     expect(snapshot.todos?.[0]).toMatchObject({ groundsKey: grounds, grounds: 'home' });
+  });
+});
+
+describe('helm-pass-request', () => {
+  it('requests a pass for the resolved grounds and publishes the pending timestamp', async () => {
+    const response = await post({ kind: 'helm-pass-request', payload: { grounds: 'home' } });
+    expect(response.status).toBe(200);
+    const result = await response.json() as { ok: boolean; requestedAt: string };
+    expect(result.ok).toBe(true);
+    expect(readHelmPassRequest('fleet')?.at).toBe(result.requestedAt);
+    expect(buildGlassSnapshot().helmPasses?.[0]?.requestedAt).toBe(result.requestedAt);
+  });
+
+  it('refuses a missing page token or an unknown grounds without filing a request', async () => {
+    expect((await post({ kind: 'helm-pass-request', payload: { grounds: 'home' } }, { 'x-lobstah-token': '' })).status).toBe(403);
+    expect((await post({ kind: 'helm-pass-request', payload: { grounds: 'unknown' } })).status).toBe(400);
+    expect((await post({ kind: 'helm-pass-request', payload: {} })).status).toBe(400);
+    expect(readHelmPassRequest('fleet')).toBeUndefined();
   });
 });
 
