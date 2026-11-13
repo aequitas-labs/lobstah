@@ -47,7 +47,7 @@ export interface GlassBackend {
   /** One glass request (an answer, a view, an ack, a trap request…), with the page's write token. */
   request<T extends GlassVerdict>(kind: string, payload: unknown, token: string): Promise<GlassWrite<T>>;
   /** Raise one live trap's window on this machine. */
-  focus(trapId: string, token: string): Promise<GlassWrite<{ message?: string; reason?: string }>>;
+  focus(trapId: string, token: string): Promise<GlassWrite<{ focused?: boolean; message?: string; reason?: string }>>;
   /** Report this page as open (and visible or not); the answer may hold a show for it. */
   presence(page: string, visible: boolean, app: boolean): Promise<GlassRead<{ show?: unknown } | null>>;
   /** A report's row, and the write token its page acks with. */

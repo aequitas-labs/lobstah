@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import type { GlassSnapshot } from '@lobstah/core';
-import { NO_OLDER, prFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
+import { NO_OLDER, detailFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
 import {
   closeDecision,
   closeLightbox,
@@ -13,7 +13,7 @@ import {
   receive,
   reviewRequest,
   routeReport,
-  routePrView,
+  routeDetailView,
   sendAnswer,
   showModal,
   stepDecision,
@@ -45,8 +45,8 @@ const initialState = (): GlassState => ({
   route: currentRoute(),
   reportSheet: reportFromHash(location.hash),
   prefs: location.hash.startsWith('#review-') ? { ...loadPrefs(), repo: '', q: '' } : loadPrefs(),
-  modal: prFromHash(location.hash) ? { type: 'pr', key: prFromHash(location.hash)! } : null,
-  detail: null,
+  modal: detailFromHash(location.hash),
+  detail: detailFromHash(location.hash)?.type === 'dispatch' ? { key: detailFromHash(location.hash)!.key } : null,
   older: NO_OLDER,
   olderLoading: null,
   olderError: null,
@@ -198,13 +198,13 @@ function startGlass(): Array<() => void> {
   paint();
 
   const unroute = onRoute((route) => {
-    const pr = prFromHash(location.hash);
-    routePrView(pr);
-    if (pr) return;
-    // A report opens in the sheet over the tab, which keeps its place underneath.
+    // Reports stay over the detail that opened them.
     const report = reportFromHash(location.hash);
     routeReport(report);
     if (report !== null) return;
+    const modal = detailFromHash(location.hash);
+    routeDetailView(modal);
+    if (modal) return;
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({

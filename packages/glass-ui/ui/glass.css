@@ -3655,3 +3655,45 @@ footer .glass-brand {
     margin: 0 auto 10px;
   }
 }
+
+.view-meta {
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.view-worker {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.detail-cards {
+  display: grid;
+  gap: var(--space-3);
+}
+.view-event {
+  margin-top: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.view-event .verbicon {
+  vertical-align: middle;
+}
+.view-details {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.view-details > summary {
+  cursor: pointer;
+  color: var(--dim);
+}
+.view-details h4 {
+  margin-top: 14px;
+}
+.detail-bar .copy-id {
+  vertical-align: middle;
+}
+.detail-identity .copy-id {
+  vertical-align: baseline;
+}

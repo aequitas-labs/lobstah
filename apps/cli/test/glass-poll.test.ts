@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { appendStatus, enqueue, ensureLayout } from '@lobstah/core';
+import { appendStatus, enqueue, ensureLayout, sendMessage, acknowledge } from '@lobstah/core';
 import type { GlassBeats, GlassDispatch, GlassFullSnapshot, GlassOlderPage, GlassSnapshot } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { NOTE_MAX, OLDER_PAGE, POLL_MIN, POLL_WINDOW_MS, olderPage, pollBody, pollSnapshot } from '../src/glass-poll.js';
@@ -21,7 +21,7 @@ import { removeTempDir } from '../../../test/temp-dir.js';
  * answers 304.
  */
 
-const HEAVY = ['brief', 'log', 'inbox', 'attachments', 'messageAttachments'] as const;
+const HEAVY = ['brief', 'log', 'inbox', 'attachments', 'messageAttachments', 'messages'] as const;
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
 
 let home: string;
@@ -192,6 +192,9 @@ describe('the /data endpoints', () => {
     const note = 'done: '.padEnd(900, 'x');
     enqueue({ id, repo: 'web', brief: 'Slim the poll\nThe second line of the brief.' }, 'work');
     appendStatus(id, 'work', 'done', note);
+    const delivered = sendMessage(id, 'work', 'Use the current branch.', 'helm');
+    acknowledge(id, 'work', delivered);
+    sendMessage(id, 'work', 'Check the screenshots.', 'Chris');
     server = serveGlass(0);
     const base = await listen(server);
     const summary = ((await (await fetch(`${base}/data`)).json()) as GlassSnapshot).dispatches.find((x) => x.id === id)!;
@@ -200,6 +203,7 @@ describe('the /data endpoints', () => {
     const detail = (await (await fetch(`${base}/data/dispatch/${id}`)).json()) as GlassDispatch;
     expect(detail).toMatchObject({ id, title: 'Slim the poll', brief: 'Slim the poll\nThe second line of the brief.', note });
     expect(detail.log.map((e) => e.verb)).toEqual(['done']);
+    expect(detail.messages).toMatchObject([{from:'helm', state:'delivered', text:'Use the current branch.'}, {from:'Chris', state:'pending', text:'Check the screenshots.'}]);
     expect((await fetch(`${base}/data/dispatch/ffffffff-0000-4000-8000-000000000000`)).status).toBe(404);
   });
 });
@@ -236,9 +240,9 @@ describe('the page on a slim poll', () => {
     (g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes(x.id.slice(0, 8))) as HTMLElement).click();
     await g.settle();
     expect(g.dataFetches()).toEqual([`/data/dispatch/${x.id}`]);
-    expect(text(g.$('#modalbox pre'))).toBe(x.brief);
+    expect(text(g.$('.dispatch-brief .md'))).toBe(x.brief);
     expect(text(g.$('#modalbox'))).toContain(x.log[0]!.note!);
-    expect(text(g.$('#modalbox'))).toContain(JSON.stringify(x.evidence));
+    expect(g.$('.dispatch-prs .card')).not.toBeNull();
   });
 
   it('show older pages in the dispatches the poll left out', async () => {

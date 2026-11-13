@@ -227,7 +227,7 @@ describe('glass links: leaving the glass', () => {
     await g.settle();
     const pr = g.$(`#modalbox a[href="${PR}"]`)!;
     expect([pr.getAttribute('target'), pr.getAttribute('rel')]).toEqual(['_blank', 'noopener noreferrer']);
-    expect(pr.classList.contains('extlink')).toBe(true);
+    expect(pr.getAttribute('href')).toBe(PR);
     const tabs = g.$$('a[href^="#"]');
     expect(tabs.length).toBeGreaterThan(0);
     for (const tab of tabs) {

@@ -29,7 +29,7 @@ import { ITEM_ICON } from './icons.js';
 export { ageText };
 
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
-export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
+export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''} title=${iso || undefined}>${ageText(iso)}</span>`;
 
 /** The same pass age beside goals and todos, recomputed when the glass refreshes. */
 export function lastPassText(at: string | undefined): string {
@@ -190,16 +190,16 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
   const here = onThisMachine(t);
   const routes: TrapRoute[] = [];
   if (here && can('focus') && (viewer!.windowFocus || t.link)) {
-    const clicked = (e: Event) => {
+    const clicked = async (e: Event) => {
       stop(e);
-      void openTrapWindow(t.trapId);
+      return openTrapWindow(t.trapId);
     };
     routes.push({
       kind: 'raise',
       name: 'Raise window',
       where: 'on this Mac',
       control: (text) =>
-        html`<${Button} class="open" title="Raise this trap's window on this Mac" aria-label="Raise this trap's window on this Mac" onClick=${clicked}>${text}<//>`,
+        html`<${Button} class="open" title="Raise this trap's window on this Mac" aria-label="Raise this trap's window on this Mac" action=${clicked} sending="Raising…" done="Window raised">${text}<//>`,
     });
   }
   if (t.liveLink) {

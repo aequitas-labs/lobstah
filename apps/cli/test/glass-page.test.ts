@@ -157,7 +157,8 @@ describe('glass page: tabs and hash routing', () => {
     expect(text(deck)).toContain('idle · not listening');
     expect(text(deck)).toContain('parked · waiting on review');
     await click(g, deck.querySelector('a[href="#dispatches"]'));
-    expect(text(g.$('#modalbox h3'))).toBe('cccccccc working');
+    expect(text(g.$('#modalbox h2'))).toContain('Polish the glass trap deck');
+    expect(text(g.$('#modalbox .pr-view-chips'))).toContain('working');
     await g.go('#traps');
     const rows = g.$$('#traps tr.rowhead');
     expect(rows.map(text).join(' ')).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
@@ -842,9 +843,8 @@ describe('glass page: modals', () => {
     };
     const g = await page(d);
     await openRow(g, '#dispatches', 'cccccccc');
-    const secs = g.$$('#modalbox .sec').map((el) => text(el));
-    expect(secs).toContain('awaiting reply');
-    expect(text(g.$('#modalbox'))).toContain('start the dev server · from helm · 5m ago');
+    expect(text(g.$('.view-messages'))).toContain('start the dev server');
+    expect(text(g.$('.view-messages'))).toContain('from helm · pending · 5m ago');
   });
 
   it('an open modal keeps its root element across ten ticks; its own item changing updates it in place', async () => {
@@ -852,9 +852,9 @@ describe('glass page: modals', () => {
     await openRow(g, '#dispatches', 'cccccccc');
     expect(g.$('#overlay')!.className).toBe('open');
     const root = g.$('#modalbox')!;
-    const title = g.$('#modalbox h3')!;
-    const secs = g.$$('#modalbox .sec');
-    expect(text(title)).toBe('cccccccc needs-decision');
+    const title = g.$('#modalbox h2')!;
+    const secs = g.$$('#modalbox .detail-scroll > section > h4');
+    expect(text(title)).toContain('Brief for cccccccc');
     const d = acceptanceFleet();
     for (let i = 0; i < 10; i++) {
       // Another dispatch changes every tick; the modal's nodes stay put.
@@ -862,16 +862,17 @@ describe('glass page: modals', () => {
       g.serve(structuredClone(d));
       await g.poll();
       expect(g.$('#modalbox')).toBe(root);
-      expect(g.$('#modalbox h3')).toBe(title);
-      expect(g.$$('#modalbox .sec')).toEqual(secs);
+      expect(g.$('#modalbox h2')).toBe(title);
+      expect(g.$$('#modalbox .detail-scroll > section > h4')).toEqual(secs);
     }
     // Its own dispatch changes: same nodes, new state.
     const own = structuredClone(d);
     own.dispatches.find((x) => x.id.startsWith('cccccccc'))!.verb = 'working';
     g.serve(own);
     const seen = await mutations(g, () => g.poll());
-    expect(g.$('#modalbox h3')).toBe(title);
-    expect(text(title)).toBe('cccccccc working');
+    expect(g.$('#modalbox h2')).toBe(title);
+    expect(text(title)).toContain('Brief for cccccccc');
+    expect(text(g.$('.pr-view-chips'))).toContain('working');
     // The dispatches table row changed too; nothing outside the modal and that row moved.
     const row = g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!;
     expect(seen.filter((m) => !root.contains(m.target as never) && !row.contains(m.target as never))).toEqual([]);
@@ -880,12 +881,12 @@ describe('glass page: modals', () => {
   it('Escape and a click outside close the modal; a vanished item closes it', async () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#traps', 'wt:t1');
-    expect(text(g.$('#modalbox h3'))).toContain('wt:t1');
+    expect(text(g.$('#modalbox h2'))).toContain('wt:t1');
     await escape(g);
     expect(g.$('#overlay')!.className).toBe('');
     await openRow(g, '#traps', 'wt:t1');
     // A click inside the modal keeps it open; a click on the backdrop closes it.
-    await click(g, g.$('#modalbox .sub'));
+    await click(g, g.$('#modalbox .view-meta'));
     expect(g.$('#overlay')!.className).toBe('open');
     await click(g, g.$('#overlay'));
     expect(g.$('#overlay')!.className).toBe('');
@@ -903,9 +904,10 @@ describe('glass page: modals', () => {
       g,
       g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!,
     );
-    expect(text(g.$('#modalbox h3'))).toBe('cccccccc needs-decision');
+    expect(text(g.$('#modalbox h2'))).toContain('Brief for cccccccc');
+    expect(text(g.$('.pr-view-chips'))).toContain('needs-decision');
     const cmds = g.$$('#modalbox .cmd code').map(text);
-    expect(cmds).toContain('wt:t1');
+    expect(text(g.$('.view-meta'))).toContain('wt:t1');
     expect(cmds).toContain('/tmp/shot.png');
     expect(g.$$('#modalbox form, #modalbox [method]')).toHaveLength(0);
   });
@@ -923,7 +925,8 @@ describe('glass page: modals', () => {
       g,
       g.$$('#modalbox a').find((a) => text(a) === 'aaaaaaaa')!,
     );
-    expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
+    expect(text(g.$('#modalbox h2'))).toContain('Brief for aaaaaaaa');
+    expect(text(g.$('.pr-view-chips'))).toContain('done');
   });
 
   it('the gear opens Settings, this device and this view only; Configuration has the helm chat', async () => {
@@ -1332,19 +1335,20 @@ describe('glass page: a dispatch shows its trap by name', () => {
     expect(text(flight.querySelector('.gtext'))).toContain('🪤 crisp-heron');
     expect(text(flight)).not.toContain('wt:t1');
     await openRow(g, '#dispatches', 'cccccccc');
-    expect(text(g.$('#modalbox .claimedby'))).toBe('claimed by crisp-heron');
-    expect(g.$('#modalbox .claimedby .trapname')!.getAttribute('title')).toBe('wt:t1');
-    expect(text(g.$('#modalbox .loglines'))).toContain('working claimed by crisp-heron');
+    expect(text(g.$('#modalbox .view-meta'))).toContain('crisp-heron');
+    expect(g.$('#modalbox .view-meta .trapname')!.getAttribute('title')).toBe('wt:t1');
+    expect(text(g.$('#modalbox .dispatch-activity'))).toContain('claimed by crisp-heron');
+    expect(text(g.$('#modalbox .dispatch-activity'))).toContain('working');
   });
 
   it("opens the trap's modal when its name is clicked, not the dispatch's", async () => {
     const g = await page(namedFleet(), { hash: '#dispatches', prefs: { view: 'table' } });
     await click(g, row(g, 'cccccccc').querySelector('a.trapname'));
-    expect(text(g.$('#modalbox h3'))).toContain('🪤');
-    expect(text(g.$('#modalbox h3'))).toContain('crisp-heron');
-    expect(text(g.$('#modalbox .trap-address'))).toContain('wt:t1');
+    expect(text(g.$('#modalbox h2'))).toContain('🪤');
+    expect(text(g.$('#modalbox h2'))).toContain('crisp-heron');
+    expect(text(g.$('#modalbox .detail-bar-identity'))).toContain('wt:t1');
     await escape(g);
     await click(g, row(g, 'dddddddd').querySelector('a.trapname'));
-    expect(text(g.$('#modalbox h3'))).toContain('signed off');
+    expect(text(g.$('#modalbox .pr-view-chips'))).toContain('signed off');
   });
 });

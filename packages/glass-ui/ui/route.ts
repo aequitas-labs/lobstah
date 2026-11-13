@@ -13,5 +13,9 @@ export const currentRoute = (): GlassTab => {
 export const onRoute = (fn: (tab: GlassTab) => void): (() => void) => {
   const changed = () => fn(currentRoute());
   window.addEventListener('hashchange', changed);
-  return () => window.removeEventListener('hashchange', changed);
+  window.addEventListener('popstate', changed);
+  return () => {
+    window.removeEventListener('hashchange', changed);
+    window.removeEventListener('popstate', changed);
+  };
 };

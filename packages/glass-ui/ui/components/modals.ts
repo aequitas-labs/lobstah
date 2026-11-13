@@ -1,53 +1,18 @@
-import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
-import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
-import { dispatchReport, modalItem, reportPageUrl } from '../../src/glass-diff.js';
-import type { DispatchDetail, GlassPrefs, ModalRef } from '../../src/glass-diff.js';
-import { cancelJob, closeModal, showModal, messageHelm, setPrefs } from '../actions.js';
-import { useState } from 'preact/hooks';
+import type { GlassDispatchSummary, GlassHelm, GlassSnapshot } from '@lobstah/core';
+import { modalItem } from '../../src/glass-diff.js';
+import type { DispatchDetail, GlassPrefs, ModalRef, GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
+import { closeModal, setPrefs } from '../actions.js';
 import { html } from '../html.js';
-import { reportByline } from './report.js';
-import { LinkedText } from './links.js';
-import { openReport } from './reports.js';
-import {
-  Age,
-  WorkerDetails,
-  addrCell,
-  attachmentRows,
-  cmdRow,
-  resumeRow,
-  trapSessionRow,
-  startCommands,
-  detailBody,
-  NamedText,
-  opener,
-  TrapName,
-  trapDisplayName,
-  trapScope,
-  liveLinkNote,
-  namedText,
-  prCell,
-  prHeadCell,
-  prChecks,
-  prLink,
-  prMerge,
-  prReview,
-  readOnlyNotice,
-  stackNumbers,
-  trapRow,
-  viewerHasTerminal,
-  trapOpenRoutes,
-} from './common.js';
-import { can, capabilities, fileUrl, visibleTabs } from '../backend.js';
+import { Age, WorkerDetails, cmdRow, resumeRow } from './common.js';
+import { visibleTabs } from '../backend.js';
 import { TAB_ICON } from './icons.js';
-import { getState } from '../store.js';
-import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
-import { GrantChip } from './session-grants.js';
 import { PrView } from './pr-view.js';
+import { DispatchView } from './dispatch-view.js';
+import { TrapView } from './trap-view.js';
+import { DetailFrame } from './detail-frame.js';
 import { Button } from './button.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR or report. */
-
-const close = html`<${Button} variant="icon" class="x" label="close" onClick=${closeModal}>×<//>`;
 
 /**
  * The glass's own settings, for this device and this view: cards or table,
@@ -75,185 +40,6 @@ export function HelmBody({ helm: h }: { helm: GlassHelm }) {
   ];
 }
 
-/** A dispatch's report, in its modal: the title and byline, and a link that opens it in the sheet over the modal. */
-function reportLink(r: GlassReport) {
-  return [
-    html`<div class="sec">report · ${LinkedText(r.title)}</div>`,
-    html`<div class="sub">${reportByline(r)} · <a href=${reportPageUrl(r.key)} target="_blank" rel="noopener" onClick=${openReport(r)}>open the report</a></div>`,
-  ];
-}
-
-function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassReport | undefined, detail: DispatchDetail | null) {
-  const session =
-    x.claimedBy && x.claimedBy.startsWith('wt:')
-      ? [
-          html`<div class="sec">worked by trap</div>`,
-          html`<div class="claimedby">claimed by ${TrapName(x.claimedBy.slice('wt:'.length))}</div>`,
-          cmdRow(namedText(x.claimedBy)),
-          html`<div class="dim" style="font-size:11px">an opted-in interactive session mans this seat — attach would resume someone's live thread. Message it instead: lobstah send ${namedText(x.claimedBy)} "…"</div>`,
-        ]
-      : // `lobstah attach` runs where the dispatch does: this machine's daemon, never a wharf's boat.
-        capabilities().daemon && viewerHasTerminal() && [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
-  return [
-    close,
-    html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
-    html`<div class="sub">${x.repo} · ${x.lane} ${x.bucket} · ${Age(x.verbAt)}${x.for && [' · ', addrCell(x)]} ${prCell(x)}</div>`,
-    session,
-    x.worker && html`<${WorkerDetails} worker=${x.worker} headless=${!x.claimedBy?.startsWith('wt:')} />`,
-    x.worktree && [
-      html`<div class="sec">worktree${x.worktreeOf ? ' (reused from ' + x.worktreeOf.slice(0, 8) + ')' : ''}</div>`,
-      cmdRow(x.worktree),
-      x.worktreeKept && html`<div class="dim" style="font-size:11px">kept: ${x.worktreeKept}</div>`,
-    ],
-    x.transcript && [html`<div class="sec">transcript</div>`, cmdRow(x.transcript)],
-    report && reportLink(report),
-    detailBody(x, detail),
-    x.bucket !== 'done' && (can('message-helm') || can('cancel')) && html`<${JobControls} key=${x.id} id=${x.id} />`,
-  ];
-}
-
-/** A job's message-the-helm and cancel controls, for a source that takes them (the wharf). */
-function JobControls({ id }: { id: string }) {
-  const [message, setMessage] = useState('');
-  const [sending, setSending] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; text: string }>();
-  // One message at a time: a second press while the first is on its way sends nothing.
-  const canSend = () => !!message.trim() && !sending;
-  const send = async () => {
-    if (!canSend()) return;
-    setSending(true);
-    const refusal = await messageHelm(id, message);
-    setSending(false);
-    setResult(refusal ? { ok: false, text: refusal } : { ok: true, text: 'Queued for the helm; it expires in 10 minutes.' });
-    if (!refusal) setMessage('');
-    return refusal;
-  };
-  const cancel = async (e: Event) => {
-    e.stopPropagation();
-    const refusal = await cancelJob(id);
-    setConfirming(false);
-    return refusal;
-  };
-  return [
-    can('message-helm') &&
-      html`<div class="sec">message the helm</div><form
-        class="jobmsg"
-        onSubmit=${(e: Event) => {
-          e.preventDefault();
-          void send();
-        }}
-      ><textarea
-          class="danswer"
-          aria-label="message to helm"
-          maxLength="16000"
-          value=${message}
-          onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}
-          onKeyDown=${onSendKey(canSend, () => void send())}
-        ></textarea><div class="jobsend"><${Button} type="submit" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()} action=${send} showError=${false}>Queue message for helm<//>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
-    can('cancel') &&
-      html`<div class="sec">cancel</div>${
-        confirming
-          ? html`<div>Cancel this dispatch? Its agent stops. <${Button} action=${cancel} done="Dispatch cancelled">Cancel dispatch<//> <${Button} onClick=${() => setConfirming(false)}>Keep dispatch<//></div>`
-          : html`<${Button} onClick=${() => setConfirming(true)}>Cancel dispatch…<//>`
-      }`,
-    result && html`<div class=${result.ok ? 'ok' : 'bad'} role=${result.ok ? 'status' : 'alert'}>${result.text}</div>`,
-  ];
-}
-
-function trapModal(t: GlassTrap) {
-  const r = trapRow(t);
-  const sub = t.requested
-    ? [
-        t.repo ?? '',
-        ' · ',
-        t.harness ?? '',
-        ' · requested ',
-        Age(t.requested.at),
-        ' ago from the glass; the helm starts it with man throw --new.',
-      ]
-    : t.starting
-      ? t.starting.failedAt
-        ? [
-            t.repo ?? '',
-            ' · reserved ',
-            Age(t.starting.reservedAt),
-            ' ago · start failed: ',
-            LinkedText(t.starting.reason),
-            '. Its addressed work stays queued; a session can still redeem the ticket, or `lobstah stow --wt ',
-            t.name ?? t.trapId,
-            '` withdraws it.',
-          ]
-        : [
-            t.repo ?? '',
-            ' · reserved ',
-            Age(t.starting.reservedAt),
-            ' ago · starting: waiting for a session to redeem the ticket (due by ',
-            t.starting.deadline,
-            ')',
-          ]
-      : t.live
-        ? [
-            t.repo ?? 'addressed bait only',
-            ' · session ',
-            t.sessionId ?? '',
-            html`<${GrantChip} session=${t.sessionId} grants=${getState().snapshot?.sessionGrants ?? []} />`,
-            ' · signed on ',
-            Age(t.signedOnAt),
-            ' ago · ',
-            r.listen,
-            ' · heartbeat ',
-            r.hb,
-          ]
-        : 'signed off · its history is below';
-  const lifecycle = t.notices.length
-    ? t.notices.map((n) => html`<div key=${n.seq} class="loglines">${Age(n.at)} ago · <b>${n.kind}</b> — ${LinkedText(n.text)}</div>`)
-    : html`<div class="empty">none recorded</div>`;
-  const messages = t.messages.length
-    ? t.messages.map(
-        (m) =>
-          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => fileUrl({ kind: 'trap', trapId: t.trapId }, name)) : ''}</div>`,
-      )
-    : html`<div class="empty">none</div>`;
-  const sessionRow = trapSessionRow(t);
-  // Each catch's last note; its modal has the whole log.
-  const catches = t.catches.length
-    ? t.catches.map(
-        (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prHeadCell(c)}</div>${
-            c.note && html`<div class="loglines">${NamedText(c.note)}</div>`
-          }</div>`,
-      )
-    : html`<div class="empty">none yet</div>`;
-  return [
-    close,
-    html`<h3>🪤 ${trapDisplayName(t)} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
-    html`<div class="sub trap-address">${trapScope(t)}${trapScope(t) && ' · '}wt:${t.trapId}</div>`,
-    html`<${WorkerDetails} worker=${t} />`,
-    t.worktree && html`<div class="sub">${t.worktree}</div>`,
-    html`<div class="sub">${sub}</div>`,
-    html`<div class="sec">open</div>`,
-    trapOpenRoutes(t),
-    !t.requested &&
-      !t.starting &&
-      sessionRow && [
-        html`<div class="route">${sessionRow}</div>`,
-        !t.live &&
-          t.sessionId &&
-          html`<div class="dim" style="font-size:11px">as registered at sign-on — a hookless enlistment may hold a made-up id</div>`,
-      ],
-    liveLinkNote(t),
-    readOnlyNotice(),
-    startCommands(t),
-    html`<div class="sec">lifecycle (${t.notices.length})</div>`,
-    lifecycle,
-    html`<div class="sec">messages (${t.messages.length})</div>`,
-    messages,
-    html`<div class="sec">catches (${t.catches.length})</div>`,
-    catches,
-  ];
-}
-
 /** The open modal's body, or nothing. Preact keeps every unchanged node across ticks. */
 export function Modal({
   snapshot,
@@ -270,11 +56,7 @@ export function Modal({
   const item = modalItem(snapshot, modal, detail);
   // A dispatch the poll left out: its detail is on its way.
   if (!item && modal.type === 'dispatch' && detail?.key === modal.key)
-    return [
-      close,
-      html`<h3>${modal.key.slice(modal.key.indexOf(':') + 1, modal.key.indexOf(':') + 9)}</h3>`,
-      html`<div class=${detail.error ? 'bad' : 'dim'}>${detail.error ?? 'loading…'}</div>`,
-    ];
+    return html`<${DetailFrame} identity=${modal.key.slice(modal.key.indexOf(':') + 1, modal.key.indexOf(':') + 9)}><p class=${detail.error ? 'bad' : 'dim'}>${detail.error ?? 'Loading dispatch…'}</p><//>`;
   if (!item) return null;
   // Settings open in a Dialog of their own (app.ts).
   if (modal.type === 'settings') return null;
@@ -282,8 +64,7 @@ export function Modal({
   if (modal.type === 'review') return html`<${PrView} snapshot=${snapshot} prKey=${modal.key.replace('review:', 'pr:')} />`;
   if (modal.type === 'helm') return null;
   if (modal.type === 'dispatch') {
-    const report = dispatchReport(snapshot, item as GlassDispatchSummary);
-    return dispatchModal(item as GlassDispatchSummary, report, detail);
+    return html`<${DispatchView} snapshot=${snapshot} dispatch=${item as GlassDispatchSummary} detail=${detail} />`;
   }
-  return trapModal(item as GlassTrap);
+  return html`<${TrapView} trap=${item as GlassTrap} snapshot=${snapshot} />`;
 }
