@@ -309,22 +309,27 @@ export function RunActions({
   const confirmed = runWindowMinutes(run.boat ?? '');
   const missing = run.inputs.filter((i) => !values[i.name]).map((i) => i.name);
   const locked = readOnly || !!blocked || !!view?.busy;
-  const start = () => {
+  const start = async () => {
     const inputs = values;
     setValues({});
     sentSecrets.delete(cardKey);
-    void runRunCard(cardKey, run.scriptSha256, inputs);
+    return runRunCard(cardKey, run.scriptSha256, inputs);
   };
   const runs = can('run') && (!readOnly || !!view?.busy);
   const primary =
     runs &&
     (view?.busy
-      ? html`<${Button} variant="danger" size="lg" onClick=${() => void stopRunCard(cardKey)}>Stop<//>`
+      ? html`<${Button} variant="danger" size="lg" action=${(e: Event) => {
+          e.stopPropagation();
+          return stopRunCard(cardKey);
+        }} showError=${false}>Stop<//>`
       : here || blocked || hosted
-        ? html`<${Button} variant="primary" size="lg" class="runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}<//>`
+        ? html`<${Button} variant="primary" size="lg" class="runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} action=${start} showError=${false}>${view?.result ? 'Run again' : 'Run'}<//>`
         : html`<${Button} variant="primary" size="lg" class="runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}<//>`);
   const second =
-    view?.result && runs ? html`<${Button} size="lg" onClick=${() => void dismissRunCard(cardKey)}>Dismiss<//>` : !view?.busy && decline;
+    view?.result && runs
+      ? html`<${Button} size="lg" action=${() => dismissRunCard(cardKey)} done="Dismissed" showError=${false}>Dismiss<//>`
+      : !view?.busy && decline;
   const note =
     runs &&
     !view?.busy &&

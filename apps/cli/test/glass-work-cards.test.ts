@@ -235,21 +235,11 @@ describe('a review card', () => {
     expect(card(9).className).toContain('quiet');
     // Who asked and the reason are in the modal, not on the card.
     expect(text(card(7))).not.toContain('maya');
-    // Sending the review takes a second tap that says what it posts; Keep backs out, and the card never opens.
+    // Sending a review verdict is one click; the card never opens.
     const approve = () => [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Approve');
     await click(g, approve());
     expect(g.$('#overlay')!.className).not.toBe('open');
     const sends = () => g.posts().filter((p) => JSON.parse(p.body).kind !== 'review-seen');
-    expect(sends()).toEqual([]);
-    await click(
-      g,
-      [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Keep'),
-    );
-    await click(g, approve());
-    await click(
-      g,
-      [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Post approval on #7'),
-    );
     expect(sends().map((p) => JSON.parse(p.body))).toEqual([{ kind: 'review-approve', payload: { key: 'review:acme/web#7' } }]);
   });
 

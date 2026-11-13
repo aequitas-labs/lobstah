@@ -166,7 +166,7 @@ describe('snoozing a todo', () => {
     finish({ status: 201, body: { ok: true, dueAt } });
     await g.settle();
     expect(editor(g)).toBeNull();
-    expect(g.$('[role="status"]')?.textContent).toMatch(/^Snoozed #4 until \w{3} \d{2}:\d{2}$/);
+    expect(g.$$('[role="status"]').map((status) => status.textContent).find((text) => text?.startsWith('Snoozed #4'))).toMatch(/^Snoozed #4 until \w{3} \d{2}:\d{2}$/);
   });
 
   it('keeps a refused time editable and allows another attempt', async () => {
