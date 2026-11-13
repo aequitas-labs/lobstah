@@ -1,6 +1,6 @@
 # Dispatch icons and Boats demo
 
-Only queued, limited and unknown gain state icons. The original six dispatch icons stay unchanged. Trap, review, PR, generic-card, wharf-request and boat status icons match main. No PR is open.
+Only queued, limited and unknown gain state icons. The original six dispatch icons stay unchanged. Trap, review, PR, generic-card, wharf-request and boat status icons match main. 
 
 | Dispatch state | Before | After |
 | --- | --- | --- |
@@ -16,22 +16,13 @@ Only queued, limited and unknown gain state icons. The original six dispatch ico
 
 `unknown` can appear on a real dispatch card. [Local glass](https://github.com/aequitas-labs/lobstah/blob/58c2c5e5/apps/cli/src/glass.ts#L373) uses it when there is neither a report nor a claim; [wharf glass](https://github.com/aequitas-labs/lobstah/blob/58c2c5e5/packages/glass-ui/ui/wharf-snapshot.ts#L55) uses it for a non-queued job without a report. `active` is a bucket, not a displayed dispatch verb; it gets no new icon.
 
-Boats keeps its grid and Slack/Account sections; the value now says “Last check-in: 30s ago” without repeating “checked in”. The source is [ce3d1544](https://github.com/aequitas-labs/lobstah/tree/ce3d1544).
+Boats keeps its grid and Slack/Account sections; the value now says “Last check-in: 30s ago” without repeating “checked in”. 
 
-## Pick the fish
+## Dispatch fish
 
-[Four candidates at 16, 20 and 32px, plus each at 16px in a Dispatches tab](fish-candidates.png)
+The selected simple side-view fish is an original body, tail and eye drawing. One inline SVG is shared by navigation, dispatch cards, deck chips, source links and notices.
 
-| Name to choose | Candidate | License and source |
-| --- | --- | --- |
-| A · Lucide Fish | [SVG](lucide-fish.svg) | [ISC license](https://github.com/lucide-icons/lucide/blob/c55aab36b553a7de50a0050e7042fd7b2d64664e/LICENSE), [drawing](https://github.com/lucide-icons/lucide/blob/c55aab36b553a7de50a0050e7042fd7b2d64664e/icons/fish.svg) |
-| B · Lucide Fish symbol | [SVG](lucide-fish-symbol.svg) | [ISC license](https://github.com/lucide-icons/lucide/blob/c55aab36b553a7de50a0050e7042fd7b2d64664e/LICENSE), [drawing](https://github.com/lucide-icons/lucide/blob/c55aab36b553a7de50a0050e7042fd7b2d64664e/icons/fish-symbol.svg) |
-| C · Tabler Fish | [SVG](tabler-fish.svg) | [MIT license](https://github.com/tabler/tabler-icons/blob/6e68709e20ad8878de0332c64fcfb32d24e2b304/LICENSE), [drawing](https://github.com/tabler/tabler-icons/blob/6e68709e20ad8878de0332c64fcfb32d24e2b304/icons/outline/fish.svg) |
-| D · Simple side-view | [SVG](simple-side-view.svg) | Original body, tail and eye drawing |
-
-The glass's current map identifies its drawings as Feather. No Lucide or Tabler import or dependency was found in the glass directories or lockfile. Upstream SVGs are pinned to the revisions above; full [Lucide](lucide-license.txt) and [Tabler](tabler-license.txt) license notices accompany this demo.
-
-All candidates use a 2px stroke on a 24px grid, matching the glass. No candidate has been chosen. Dispatch screenshots retain the provisional fish; the final dispatch kind waits for Chris's pick.
+[16, 20 and 32px](after-desktop-fish-sizes.png) · [Original SVG](simple-side-view.svg) · [Source e5771328](https://github.com/aequitas-labs/lobstah/tree/e5771328)
 
 ## Before and after
 
@@ -47,4 +38,4 @@ Playwright CLI only, with fixtures. Desktop: 1440×1000. Phone: 375px wide; the 
 
 Full build and lint pass. Root: 3,920/3,920 tests across 320 files. Wharf: 169/169 tests across 16 files. The reduced branch also passes 163 focused behavior tests. Three formatting fixes inherited from main are retained because the required lint check flags those files; they change no behavior or icons.
 
-Please pick a fish by name (A–D) and approve this smaller set and Boats layout before the ready PR opens.
+The selected SVG also passes the shared UI build and 67 focused behavior tests. The after screenshots show the selected fish.
