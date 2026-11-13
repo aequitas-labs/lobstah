@@ -582,7 +582,7 @@ repo's review tool (`[repos.<key>].reviewTool`), where the drafted review waits
 as your pending review, to edit and send there. The tab only dismisses a
 review (deleting its pending draft) or re-drafts a stale or failed one,
 through the page-token-guarded `/requests` endpoint as `review-dismiss` or
-`review-redraft`. On deck lists the reviews waiting on you when there are
+`review-redraft`. In card view, Skip and Mute PR are in the card's More actions menu; a muted card keeps its Muted chip and Unmute action on the bar. On deck lists the reviews waiting on you when there are
 any. A `review` lob and the pet's review lobster ("review request") open the
 PR in the review tool too. Nothing counts reviews with a badge. Reading the glass consumes no cursor. Each
 live trap has a **↗ open** button at the end of its foot line. It asks the local server to focus

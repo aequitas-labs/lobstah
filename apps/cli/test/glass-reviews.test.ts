@@ -112,14 +112,26 @@ describe('the Reviews tab', () => {
     expect(g.$('#tabs a[data-tab="reviews"] .dbadge')?.textContent).toBe('1');
   });
 
-  it('shows mute and unmute controls and links to the time of a posted review', async () => {
+  it('puts mute in the card menu, keeps unmute on the bar, and links to a posted review', async () => {
     const post = () => ({ status: 200, body: { ok: true } });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [review(7), review(8, { state: 'posted', stands: false, postedAt: ago(60), postedReviewUrl: 'https://github.com/acme/web/pull/8#pullrequestreview-88' })] }, { now: NOW, prefs: { view: 'cards' }, post });
     open.push(g); await g.go('#reviews');
-    expect(g.$('#reviews')?.textContent).toContain('Mute this PR');
-    const mute = g.$$('#reviews button').find(button => button.textContent === 'Mute this PR') as unknown as HTMLElement;
+    const openCard = g.$('#reviews [data-review="review:acme/web#7"]')!;
+    expect(openCard.querySelector('.gactions')?.textContent).not.toContain('Mute PR');
+    (openCard.querySelector('.splitcaret') as unknown as HTMLElement).click(); await g.settle();
+    const mute = [...openCard.querySelectorAll('.cmenulist [role="menuitem"]')].find(button => button.textContent === 'Mute PR') as unknown as HTMLElement;
     mute.click(); await g.settle();
     expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-mute', payload: { key: 'review:acme/web#7' } });
+    expect(g.$$('[role="status"]').map(status => status.textContent)).toContain('Muted');
+    (openCard.querySelector('.splitcaret') as unknown as HTMLElement).click(); await g.settle();
+    const skip = [...openCard.querySelectorAll('.cmenulist [role="menuitem"]')].find(button => button.textContent === 'Skip') as unknown as HTMLElement;
+    skip.click(); await g.settle();
+    expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-skip', payload: { key: 'review:acme/web#7' } });
+    expect(g.$$('[role="status"]').map(status => status.textContent)).toContain('Dismissed');
+    const closedCard = g.$('#reviews [data-review="review:acme/web#8"]')!;
+    expect(closedCard.querySelector('.split-menu-only')).toBeTruthy();
+    (closedCard.querySelector('.splitmore') as unknown as HTMLElement).click(); await g.settle();
+    expect([...closedCard.querySelectorAll('.cmenulist [role="menuitem"]')].map(button => button.textContent)).toEqual(['Mute PR']);
     const posted = g.$('#reviews a[href="https://github.com/acme/web/pull/8#pullrequestreview-88"]');
     expect(posted?.textContent).toContain('Posted');
 

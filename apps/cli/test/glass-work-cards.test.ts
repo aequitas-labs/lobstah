@@ -212,11 +212,12 @@ describe('a review card', () => {
     expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #7 · 🪤 wt:t1');
     expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
-    // The main action as a big button with its ▾, then mute and Open draft; dismiss waits in the menu.
+    // Skip and Mute PR are in the menu beside the main action; Open stays on the bar.
     const bar = [...card(7).querySelectorAll('.gactions button, .gactions a')].map((b) => text(b) || b.getAttribute('aria-label'));
-    expect(bar).toEqual(['Approve', 'More actions', 'Mute this PR', 'Open draft']);
+    expect(bar).toEqual(['Approve', 'More actions', 'Open draft']);
     await click(g, card(7).querySelector('.gactions .splitcaret'));
-    expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Dismiss']);
+    expect(card(7).querySelector('.cmenulist')?.parentElement).toBe(card(7).querySelector('.split'));
+    expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Skip', 'Mute PR']);
     expect(g.$('#overlay')!.className).not.toBe('open');
     expect(chips(8)).toEqual(['drafting']);
     expect(chips(9)).toEqual(['approved']);
@@ -233,6 +234,10 @@ describe('a review card', () => {
     expect(card(8).querySelector('.gactions a')!.getAttribute('aria-label')).toBe('Open');
     expect(card(9).className).toContain('gcard-edge gedge-ok');
     expect(card(9).className).toContain('quiet');
+    expect(card(9).querySelector('.split-menu-only')).toBeTruthy();
+    expect([...card(9).querySelectorAll('.gactions button')].map((b) => text(b) || b.getAttribute('aria-label'))).toEqual(['More actions']);
+    await click(g, card(9).querySelector('.gactions .splitmore'));
+    expect([...card(9).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Mute PR']);
     // Who asked and the reason are in the modal, not on the card.
     expect(text(card(7))).not.toContain('maya');
     // Sending a review verdict is one click; the card never opens.

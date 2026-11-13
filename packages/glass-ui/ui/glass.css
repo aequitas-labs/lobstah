@@ -3341,6 +3341,12 @@ footer .glass-brand {
 .gactions .gopenbtn {
   margin-left: auto;
 }
+.gactions .rv-menu-only {
+  margin-left: auto;
+}
+.gactions .rv-menu-only + .gopenbtn {
+  margin-left: 0;
+}
 /* A trap's Open, at the right of its boat line. */
 .gfoot .gright {
   margin-left: auto;
@@ -3353,9 +3359,10 @@ footer .glass-brand {
 }
 /* The big button joined to its ▾, which opens the other actions upward. */
 .split {
+  position: relative;
   display: inline-flex;
 }
-.split > .btn:first-child {
+.split:not(.split-menu-only) > .btn:first-child {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -3365,10 +3372,6 @@ footer .glass-brand {
   border-left: 0;
   min-width: 28px;
 }
-.cmenu {
-  position: relative;
-  display: inline-flex;
-}
 .cmenulist {
   position: absolute;
   left: 0;
@@ -3376,12 +3379,16 @@ footer .glass-brand {
   z-index: 3;
   display: flex;
   flex-direction: column;
-  min-width: 160px;
+  min-width: max(100%, 160px);
   padding: 4px;
   background: var(--card);
   border: 1px solid var(--line-hover);
   border-radius: var(--radius);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.split-menu-only .cmenulist {
+  right: 0;
+  left: auto;
 }
 .cmenuitem {
   display: flex;
