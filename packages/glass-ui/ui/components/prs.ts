@@ -1,4 +1,3 @@
-import { useState } from 'preact/hooks';
 import { ackPrAttention, requestPrMerge, requestStackMerge } from '../actions.js';
 import type { DeckAttention } from '../../src/glass-diff.js';
 import type { GlassPr, GlassStack } from '@lobstah/core';
@@ -118,27 +117,16 @@ const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', r
 export function MergeWhenGreen({ p }: { p: GlassPr }) {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('pr-merge') || !p.mine || p.state !== 'OPEN') return null;
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
   const send = (cancel: boolean) => async (e: Event) => {
     e.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await requestPrMerge(p.key, cancel);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not ask for the merge.');
-    } finally {
-      setBusy(false);
-    }
+    await requestPrMerge(p.key, cancel);
   };
   const method = p.mergeRequest?.method ?? p.mergeMethod;
   const how = `#${p.number} into ${p.baseRefName ?? 'its base'}${method ? ` as ${METHOD_WORDS[method]}` : ''}`;
   const button = p.mergeRequest
-    ? html`<${Button} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} disabled=${busy} onClick=${send(true)}>${ActionIcon.merge}Cancel merge<//>`
-    : html`<${Button} variant="primary" aria-pressed="false" title=${`Merges ${how} once green`} disabled=${busy} onClick=${send(false)}>${ActionIcon.merge}Merge when green<//>`;
-  return html`<span class="prmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+    ? html`<${Button} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how} once green; click to cancel`} action=${send(true)} sending="Cancelling merge…" done="Merge cancelled">${ActionIcon.merge}Cancel merge<//>`
+    : html`<${Button} variant="primary" aria-pressed="false" title=${`Merges ${how} once green`} action=${send(false)} sending="Requesting merge…" done=${`Merges #${p.number} when green`}>${ActionIcon.merge}Merge when green<//>`;
+  return html`<span class="prmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}</span>`;
 }
 
 /** "#41, #42 and #43": a stack's numbers in words, bottom first. */
@@ -157,20 +145,9 @@ const numberList = (numbers: readonly number[]): string => {
 export function MergeStackWhenGreen({ s, prs }: { s: GlassStack; prs: GlassPr[] }) {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('stack-merge') || !s.mine || !s.open || prs.length < 2) return null;
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
   const send = (cancel: boolean) => async (e: Event) => {
     e.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await requestStackMerge(s.id, cancel);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not ask for the merge.');
-    } finally {
-      setBusy(false);
-    }
+    await requestStackMerge(s.id, cancel);
   };
   const open = prs.filter((p) => p.state === 'OPEN');
   const method = s.mergeRequest?.method ?? open[0]?.mergeMethod;
@@ -178,9 +155,9 @@ export function MergeStackWhenGreen({ s, prs }: { s: GlassStack; prs: GlassPr[] 
   const button = s.mergeRequest?.merging
     ? html`<${Button} variant="primary" class="on" aria-pressed="true" disabled title=${`GitHub is merging ${how}`}>${ActionIcon.merge}Merging<//>`
     : s.mergeRequest
-      ? html`<${Button} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how}, once all are green; click to cancel`} disabled=${busy} onClick=${send(true)}>${ActionIcon.merge}Cancel merge<//>`
-      : html`<${Button} variant="primary" aria-pressed="false" title=${`Merges ${how}, once all are green`} disabled=${busy} onClick=${send(false)}>${ActionIcon.merge}Merge stack when green<//>`;
-  return html`<span class="prmerge stackmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+      ? html`<${Button} variant="primary" class="on" aria-pressed="true" title=${`Merges ${how}, once all are green; click to cancel`} action=${send(true)} sending="Cancelling merge…" done="Merge cancelled">${ActionIcon.merge}Cancel merge<//>`
+      : html`<${Button} variant="primary" aria-pressed="false" title=${`Merges ${how}, once all are green`} action=${send(false)} sending="Requesting merge…" done=${`Merges ${numberList(open.map((p) => p.number))} when green`}>${ActionIcon.merge}Merge stack when green<//>`;
+  return html`<span class="prmerge stackmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}</span>`;
 }
 
 /** What a standing merge request says on the row's status line. */
@@ -476,22 +453,11 @@ export function ackOnOpen(pending: DeckAttention[]): void {
 function AckButton({ pending, label, stack }: { pending: DeckAttention[]; label: string; stack?: string }) {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('pr-ack')) return null;
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
   const ack = async (e: Event) => {
     e.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await ackPrAttention(pending);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not acknowledge PRs.');
-    } finally {
-      setBusy(false);
-    }
+    await ackPrAttention(pending);
   };
-  return html`<span class="prack" onClick=${(e: Event) => e.stopPropagation()}><${Button} data-stack=${stack} disabled=${busy} onClick=${ack}>${busy ? 'Acknowledging…' : label}<//>${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+  return html`<span class="prack" onClick=${(e: Event) => e.stopPropagation()}><${Button} data-stack=${stack} action=${ack} sending="Acknowledging…">${label}<//></span>`;
 }
 
 export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {

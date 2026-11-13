@@ -7,6 +7,7 @@ import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, acceptanceFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
 import { Button, buttonClass } from '../../../packages/glass-ui/ui/components/button.js';
+import { ToastHost } from '../../../packages/glass-ui/ui/components/toast.js';
 import { html } from '../../../packages/glass-ui/ui/html.js';
 
 /**
@@ -57,6 +58,45 @@ describe('the atom', () => {
     expect([merge!.className, merge!.getAttribute('aria-pressed')]).toEqual(['btn btn-primary on', 'true']);
     expect([open!.tagName, open!.getAttribute('aria-label'), open!.getAttribute('title'), open!.className]).toEqual(['A', 'Open', 'Open', 'btn btn-icon']);
     expect([stop!.getAttribute('type'), stop!.className]).toEqual(['submit', 'btn btn-danger btn-lg']);
+  });
+
+  it('shows progress, announces success, and puts a refusal beside the action', async () => {
+    const g = await page(acceptanceFleet(), '#deck');
+    const host = g.window.document.createElement('div');
+    g.window.document.body.appendChild(host);
+    const global = globalThis as { document?: unknown };
+    const before = global.document;
+    global.document = g.window.document;
+    let finish!: () => void;
+    let called = 0;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    render(
+      html`<div>
+        <${Button} action=${async () => { called++; await pending; }} sending="Approving…" done="Approved #91">Approve<//>
+        <${Button} action=${async () => 'The request was refused.'}>Send<//>
+        <${ToastHost} />
+      </div>`,
+      host as never,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [approve, send] = [...host.querySelectorAll('button')];
+    (approve as unknown as HTMLElement).click();
+    await Promise.resolve();
+    expect(called).toBe(1);
+    expect(approve!.disabled).toBe(true);
+    expect(approve!.getAttribute('aria-busy')).toBe('true');
+    expect(approve!.textContent).toContain('Approving…');
+    finish();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(approve!.disabled).toBe(false);
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Approved #91');
+    (send as unknown as HTMLElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe('The request was refused.');
+    global.document = before;
   });
 
   it('is 32px with 12px words, 40px with 14px at lg, and an icon is a square', async () => {

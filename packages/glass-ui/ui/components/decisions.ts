@@ -126,7 +126,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
             });
           }}
         /></label>`
-    }${!touch && html`<${SendHint} />`}<${Button} variant="icon" size="lg" class="dsend" aria-label="Send" aria-keyshortcuts=${sendShortcut()} title=${sending ? 'Sending…' : 'Send'} aria-busy=${sending} disabled=${sending} onClick=${() => void sendAnswer(key)}>${SendIcon}<//></div></div>`,
+    }${!touch && html`<${SendHint} />`}<${Button} variant="icon" size="lg" class="dsend" aria-label="Send" title="Send" aria-keyshortcuts=${sendShortcut()} disabled=${sending} action=${() => sendAnswer(key)} sending="Send" preserveLabel pendingTitle="Sending…" done="Answer sent" showError=${false}>${SendIcon}<//></div></div>`,
     !permission &&
       (files.length > 0 || (draft?.error && !(instant && draft.option))) &&
       html`<div class="dfoot">

@@ -919,6 +919,7 @@ export function NewTrap() {
     const error = await requestTrap(chosen, harness);
     setResult(error ?? null);
     if (!error) setOpen(false);
+    return error;
   };
   const trigger = html`<${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//>`;
   // A modal on a desktop, a sheet on a phone (Dialog); the form's fields stack in it.
@@ -929,7 +930,7 @@ export function NewTrap() {
         <label>repo <select name="repo" value=${chosen} onChange=${(e: Event) => setRepo((e.target as HTMLSelectElement).value)}>${repos.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
         <label>harness <select name="harness" value=${harness} onChange=${(e: Event) => setHarness((e.target as HTMLSelectElement).value)}><option value="claude">Claude</option><option value="codex">Codex</option></select></label>
         ${result && html`<div class="bad">${result}</div>`}
-        <div class="dialog-actions"><${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//><${Button} variant="primary" type="submit" disabled=${!chosen}>Request<//></div>
+        <div class="dialog-actions"><${Button} type="button" onClick=${() => setOpen(false)}>Cancel<//><${Button} variant="primary" type="submit" disabled=${!chosen} action=${submit} showError=${false}>Request<//></div>
       </form>
     <//>`
   }</span>`;
