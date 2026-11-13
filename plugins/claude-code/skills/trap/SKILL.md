@@ -23,7 +23,7 @@ lobstah soak                  # sign on; prints your wt:<trap> address and workt
 lobstah soak --repo <key>     # outside any repo: create a worktree for that repo
 lobstah soak --link <url>     # record this session's link for the glass's ↗ open button
 lobstah soak --one            # sign off after the first finished catch
-lobstah soak --wait           # hookless: listen now; exit 3 = quiet, run again
+lobstah soak --wait           # hookless: listen until work or sign-off; quiet deadlines renew
 lobstah soak stop-listener    # end this session's own --wait listener, by its pid
 lobstah soak --ticket <t>     # sign on as a trap `lobstah man throw` reserved
 lobstah stow                  # sign off; keeps the worktree
@@ -122,10 +122,16 @@ naming a dispatch id. Then:
   cannot run the await as a tracked background task.
 - Don't block on long-running processes: run servers and watchers in the
   background with a timeout.
-- Run `lobstah soak --wait --timeout 900` as a tracked background task, never
-  with a shell `&`, after sign-on and after every completion or report. The
-  Stop hook blocks with standing work or the arm command when no watcher is
-  live. Re-run after exit 3.
+- After sign-on and after every completion or report, end your turn. The
+  Stop hook waits for work in the shell; quiet deadlines renew there without
+  another model turn. Do not poll or re-arm on a timeout. An existing
+  listener stays in place until work, a message or sign-off.
+  In a session without a Stop hook, use `lobstah soak --wait` as a tracked
+  background task, never with a shell `&`; its quiet deadlines also renew
+  inside the process. `--timeout 0` is an explicit one-shot probe.
+- After `[soak] idleStowMins` (default 60) with no work, the daemon signs the
+  trap off, keeps its worktree, and ends its harness session. A later dispatch
+  can bring it back.
 
 ## Heavy commands
 
@@ -142,9 +148,8 @@ it. A person's own pushes never wait.
   longer than the shell timeout goes in the background with its output in a
   file; the subagent then reads that file.
 - `git push` queues on its own. Run it as a tracked background task, and report
-  `paused "Push in line" --waiting-on heavy`, then run `lobstah soak --wait`
-  as usual. The helm isn't woken for this. The task's notification tells you
-  when it finished: report `working` and carry on.
+  `paused "Push in line" --waiting-on heavy`, then end your turn. The helm isn't
+  woken for this. The task's notification tells you when it finished: report `working` and carry on.
 - `lobstah heavy` shows the line. Over the time limit a command loses its slot
   and keeps running, so a slow gate isn't a failure. Never use `--no-verify` to
   skip the line.

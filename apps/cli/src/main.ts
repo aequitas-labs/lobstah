@@ -243,6 +243,7 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
+import { createIdleTrapWatch } from './idle-traps.js';
 import { createUsageLimitWatch } from './usage-limit-watch.js';
 import { compactDispatchSession, compactTrapSession } from './trap-compact.js';
 import { swapTrapCatch } from './trap-swap.js';
@@ -280,7 +281,6 @@ import {
 } from './glass-lifecycle.js';
 import { installPet, refreshStalePet, uninstallPet } from './pet.js';
 import { installService, restartService, serviceInstalled, uninstallService } from './service.js';
-import { clearParkRenewal, parkRenewal } from './park-renewal.js';
 import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
 import { appendRepoBlock, configuredRepoKeys, configuredRepoPaths, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
@@ -562,7 +562,7 @@ soaking (interactive sessions volunteering as workers):
                                   session that mans a trap re-uses it.
                                   --wait listens in the foreground now (for
                                   sessions without Stop hooks): work prints
-                                  plain, a quiet timeout exits 3 — re-run it.
+                                  plain; quiet deadlines renew in that process.
                                   prints this session's trap title.
                                   --ticket (or LOBSTAH_TRAP_TICKET) signs on
                                   as a reserved trap. Sign-on names a
@@ -650,15 +650,6 @@ function hookParkMode(configured: 'arm' | 'block' | undefined, harness?: string)
 // [pickup].pollSecs, the same as pick's (pollSecs()). Whoever polls first
 // stamps lastCheckedAt, so the two never double-poll a watch inside one window.
 
-/**
- * The trap side of the park: heartbeat, then wait for something to act on.
- * Messages deliver first (cheap context, no catch lifecycle), then bait; a
- * trap with an open catch waits for a cancel or a `lobstah send` message
- * about it. Driven by the Stop hook (wakes are hook-decision JSON; on a
- * timeout the hook renews the park while the trap is signed on) or run
- * as `soak --wait` in a hookless session (wakes print plain; a timeout
- * exits 3 so re-running the same command re-arms).
- */
 /** Record that this session applied its sign-on title; sign-on is complete. */
 function confirmTitle(sessionFlag: string | undefined): void {
   const who = callerSession(sessionFlag);
@@ -668,22 +659,32 @@ function confirmTitle(sessionFlag: string | undefined): void {
   console.log(toonKV({ trap: trapLabel(reg), title: reg.titleSet, signOn: 'complete' }));
 }
 
-/** How a park ended: something to act on, the registration gone, or the timeout. */
+/** How a park ended: an event, sign-off, or an explicit zero-time probe. */
 type ParkEnd = 'woke' | 'gone' | 'timeout';
 
+/**
+ * The trap side of the park: heartbeat, then wait for something to act on.
+ * Messages deliver first (cheap context, no catch lifecycle), then bait; a
+ * trap with an open catch waits for a cancel or a `lobstah send` message
+ * about it. Driven by the Stop hook (wakes are hook-decision JSON; quiet
+ * deadlines renew in the shell) or run as `soak --wait` in a hookless
+ * session (wakes print plain; --timeout 0 is an explicit one-shot probe).
+ */
 async function soakPark(trapId: string, timeout: string | undefined, plain = false): Promise<ParkEnd> {
   const sessionId = readTrap(trapId)?.sessionId;
-  const idle = new IdleWait(sessionId, loadConfig().wait, timeout);
+  let idle = new IdleWait(sessionId, loadConfig().wait, timeout);
   const rearm = `lobstah soak --wait${timeout === undefined ? '' : ` --timeout ${timeout}`}`;
   // Self-instructive in plain mode (axi.md P9): every exit tells the session
   // its own next command — a foreground park has no hook to re-arm it.
   const block = plain
     ? (reason: string) => {
         idle.woke();
+        const trap = readTrap(trapId);
+        if (trap) resumeTrapTurn(trap);
         console.log(reason);
         console.log(toonHelp([`${rearm}   (when you finish handling this, run this here to keep listening)`]));
       }
-    : (reason: string) => { idle.woke(); console.log(JSON.stringify({ decision: 'block', reason })); };
+    : (reason: string) => { idle.woke(); const trap = readTrap(trapId); if (trap) resumeTrapTurn(trap); console.log(JSON.stringify({ decision: 'block', reason })); };
   while (true) {
     if (readTrap(trapId)?.sessionId !== sessionId) return 'gone';
     const reg = heartbeatTrap(trapId, { parked: true });
@@ -752,6 +753,11 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
     }
     if (idle.expired()) {
       idle.timedOut();
+      if (!idle.probe) {
+        // Renew inside the shell process: a quiet deadline never requests another model turn.
+        idle = new IdleWait(sessionId, loadConfig().wait, timeout);
+        continue;
+      }
       if (plain) {
         console.log(toonKV({ timeout: true, waitedSecs: idle.timeoutSecs, stillSignedOn: true }));
         console.log(toonHelp([`${rearm}   (no work yet — run this again to keep listening)`, `lobstah stow   (sign off instead)`]));
@@ -759,7 +765,7 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
       }
       return 'timeout';
     }
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, idle.pollMs(1500)));
   }
 }
 
@@ -1869,10 +1875,10 @@ async function mainCli(): Promise<void> {
             : [`lobstah inbox ${id}   (the answer arrives here — check at checkpoints)`]
           : verb === 'done' || verb === 'failed'
             ? soaked
-              ? [`lobstah soak --wait   (next assignment, or a quiet timeout)`, `lobstah stow   (sign off instead)`]
+              ? [`lobstah soak --wait   (hookless only; otherwise end your turn for the Stop hook)`, `lobstah stow   (sign off instead)`]
               : []
             : soaked
-              ? [`lobstah soak --wait   (re-park after reporting so answers and messages reach you)`]
+              ? [`lobstah soak --wait   (hookless only; otherwise end your turn to wait in the Stop hook)`]
               : [];
       if (next.length > 0) console.log(toonHelp(next));
       break;
@@ -3120,34 +3126,8 @@ async function mainCli(): Promise<void> {
           }
         }
         if (trapReg) {
-          const cfg = loadConfig();
-          if (!has('--park') && hookParkMode(cfg.helm.park, trapReg.harness) === 'arm') {
-            // The hook checks once for standing messages/bait, then lets the
-            // background soak own the wait and its completion notification.
-            if ((await soakPark(trapReg.trapId, '0')) === 'woke') break;
-            if (!anythingInFlight()) break;
-            // A soak --wait backgrounded just before the turn ended may still be starting.
-            const graceSecs = cfg.helm.armGraceSecs;
-            if (await awaitWatcher(trapReg.sessionId, 'trap', graceSecs * 1000, trapReg.trapId)) break;
-            console.log(
-              JSON.stringify({
-                decision: 'block',
-                reason:
-                  `Arm the watcher: run \`lobstah soak --wait --timeout 900\` as a background task ` +
-                  `(it wakes this session when the fleet needs you), then end your turn. ` +
-                  armGraceNote(graceSecs),
-              }),
-            );
-            break;
-          }
-          // A park that times out while the trap is still signed on renews
-          // itself: the hook blocks with "park again", and the next Stop parks.
-          const parkedAt = Date.now();
-          const end = await soakPark(trapReg.trapId, opt('--timeout'));
-          if (end === 'timeout') {
-            const renewal = parkRenewal(trapReg.trapId, Date.now() - parkedAt);
-            if (renewal.output) console.log(JSON.stringify(renewal.output));
-          } else clearParkRenewal(trapReg.trapId);
+          // Both harnesses can wait in their Stop hook without starting a model turn on quiet deadlines.
+          await soakPark(trapReg.trapId, opt('--timeout'));
           break;
         }
         /** Peek before blocking; record card reminders only when Stop emits them. */
@@ -3424,7 +3404,7 @@ async function mainCli(): Promise<void> {
           toonKV({
             session: sid,
             listener: `stopped (pid ${res.watcher.pid})`,
-            note: 'only this session\'s listener was stopped. Listen again with `lobstah soak --wait --timeout 900` as a background task.',
+            note: 'only this session\'s listener was stopped. End your turn to wait in the Stop hook; hookless sessions run `lobstah soak --wait`.',
           }),
         );
         break;
@@ -3734,26 +3714,19 @@ async function mainCli(): Promise<void> {
                 step: `Apply this title: ${reg.titlePending} (skip this if you have no tool that sets the session title). Then run \`lobstah soak title-set${sessionFlag}\`. Sign-on is complete after that.`,
               }
             : {}),
-          note:
-            (reg.harness === 'codex'
-              ? 'this session now takes assigned work: run `lobstah soak --wait --timeout 600` in the foreground, ' +
-                'and keep the turn open until it returns. On Codex, a background listener that finishes after your turn ends starts no new turn, so its brief is lost. '
-              : 'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
-                'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ') +
-            "Never `man wait` (that is the orchestrator's command, not yours).",
+          note: 'End your turn after reporting. The Stop hook waits for work and renews quiet deadlines without waking the model. Never man wait; that is the helm command.',
         }),
       );
       console.log(
         toonHelp([
           ...(inside ? [] : [`cd ${reg.worktree}   (do this first: every task runs in the trap's worktree)`]),
-          `lobstah soak --wait --timeout 600${sessionFlag}   (no Stop hook: listen now; work prints here, exit 3 = run it again)`,
+          `lobstah soak --wait --timeout 600${sessionFlag}   (hookless: listen until work or sign-off; quiet deadlines renew without a model turn)`,
           `lobstah stow${sessionFlag}   (sign off; keeps this worktree${reg.createdWorktree ? ', --remove removes it when it holds no unpushed work' : ''})`,
         ]),
       );
       // The hookless park: same soakPark as the Stop hook drives, as a plain
       // foreground command — the trap waits in the water right here. Wakes
-      // print plain; a quiet timeout exits 3 so the session re-arms by
-      // re-running the same soak --wait command.
+      // print plain; quiet deadlines renew inside this process. --timeout 0 is a one-shot probe.
       if (has('--wait')) {
         const waiter = armWatcher(reg.sessionId, 'trap', reg.trapId);
         try {
@@ -4020,6 +3993,7 @@ async function mainCli(): Promise<void> {
             // This boat's own glass cards, for the grounds bound to a wharf.
             await (await import('./wharf-cards.js')).publishBoatCards(Date.now(), console.log);
           },
+          idleTraps: createIdleTrapWatch(),
           trapStarts: createTrapDispatchScheduler(),
           culler: cliCuller,
           prWatches: (now, log) => {
