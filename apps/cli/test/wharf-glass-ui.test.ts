@@ -25,6 +25,7 @@ type Data = {
   detail?: typeof detail;
   badge?: (count: number) => Promise<void>;
   userAgent?: string;
+  prefs?: Record<string, unknown>;
   card?: unknown;
   slack?: unknown;
 };
@@ -43,6 +44,7 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     },
   } as ConstructorParameters<typeof Window>[0]);
   windows.push(window);
+  if (data.prefs) window.localStorage.setItem('spyglass', JSON.stringify(data.prefs));
   const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; method: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] =
     [];
@@ -267,7 +269,7 @@ it("renders the wharf in the local glass's own views and tabs", async () => {
   expect(g.doc.querySelector('.headerline h1')?.textContent).toContain('spyglass');
   expect(g.text('.chips')).toContain('helm live');
   expect(g.text('.chips')).not.toContain('daemon');
-  expect(g.text('#deck')).toContain('in flight');
+  expect(g.text('#deck')).toContain('In flight');
   expect(g.text('#deck')).not.toContain('PRs');
   expect(g.text('#foot')).toContain('lobstah · wharf · PR watches and repair run on your boats');
 });
@@ -285,7 +287,7 @@ it('shows jobs, notes, reports, PR links and messages in the dispatch modal, wit
   expect(g.doc.querySelector("#modalbox a[href='https://github.com/aequitas-labs/lobstah/pull/205']")).toBeTruthy();
   expect(g.doc.querySelector('#modalbox button.btn.open')).toBeNull();
   expect(g.reads).toContain('/api/glass/dispatches/job/detail');
-  await g.click('#modalbox .x');
+  await g.click('#modalbox .detail-close');
   await g.go('#traps');
   expect(g.doc.querySelector('#traps .harness-icon')?.getAttribute('aria-label')).toBe('Codex');
   expect(g.text('#traps')).toContain('kind-crab');
@@ -331,22 +333,16 @@ it('renders decisions as safe elements, requests only their own attachment image
   expect(g.doc.querySelector('.dmodal .dattach')).toBeNull();
 });
 
-it('queues messages, confirms direct cancellation, and sends no bearer or helm takeover', async () => {
+it('confirms cancellation from the dispatch menu and sends no bearer or helm takeover', async () => {
   const g = await page('/#dispatches');
   await g.click('#dispatches tr', 'job');
-  g.input('message to helm', 'Please retry');
-  await g.settle();
-  await g.click('#modalbox button', 'Queue message for helm');
-  expect(g.writes[0]).toMatchObject({
-    path: '/api/glass/requests',
-    body: { kind: 'message', dispatch: 'job', text: 'Please retry' },
-    credentials: 'same-origin',
-  });
+  expect(g.doc.querySelector('.jobmsg')).toBeNull();
+  await g.click('#modalbox button[aria-label="More actions"]');
   await g.click('#modalbox button', 'Cancel dispatch…');
-  expect(g.writes).toHaveLength(1);
-  expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its agent stops.');
+  expect(g.writes).toHaveLength(0);
+  expect(g.text('#modalbox')).toContain('Cancel this dispatch? Its worker stops.');
   await g.click('#modalbox button', 'Cancel dispatch');
-  expect(g.writes[1]).toMatchObject({ path: '/api/glass/dispatches/job/cancel', body: {} });
+  expect(g.writes[0]).toMatchObject({ path: '/api/glass/dispatches/job/cancel', body: {} });
   for (const write of g.writes) {
     expect(write.headers['Idempotency-Key']).toBeTruthy();
     expect(write.headers.Authorization).toBeUndefined();
@@ -356,34 +352,16 @@ it('queues messages, confirms direct cancellation, and sends no bearer or helm t
   expect(g.writes.some((w) => w.path.includes('helm/'))).toBe(false);
 });
 
-it('Ctrl+Enter queues the helm message as its button does, only when there is one to send, and once', async () => {
+it('leaves helm messaging out of dispatch details', async () => {
   const g = await page('/#dispatches');
   await g.click('#dispatches tr', 'job');
-  const box = g.doc.querySelector("[aria-label='message to helm']")!;
-  const press = async (opts: { ctrlKey?: boolean; repeat?: boolean }) => {
-    const ev = new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...opts });
-    box.dispatchEvent(ev as unknown as Event);
-    await g.settle();
-    return ev;
-  };
-  expect(g.text('#modalbox .jobsend .sendhint')).toMatch(/↵ to send$/);
-  // An empty box: its button is disabled, and so is the shortcut.
-  await press({ ctrlKey: true });
-  expect(g.writes).toHaveLength(0);
-  g.input('message to helm', 'Please retry');
-  await g.settle();
-  // Plain Enter is a newline.
-  expect((await press({})).defaultPrevented).toBe(false);
-  await press({ ctrlKey: true, repeat: true });
-  expect(g.writes).toHaveLength(0);
-  expect((await press({ ctrlKey: true })).defaultPrevented).toBe(true);
-  expect(g.writes).toHaveLength(1);
-  expect(g.writes[0]).toMatchObject({ path: '/api/glass/requests', body: { kind: 'message', dispatch: 'job', text: 'Please retry' } });
-  expect(g.text('#modalbox')).toContain('Queued for the helm');
+  expect(g.doc.querySelector('[aria-label="message to helm"]')).toBeNull();
+  expect(g.writes).toEqual([]);
 });
 
 it('boats show repos and check-in, no edit/grant controls; revoke and delete each require confirmation', async () => {
   const g = await page('/#boats');
+  expect(g.doc.querySelector('#boats .page-head h1')?.textContent).toBe('Boats');
   // The card shows the boat's access and age; a tap shows its repos, last check-in and trap request.
   expect(g.text('#boats')).not.toContain('github.com/aequitas-labs/lobstah');
   (g.doc.querySelector('#boats .card') as unknown as HTMLElement).click();
@@ -584,17 +562,32 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   s.documents.push(review('8', 'posted', false, '2026-10-15T12:00:00.000Z'), review('7', 'drafted', true, '2026-10-15T10:00:00.000Z'));
   const g = await page('/#reviews', false, {
     snapshot: s,
+    prefs: { view: 'cards' },
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15',
   });
   expect(g.text('#reviews')).toContain('acme/web#7 Add the thing');
   expect(g.text('#reviews')).toContain('acme/web#8 Add the thing');
   expect(g.text('#reviews').indexOf('#7 Add')).toBeLessThan(g.text('#reviews').indexOf('#8 Add'));
-  // The open round can be dismissed, and each PR can be muted.
-  const buttons = Array.from(g.doc.querySelectorAll('#reviews button')).map((b) => b.textContent?.trim());
-  expect(buttons).toEqual(['Mute this PR', 'Dismiss', 'Mute this PR']);
-  await g.click('#reviews button', 'Dismiss');
+  // Boat actions stay behind the card menu; Open remains available on each card.
+  const buttons = Array.from(g.doc.querySelectorAll('#reviews button')).map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim());
+  expect(buttons).toEqual(['More actions', 'More actions']);
+  const reviewCards = Array.from(g.doc.querySelectorAll('#reviews .rv-card'));
+  (reviewCards[0]!.querySelector('.gactions button[aria-label="More actions"]') as unknown as HTMLElement).click();
+  await g.settle();
+  expect(Array.from(reviewCards[0]!.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent?.trim())).toEqual([
+    'Dismiss',
+    'Mute PR',
+  ]);
+  (reviewCards[0]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
+  await g.settle();
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
-  expect(g.text('#reviews')).toContain('Sent to the boat that drafted it');
+  expect(g.doc.querySelector('.glass-toast[role="status"]')?.textContent).toContain('Sent to the boat that drafted it');
+  (reviewCards[1]!.querySelector('.gactions button[aria-label="More actions"]') as unknown as HTMLElement).click();
+  await g.settle();
+  (reviewCards[1]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
+  await g.settle();
+  expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-mute', document: '8' } });
+  expect(g.doc.querySelector('.glass-toast[role="status"]')?.textContent).toContain('Muted');
   await g.go('#review/7');
   expect(g.activeTab()).toBe('reviews');
 });
@@ -621,7 +614,7 @@ it('links bare http(s) URLs in decisions, notes, briefs and messages as text, ne
   expect(row.textContent).toContain('<script>alert(1)</script> review ');
   await g.click('#dispatches tr', 'job');
   const modal = g.doc.querySelector('#modalbox')!;
-  expect(links(modal)).toEqual(expect.arrayContaining([LOCAL, PR]));
+  expect(Array.from(modal.querySelectorAll('a')).map(a => a.getAttribute('href'))).toEqual(expect.arrayContaining([LOCAL, PR]));
   expect(modal.textContent).toContain('<b>keep</b>');
   expect(modal.querySelector("a[href^='javascript:']")).toBeNull();
 });

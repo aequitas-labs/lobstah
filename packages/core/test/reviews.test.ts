@@ -288,7 +288,7 @@ describe('drafts', () => {
 
   it('a stale or failed round re-drafts at the current head; others refuse', () => {
     observeReviewRequest(seen(), T0);
-    expect(redraftReview('review:acme/web#7')).toContain('only a stale or failed round re-drafts');
+    expect(redraftReview('review:acme/web#7')).toContain('only a drafted, stale or failed round re-drafts');
     const item = readReview('review:acme/web#7')!;
     Object.assign(item.rounds[0]!, { state: 'stale', dispatch: 'd1', dispatchedAt: 'x', draftedAt: 'y', reason: 'moved' });
     item.pr.headSha = 'bbbbbbb2';

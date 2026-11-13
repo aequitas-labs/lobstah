@@ -28,7 +28,7 @@ it.each([
   const links = g.$$('a').map((a) => a.getAttribute('href') ?? '');
   expect(links.some((url) => url.startsWith(prefix!))).toBe(true);
   expect(links.filter((url) => /^https:\/\/github.com\/acme\/web\/pull\//.test(url))).toEqual([]);
-  expect(g.$$('#lobs a').some((a) => (a.getAttribute('href') ?? '').startsWith(prefix!))).toBe(true);
+  expect(g.$$('#lobs a').some((a) => (a.getAttribute('href') ?? '').startsWith('#pr/'))).toBe(true);
 });
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-glass-page-'));
@@ -125,7 +125,7 @@ describe('glass page: tabs and hash routing', () => {
     expect(g.$('#deck')).toBeTruthy();
     expect(g.fetches()).toBeGreaterThan(1);
   });
-  it('shows working, idle, and parked traps on deck and tab, with a dispatch link', async () => {
+  it('keeps healthy working, idle and parked traps on the Traps tab with dispatch links, off the deck', async () => {
     const d = acceptanceFleet();
     const working = d.dispatches.find((x) => x.id.startsWith('cccccccc'))!;
     working.verb = 'working';
@@ -153,19 +153,18 @@ describe('glass page: tabs and hash routing', () => {
     d.traps = [live, idle, waiting];
     const g = await page(d, { hash: '#deck', prefs: { view: 'table' } });
     const deck = g.$$('#deck section')[4]!;
-    expect(text(deck)).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
-    expect(text(deck)).toContain('idle · not listening');
-    expect(text(deck)).toContain('parked · waiting on review');
-    await click(g, deck.querySelector('a[href="#dispatches"]'));
-    expect(text(g.$('#modalbox h3'))).toBe('cccccccc working');
+    expect(text(deck)).toContain('No traps need attention');
     await g.go('#traps');
     const rows = g.$$('#traps tr.rowhead');
     expect(rows.map(text).join(' ')).toContain('working · cccccccc · Polish the glass trap deck · Bash 12s ago');
     expect(rows.map(text).join(' ')).toContain('idle · not listening');
     expect(rows.map(text).join(' ')).toContain('parked · waiting on review');
+    await click(g, rows.find((row) => text(row).includes('working · cccccccc'))!.querySelector('a[href="#dispatches"]'));
+    expect(text(g.$('#modalbox h2'))).toContain('Polish the glass trap deck');
+    expect(text(g.$('#modalbox .pr-view-chips'))).toContain('working');
   });
 
-  it('leads each trap state line with an amber, green, or grey dot on deck, cards, and table', async () => {
+  it('keeps trap state dots on the Traps page and healthy workers off On deck', async () => {
     const want: Record<string, [string, string]> = {
       'working trap': ['warn', 'working · '],
       'listening trap': ['ok', 'idle · listening'],
@@ -190,7 +189,7 @@ describe('glass page: tabs and hash routing', () => {
       }
     };
     const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view: 'table' } });
-    check(dots([...g.$$('#deck section')[4]!.querySelectorAll('.deckline')]));
+    expect(g.$$('#deck .deck-traps .deckline')).toHaveLength(0);
     await g.go('#traps');
     check(dots(g.$$('#traps tr.rowhead')));
   });
@@ -220,7 +219,7 @@ describe('glass page: tabs and hash routing', () => {
       }
     };
     const g = await page(trapStatesFleet(), { hash: '#deck', prefs: { view: 'cards' } });
-    check(chips([...g.$$('#deck section')[4]!.querySelectorAll('.card')]));
+    expect(g.$$('#deck .deck-traps .card')).toHaveLength(0);
     await g.go('#traps');
     check(chips(g.$$('#traps .card')));
   });
@@ -242,8 +241,8 @@ describe('glass page: tabs and hash routing', () => {
       expect(text(g.$('#traps'))).not.toContain(command);
       expect(g.$$('#traps .cmd')).toHaveLength(0);
       await g.go('#deck');
-      // Only recently signed-off traps are listed on deck.
-      expect(text(g.$('#deck'))).toContain('wt:t2');
+      // Deliberately stowed traps are kept on the Traps page.
+      expect(text(g.$('#deck .deck-traps'))).not.toContain('wt:t2');
       expect(text(g.$('#deck'))).not.toContain(command);
       expect(g.$$('#deck .cmd')).toHaveLength(0);
       await g.go('#traps');
@@ -285,12 +284,13 @@ describe('glass page: tabs and hash routing', () => {
   });
 
   it.each(['claude', 'codex'].flatMap((harness) => (['table', 'cards'] as const).map((view) => ({ harness, view }))))(
-    'opens a signed-off $harness desktop link from $view and deck, and copies it in the modal only',
+    'opens a ghosted $harness desktop link from $view and deck, and copies it in the modal only',
     async ({ harness, view }) => {
       const d = acceptanceFleet();
       d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
       const trap = d.traps.find((t) => t.trapId === 't2')!;
       Object.assign(trap, {
+        rosterState: 'ghosted',
         harness,
         sessionId: 'past-session',
         link: harness === 'codex' ? 'codex://threads/past-session' : 'claude://claude.ai/past-session',
@@ -842,9 +842,8 @@ describe('glass page: modals', () => {
     };
     const g = await page(d);
     await openRow(g, '#dispatches', 'cccccccc');
-    const secs = g.$$('#modalbox .sec').map((el) => text(el));
-    expect(secs).toContain('awaiting reply');
-    expect(text(g.$('#modalbox'))).toContain('start the dev server · from helm · 5m ago');
+    expect(text(g.$('.view-messages'))).toContain('start the dev server');
+    expect(text(g.$('.view-messages'))).toContain('from helm · pending · 5m ago');
   });
 
   it('an open modal keeps its root element across ten ticks; its own item changing updates it in place', async () => {
@@ -852,9 +851,9 @@ describe('glass page: modals', () => {
     await openRow(g, '#dispatches', 'cccccccc');
     expect(g.$('#overlay')!.className).toBe('open');
     const root = g.$('#modalbox')!;
-    const title = g.$('#modalbox h3')!;
-    const secs = g.$$('#modalbox .sec');
-    expect(text(title)).toBe('cccccccc needs-decision');
+    const title = g.$('#modalbox h2')!;
+    const secs = g.$$('#modalbox .detail-scroll > section > h4');
+    expect(text(title)).toContain('Brief for cccccccc');
     const d = acceptanceFleet();
     for (let i = 0; i < 10; i++) {
       // Another dispatch changes every tick; the modal's nodes stay put.
@@ -862,16 +861,17 @@ describe('glass page: modals', () => {
       g.serve(structuredClone(d));
       await g.poll();
       expect(g.$('#modalbox')).toBe(root);
-      expect(g.$('#modalbox h3')).toBe(title);
-      expect(g.$$('#modalbox .sec')).toEqual(secs);
+      expect(g.$('#modalbox h2')).toBe(title);
+      expect(g.$$('#modalbox .detail-scroll > section > h4')).toEqual(secs);
     }
     // Its own dispatch changes: same nodes, new state.
     const own = structuredClone(d);
     own.dispatches.find((x) => x.id.startsWith('cccccccc'))!.verb = 'working';
     g.serve(own);
     const seen = await mutations(g, () => g.poll());
-    expect(g.$('#modalbox h3')).toBe(title);
-    expect(text(title)).toBe('cccccccc working');
+    expect(g.$('#modalbox h2')).toBe(title);
+    expect(text(title)).toContain('Brief for cccccccc');
+    expect(text(g.$('.pr-view-chips'))).toContain('working');
     // The dispatches table row changed too; nothing outside the modal and that row moved.
     const row = g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!;
     expect(seen.filter((m) => !root.contains(m.target as never) && !row.contains(m.target as never))).toEqual([]);
@@ -880,12 +880,12 @@ describe('glass page: modals', () => {
   it('Escape and a click outside close the modal; a vanished item closes it', async () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#traps', 'wt:t1');
-    expect(text(g.$('#modalbox h3'))).toContain('wt:t1');
+    expect(text(g.$('#modalbox h2'))).toContain('wt:t1');
     await escape(g);
     expect(g.$('#overlay')!.className).toBe('');
     await openRow(g, '#traps', 'wt:t1');
     // A click inside the modal keeps it open; a click on the backdrop closes it.
-    await click(g, g.$('#modalbox .sub'));
+    await click(g, g.$('#modalbox .view-meta'));
     expect(g.$('#overlay')!.className).toBe('open');
     await click(g, g.$('#overlay'));
     expect(g.$('#overlay')!.className).toBe('');
@@ -903,27 +903,29 @@ describe('glass page: modals', () => {
       g,
       g.$$('#dispatches tr.rowhead').find((tr) => text(tr).includes('cccccccc'))!,
     );
-    expect(text(g.$('#modalbox h3'))).toBe('cccccccc needs-decision');
+    expect(text(g.$('#modalbox h2'))).toContain('Brief for cccccccc');
+    expect(text(g.$('.pr-view-chips'))).toContain('needs-decision');
     const cmds = g.$$('#modalbox .cmd code').map(text);
-    expect(cmds).toContain('wt:t1');
+    expect(text(g.$('.view-meta'))).toContain('wt:t1');
     expect(cmds).toContain('/tmp/shot.png');
     expect(g.$$('#modalbox form, #modalbox [method]')).toHaveLength(0);
   });
 
-  it('the PR modal shows the stack, the dispatch chain, and the watch cursor', async () => {
+  it('the PR view shows its title, stack, dispatch chain and watch', async () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#prs', '#42');
     const box = g.$('#modalbox')!;
-    expect(text(box.querySelector('h3'))).toBe(`#42 ${PR_TITLES[42]} checks 3/4`);
-    expect(text(box)).toContain('#41 → #42 → #43 · 2 of 3 · floor main · blocked by #41');
-    expect(box.querySelector('b')?.textContent).toBe('#42');
-    expect(g.$$('#modalbox .cmd code').map(text)).toEqual(['eyJoIjoiYWJjIn0-a-long-opaque-cursor']);
+    expect(text(box.querySelector('h2'))).toBe(PR_TITLES[42]);
+    expect(text(box)).toContain('#41 → #42 → #43 · 2 of 3 · base main · waiting for #41');
+    expect([...box.querySelectorAll('b')].some(b => b.textContent === '#42')).toBe(true);
+    expect(text(box)).toContain('checked 60s ago');
     // The chain links open the dispatch modals.
     await click(
       g,
       g.$$('#modalbox a').find((a) => text(a) === 'aaaaaaaa')!,
     );
-    expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
+    expect(text(g.$('#modalbox h2'))).toContain('Brief for aaaaaaaa');
+    expect(text(g.$('.pr-view-chips'))).toContain('done');
   });
 
   it('the gear opens Settings, this device and this view only; Configuration has the helm chat', async () => {
@@ -1035,7 +1037,7 @@ describe('glass page: PRs', () => {
     expect(rows[1]![6]).toBe('watching · 60s ago');
     expect(text(g.$('#prs'))).not.toContain('a-long-opaque-cursor');
     // None of these PRs is the person's, so they sit under Other PRs; non-PR watches list below, cursor shortened.
-    expect(g.$$('#prs h2').map(text)).toEqual(['Yours · 0', 'Other PRs · 3', 'other watches']);
+    expect(g.$$('#prs h2').map(text)).toEqual(['Yours · 0', 'Other PRs · 3', 'Other watches']);
     expect(text(g.$$('#prs table')[1]!)).toContain('ci-nightly');
   });
 
@@ -1086,10 +1088,10 @@ describe('glass page: PRs', () => {
   it('titles: the PR modal header shows the title; a PR without one shows the number alone', async () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#prs', '#41');
-    expect(text(g.$('#modalbox h3'))).toBe(`#41 ${PR_TITLES[41]} green`);
+    expect(text(g.$('#modalbox h2'))).toBe(PR_TITLES[41]);
     await escape(g);
     await openRow(g, '#prs', '#43');
-    expect(text(g.$('#modalbox h3'))).toBe('#43 draft');
+    expect(text(g.$('#modalbox h2'))).toBe('acme/web#43');
   });
 
   it('a dispatch row carries its PR link, evidence badge, and merge gate', async () => {
@@ -1109,13 +1111,14 @@ describe('glass page: On deck', () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
     // The decisions heading carries the unread count as a badge.
-    const heading = (s: Element) => text(s.querySelector('h2')).replace(/\d+$/, '');
-    expect(sections.map(heading)).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →']);
+    const heading = (s: Element) => s.querySelector('.section-head h2 a')?.firstChild?.textContent?.trim();
+    expect(sections.map(heading)).toEqual(['Decisions', 'In flight', 'Landed · 24h', 'Reports', 'Traps']);
     // Only raw questions (and framed decisions) are rows; PR kinds stay with the PRs.
     const rows = [...sections[0]!.querySelectorAll('.drow')];
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.querySelector('.badge'))).toBe(true);
-    expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(String(rows.length));
+    expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(text(g.$('#tabs a[data-tab="deck"] .dbadge')));
+    expect(rows.length).toBeLessThanOrEqual(3);
     // PRs live on the PRs tab, as stack cards: the deck shows none.
     expect(g.$$('#deck .prcard, #deck .stackcard')).toHaveLength(0);
     expect(text(g.$('#deck'))).not.toContain('#41 → #42 → #43');
@@ -1156,33 +1159,18 @@ describe('glass page: On deck', () => {
     expect(landed.querySelector('.deckmore')).toBeNull();
   });
 
-  it('traps: eight at most, live by sign-on then recently signed off, the rest in "+N more"', async () => {
+  it('traps: at most eight attention cases, with a link to the remaining ones', async () => {
     for (const view of ['table', 'cards'] as const) {
-      const g = await page(everyAttentionFleet(), { prefs: { view } });
-      const traps = g.$$('#deck section')[4]!;
+      const snapshot = everyAttentionFleet();
+      const base = snapshot.traps[0]!;
+      snapshot.traps = Array.from({ length: 9 }, (_, i) => ({ ...base, trapId: `g${i}`, name: `ghost-${i}`, live: false, rosterState: 'ghosted' as const, claimed: undefined, catches: [], notices: [{ kind: 'trap-ghosted', at: ago(i * 60_000), text: 'Ghosted' }] }));
+      const g = await page(snapshot, { prefs: { view } });
+      const traps = g.$('#deck .deck-traps')!;
       const items = [...traps.querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
-      // A card leads with the name alone (components/card.ts); a deck line keeps the 🪤.
-      expect(items.map((l) => text(l.querySelector('b')).replace(/^🪤 /, ''))).toEqual([
-        'wt:t1',
-        'wt:t10',
-        'wt:t3',
-        'wt:t4',
-        'wt:t5',
-        'wt:t6',
-        'wt:t7',
-        'wt:t2',
-      ]);
-      const harnessOrState = (l: Element) =>
-        view === 'cards'
-          ? text(l.querySelector('.gchip')) === 'signed off'
-            ? 'signed off'
-            : l.querySelector('.gicon .harness-icon')?.getAttribute('aria-label')?.toLowerCase()
-          : (l.querySelector('.badge .harness-icon')?.getAttribute('aria-label')?.toLowerCase() ?? text(l.querySelector('.badge')));
-      expect(items.map(harnessOrState)).toEqual(['claude', 'claude', 'codex', 'claude', 'claude', 'claude', 'signed off', 'signed off']);
-      // t8 (ghosted 45m ago) is the ninth; t9 stowed two hours ago is off the deck.
+      expect(items.map((item) => text(item.querySelector('b')))).toEqual(Array.from({ length: 8 }, (_, i) => `ghost-${i}`));
+      expect(items.map((item) => text(item.querySelector(view === 'cards' ? '.gchip' : '.badge')))).toEqual(Array(8).fill('ghosted'));
       expect(text(traps.querySelector('.deckmore'))).toBe('+1 more →');
       expect(traps.querySelector('.deckmore')!.getAttribute('href')).toBe('#traps');
-      expect(text(traps)).not.toContain('wt:t9');
     }
   });
 
@@ -1202,7 +1190,7 @@ describe('glass page: On deck', () => {
 
   it('an empty fleet: every section says it is empty, the daemon is down', async () => {
     const g = await page(emptyFleet());
-    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'none']);
+    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'No traps need attention']);
     expect(text(g.$('#chips'))).toBe('daemon down');
   });
 });
@@ -1251,7 +1239,7 @@ describe('glass page: lobs', () => {
       ['A', 'which base should #43 target?'],
       ['A', 'draft #43 draft'],
     ]);
-    expect(lobs[1]!.getAttribute('href')).toBe('https://github.com/acme/web/pull/43');
+    expect(lobs[1]!.getAttribute('href')).toBe('#pr/pr%3Aacme%2Fweb%2343');
     const key = acceptanceFleet().attention.find((a) => a.kind === 'question')!.key!;
     expect(lobs[0]!.getAttribute('href')).toBe(`#decision/${encodeURIComponent(key)}`);
     await click(g, lobs[0]!);
@@ -1332,19 +1320,20 @@ describe('glass page: a dispatch shows its trap by name', () => {
     expect(text(flight.querySelector('.gtext'))).toContain('🪤 crisp-heron');
     expect(text(flight)).not.toContain('wt:t1');
     await openRow(g, '#dispatches', 'cccccccc');
-    expect(text(g.$('#modalbox .claimedby'))).toBe('claimed by crisp-heron');
-    expect(g.$('#modalbox .claimedby .trapname')!.getAttribute('title')).toBe('wt:t1');
-    expect(text(g.$('#modalbox .loglines'))).toContain('working claimed by crisp-heron');
+    expect(text(g.$('#modalbox .view-meta'))).toContain('crisp-heron');
+    expect(g.$('#modalbox .view-meta .trapname')!.getAttribute('title')).toBe('wt:t1');
+    expect(text(g.$('#modalbox .dispatch-activity'))).toContain('claimed by crisp-heron');
+    expect(text(g.$('#modalbox .dispatch-activity'))).toContain('working');
   });
 
   it("opens the trap's modal when its name is clicked, not the dispatch's", async () => {
     const g = await page(namedFleet(), { hash: '#dispatches', prefs: { view: 'table' } });
     await click(g, row(g, 'cccccccc').querySelector('a.trapname'));
-    expect(text(g.$('#modalbox h3'))).toContain('🪤');
-    expect(text(g.$('#modalbox h3'))).toContain('crisp-heron');
-    expect(text(g.$('#modalbox .trap-address'))).toContain('wt:t1');
+    expect(text(g.$('#modalbox h2'))).toContain('🪤');
+    expect(text(g.$('#modalbox h2'))).toContain('crisp-heron');
+    expect(text(g.$('#modalbox .detail-bar-identity'))).toContain('wt:t1');
     await escape(g);
     await click(g, row(g, 'dddddddd').querySelector('a.trapname'));
-    expect(text(g.$('#modalbox h3'))).toContain('signed off');
+    expect(text(g.$('#modalbox .pr-view-chips'))).toContain('signed off');
   });
 });

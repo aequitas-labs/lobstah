@@ -19,6 +19,7 @@ export const localBackend: GlassBackend = {
   async snapshot() {
     return (await (await fetch('/data')).json()) as GlassSnapshot;
   },
+  prDetails: (key) => read(`/data/pr/${encodeURIComponent(key)}`, { cache: 'no-store' }),
   dispatch: (id) => read(`/data/dispatch/${encodeURIComponent(id)}`, { cache: 'no-store' }),
   decision: (key) => read(`/data/decision/${encodeURIComponent(key)}`),
   older: (kind, offset, limit) => read(`/data/older?kind=${kind}&offset=${offset}&limit=${limit}`, { cache: 'no-store' }),

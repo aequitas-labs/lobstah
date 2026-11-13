@@ -1,5 +1,14 @@
 import type { GlassSnapshot, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
-import { DECK_TRAPS_MAX, INFLIGHT_MAX, LANDED_MAX, REPORTS_MAX, catchCount, goalLine, reportPageUrl } from '../../src/glass-diff.js';
+import {
+  catchCount,
+  DECK_TRAPS_MAX,
+  deckTrapAttention,
+  INFLIGHT_MAX,
+  LANDED_MAX,
+  REPORTS_MAX,
+  goalLine,
+  reportPageUrl,
+} from '../../src/glass-diff.js';
 import type { DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -15,10 +24,8 @@ import {
   badgeTitle,
   NewTrap,
   opener,
-  startCommands,
-  trapNow,
-  trapNowText,
-  trapDisplayName,
+  trapWork,
+  trapWorkText,
   trapScope,
   windowAction,
   dispatchContext,
@@ -27,13 +34,15 @@ import {
   verbTone,
 } from './common.js';
 import { GrantChip } from './session-grants.js';
-import { trapCard } from './traps.js';
+import { trapCard, trapTitleLink } from './traps.js';
+import { TrapOverview } from './trap-overview.js';
 import { dispatchCard } from './dispatches.js';
 import { Card } from './card.js';
 import { getState } from '../store.js';
 import { openReport, reportCard, reportMeta } from './reports.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
+import { SectionHead } from './section-head.js';
 import { Todos } from './todos.js';
 import type { DecisionDraft } from '../store.js';
 import { visibleTabs } from '../backend.js';
@@ -126,7 +135,7 @@ function deckItem(it: DeckItem, view: View) {
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
 
 /** What an empty deck section says, where "none" doesn't say what is missing. */
-const EMPTY: Record<string, string> = { 'in flight': 'nothing in flight', reports: 'no reports yet' };
+const EMPTY: Record<string, string> = { 'In flight': 'nothing in flight', Reports: 'no reports yet' };
 
 function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number, view: View, headAction?: Children) {
   // A section for a tab this page's source does not fill is not shown, empty or otherwise.
@@ -138,7 +147,16 @@ function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number,
       ? html`<div class="cards">${lines}</div>`
       : lines
     : html`<div class="empty">${EMPTY[title] ?? 'none'}</div>`;
-  return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
+  const headTitle = title === 'Landed · 24h' ? title : title[0]!.toUpperCase() + title.slice(1);
+  return html`<section><${SectionHead} title=${headTitle} count=${items.length} href=${'#' + tab} action=${headAction} />${body}${more(items.length - shown.length, tab)}</section>`;
+}
+
+/** Only attention cases get rows; the fleet overview remains useful even when every trap is healthy. */
+function trapBlock(items: DeckItem[], repos: DeckInputs['repoTraps'], view: View): Children {
+  if (!visibleTabs().includes('traps')) return null;
+  const shown = items.slice(0, DECK_TRAPS_MAX);
+  const lines = shown.map((item) => deckItem(item, view));
+  return html`<section class="deck-traps"><${SectionHead} title="Traps" count=${items.length} href="#traps" action=${html`${more(items.length - shown.length, 'traps')}<${NewTrap} />`} /><${TrapOverview} repos=${repos} />${shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">No traps need attention</div>`}</section>`;
 }
 
 export function Deck({
@@ -228,27 +246,25 @@ export function Deck({
       acked: !!r.acked,
     };
   });
-  const traps = inp.traps.map(({ x: t }): DeckItem => ({
-    key: t.trapId,
-    title: '🪤 ' + trapDisplayName(t),
-    trap: { address: `wt:${t.trapId}`, scope: trapScope(t) },
-    badge: t.requested
-      ? { text: 'requested', tone: 'dim' }
-      : t.starting
-        ? { text: t.starting.failedAt ? 'start failed' : 'starting', tone: t.starting.failedAt ? 'bad' : 'warn' }
-        : { text: t.live ? t.harness || 'live' : 'signed off', tone: t.live ? 'ok' : 'dim', worker: t.live ? t : undefined },
-    meta: [
-      html`<${GrantChip} session=${t.sessionId} grants=${grants} />`,
-      html`<span class="catchn" title="catches">🦞 ${catchCount(t.totalCatches ?? 0)}</span>`,
-      ' · ',
-      trapNow(t),
-    ],
-    metaText: `🦞 ${catchCount(t.totalCatches ?? 0)} · ${trapNowText(t)}`,
-    action: windowAction(t),
-    extra: startCommands(t),
-    card: trapCard(t),
-    open: opener('trap', t.trapId),
-  }));
+  const traps = inp.traps.map(({ x: trap }): DeckItem => {
+    const attention = deckTrapAttention(trap, getState().snapshot!);
+    return {
+      key: trap.trapId,
+      title: [trapTitleLink(trap), ' ', html`<${Harness} worker=${trap} cls="" compact />`],
+      trap: { address: `wt:${trap.trapId}`, scope: trapScope(trap) },
+      badge: { text: attention ?? '', tone: 'warn' },
+      meta: [
+        html`<${GrantChip} session=${trap.sessionId} grants=${grants} />`,
+        html`<span class="catchn" title="catches">🦞 ${catchCount(trap.totalCatches ?? 0)}</span>`,
+        ' · ',
+        trapWork(trap),
+      ],
+      metaText: trapWorkText(trap),
+      action: windowAction(trap),
+      card: trapCard(trap, attention),
+      open: opener('trap', trap.trapId),
+    };
+  });
   return [
     shownGoals.length > 0 &&
       html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map(
@@ -260,6 +276,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('In flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('Reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${trapBlock(traps, inp.repoTraps, view)}</div>`,
   ];
 }

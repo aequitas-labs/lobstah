@@ -365,8 +365,8 @@ describe('staged reviews', () => {
     expect(latestRound(readReview(KEY)!)!.state).toBe('posted');
   });
 
-  it('re-drafting a stale round deletes its pending review first', async () => {
-    staged('stale');
+  it.each(['stale', 'drafted'] as const)('re-drafting a %s round deletes its pending review first', async state => {
+    staged(state);
     const calls: Call[] = [];
     expect(await redraftReviewRound(KEY, { token: tok, fetch: github(calls, [{ id: 77, body: MARKER, state: 'PENDING' }]) })).toBeUndefined();
     expect(calls.map((c) => c.method)).toEqual(['GET', 'DELETE']);

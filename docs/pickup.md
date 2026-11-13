@@ -295,8 +295,8 @@ outside the configured repos, or `maxPerDay` jobs already started today
 (UTC) leave the round `requested` with the reason. The daily cap stops only
 the jobs lobstah starts on its own: a round you ask for (Draft on the
 glass's Reviews tab, or a redraft) always starts, and counts toward the
-day's total. `lobstah reviews redraft <key>` drafts a stale or failed round
-again at the current head, on the next pick cycle, in any mode.
+day's total. `lobstah reviews redraft <key>` replaces a ready draft or retries a stale or
+failed round at the current head, on the next pick cycle, in any mode.
 
 **Staging and posting.** With `mode = "auto-draft"` or `publish = false` for an on-demand job, a
 fresh draft is staged on the PR as the identity's **pending review**:

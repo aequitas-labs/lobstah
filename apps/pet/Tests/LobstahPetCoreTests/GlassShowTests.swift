@@ -52,7 +52,7 @@ final class GlassShowTests: XCTestCase {
     XCTAssertEqual(report.glassTarget(glass: glass),
                    GlassTarget(hash: "#report/fleet%2Fr1", url: URL(string: "http://127.0.0.1:4949/report/fleet%2Fr1")!))
     let pr = AttentionItem(id: "p", verb: "pr", note: nil, key: "pr:o/r#1", kind: "pr:draft", prUrl: "https://github.com/o/r/pull/1")
-    XCTAssertNil(pr.glassTarget(glass: glass))
+    XCTAssertEqual(pr.glassTarget(glass: glass)?.hash, "#pr/pr%3Ao%2Fr%231")
   }
 
   func testARecentDesktopPageRaisesClaudeAndOpensTheHelmSessionWithNoNewTab() {
@@ -121,8 +121,8 @@ final class GlassShowTests: XCTestCase {
     XCTAssertEqual(helmFocused, ["http://127.0.0.1:4949/#decision/decision%3A0a1b2c3d"])
   }
 
-  func testPRClicksNeverAskTheGlass() {
-    let pr = AttentionItem(id: "p", verb: "pr", note: nil, key: "pr:o/r#1", kind: "pr:draft", prUrl: "https://github.com/o/r/pull/1")
+  func testNonDraftPRClicksKeepOpeningTheirReviewTool() {
+    let pr = AttentionItem(id: "p", verb: "pr", note: nil, key: "pr:o/r#1", kind: "pr:ready", prUrl: "https://github.com/o/r/pull/1")
     var opened: [String] = []
     clickAttentionItem(pr, glass: glass,
       open: { opened.append($0.absoluteString) },

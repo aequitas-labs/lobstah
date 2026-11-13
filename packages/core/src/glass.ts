@@ -153,6 +153,8 @@ export interface GlassPr {
   state: string;
   draft: boolean;
   checks: PrEvidence['checks'];
+  /** Failed checks with links to their runs, as last observed. */
+  failingChecks?: PrEvidence['failingChecks'];
   review: PrEvidence['review'];
   reviewDecision: string;
   mergeStateStatus: string;
@@ -185,6 +187,20 @@ export interface GlassPr {
   mergeRequest?: { at: string; method: 'merge' | 'squash' | 'rebase' };
   /** How Merge when green would merge this open PR of yours: its repo's method. */
   mergeMethod?: 'merge' | 'squash' | 'rebase';
+}
+
+/** Fresh GitHub description and byline, read only when a PR view opens. Never cached. */
+export interface GlassPrDetails {
+  key: string;
+  url: string;
+  title: string;
+  bodyHtml: string;
+  author?: { login: string; avatarUrl?: string; name?: string };
+  baseRefName?: string;
+  headRefName?: string;
+  updatedAt?: string;
+  state?: string;
+  draft?: boolean;
 }
 
 export interface GlassStack {
@@ -284,6 +300,8 @@ export interface GlassDispatch extends GlassDispatchSummary {
   messageAttachments: Attachment[];
   log: StatusEntry[];
   inbox: string[];
+  /** Mail history with existing sender and delivery receipts, loaded with detail only. */
+  messages?: GlassMessage[];
   evidence?: Evidence;
 }
 
@@ -350,6 +368,8 @@ export interface GlassReview {
   verdict?: import('./reviews.js').ReviewVerdict;
   blocking?: import('./reviews.js').BlockingFinding[];
   summary?: string;
+  /** Every inline finding, with its full body, separate from the blocking findings. */
+  comments?: import('./reviews.js').ReviewComment[];
   needsYou?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;
@@ -421,6 +441,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   repoLabel?: string;
   /** Signed on now (the registration exists), including when its beat is stale. */
   live: boolean;
+  /** The existing roster's departure state, so ghosted and deliberately stowed seats stay distinct. */
+  rosterState?: 'live' | 'stowed' | 'ghosted';
   /** Parked and recently beating; false for a stale or never-parked registration. */
   listening?: boolean;
   /** A reserved trap no session has signed on as yet (`man throw`); `live` is false. */
@@ -534,6 +556,15 @@ export interface GlassHeavy {
   tickets: GlassHeavyTicket[];
 }
 
+/** One repo's existing roster capacity and available workers, carried with the fleet snapshot. */
+export interface GlassRepoTraps {
+  repo: string;
+  used: number;
+  limit?: number;
+  free: number;
+  harnesses: Array<{ harness: string; count: number }>;
+}
+
 export interface GlassSnapshot {
   /** One banner per provider account and limit, shared by desktop and phone. */
   usageLimits?: import('./usage-limits.js').UsageLimitGroup[];
@@ -555,6 +586,8 @@ export interface GlassSnapshot {
   runPasskeys?: { count: number; newestAt?: string; hosted?: number };
   /** Configured repo keys, for the New trap form. */
   repoKeys?: string[];
+  /** Per-repo overview from the same registrations and reservations as the roster. */
+  repoTraps?: GlassRepoTraps[];
   /** A helm is signed on and beating: a trap request will be answered. */
   helmOn?: boolean;
   now: string;

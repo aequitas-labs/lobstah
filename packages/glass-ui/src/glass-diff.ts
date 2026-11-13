@@ -52,6 +52,40 @@ export const STALE_SEAT_MS = 1800000;
 /** A trap's catch count as its badge shows it: capped at 999+. */
 export const catchCount = (count: number): string => (count > 999 ? '999+' : String(count));
 
+/** The Traps page's grouping, shared with its stored browser preference. */
+export type TrapGrouping = 'repo' | 'harness' | 'status';
+
+/** Current reasons to put a trap on the deck, independent of a quiet heartbeat alone. */
+export type TrapAttentionReason = 'ghosted' | 'start failed' | 'needs decision' | 'blocked' | 'permission' | 'stalled' | 'not listening';
+
+/** Use recorded lifecycle, permission and dispatch-progress signals, without guessing at terminal contents. */
+export function deckTrapAttention(trap: GlassTrapView, snapshot: Pick<GlassSnapshot, 'decisions' | 'attention'>): TrapAttentionReason | undefined {
+  if (trap.starting?.failedAt) return 'start failed';
+  const lifecycle = trap.notices.find((notice) => ['trap-signed-on', 'trap-stowed', 'trap-ghosted'].includes(notice.kind));
+  if (!trap.live && (trap.rosterState === 'ghosted' || (!trap.rosterState && lifecycle?.kind === 'trap-ghosted'))) return 'ghosted';
+  if (!trap.live) return undefined;
+  const current = trap.catches.find((dispatch) => dispatch.id === trap.claimed && dispatch.bucket === 'active');
+  if (!current) return undefined;
+  if (current.verb === 'blocked') return 'blocked';
+  if (current.verb === 'needs-decision' || current.waiting?.on === 'person') return 'needs decision';
+  if (snapshot.decisions?.some((card) => card.permission && !card.readOnly && card.dispatch === current.id)) return 'permission';
+  const progress = snapshot.attention.find((item) => item.kind === 'dispatch-progress' && item.id === current.id && item.lane === current.lane);
+  if (progress?.verb === 'stalled') return 'stalled';
+  if (progress?.verb === 'idle-while-working') return 'not listening';
+  return undefined;
+}
+
+/** A trap's own route, usable from the deck, a copied link, or another device. */
+export function trapPageUrl(trapId: string): string {
+  return `#trap/${encodeURIComponent(trapId)}`;
+}
+
+/** Read a trap route without accepting an invalid or unbounded identifier. */
+export function trapFromHash(hash: string): string | undefined {
+  const match = /^#trap\/([A-Za-z0-9_-]{1,128})$/.exec(hash);
+  return match?.[1];
+}
+
 /** This browser's preferences and filters (localStorage `spyglass`). */
 export interface GlassPrefs {
   view: 'table' | 'cards';
@@ -62,6 +96,7 @@ export interface GlassPrefs {
   lobs: boolean;
   chain: boolean;
   noticeKind: string;
+  trapGroup?: TrapGrouping;
 }
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
@@ -105,9 +140,14 @@ export interface ResumeSession {
 /** The terminal panel inside Claude Desktop is still a CLI session. */
 export function desktopSession(session: ResumeSession): boolean {
   if (session.harness === 'codex')
-    return !!session.desktopThread || session.link?.startsWith('codex://threads/') === true || session.window?.bundleId === 'com.openai.codex';
+    return (
+      !!session.desktopThread || session.link?.startsWith('codex://threads/') === true || session.window?.bundleId === 'com.openai.codex'
+    );
   if (session.harness === 'claude')
-    return session.window?.entrypoint === 'claude-desktop' || (!session.window?.entrypoint && session.link?.startsWith('claude://claude.ai/') === true);
+    return (
+      session.window?.entrypoint === 'claude-desktop' ||
+      (!session.window?.entrypoint && session.link?.startsWith('claude://claude.ai/') === true)
+    );
   return false;
 }
 
@@ -152,14 +192,47 @@ export function prBadgeClass(b: Partial<PrBadge> | undefined | null): string {
   return state === 'open' && b.tone && b.tone !== 'ok' ? b.tone : 'pr-' + state;
 }
 
-export const GLASS_TABS = ['deck', 'dispatches', 'traps', 'boats', 'prs', 'reviews', 'reports', 'grants', 'todos', 'notices', 'stats', 'settings'] as const;
+export const GLASS_TABS = [
+  'deck',
+  'dispatches',
+  'traps',
+  'boats',
+  'prs',
+  'reviews',
+  'reports',
+  'grants',
+  'todos',
+  'notices',
+  'stats',
+  'settings',
+] as const;
 export type GlassTab = (typeof GLASS_TABS)[number];
+export type GlassRoute = GlassTab | 'decisions';
 
 export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
   if (tab.startsWith('review-')) return 'reviews';
+  if (tab.startsWith('pr/')) return 'prs';
+  if (tab.startsWith('dispatch/')) return 'dispatches';
+  if (tab.startsWith('trap-view/')) return 'traps';
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
 }
+
+/** A PR view can be opened from a card, pet or copied link. */
+export const prHash = (key: string): string => `#pr/${encodeURIComponent(key)}`;
+export function prFromHash(hash: string | undefined | null): string | null {
+  const match = /^#pr\/(.+)$/.exec(hash ?? '');
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]!); } catch { return null; }
+}
+
+/** A shared detail route, including phone Back navigation between linked cards. */
+export function detailFromHash(hash: string | undefined | null): ModalRef | null {
+  const match = /^#(pr|dispatch|trap-view)\/(.+)$/.exec(hash ?? '');
+  if (!match) return null;
+  try { return { type: (match[1] === 'trap-view' ? 'trap' : match[1]) as 'pr' | 'dispatch' | 'trap', key: decodeURIComponent(match[2]!) }; } catch { return null; }
+}
+export const detailHash = (modal: ModalRef): string => `#${modal.type === 'trap' ? 'trap-view' : modal.type}/${encodeURIComponent(modal.key)}`;
 
 /** `#decision/<key>`: the deck, scrolled to that decision's card. */
 export const decisionHash = (key: string): string => `#decision/${encodeURIComponent(key)}`;
@@ -178,13 +251,15 @@ export function decisionFromHash(hash: string | undefined | null): string | null
 /** Where a dispatch's and a trap's attachment images are served (glass.ts serveAttachment). */
 export const dispatchFileUrl = (lane: string, id: string, name: string): string =>
   `/attachment/dispatch/${encodeURIComponent(lane)}/${encodeURIComponent(id)}/${encodeURIComponent(name)}`;
-export const trapFileUrl = (trapId: string, name: string): string => `/attachment/trap/${encodeURIComponent(trapId)}/${encodeURIComponent(name)}`;
+export const trapFileUrl = (trapId: string, name: string): string =>
+  `/attachment/trap/${encodeURIComponent(trapId)}/${encodeURIComponent(name)}`;
 
 /** An attachment name the glass shows as an image. */
 export const isImageName = (name: string): boolean => /\.(png|jpe?g|gif|webp)$/i.test(name);
 
 /** Where a decision's images are served (glass.ts). */
-export const decisionFileUrl = (key: string, name: string): string => `/decision/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
+export const decisionFileUrl = (key: string, name: string): string =>
+  `/decision/${encodeURIComponent(key)}/files/${encodeURIComponent(name)}`;
 
 /**
  * One card in the deck's decisions section: a decision the helm framed, or
@@ -212,7 +287,17 @@ export type DecisionCard =
       /** When the human first viewed it in the decision modal; absent = unread. */
       viewedAt?: string;
     }
-  | { kind: 'question'; key: string; verb: string; note: string; dispatch: string; lane: string; repo?: string; at: string; viewedAt?: string };
+  | {
+      kind: 'question';
+      key: string;
+      verb: string;
+      note: string;
+      dispatch: string;
+      lane: string;
+      repo?: string;
+      at: string;
+      viewedAt?: string;
+    };
 
 /**
  * The deck's cards, newest first: each `decision` attention item joined to
@@ -270,7 +355,11 @@ export function decisionCards(
 
 /** What an answered card says it sent: the option, the text's first line, the files. */
 export function answerSummary(a: { option?: string; text?: string; files?: number }): string {
-  const line = (a.text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  const line =
+    (a.text ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean) ?? '';
   return [
     a.option,
     line && (line.length > 80 ? line.slice(0, 79) + '…' : line),
@@ -328,10 +417,14 @@ export function validShowHash(hash: unknown): hash is string {
   if (typeof hash !== 'string') return false;
   if (hash === '') return true;
   if (hash.length > 1024 || !hash.startsWith('#') || /[\s\x00-\x1f\x7f]/.test(hash)) return false;
-    if (/^#review-.+/.test(hash)) {
-    try { return /^review:[^\s]+\/[^\s]+#\d+$/.test(decodeURIComponent(hash.slice(8))); } catch { return false; }
+  if (/^#review-.+/.test(hash)) {
+    try {
+      return /^review:[^\s]+\/[^\s]+#\d+$/.test(decodeURIComponent(hash.slice(8)));
+    } catch {
+      return false;
+    }
   }
-  return (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
+  return hash === '#decisions' || (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
 }
 
 /** The report key a `/report/<key>` page path names, else null. */
@@ -418,17 +511,18 @@ type Filterable = Pick<GlassDispatchSummary, 'id' | 'lane' | 'repo' | 'verb' | '
 const matchesRepo = (repo: string | undefined, st: Partial<GlassPrefs>, global = false): boolean =>
   !st.repo || repo === st.repo || (global && !repo);
 
-const dispatchRepos = (dispatches: readonly GlassDispatchSummary[]) =>
-  new Map(dispatches.map((x) => [`${x.lane}:${x.id}`, x.repo]));
+const dispatchRepos = (dispatches: readonly GlassDispatchSummary[]) => new Map(dispatches.map((x) => [`${x.lane}:${x.id}`, x.repo]));
 const linkedRepo = (x: { repo?: string; dispatch?: string; lane?: string }, repos: Map<string, string | undefined>): string | undefined =>
   x.repo || (x.dispatch ? repos.get(`${x.lane ?? 'work'}:${x.dispatch}`) : undefined);
 
 /** Shared selection for deck rows, unread badges, alerts and decision navigation. */
 export function filteredDecisionCards(d: GlassSnapshot, st: Partial<GlassPrefs>): DecisionCard[] {
   const query = String(st.q || '').toLowerCase();
-  return decisionCards(d.attention || [], d.decisions || [], d.dispatches).filter((c) =>
-    matchesRepo(c.repo, st) &&
-    (!query || [c.kind, c.repo, c.dispatch, c.kind === 'decision' ? `${c.title} ${c.detail}` : c.note].join(' ').toLowerCase().includes(query)),
+  return decisionCards(d.attention || [], d.decisions || [], d.dispatches).filter(
+    (c) =>
+      matchesRepo(c.repo, st) &&
+      (!query ||
+        [c.kind, c.repo, c.dispatch, c.kind === 'decision' ? `${c.title} ${c.detail}` : c.note].join(' ').toLowerCase().includes(query)),
   );
 }
 
@@ -461,7 +555,7 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null, detail?: Dis
     // The detail has the brief, log, and whole note; the summary keeps its PR badges.
     return summary && full ? { ...summary, ...full } : (summary ?? full ?? null);
   }
-  if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
+  if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || (d.reviews || []).find(v => v.key.replace('review:', 'pr:') === modal.key) || null;
   if (modal.type === 'review') return (d.reviews || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError, helms: d.helms };
   const t = d.traps.find((v) => v.trapId === modal.key);
@@ -485,6 +579,7 @@ export interface DeckInputs {
   reviews: GlassReview[];
   inflight: GlassDispatchSummary[];
   traps: Seat<GlassTrapView>[];
+  repoTraps?: GlassSnapshot['repoTraps'];
   stacks: GlassStack[];
   prs: GlassPr[];
   /** The helms' open to-dos, oldest first within each grounds. */
@@ -502,7 +597,11 @@ export interface PrsInputs {
 }
 
 /** Attention belonging to PRs/stacks actually visible in this section. */
-export function shownPrAttention(attention: readonly DeckAttention[], prs: readonly GlassPr[], stacks: readonly GlassStack[]): DeckAttention[] {
+export function shownPrAttention(
+  attention: readonly DeckAttention[],
+  prs: readonly GlassPr[],
+  stacks: readonly GlassStack[],
+): DeckAttention[] {
   const keys = new Set(prs.map((p) => p.key));
   const stackIds = new Set(prs.map((p) => p.stackId));
   for (const s of stacks) if (stackIds.has(s.id)) keys.add('stack:' + s.id);
@@ -510,16 +609,26 @@ export function shownPrAttention(attention: readonly DeckAttention[], prs: reado
 }
 
 export interface SectionInputs {
-  chips: { daemon: GlassSnapshot['daemon']; daemonStale: boolean; helms: Seat<GlassHelm>[]; stats: GlassSnapshot['stats']; backends?: GlassSnapshot['backends'] };
+  chips: {
+    daemon: GlassSnapshot['daemon'];
+    daemonStale: boolean;
+    helms: Seat<GlassHelm>[];
+    stats: GlassSnapshot['stats'];
+    backends?: GlassSnapshot['backends'];
+  };
   deck: DeckInputs;
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatchSummary[] };
-  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps'] };
+  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps']; groupBy?: TrapGrouping };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
   reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[] };
   notices: { list: Notice[] };
   foot: { version: string; repoUrl: string };
-  modal: { modal: ModalRef | null; item: Seat<ModalItem> | null; prefs: { view: GlassPrefs['view'] | undefined; lobs: boolean | undefined } | undefined };
+  modal: {
+    modal: ModalRef | null;
+    item: Seat<ModalItem> | null;
+    prefs: { view: GlassPrefs['view'] | undefined; lobs: boolean | undefined } | undefined;
+  };
 }
 
 export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): SectionInputs {
@@ -532,29 +641,39 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   // A signed-on trap keeps its seat through heartbeat, claim, and listening
   // changes. Signed-off traps follow in most-recently-signed-off order.
   const signedOffAt = (t: GlassTrap) =>
-    Math.max(0, ...(t.notices || []).filter((n) => n.kind === 'trap-stowed' || n.kind === 'trap-ghosted').map((n) => Date.parse(n.at) || 0));
+    Math.max(
+      0,
+      ...(t.notices || []).filter((n) => n.kind === 'trap-stowed' || n.kind === 'trap-ghosted').map((n) => Date.parse(n.at) || 0),
+    );
   const seated = (t: GlassTrap) => t.live || !!t.starting || !!t.requested;
-  const orderedTraps = [...(d.traps || [])].sort((a, b) =>
-    Number(seated(b)) - Number(seated(a)) ||
-    Number(b.live) - Number(a.live) ||
-    (a.live ? (Date.parse(a.signedOnAt || '') || 0) - (Date.parse(b.signedOnAt || '') || 0)
-      : signedOffAt(b) - signedOffAt(a)) ||
-    (a.name ?? a.trapId).localeCompare(b.name ?? b.trapId));
+  const orderedTraps = [...(d.traps || [])].sort(
+    (a, b) =>
+      Number(seated(b)) - Number(seated(a)) ||
+      Number(b.live) - Number(a.live) ||
+      (a.live ? (Date.parse(a.signedOnAt || '') || 0) - (Date.parse(b.signedOnAt || '') || 0) : signedOffAt(b) - signedOffAt(a)) ||
+      (a.name ?? a.trapId).localeCompare(b.name ?? b.trapId),
+  );
   const repos = dispatchRepos(d.dispatches);
   const inRepo = (x: { repo?: string; dispatch?: string; lane?: string }) => matchesRepo(linkedRepo(x, repos), st);
   const traps = orderedTraps.filter((t) => inRepo(t) && hasQuery(t.name, t.trapId, t.repo, t.worktree, t.harness));
-  const reports = (d.reports || []).filter((r) => inRepo(r) && hasQuery(r.title, r.author, r.dispatch, linkedRepo(r, repos))).sort(reportOrder);
+  const reports = (d.reports || [])
+    .filter((r) => inRepo(r) && hasQuery(r.title, r.author, r.dispatch, linkedRepo(r, repos)))
+    .sort(reportOrder);
   const reviews = (d.reviews || [])
     .filter((r) => matchesRepo(r.repoKey, st, true) && hasQuery(r.repo, r.number, r.title, r.author, r.requestedBy, r.state))
     .sort(reviewOrder);
   const stacks = (d.stacks || []).filter(inRepo);
   const prs = (d.prs || []).filter(inRepo);
-  const deckTraps = traps.filter((t) =>
-    seated(t) || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000)),
-  );
+  const deckTraps = traps.map((trap) => trapView(d, trap)).filter((trap) => deckTrapAttention(trap, d) !== undefined);
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
-    chips: { daemon: d.daemon, daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now), helms: d.helms.map(seat), stats: d.stats, backends: d.backends },
+    chips: {
+      daemon: d.daemon,
+      daemonStale: !!d.daemon && isStale(d.daemon.heartbeat, STALE_DAEMON_MS, now),
+      helms: d.helms.map(seat),
+      stats: d.stats,
+      backends: d.backends,
+    },
     deck: {
       view: st.view,
       decisions: filteredDecisionCards(d, st),
@@ -567,7 +686,8 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       reports,
       reviews: [],
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', verb: '' })),
-      traps: deckTraps.map((t) => seat(trapView(d, t))),
+      traps: deckTraps.map(seat),
+      repoTraps: d.repoTraps?.filter((row) => matchesRepo(row.repo, st)),
       stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
       prs: prs.filter((p) => p.state === 'OPEN'),
       todos: (d.todos || []).filter((t) => hasQuery(t.grounds, t.id, t.text)),
@@ -577,6 +697,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
       configured: d.configuredTraps,
+      groupBy: st.trapGroup,
       view: st.view,
       list: traps.map((t) => seat(trapView(d, t))),
     },
@@ -584,7 +705,11 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       view: st.view,
       stacks,
       prs: prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)),
-      prAttention: shownPrAttention((d.attention || []).map(noAge), prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)), stacks),
+      prAttention: shownPrAttention(
+        (d.attention || []).map(noAge),
+        prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)),
+        stacks,
+      ),
       watches: (d.watches || []).filter((w) => !String(w.key).startsWith('pr:')),
     },
     reports: {
@@ -660,7 +785,9 @@ export function prModalView(d: Pick<GlassSnapshot, 'prs' | 'stacks' | 'dispatche
         }
       : null,
     chain,
-    watch: w ? { key: w.key, owner: w.owner || '', lastCheckedAt: w.lastCheckedAt || null, lastError: w.lastError || null, cursor: w.cursor } : null,
+    watch: w
+      ? { key: w.key, owner: w.owner || '', lastCheckedAt: w.lastCheckedAt || null, lastError: w.lastError || null, cursor: w.cursor }
+      : null,
   };
 }
 
@@ -694,6 +821,10 @@ export function decisionNeighbours(
 }
 
 /** The open decisions not yet viewed, oldest first: what the new-decision alert counts. */
-export function unreadDecisions(cards: readonly DecisionCard[], sent: (key: string) => boolean, viewedHere: (key: string) => boolean): DecisionCard[] {
+export function unreadDecisions(
+  cards: readonly DecisionCard[],
+  sent: (key: string) => boolean,
+  viewedHere: (key: string) => boolean,
+): DecisionCard[] {
   return openDecisionOrder(cards, sent).filter((c) => !c.viewedAt && !viewedHere(c.key));
 }

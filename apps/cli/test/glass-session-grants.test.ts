@@ -126,9 +126,9 @@ it("shows the trap name first, keeps repo context secondary, and retains the tab
   expect(dom.$('main .card .gtop')?.textContent).not.toContain('web');
   (dom.$('main .card') as unknown as HTMLElement).click();
   await dom.settle();
-  expect(dom.$('#overlay h3')?.textContent).toContain('amber-gull');
-  expect(dom.$('#overlay h3')?.textContent).not.toContain('web');
-  expect(dom.$('#overlay .trap-address')?.textContent).toBe(`web · ${address}`);
+  expect(dom.$('#overlay h2')?.textContent).toContain('amber-gull');
+  expect(dom.$('#overlay h2')?.textContent).not.toContain('web');
+  expect(dom.$('#overlay .detail-bar-identity')?.textContent).toBe(`web · ${address}`);
   await dom.close();
   dom = await loadGlass(GLASS_PAGE, { ...emptyFleet(), traps: buildGlassSnapshot().traps }, { now: NOW, hash: '#traps', prefs: { view: 'table' } });
   expect(dom.$('main tr.rowhead td b')?.textContent).toBe('amber-gull');

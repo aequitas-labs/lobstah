@@ -30,6 +30,8 @@ function boatFleet(tag: 'n' | 's'): GlassFullSnapshot {
   d.reviewSetup = { enabled: true, mode: 'notify', publish: false, running: true, identity: 'reviewer', perRepo: { web: { mode: 'on-demand', publish: true, overridden: true } } };
   d.reports = [{ key: `report:work:${d.dispatches[0]!.id}`, dispatch: d.dispatches[0]!.id, lane: 'work', title: `${tag} findings`, author: `${tag}-crab`, filedAt: new Date(NOW - 60_000).toISOString(), stateHash: tag, bytes: 40, attachments: [] }];
   d.viewer = { onMachine: false, windowFocus: false, machine: '', device: 'desktop' };
+  d.helmPasses = [{ grounds: 'home', lastPassAt: new Date(NOW - 60_000).toISOString() }];
+  d.repoTraps = [{ repo: 'web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] }];
   return d;
 }
 
@@ -232,6 +234,16 @@ describe('two mirror boats in one fleet', () => {
     expect(answers[0]).toMatchObject({ boat: NORTH.boat, write: { payload: { key: 'decision:n0000000', option: 'main' } } });
   });
 
+  it('routes Recheck all to the selected boat with its original grounds name', async () => {
+    const page = await hosted('#todos');
+    const south = Array.from(page.doc.querySelectorAll('.todo-pass')).find((row) => text(row).startsWith('south · home'))!;
+    (south.querySelector('.helm-recheck') as unknown as HTMLButtonElement).click();
+    await page.settle();
+    const requests = page.relayed.filter((call) => call.write?.kind === 'helm-pass-request');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ boat: SOUTH.boat, write: { kind: 'helm-pass-request', payload: { grounds: 'home' } } });
+  });
+
   it('shows an asleep boat’s age in the header and its rows read-only', async () => {
     const h = await hosted('#dispatches', { southAt: NOW - MIRROR_STALE_MS - 60_000 });
     const south = Array.from(h.doc.querySelectorAll('.chip')).map(text).find((c) => c.startsWith('south'))!;
@@ -329,6 +341,14 @@ describe('mergeMirror', () => {
     expect(snapshot).toEqual({ ...expected, viewer: { ...viewer, machine: 'north' } });
   });
 
+  it('keeps each boat’s repo overview counts beside its labelled repo', () => {
+    const { snapshot } = mergeMirror(sources(), NOW, viewer);
+    expect(snapshot.repoTraps).toEqual([
+      { repo: 'north · web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] },
+      { repo: 'south · web', used: 2, limit: 4, free: 1, harnesses: [{ harness: 'codex', count: 2 }] },
+    ]);
+  });
+
   it('routes each row’s key to its boat, takes labels back off, and refuses a call naming two boats', () => {
     const { router, snapshot } = mergeMirror(sources(), NOW, viewer);
     const southRow = snapshot.dispatches.find((d) => d.id.startsWith('s'))!;
@@ -363,5 +383,16 @@ describe('mergeMirror', () => {
     expect(snapshot.dispatches).toHaveLength(one.dispatches.length * 2);
     expect(snapshot.prs).toHaveLength(one.prs.length);
     if (one.slots) expect(snapshot.slots?.limit).toBe(one.slots.limit * 2);
+  });
+});
+
+
+describe('a PR description on the hosted glass', () => {
+  it('relays the description read to the row’s boat', async () => {
+    const key = boatFleet('s').prs[0]!.key;
+    const h = await hosted('#pr/' + encodeURIComponent(key), { boats: [[SOUTH, 's']], relay: call => call.read?.startsWith('/data/pr/') ? Response.json({ key, title: 'Fresh PR', url: boatFleet('s').prs[0]!.url, bodyHtml: '<p>A fresh description.</p>' }) : undefined });
+    expect(text(h.doc.querySelector('.github-description'))).toBe('A fresh description.');
+    expect(h.relayed.filter(call => call.read).map(({boat, read}) => ({boat, read}))).toEqual([{ boat: SOUTH.boat, read: '/data/pr/' + encodeURIComponent(key) }]);
+    expect(h.relayed.filter(call => call.write)).toEqual([]);
   });
 });

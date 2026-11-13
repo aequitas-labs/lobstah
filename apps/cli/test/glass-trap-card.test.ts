@@ -29,7 +29,7 @@ function fleet(viewer: GlassFullSnapshot['viewer']): GlassFullSnapshot {
 async function card(d: GlassFullSnapshot, hash = '#traps') {
   const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash, prefs: { view: 'cards' } });
   open.push(g);
-  return { g, card: g.$$(`${hash === '#deck' ? '#deck' : '#traps'} .card`).find((c) => text(c).includes('hardy-kelp'))! };
+  return { g, card: g.$$(`${hash === '#deck' ? '#deck' : '#traps'} .card`).find((c) => text(c.querySelector('.gtitle')) === 'hardy-kelp')! };
 }
 
 describe('the trap card', () => {
@@ -48,7 +48,7 @@ describe('the trap card', () => {
 
   it('shows the same card on the deck', async () => {
     const { card: c } = await card(fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }), '#deck');
-    expect(text(c.querySelector('.gchip'))).toBe('working');
+    expect(text(c.querySelector('.gchip'))).toBe('needs decision');
     expect(text(c.querySelector('.gfoot'))).toContain('⛵ studio');
   });
 
@@ -80,7 +80,7 @@ describe('the trap card', () => {
       prefs: { view: 'table' },
     });
     open.push(g);
-    expect(g.$$('#traps th').map((th) => text(th))).toEqual([
+    expect([...g.$('#traps table')!.querySelectorAll('th')].map((th) => text(th))).toEqual([
       'address',
       'repo',
       'worktree',

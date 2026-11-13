@@ -1,4 +1,3 @@
-import { useState } from 'preact/hooks';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { dismissReview, muteReviewPr, reviewRequest, showModal, unmuteReviewPr } from '../actions.js';
@@ -8,7 +7,7 @@ import { Age, Table, ageText } from './common.js';
 import { can } from '../backend.js';
 import { getState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
-import type { CardPerson, CardTone } from './card.js';
+import type { CardPerson, CardTone, MenuAction } from './card.js';
 import { StatusChip, dispatchTrap, prShapedCard } from './prs.js';
 import { Button } from './button.js';
 
@@ -28,7 +27,6 @@ const TONE: Record<string, string> = { drafted: 'ok', stale: 'warn', failed: 'ba
 export const reviewState = (r: Pick<GlassReview, 'state' | 'staged'>): string => r.state;
 
 export const openReview = (r: Pick<GlassReview, 'reviewUrl'> & { key?: string }) => () => {
-  if (r.key) void reviewRequest('review-seen', { key: r.key });
   window.open(r.reviewUrl, '_blank', 'noopener');
 };
 
@@ -49,33 +47,38 @@ const DISMISSABLE = ['requested', 'drafting', 'drafted', 'stale', 'failed'];
 
 /** Dismiss, for a source whose boats carry it out (the wharf): the boat that drafted the round deletes its pending draft. */
 function Dismiss({ r }: { r: GlassReview }) {
-  const [state, setState] = useState<'idle' | 'busy' | 'sent'>('idle');
-  const [error, setError] = useState<string>();
   if (!DISMISSABLE.includes(r.state)) return null;
   const dismiss = async (e: Event) => {
     e.stopPropagation();
-    setState('busy');
-    const refusal = await dismissReview(r.key);
-    setError(refusal);
-    setState(refusal ? 'idle' : 'sent');
+    return dismissReview(r.key);
   };
-  if (state === 'sent') return html`<span class="ok" role="status">Sent to the boat that drafted it</span>`;
-  return html`<${Button} disabled=${state === 'busy'} onClick=${dismiss}>Dismiss<//>${error && html` <span class="bad" role="alert">${error}</span>`}`;
+  return html`<${Button} action=${dismiss} done="Sent to the boat that drafted it">Dismiss<//>`;
 }
 
 /** Mute or unmute every review round for this PR. */
 function MuteAction({ r }: { r: GlassReview }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
   if (r.mutedAt ? !can('review-unmute') : !can('review-mute')) return null;
   const change = async (e: Event) => {
     e.stopPropagation();
-    setBusy(true);
-    const refusal = r.mutedAt ? await unmuteReviewPr(r.key) : await muteReviewPr(r.key);
-    setError(refusal);
-    setBusy(false);
+    return r.mutedAt ? unmuteReviewPr(r.key) : muteReviewPr(r.key);
   };
-  return html`<${Button} disabled=${busy} onClick=${change}>${r.mutedAt ? 'Unmute' : 'Mute this PR'}<//>${error && html` <span class="bad" role="alert">${error}</span>`}`;
+  return html`<${Button} action=${change} done=${r.mutedAt ? 'Unmuted' : 'Muted'}>${r.mutedAt ? 'Unmute' : 'Mute this PR'}<//>`;
+}
+
+/** Mute belongs in the card's menu; Unmute stays on the bar. */
+function muteMenuAction(r: GlassReview): MenuAction | undefined {
+  if (r.mutedAt || !can('review-mute')) return undefined;
+  return {
+    label: 'Mute PR',
+    icon: ActionIcon.mute,
+    title: 'Stop new review requests until you unmute this PR',
+    action: async (e) => {
+      e.stopPropagation();
+      return muteReviewPr(r.key);
+    },
+    sending: 'Muting…',
+    done: 'Muted',
+  };
 }
 
 /** Sending a drafted review: the request, the button, and what a card's second tap says it posts. */
@@ -89,87 +92,108 @@ const SEND = {
 const SEND_ICON = { approve: ActionIcon.approve, request_changes: ActionIcon.changes, comment: ActionIcon.publish } as const;
 
 /**
- * The review's actions. On a card (`confirm`), sending the review takes a
- * second tap that names what it posts, as Merge when green does; the modal
- * sends on the first, from beside the findings.
+ * The review's actions. A card keeps its main action on the bar and puts
+ * Skip and Mute PR in its menu; the modal keeps its actions beside findings.
  */
-function Actions({
+export function ReviewActions({
   r,
   canDraft,
   publish,
-  confirm = false,
   split = false,
+  inView = false,
 }: {
   r: GlassReview;
   canDraft: boolean;
   publish: boolean;
-  confirm?: boolean;
-  /** A card's bar: the main action as a big button, Dismiss in its ▾ menu. */
+  /** A card's bar: the main action as a big button; Skip and Mute PR in its menu. */
   split?: boolean;
+  /** View actions keep secondary choices in the split menu. */
+  inView?: boolean;
 }) {
   // A source without review actions may still dismiss or mute through its boat.
-  if (!can('review-request')) return html`<${MuteAction} r=${r} />${can('review-dismiss') && html`<${Dismiss} r=${r} />`}`;
-  const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
+  if (!can('review-request')) {
+    if (r.mutedAt) return html`<span class="rv-actions"><span class="badge dim">Muted</span><${MuteAction} r=${r} /></span>`;
+    if (!split) return html`<${MuteAction} r=${r} />${can('review-dismiss') && html`<${Dismiss} r=${r} />`}`;
+    const more: MenuAction[] = [];
+    if (can('review-dismiss') && DISMISSABLE.includes(r.state)) {
+      more.push({
+        label: 'Dismiss',
+        icon: ActionIcon.skip,
+        title: 'Send the dismissal to the boat that drafted this review',
+        action: async (e) => {
+          e.stopPropagation();
+          return dismissReview(r.key);
+        },
+        sending: 'Dismissing…',
+        done: 'Sent to the boat that drafted it',
+      });
+    }
+    const mute = muteMenuAction(r);
+    if (mute) more.push(mute);
+    return html`<span class=${'rv-actions' + (more.length ? ' rv-menu-only' : '')}>${more.length && html`<${SplitButton} more=${more} />`}</span>`;
+  }
   const act = (kind: ReviewRequestKind) => async (e: Event) => {
     e.stopPropagation();
-    setBusy(true);
-    setAsking(false);
-    setError(await reviewRequest(kind, { key: r.key }));
-    setBusy(false);
+    return reviewRequest(kind, { key: r.key });
   };
   const send = SEND[r.verdict ?? 'comment'];
+  const verdictDone =
+    send.kind === 'review-approve'
+      ? `Approved #${r.number}`
+      : send.kind === 'review-request-changes'
+        ? `Requested changes on #${r.number}`
+        : `Published a comment on #${r.number}`;
+  const done = (kind: ReviewRequestKind): string | undefined => {
+    if (kind === 'review-approve' || kind === 'review-request-changes' || kind === 'review-comment') return verdictDone;
+    if (kind === 'review-draft' || kind === 'review-redraft') return 'Draft ready';
+    if (kind === 'review-skip') return 'Dismissed';
+    return undefined;
+  };
+  const sending = (kind: ReviewRequestKind): string =>
+    kind === 'review-approve'
+      ? 'Approving…'
+      : kind === 'review-request-changes'
+        ? 'Requesting changes…'
+        : kind === 'review-comment'
+          ? 'Publishing…'
+          : kind === 'review-skip'
+            ? 'Skipping…'
+            : 'Sending…';
   if (r.mutedAt) return html`<span class="rv-actions"><span class="badge dim">Muted</span><${MuteAction} r=${r} /></span>`;
   const sendButton =
     r.state === 'drafted' &&
-    (confirm && asking
-      ? html`<${Button} variant="primary" disabled=${busy} onClick=${act(send.kind)}>Post ${send.posts} on #${r.number}<//><${Button} onClick=${(
-          e: Event,
-        ) => {
-          e.stopPropagation();
-          setAsking(false);
-        }}>Keep<//>`
-      : html`<${Button} disabled=${busy} onClick=${
-          confirm
-            ? (e: Event) => {
-                e.stopPropagation();
-                setAsking(true);
-              }
-            : act(send.kind)
-        }>${send.label}<//>`);
-  if (split && !asking) {
+    html`<${Button} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${send.label}<//>`;
+  if (split) {
     const drafts = (canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale';
     const skips = OPEN.has(r.state) || !!r.notification;
     const skipTitle =
       "Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.";
     const main =
       r.state === 'drafted'
-        ? html`<${Button} variant="primary" disabled=${busy} onClick=${
-            confirm
-              ? (e: Event) => {
-                  e.stopPropagation();
-                  setAsking(true);
-                }
-              : act(send.kind)
-          }>${SEND_ICON[r.verdict ?? 'comment']}${send.label}<//>`
+        ? html`<${Button} size=${inView ? 'lg' : 'md'} variant="primary" action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${SEND_ICON[r.verdict ?? 'comment']}${send.label}<//>`
         : drafts
-          ? html`<${Button} variant="primary" disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`
-          : skips
-            ? html`<${Button} variant="primary" disabled=${busy} title=${skipTitle} onClick=${act('review-skip')}>${ActionIcon.skip}Dismiss<//>`
-            : null;
-    const more =
-      main && skips && (r.state === 'drafted' || drafts)
-        ? [{ label: 'Dismiss', icon: ActionIcon.skip, title: skipTitle, disabled: busy, onClick: act('review-skip') }]
-        : [];
-    return html`<span class="rv-actions">${main && html`<${SplitButton} main=${main} more=${more} />`}<${MuteAction} r=${r} />${error && html`<span class="bad" role="alert">${error}</span>`}</span>`;
+          ? html`<${Button} size=${inView ? 'lg' : 'md'} variant="primary" action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`
+          : null;
+    const more: MenuAction[] = [];
+    if (skips)
+      more.push({
+        label: inView ? 'Dismiss' : 'Skip',
+        icon: ActionIcon.skip,
+        title: skipTitle,
+        action: act('review-skip'),
+        sending: sending('review-skip'),
+        done: done('review-skip'),
+      });
+    if (inView && r.state === 'drafted') more.push({ label: 'Redraft', action: act('review-redraft'), done: 'Draft requested' });
+    const mute = muteMenuAction(r);
+    if (mute) more.push(mute);
+    return html`<span class=${'rv-actions' + (!main && more.length ? ' rv-menu-only' : '')}>${(main || more.length) && html`<${SplitButton} main=${main} more=${more} />`}</span>`;
   }
-  return html`<span class=${asking ? 'rv-actions asking' : 'rv-actions'}>
-    ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} disabled=${busy} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'} onClick=${act('review-draft')}>${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}
+  return html`<span class="rv-actions">
+    ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}
     ${sendButton}
     <${MuteAction} r=${r} />
-    ${(OPEN.has(r.state) || r.notification) && html`<${Button} disabled=${busy} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub." onClick=${act('review-skip')}>Dismiss<//>`}
-    ${error && html`<span class="bad" role="alert">${error}</span>`}
+    ${(OPEN.has(r.state) || r.notification) && html`<${Button} action=${act('review-skip')} done=${done('review-skip')} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.">Dismiss<//>`}
   </span>`;
 }
 
@@ -205,17 +229,18 @@ const staged = (r: GlassReview) =>
   }}>Open pending review</a>`;
 
 function row(r: GlassReview, canDraft: boolean, publish: boolean) {
-  return html`<tr key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'rowhead' + (r.seenAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} onClick=${openReview(r)}>
+  return html`<tr key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'rowhead' + (r.seenAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} onClick=${() => showModal('pr', r.key.replace('review:', 'pr:'))}>
     <td><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => {
       e.stopPropagation();
-      void reviewRequest('review-seen', { key: r.key });
+      showModal('pr', r.key.replace('review:', 'pr:'));
+      e.preventDefault();
     }}>${r.repo}#${r.number}</a></td>
     <td class="grow">${r.title}${findings(r)}</td>
     <td>${r.author}</td>
     <td>${asker(r)}</td>
     <td>${Age(r.requestedAt)}</td>
     <td>${badge(r)} ${staged(r)} ${posted(r)}</td>
-    <td><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></td>
+    <td><${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></td>
   </tr>`;
 }
 
@@ -247,9 +272,8 @@ function reviewTone(r: GlassReview): CardTone {
   return 'warn';
 }
 
-/** Open the review's modal, and mark it seen. */
+/** Open the PR view without acknowledging its draft. */
 const showReview = (r: GlassReview) => () => {
-  void reviewRequest('review-seen', { key: r.key });
   showModal('review', r.key);
 };
 
@@ -282,7 +306,7 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
     trap: dispatchTrap([r.dispatch]),
     person: reviewPerson(r),
     actions: [
-      html`<${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} confirm split />`,
+      html`<${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} split />`,
       html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : 'Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`,
     ],
     quiet: !OPEN.has(r.state),
@@ -312,7 +336,7 @@ export function reviewModal(r: GlassReview) {
     (r.summary || r.blocking?.length) && html`<div class="sec">findings</div>${findings(r)}`,
     r.staged && html`<div class="sec">pending review</div><div>${staged(r)}</div>`,
     r.postedAt && html`<div class="sec">posted review</div><div>${posted(r)}</div>`,
-    html`<div class="sec">actions</div><div class="rv-modal-actions"><${Actions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : effective?.mode !== 'notify'} publish=${r.publish ?? effective?.publish ?? false} /></div>`,
+    html`<div class="sec">actions</div><div class="rv-modal-actions"><${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : effective?.mode !== 'notify'} publish=${r.publish ?? effective?.publish ?? false} /></div>`,
   ];
 }
 

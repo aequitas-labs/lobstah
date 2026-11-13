@@ -247,6 +247,7 @@ export const MIRROR_SNAPSHOT_MAX_JSON_BYTES = 16 * 1024 * 1024;
  */
 export const MIRROR_READ_PATHS: readonly RegExp[] = [
   /^\/data\/(stats|settings)$/,
+  /^\/data\/pr\/[A-Za-z0-9%._-]{1,300}$/,
   /^\/data\/dispatch\/[A-Za-z0-9-]{1,64}$/,
   /^\/data\/decision\/[A-Za-z0-9%._-]{1,300}$/,
   /^\/data\/older\?kind=[a-z-]{1,32}&offset=\d{1,6}&limit=\d{1,4}$/,
@@ -262,7 +263,7 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
  * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [
-  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'pr-merge', 'stack-merge', 'attention-ack',
+  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'helm-pass-request', 'pr-ack', 'pr-merge', 'stack-merge', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-dismiss', 'review-mute', 'review-unmute', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
   // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.
@@ -277,6 +278,11 @@ export const MIRROR_WRITE_KINDS = [
 export type MirrorWriteKind = (typeof MIRROR_WRITE_KINDS)[number];
 /** Whether a relayed read names a path the hosted glass may read. */
 export function mirrorReadAllowed(path: string): boolean {
+  // A PR identity contains one encoded slash; validate the decoded identity before the generic path guard.
+  if (path.startsWith('/data/pr/') && path.length <= 700 && !path.includes('..')) {
+    try { return /^pr:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*$/.test(decodeURIComponent(path.slice('/data/pr/'.length))); }
+    catch { return false; }
+  }
   // No climbing out of a segment, written plainly or percent-encoded.
   return path.length <= 700 && !path.includes('..') && !/%2e%2e|%2f|%5c/i.test(path) && MIRROR_READ_PATHS.some((pattern) => pattern.test(path));
 }

@@ -44,7 +44,7 @@ describe('trap catches by id', () => {
       expect(text(g.$('#traps'))).not.toMatch(/keeper|\d+ catch/);
       await g.go('#deck');
       expect(text(g.$('#deck'))).toContain('🦞 12');
-      expect(text(g.$('#deck'))).toContain('🦞 999+');
+      expect(text(g.$('#deck .deck-traps'))).not.toContain('🦞 999+');
     });
   }
 
@@ -75,14 +75,15 @@ describe('trap catches by id', () => {
     const card = g.$$('#traps .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
     expect(text(card.querySelector('.gcontext'))).toContain('🦞 1');
     await click(g, card);
-    const catches = g.$$('#modalbox .catch').map((c) => text(c.querySelector('.hdr')));
+    const cards = g.$$('#modalbox .trap-current .card, #modalbox .trap-catches .card');
+    const catches = cards.map(card => text(card));
     expect(catches).toHaveLength(2);
     expect(catches[0]).toContain(known.slice(0, 8));
     expect(catches[1]).toContain('feedface');
-    expect(catches[1]).toContain('unknown');
+    expect(cards[1]!.querySelector('.verbicon')?.getAttribute('aria-label')).toBe('Unknown');
   });
 
-  it('a working trap reads its current catch from dispatches on the deck and the Traps tab', async () => {
+  it('a working trap reads its current catch on the Traps tab and stays off the attention deck', async () => {
     const d = acceptanceFleet();
     const t = d.traps.find((x) => x.trapId === 't1')!;
     const current = d.dispatches.find((x) => x.id === t.catches[0])!;
@@ -94,6 +95,6 @@ describe('trap catches by id', () => {
     const row = g.$$('#traps tr.rowhead').find((r) => text(r).includes('wt:t1'))!;
     expect(text(row)).toContain(`working · ${current.id.slice(0, 8)}`);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain(`working · ${current.id.slice(0, 8)}`);
+    expect(text(g.$('#deck .deck-traps'))).not.toContain(`working · ${current.id.slice(0, 8)}`);
   });
 });

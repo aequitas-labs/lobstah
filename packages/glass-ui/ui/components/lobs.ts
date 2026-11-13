@@ -32,7 +32,7 @@ function lob(it: LobItem, i: number) {
   const open = it.open;
   // A decision or question goes to its card on the deck, scrolled to and flashed.
   if (it.hash)
-    return html`<a key=${it.key} class="lob" style=${style} title="open the decision" href=${it.hash} onClick=${hide}>${body}</a>`;
+    return html`<a key=${it.key} class="lob" style=${style} title=${it.hash.startsWith('#pr/') ? 'open the PR' : 'open the decision'} href=${it.hash} onClick=${hide}>${body}</a>`;
   return it.href
     ? html`<a key=${it.key} class="lob" style=${style} title=${it.label === 'report' ? 'open the report' : it.key.startsWith('decision:') ? 'open the decision' : 'open the PR'} href=${reviewLink(it.href)} target="_blank" rel="noopener" onClick=${hide}>${body}</a>`
     : html`<div

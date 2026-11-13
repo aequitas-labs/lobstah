@@ -5,9 +5,12 @@ import {
   answerSummary,
   applyBeats,
   decisionCards,
+  decisionFromHash,
   decisionNeighbours,
   filteredDecisionCards,
   modalItem,
+  detailHash,
+  detailFromHash,
   openDecisionOrder,
   unreadDecisions,
 } from '../src/glass-diff.js';
@@ -17,7 +20,7 @@ import { getState, setState, viewOf } from './store.js';
 import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
 import { setDecisionBadge } from './app-badge.js';
-import { backend, can } from './backend.js';
+import { backend, can, type GlassVerdict } from './backend.js';
 import { RUN_LINE_SEAL_INFO, RUN_SEAL_INFO, runInputsText, runLineSignedText } from '../../core/src/run-inputs.js';
 import type { RunInputValues, SealedInput } from '../../core/src/run-inputs.js';
 
@@ -149,7 +152,10 @@ export function stepDecision(dir: -1 | 1): void {
   if (next) setState({ decisionModal: { key: next.key } });
 }
 
-export const closeDecision = (): void => setState({ decisionModal: null });
+export const closeDecision = (): void => {
+  setState({ decisionModal: null });
+  if (isDetail(getState().modal) && decisionFromHash(location.hash)) history.back();
+};
 
 /** Hotkeys reach the first nine answers only: 1–9. */
 export const HOTKEY_MAX = 9;
@@ -423,7 +429,7 @@ export function removeFile(key: string, index: number): void {
  * Send a card's answer: one same-origin POST to /requests with the page's
  * token, a `decision-answer` request. The server stores it; the helm acts on it.
  */
-export async function sendAnswer(key: string): Promise<void> {
+export async function sendAnswer(key: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
   const draft = getState().drafts[key] ?? emptyDraft();
   if (draft.sending || draft.sent) return;
@@ -432,14 +438,14 @@ export async function sendAnswer(key: string): Promise<void> {
   const text = permission ? '' : draft.text;
   const files = permission ? [] : draft.files;
   if (!draft.option && !text.trim() && files.length === 0) {
-    setDraft(key, {
-      error: permission ? 'Choose an answer.' : 'Choose an option, write an answer, or attach a file.',
-    });
-    return;
+    const error = permission ? 'Choose an answer.' : 'Choose an option, write an answer, or attach a file.';
+    setDraft(key, { error });
+    return error;
   }
   if (!token) {
-    setDraft(key, { error: 'Reload the page to answer.' });
-    return;
+    const error = 'Reload the page to answer.';
+    setDraft(key, { error });
+    return error;
   }
   setDraft(key, { sending: true, error: undefined });
   try {
@@ -455,40 +461,96 @@ export async function sendAnswer(key: string): Promise<void> {
     );
     const result = response.body;
     if (!response.ok || !result.ok) {
-      setDraft(key, { sending: false, error: result.reason ?? "Your answer didn't go through. Reload and try again." });
-      return;
+      const error = result.reason ?? "Your answer didn't go through. Reload and try again.";
+      setDraft(key, { sending: false, error });
+      return error;
     }
     const previous = modalOrder();
     setDraft(key, { sending: false, sent: answerSummary({ option: draft.option, text, files: files.length }) });
     // Answered in the modal: the next open decision loads, or the all-answered state.
     const open = getState().decisionModal;
     if (open?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
+    return undefined;
   } catch {
-    setDraft(key, { sending: false, error: 'The answer could not be sent.' });
+    const error = 'The answer could not be sent.';
+    setDraft(key, { sending: false, error });
+    return error;
   }
 }
 
 export const markStale = (): void => setState({ stale: true });
 
 /** Show an image in the in-page overlay. */
-export const openLightbox = (src: string, name: string): void => setState({ lightbox: { src, name } });
+export const openLightbox = (src: string, name: string, origin?: Element): void => {
+  const selector = '.mdimg img, .thumb img, .dimg img';
+  const thumbnails = [...document.querySelectorAll<HTMLImageElement>(selector)];
+  const image = origin?.querySelector<HTMLImageElement>('img') ?? thumbnails.find((image) => image.getAttribute('src') === src);
+  const container =
+    image?.closest('.github-description, .reportview, .rsheet, .dmodal, .drow, .card, .detail-scroll, #modalbox') ?? image?.closest('.md');
+  const images = container
+    ? [...container.querySelectorAll<HTMLImageElement>(selector)].map((image) => ({
+        src: image.getAttribute('src')!,
+        name: image.alt || image.getAttribute('src')!,
+      }))
+    : [{ src, name }];
+  const index = images.findIndex((image) => image.src === src);
+  setState({ lightbox: index >= 0 ? { src, name, images, index } : { src, name } });
+};
+/** Step only within the images of the card, report or description that opened the overlay. */
+export const stepLightbox = (direction: -1 | 1): void => {
+  const box = getState().lightbox;
+  if (!box?.images || box.images.length < 2) return;
+  const index = ((box.index ?? 0) + direction + box.images.length) % box.images.length;
+  setState({ lightbox: { ...box, ...box.images[index]!, index } });
+};
 export const closeLightbox = (): void => setState({ lightbox: null });
 
+let detailScroll: number | undefined;
+const isDetail = (modal: ModalRef | null) => modal && ['pr', 'dispatch', 'trap'].includes(modal.type);
+
+/** Keep the current tab under linked detail views, including browser Back. */
+export function routeDetailView(modal: ModalRef | null): void {
+  const state = getState();
+  if (modal) {
+    if (state.modal?.type === modal.type && state.modal.key === modal.key) return;
+    setState({ modal, detail: modal.type === 'dispatch' ? { key: modal.key } : null });
+    if (modal.type === 'dispatch') void refreshDetail();
+  } else if (isDetail(state.modal)) {
+    setState({ modal: null, detail: null });
+    const y = detailScroll;
+    detailScroll = undefined;
+    if (y !== undefined) setTimeout(() => window.scrollTo(0, y), 0);
+  }
+}
+
 export function showModal(type: ModalType, key: string): void {
+  if (type === 'review') {
+    showModal('pr', key.replace('review:', 'pr:'));
+    return;
+  }
   const state = getState();
   const modal = { type, key };
-  if (type === 'dispatch') {
-    // Its detail loads now; the modal shows the summary meanwhile.
-    setState({ modal, detail: state.detail?.key === key ? state.detail : { key } });
-    void refreshDetail();
+  if (isDetail(modal)) {
+    if (!detailFromHash(location.hash)) detailScroll = window.scrollY;
+    if (detailHash(modal) !== location.hash) history.pushState({ ...history.state, glassDetail: true }, '', detailHash(modal));
+    routeDetailView(modal);
     return;
   }
   const view = viewOf(state);
   setState({ modal: !view || modalItem(view, modal) ? modal : null, detail: null });
 }
 
-/** Close the modal. */
+/** Back returns to the linked detail or tab this page opened from. Direct links stay in the glass. */
 export function closeModal(): void {
+  if (isDetail(getState().modal)) {
+    if (history.state?.glassDetail) {
+      history.back();
+      return;
+    }
+    history.replaceState(null, '', '#' + getState().route);
+    routeDetailView(null);
+    return;
+  }
   setState({ modal: null, detail: null });
 }
 
@@ -496,14 +558,16 @@ export function closeModal(): void {
 export const READ_ONLY_REASON = 'This glass is read-only from here';
 
 /** Ask the local server to focus one live trap; it accepts no path, URL, or command. */
-export async function openTrapWindow(trapId: string): Promise<void> {
+export async function openTrapWindow(trapId: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
-  if (!token) return;
+  if (!token) return 'The glass has no page token yet.';
   try {
     const result = (await backend().focus(trapId, token)).body;
     setState({ focusResults: { ...getState().focusResults, [trapId]: result.message ?? result.reason ?? 'Window focus failed' } });
+    return result.focused ? undefined : (result.reason ?? 'Window focus failed');
   } catch {
     setState({ focusResults: { ...getState().focusResults, [trapId]: 'Window focus failed' } });
+    return 'Window focus failed';
   }
 }
 
@@ -556,8 +620,20 @@ export async function reviewRequest(kind: ReviewRequestKind, payload: Record<str
 }
 
 /** Set or move a todo's time from its row. Resolves to the parser's message, or undefined on success. */
-export async function scheduleTodo(grounds: string, id: number, until: string): Promise<string | undefined> {
-  return glassRequest('todo-schedule', { grounds, id, until });
+export async function scheduleTodo(
+  grounds: string,
+  id: number,
+  until: string,
+  onScheduled?: (dueAt: string) => void,
+): Promise<string | undefined> {
+  return glassRequest<GlassVerdict & { dueAt?: string }>('todo-schedule', { grounds, id, until }, (result) => {
+    if (result.dueAt) onScheduled?.(result.dueAt);
+  });
+}
+
+/** Request a todo/goals pass on these grounds, leaving the review work to the helm. */
+export async function requestHelmPass(grounds: string): Promise<string | undefined> {
+  return glassRequest('helm-pass-request', { grounds });
 }
 
 /** Queue a message for the helm about a job. Resolves to the refusal, or undefined once it is queued. */
@@ -585,13 +661,18 @@ export async function unmuteReviewPr(key: string): Promise<string | undefined> {
   return glassRequest('review-unmute', { key });
 }
 
-async function glassRequest(kind: string, payload: Record<string, unknown>): Promise<string | undefined> {
+async function glassRequest<T extends GlassVerdict = GlassVerdict>(
+  kind: string,
+  payload: Record<string, unknown>,
+  onSuccess?: (result: T) => void,
+): Promise<string | undefined> {
   const snapshot = getState().snapshot;
   const token = snapshot?.focusToken;
   if (!token) return snapshot?.viewer?.onMachine === false ? READ_ONLY_REASON : 'The glass has no page token yet.';
   try {
-    const result = (await backend().request(kind, payload, token)).body;
+    const result = (await backend().request<T>(kind, payload, token)).body;
     if (!result.ok) return result.reason ?? 'The request was refused.';
+    onSuccess?.(result);
   } catch {
     return 'The request could not be sent.';
   }
@@ -760,7 +841,7 @@ export async function selectProposalRule(key: string, ruleId: string): Promise<v
 }
 
 /** Approve/reject through the dedicated person-facing glass route, then advance the existing decision queue. */
-export async function sendPermissionsProposal(key: string, option: 'Approve' | 'Reject'): Promise<void> {
+export async function sendPermissionsProposal(key: string, option: 'Approve' | 'Reject'): Promise<string | undefined> {
   const card = modalOrder().find((decision) => decision.key === key);
   if (card?.kind !== 'decision' || !card.permissionsProposal) return;
   const draft = getState().drafts[key];
@@ -774,8 +855,11 @@ export async function sendPermissionsProposal(key: string, option: 'Approve' | '
     const previous = modalOrder();
     setDraft(key, { sending: false, sent: option === 'Approve' ? 'Permission changes applied' : 'Permission changes rejected' });
     if (getState().decisionModal?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
+    return undefined;
   } catch (error) {
-    setDraft(key, { sending: false, error: error instanceof Error ? error.message : 'The proposal could not be answered.' });
+    const message = error instanceof Error ? error.message : 'The proposal could not be answered.';
+    setDraft(key, { sending: false, error: message });
+    return message;
   }
 }
 
@@ -953,9 +1037,9 @@ const setRun = (key: string, patch: Partial<import('./store.js').RunView>) => {
  * the assertion with the typed inputs, then follow the scrubbed output until
  * the run ends. The inputs go in that one request and are kept nowhere here.
  */
-export async function runRunCard(key: string, sha256: string, inputs: Record<string, string>): Promise<void> {
+export async function runRunCard(key: string, sha256: string, inputs: Record<string, string>): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
-  if (!token) return setRun(key, { error: 'Reload the page to run this card.' });
+  if (!token) return runFailure(key, 'Reload the page to run this card.');
   const card = currentCards().find((c) => c.key === key);
   setRun(key, { busy: true, error: undefined, output: '', next: 0, result: undefined, id: undefined, ...(card ? { card } : {}) });
   const run = card?.kind === 'decision' ? card.run : undefined;
@@ -968,7 +1052,7 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
       const value = inputs[input.name];
       if (value === undefined) continue;
       if (run?.boat !== undefined && input.secret) {
-        if (!run.sealKey) return setRun(key, { busy: false, error: 'Secret inputs are typed on the Mac for now.' });
+        if (!run.sealKey) return runFailure(key, 'Secret inputs are typed on the Mac for now.');
         sent[input.name] = await sealInput(value, run.sealKey);
       } else sent[input.name] = value;
     }
@@ -987,10 +1071,10 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
         window?: string;
       }>('run-challenge', { key, sha256, inputsSha256, ...(inWindow ? { window: inWindow.id } : {}) }, token)
     ).body;
-    if (!start.ok || !start.challenge) return setRun(key, { busy: false, error: start.reason ?? 'The glass refused the run.' });
+    if (!start.ok || !start.challenge) return runFailure(key, start.reason ?? 'The glass refused the run.');
     // The script this page shows must be the one the boat will run: never ask for a passkey over another.
     if (!run || (await sha256Text(run.script)) !== (start.sha256 ?? sha256) || sha256 !== (start.sha256 ?? sha256))
-      return setRun(key, { busy: false, error: "The script this page shows isn't the card's. Reload the page." });
+      return runFailure(key, "The script this page shows isn't the card's. Reload the page.");
     if (start.window && inWindow) {
       // Inside the window: the page's window key signs the boat's fresh challenge instead of a passkey.
       const signature = await crypto.subtle.sign(
@@ -1005,9 +1089,10 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
           token,
         )
       ).body;
-      if (!started.ok) return setRun(key, { busy: false, error: started.reason ?? 'The run did not start.' });
+      if (!started.ok) return runFailure(key, started.reason ?? 'The run did not start.');
       if (run.boat !== undefined) runLineKeys.set(key, { key: inWindow.key.privateKey, seq: 0 });
-      return await followRunCard(key);
+      void followRunCard(key);
+      return undefined;
     }
     runWindows.delete(boat);
     // A new window key for this confirmation: its private half never leaves this page.
@@ -1022,7 +1107,7 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
         timeout: 120_000,
       },
     })) as PublicKeyCredential | null;
-    if (!got) return setRun(key, { busy: false, error: 'The passkey was not used.' });
+    if (!got) return runFailure(key, 'The passkey was not used.');
     const response = got.response as AuthenticatorAssertionResponse;
     const started = (
       await backend().request<{ ok: boolean; reason?: string }>(
@@ -1039,13 +1124,20 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
         token,
       )
     ).body as { ok: boolean; reason?: string; window?: string; windowUntil?: number };
-    if (!started.ok) return setRun(key, { busy: false, error: started.reason ?? 'The run did not start.' });
+    if (!started.ok) return runFailure(key, started.reason ?? 'The run did not start.');
     if (started.window && started.windowUntil) runWindows.set(boat, { key: windowKey, id: started.window, until: started.windowUntil });
     if (run.boat !== undefined) runLineKeys.set(key, { key: windowKey.privateKey, seq: 0 });
-    await followRunCard(key);
+    void followRunCard(key);
+    return undefined;
   } catch (err) {
-    setRun(key, { busy: false, error: err instanceof Error ? err.message : 'The run did not start.' });
+    return runFailure(key, err instanceof Error ? err.message : 'The run did not start.');
   }
+}
+
+/** Store a run-start refusal and return it so the action button can announce it beside the control. */
+function runFailure(key: string, error: string): string {
+  setRun(key, { busy: false, error });
+  return error;
 }
 
 const runPollers = new Set<string>();
@@ -1102,29 +1194,43 @@ export async function followRunCard(key: string): Promise<void> {
 }
 
 /** Ask the local server to stop the card's complete process group. */
-export async function stopRunCard(key: string): Promise<void> {
+export async function stopRunCard(key: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
-  if (!token) return;
+  if (!token) return 'The command could not be stopped. Try again.';
   try {
     const response = (await backend().request<{ ok: boolean; reason?: string }>('run-stop', { key }, token)).body;
-    if (!response.ok) setRun(key, { error: response.reason ?? 'The command could not be stopped. Try again.' });
+    if (!response.ok) {
+      const error = response.reason ?? 'The command could not be stopped. Try again.';
+      setRun(key, { error });
+      return error;
+    }
+    return undefined;
   } catch {
-    setRun(key, { error: 'The command could not be stopped. Try again.' });
+    const error = 'The command could not be stopped. Try again.';
+    setRun(key, { error });
+    return error;
   }
 }
 
 /** Archive a finished card and retain the old queue slot. */
-export async function dismissRunCard(key: string): Promise<void> {
+export async function dismissRunCard(key: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
-  if (!token) return;
+  if (!token) return 'The card could not be dismissed. Try again.';
   try {
     const response = (await backend().request<{ ok: boolean; reason?: string }>('run-dismiss', { key }, token)).body;
-    if (!response.ok) return setRun(key, { error: response.reason ?? 'The card could not be dismissed. Try again.' });
+    if (!response.ok) {
+      const error = response.reason ?? 'The card could not be dismissed. Try again.';
+      setRun(key, { error });
+      return error;
+    }
     const previous = modalOrder();
     setDraft(key, { sent: 'Dismissed' });
     if (getState().decisionModal?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
+    return undefined;
   } catch {
-    setRun(key, { error: 'The card could not be dismissed. Try again.' });
+    const error = 'The card could not be dismissed. Try again.';
+    setRun(key, { error });
+    return error;
   }
 }
 

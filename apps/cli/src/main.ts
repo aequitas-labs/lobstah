@@ -261,6 +261,7 @@ import { livenessView } from './liveness-view.js';
 import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
 import { decisionEventFields, decisionLine } from './decisions.js';
+import { readHelmPassRequest, requestHelmPass } from '@lobstah/core';
 import { openCardsAtStop } from './open-cards.js';
 import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
@@ -483,6 +484,7 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   links them by stored name.
   todo add "<text>"
   todo done <id> | todo drop <id> | todo ls [--all]
+  todo recheck [--grounds <name>]
                                   the helm's own todos, per grounds; shown in
                                   man tend, man report, and the glass, and
                                   re-injected at session start and compaction.
@@ -2145,7 +2147,10 @@ async function mainCli(): Promise<void> {
       const grounds = resolveGrounds(cfgTodo, groundsName).name;
       const shown = displayGrounds(grounds, cfgTodo);
       try {
-        if (verb === 'add') {
+        if (verb === 'recheck') {
+          const requested = requestHelmPass(grounds);
+          console.log(toonKV({ grounds: shown, requestedAt: requested.at }));
+        } else if (verb === 'add') {
           const text = pos.slice(1).join(' ');
           if (!text.trim()) throw new UsageError(`todo add requires its text\n\n${usageFor('todo')!}`);
           if (opt('--at') !== undefined && opt('--in') !== undefined) throw new UsageError(`--at and --in both set the time: give one\n\n${usageFor('todo')!}`);
@@ -2907,6 +2912,19 @@ async function mainCli(): Promise<void> {
         };
         const remindMs = (loadConfig().remindSecs ?? 900) * 1000;
         const consume = !has('--peek');
+        /** An explicit recheck wakes now, before consuming unrelated fleet events. */
+        const requestedPass = (): boolean => {
+          if (!callerHelm || !readHelmPassRequest(callerHelm.grounds)) return false;
+          if (consume) {
+            if (!deliverHelmPass(callerHelm.grounds, cfgWait, (details) => console.log(details))) return false;
+            idle.woke();
+          } else {
+            const details = helmPassNotice(callerHelm.grounds, cfgWait);
+            if (details) console.log(details);
+          }
+          return true;
+        };
+        if (requestedPass()) break;
         // A watcher delivery is a report through the newest event it printed.
         // Reminders can be older than the cursor, so never move it backwards.
         const delivered = (keys: string[], ...times: string[]) => {
@@ -2989,6 +3007,7 @@ async function mainCli(): Promise<void> {
             return;
           }
           if (callerHelm) heartbeatHelm(callerHelm.sessionId); // waiting IS liveness
+          if (requestedPass()) return;
           const fresh = freshWakeEvents(baseline, undefined, matchGrounds);
           // Taken after the wake scan: a send answered by a waking verb is
           // cleared here, and that verb is the wake.

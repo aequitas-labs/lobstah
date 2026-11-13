@@ -5,15 +5,16 @@ import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, repoFilterFleet } from './fixtures/glass-snapshots.js';
 
+const attentionFleet = () => { const snapshot = repoFilterFleet(); snapshot.traps = snapshot.traps.map((trap) => ({ ...trap, live: false, rosterState: 'ghosted' as const })); return snapshot; };
 const select = (repo: string) => ({ st: { view: 'table' as const, repo }, modal: null });
-const inputs = (repo: string) => sectionInputs(repoFilterFleet(), select(repo), NOW);
+const inputs = (repo: string) => sectionInputs(attentionFleet(), select(repo), NOW);
 let pages: GlassDom[] = [];
 afterEach(async () => {
   await Promise.all(pages.map((g) => g.close()));
   pages = [];
 });
 async function page(prefs: Record<string, unknown> = {}) {
-  const g = await loadGlass(GLASS_PAGE, repoFilterFleet(), { now: NOW, prefs });
+  const g = await loadGlass(GLASS_PAGE, attentionFleet(), { now: NOW, prefs });
   pages.push(g);
   return g;
 }
@@ -51,14 +52,14 @@ describe('deck repo filter', () => {
   });
 
   it('uses the decision attention repo if its dispatch is no longer in the snapshot', () => {
-    const d = repoFilterFleet();
+    const d = attentionFleet();
     d.dispatches = [];
     d.attention.find((a) => a.key === 'decision:web')!.repo = 'web';
     expect(sectionInputs(d, select('web'), NOW).deck.decisions.map((c) => c.key)).toEqual(['decision:web']);
   });
 
   it('keeps a multi-PR stack together and filters before deck display limits', () => {
-    const d = repoFilterFleet();
+    const d = attentionFleet();
     const web = d.prs[0]!;
     d.prs.push({ ...web, key: 'pr:acme/web#43', number: 43, position: 1 });
     d.stacks[0]!.numbers.push(43);
@@ -98,7 +99,7 @@ describe('deck repo filter', () => {
       expect((p.$('#f-repo') as HTMLSelectElement).value).toBe('web');
     };
     check(g);
-    const updated = repoFilterFleet();
+    const updated = attentionFleet();
     updated.reports.push({ ...updated.reports[1]!, key: 'report:api:later', title: 'api later' });
     g.serve(updated);
     await g.poll();

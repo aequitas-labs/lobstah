@@ -52,8 +52,16 @@ it('serves the same bundled look on the glass host only, with nonce CSP and no c
   // Besides the wharf, only a boat's glass on loopback: the mirror probe and ↗ Open.
   expect(page.headers.get('content-security-policy')).toContain("connect-src 'self' http://127.0.0.1:*;");
   expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
-  // The Reviews tab shows each asker's GitHub avatar; no other remote image loads.
-  expect(page.headers.get('content-security-policy')).toContain("img-src 'self' blob: data: https://avatars.githubusercontent.com;");
+  // Avatars and rendered PR descriptions load only from these GitHub image hosts.
+  const imagePolicy = page.headers.get('content-security-policy')?.split(';').find(directive => directive.trim().startsWith('img-src '));
+  expect(imagePolicy?.trim().split(/\s+/).slice(1)).toEqual([
+    "'self'", 'blob:', 'data:',
+    'https://avatars.githubusercontent.com',
+    'https://user-images.githubusercontent.com',
+    'https://github.com',
+    'https://private-user-images.githubusercontent.com',
+    'https://camo.githubusercontent.com',
+  ]);
   expect(page.headers.get('cache-control')).toBe('no-store'); expect(content).not.toContain(token);
   expect((await SELF.fetch('https://glass.test/device')).status).toBe(200);
   // A report opens on its own page, as in the local glass; the page reads the report through /api/glass.

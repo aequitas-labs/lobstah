@@ -1,9 +1,12 @@
+import { trapAvailability } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
+import { requestHelmPass, resolveGrounds } from '@lobstah/core';
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
 import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
+import { readPrDetails } from './pr-details.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
@@ -164,6 +167,7 @@ export function requestBodyCap(): number {
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['todo-schedule', 1024],
+  ['helm-pass-request', 1024],
   ['decision-viewed', 1024],
   ['checklist-tick', 1024],
   ['permissions-proposal-preview', 8192],
@@ -290,6 +294,20 @@ function trapMessages(trapId: string): GlassMessage[] {
   return rows.filter((m): m is GlassMessage => m !== undefined).sort((a, b) => a.file.localeCompare(b.file));
 }
 
+/** A dispatch's existing mail and sidecars, including delivered envelopes, read with its detail. */
+function dispatchMessages(dir: string): GlassMessage[] {
+  const rows: GlassMessage[] = [];
+  for (const [folder, state] of [[dir, 'pending'], [path.join(dir, 'handled'), 'delivered']] as const) {
+    for (const file of listDir(folder).filter(file => file.endsWith('.msg'))) {
+      try {
+        const meta = readJson<{from?: string; at?: string; attachments?: Attachment[]}>(path.join(folder, file.replace(/\.msg$/, '.meta.json')));
+        rows.push({file, state, from: meta?.from ?? 'unknown', at: meta?.at ?? '', text: fs.readFileSync(path.join(folder, file), 'utf8').trim(), attachments: meta?.attachments});
+      } catch { /* A message moved to handled while this detail was read. The next read sees it. */ }
+    }
+  }
+  return rows.sort((a,b) => a.file.localeCompare(b.file));
+}
+
 /** Activity older than this shows stale. A config error falls back to the default. */
 function wedgeSecs(): number {
   try {
@@ -346,7 +364,7 @@ function dispatchOnDisk(id: string): DispatchOnDisk | undefined {
   return undefined;
 }
 
-function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, staleSecs: number): Omit<GlassDispatch, 'prBadge' | 'prGate'> {
+function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, staleSecs: number, withMessages = false): Omit<GlassDispatch, 'prBadge' | 'prGate'> {
   const id = r.d.id;
   const log = readStatusLog(id, r.lane);
   const last = log.at(-1);
@@ -366,6 +384,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     brief: r.d.brief,
     attachments: r.d.attachments ?? [],
     messageAttachments: messageAttachments(inboxDir),
+    ...(withMessages ? { messages: dispatchMessages(inboxDir) } : {}),
     // A queued descriptor with no log is waiting, not unknown; its time
     // is the queue time.
     // An active dispatch a trap claimed, with no log, is working since
@@ -416,7 +435,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
  */
 export function dispatchDetail(id: string): Omit<GlassDispatch, 'prBadge' | 'prGate'> | undefined {
   const r = dispatchOnDisk(id);
-  return r && dispatchRow(r, readHold(), wedgeSecs());
+  return r && dispatchRow(r, readHold(), wedgeSecs(), true);
 }
 
 function awaitingOf(id: string): Pick<GlassDispatch, 'awaitingReply'> {
@@ -713,6 +732,8 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const notices = allNotices.filter((n) => n.refId === t.trapId).reverse();
     const signed = notices.find((n) => n.kind === 'trap-signed-on');
     const roster = readRoster(t.trapId);
+    // A departed registration retains the repo and folder already known to its roster.
+    const repo = t.repo ?? roster?.repo;
     const name = t.name ?? names(t.trapId);
     const window = t.window ?? (!registered ? roster?.window : undefined);
     const link = t.link ?? (!registered ? roster?.link : undefined);
@@ -722,11 +743,14 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     const harness = t.harness ?? roster?.harness ?? (/\((claude|codex)(?:,| ·)/.exec(signed?.text ?? '')?.[1]);
     return {
       ...t,
+      repo,
+      worktree: t.worktree ?? roster?.worktree,
+      rosterState: roster?.state,
       ...(roster?.configured ? { configured: roster.configured, cwd: roster.worktree } : {}),
       name,
       totalCatches: catches.get(name ?? `wt:${t.trapId}`) ?? 0,
       label: trapLabel({ trapId: t.trapId, name }),
-      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo: t.repo }),
+      repoLabel: trapRepoLabel({ trapId: t.trapId, name, repo }),
       // A link that contradicts the trap's window (a vscode:// link on a
       // terminal session) is not shown; focus falls back to the window.
       window,
@@ -801,6 +825,18 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     // Dispatch progress is the helm's to act on; the glass lists it only when attentionKinds names it, as its attention walks.
     notices: (cfg.attentionKinds.includes('dispatch-progress') ? allNotices : allNotices.filter((n) => !progressNotice(n))).reverse(),
     repoKeys: Object.keys(cfg.repos),
+    repoTraps: Object.keys(cfg.repos).map((repo) => {
+      const inUse = [...new Map([...live, ...reserved].filter((trap) => trap.repo === repo).map((trap) => [trap.trapId, trap])).values()];
+      const harnesses = new Map<string, number>();
+      for (const trap of inUse) harnesses.set(trap.harness ?? '', (harnesses.get(trap.harness ?? '') ?? 0) + 1);
+      return {
+        repo,
+        used: inUse.length,
+        limit: cfg.repos[repo]!.traps,
+        free: live.filter((trap) => trap.repo === repo && trapAvailability(trap).state === 'free').length,
+        harnesses: [...harnesses].sort(([left], [right]) => left.localeCompare(right)).map(([harness, count]) => ({ harness, count })),
+      };
+    }),
     helmOn: liveHelms(cfg.helm.ttlSecs * 1000).length > 0,
     watches,
     dispatches,
@@ -919,6 +955,8 @@ export function serveGlass(
     focus?: (reg: TrapRegistration) => Promise<FocusResult>;
     snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
     presence?: GlassPresence;
+    /** Read a fresh PR description with this server's forge sign-in. */
+    prDetails?: typeof readPrDetails;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
     runWindows?: RunWindows;
@@ -1084,6 +1122,17 @@ export function serveGlass(
           case 'helm-chat':
           case 'review-mode':
             return reply(403, { ok: false, reason: 'Settings are read-only in glass.' });
+          case 'helm-pass-request': {
+            const { grounds } = (body.payload ?? {}) as { grounds?: unknown };
+            if (typeof grounds !== 'string' || grounds.length > 200) return reply(400, { ok: false, reason: 'The request was refused.' });
+            try {
+              const scope = resolveGrounds(loadConfig(), grounds);
+              const requested = requestHelmPass(scope.name);
+              return reply(200, { ok: true, requestedAt: requested.at });
+            } catch (error) {
+              return reply(400, { ok: false, reason: error instanceof Error ? error.message : 'The request was refused.' });
+            }
+          }
           case 'todo-schedule': {
             // Set or move a todo's time from its row. No helm gate, the same as answering a card.
             const { grounds, id, until } = (body.payload ?? {}) as { grounds?: unknown; id?: unknown; until?: unknown };
@@ -1518,6 +1567,21 @@ export function serveGlass(
       const ok = req.method === 'GET';
       res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(ok ? glassSettings() : { error: 'GET required' }));
+    } else if (req.url?.startsWith('/data/pr/')) {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'GET required' })); return;
+      }
+      let key: string;
+      try { key = decodeURIComponent(req.url.slice('/data/pr/'.length)); }
+      catch { res.writeHead(400); res.end(); return; }
+      const fleet = snapshot({ local: false });
+      if (!fleet.prs.some(pr => pr.key === key) && !fleet.reviews?.some(review => review.key.replace(/^review:/, 'pr:') === key)) {
+        res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ error: 'PR not found' })); return;
+      }
+      void (options.prDetails ?? readPrDetails)(key).then(details => {
+        res.writeHead(details ? 200 : 404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(details ?? { error: 'PR description could not be read' }));
+      }).catch(error => fail(req, res, error));
     } else if (req.url?.startsWith('/data/')) {
       // History the poll leaves out, and one dispatch's detail: built on the
       // snapshot thread when there is one. Nothing else lives under /data/.
