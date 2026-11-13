@@ -6,6 +6,7 @@ import { Age, lastPassText } from './common.js';
 import { LinkedText } from './links.js';
 import { can } from '../backend.js';
 import { Button } from './button.js';
+import { RecheckAll } from './recheck-all.js';
 
 /** The times the box offers in one click. They go through the same parser as anything typed. */
 const SCHEDULE_PRESETS: ReadonlyArray<{ label: string; until: string }> = [
@@ -90,13 +91,13 @@ export function Todos({
 }) {
   const open = todos.filter((t) => !t.done);
   const doneToday = todos.filter((t) => t.done);
-  if (preview && !open.length && !doneToday.length) return null;
+  if (preview && !open.length && !doneToday.length && !passes.length) return null;
   const shown = preview ? open.slice(0, 5) : open;
   const grounds = new Set(todos.map((t) => t.grounds)).size > 1;
-  const shownPasses = passes.filter((pass) => !todos.length || todos.some((todo) => todo.grounds === pass.grounds));
+  const shownPasses = passes;
   const row = (t: TodoView) =>
     html`<li key=${`todo:${t.grounds}:${t.id}`} class=${t.done ? 'todo-check done' : 'todo-check'}><input type="checkbox" checked=${!!t.done} disabled aria-label=${`Todo ${t.id}: ${t.text}`} title=${t.done ? 'Done today; it drops off when the day rolls over (04:00)' : `Read-only; use lobstah todo done ${t.id} --grounds ${t.grounds}`} /><div class="todo-content"><span class="todo-text">${t.done ? html`<s>${LinkedText(t.text)}</s>` : LinkedText(t.text)}</span><span class="dim">${grounds ? t.grounds + ' · ' : ''}#${t.id} · added ${preview ? [Age(t.createdAt), ' ago'] : html`<time datetime=${t.createdAt} title=${t.createdAt}>${new Date(t.createdAt).toLocaleString()}</time>`}</span>${!t.done && html`<${TodoChips} todo=${t} />`}${!t.done && !preview && can('todo-schedule') && html`<div class="todo-actions"><${TodoSchedule} todo=${t} /></div>`}</div></li>`;
-  return html`<section class="todos"><h2>${preview ? 'Todos' : 'TODOs'}</h2>${shownPasses.map((pass) => html`<div class="dim">${shownPasses.length > 1 ? pass.grounds + ' · ' : ''}${lastPassText(pass.lastPassAt)}</div>`)}${note && html`<div class="dim">${LinkedText(note)}</div>`}${!open.length && html`<div class="empty">No open TODOs</div>`}<ul class="todo-checklist">${shown.map(row)}</ul>${preview && open.length > 5 && html`<a class="deckmore" href="#todos">More (${open.length - 5})</a>`}${
+  return html`<section class="todos"><div class="todo-heading"><h2>${preview ? 'Todos' : 'TODOs'}</h2>${shownPasses.length === 1 && html`<${RecheckAll} pass=${shownPasses[0]} />`}</div>${shownPasses.map((pass) => html`<div class="todo-pass"><span class="dim">${shownPasses.length > 1 ? pass.grounds + ' · ' : ''}${lastPassText(pass.lastPassAt)}</span>${shownPasses.length > 1 && html`<${RecheckAll} pass=${pass} />`}</div>`)}${note && html`<div class="dim">${LinkedText(note)}</div>`}${!open.length && html`<div class="empty">No open TODOs</div>`}<ul class="todo-checklist">${shown.map(row)}</ul>${preview && open.length > 5 && html`<a class="deckmore" href="#todos">More (${open.length - 5})</a>`}${
     doneToday.length > 0 &&
     (preview
       ? html`<a class="dim todo-done-today" href="#todos">${doneToday.length} done today</a>`

@@ -83,6 +83,8 @@ export const GLASS_ACTIONS = [
   'trap-request',
   /** Set or move a TODO's time. */
   'todo-schedule',
+  /** Ask the helm for an immediate todo and goals pass. */
+  'helm-pass-request',
   /** Acknowledge PR and stack attention. */
   'pr-ack',
   /** Merge one of your PRs when it's green, or cancel that. */

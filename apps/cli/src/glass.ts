@@ -1,4 +1,5 @@
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
+import { requestHelmPass, resolveGrounds } from '@lobstah/core';
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
 import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
@@ -164,6 +165,7 @@ export function requestBodyCap(): number {
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
   ['todo-schedule', 1024],
+  ['helm-pass-request', 1024],
   ['decision-viewed', 1024],
   ['checklist-tick', 1024],
   ['permissions-proposal-preview', 8192],
@@ -1084,6 +1086,17 @@ export function serveGlass(
           case 'helm-chat':
           case 'review-mode':
             return reply(403, { ok: false, reason: 'Settings are read-only in glass.' });
+          case 'helm-pass-request': {
+            const { grounds } = (body.payload ?? {}) as { grounds?: unknown };
+            if (typeof grounds !== 'string' || grounds.length > 200) return reply(400, { ok: false, reason: 'The request was refused.' });
+            try {
+              const scope = resolveGrounds(loadConfig(), grounds);
+              const requested = requestHelmPass(scope.name);
+              return reply(200, { ok: true, requestedAt: requested.at });
+            } catch (error) {
+              return reply(400, { ok: false, reason: error instanceof Error ? error.message : 'The request was refused.' });
+            }
+          }
           case 'todo-schedule': {
             // Set or move a todo's time from its row. No helm gate, the same as answering a card.
             const { grounds, id, until } = (body.payload ?? {}) as { grounds?: unknown; id?: unknown; until?: unknown };

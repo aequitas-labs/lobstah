@@ -606,6 +606,23 @@ h2 {
   padding: 0;
   margin: 0;
 }
+.todo-heading,
+.todo-pass {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.todo-heading {
+  align-items: baseline;
+}
+.todo-heading h2 {
+  flex: 1;
+}
+.todo-pass > .dim {
+  flex: 1;
+}
 /* Todos done today sit apart from the open ones, and no count includes them. */
 .todo-done-today {
   display: block;

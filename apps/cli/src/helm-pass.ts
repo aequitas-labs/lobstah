@@ -1,4 +1,4 @@
-import { backendScopes, readHelmPass, recordHelmPass, storageGrounds, type HelmPassView, displayGrounds, goalDate, helmPassStatus, readGoals, type Config } from '@lobstah/core';
+import { backendScopes, readHelmPass, readHelmPassRequest, recordHelmPass, storageGrounds, type HelmPassView, displayGrounds, goalDate, helmPassStatus, readGoals, type Config } from '@lobstah/core';
 import { renderTodoList } from './todo.js';
 import { renderGoals } from './goals.js';
 
@@ -30,5 +30,6 @@ export function helmPassViews(config: Config): HelmPassView[] {
   return backendScopes(config).map((scope) => ({
     grounds: scope.grounds,
     lastPassAt: readHelmPass(storageGrounds(scope.grounds, config))?.at,
+    requestedAt: readHelmPassRequest(storageGrounds(scope.grounds, config))?.at,
   }));
 }

@@ -3,9 +3,9 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { enqueue, addTodo, ensureLayout, goalDate, helmPassStatus, loadConfig, readHelmPass, recordHelmPass, setGoals, snoozeTodo, takeHelm } from '@lobstah/core';
+import { enqueue, addTodo, ensureLayout, goalDate, helmPassStatus, loadConfig, readHelmPass, readHelmPassRequest, recordHelmPass, requestHelmPass, setGoals, snoozeTodo, takeHelm } from '@lobstah/core';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
@@ -33,6 +33,52 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\ntimezone = "UTC"\n');
 });
 afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
+
+it('todo recheck stands through a peek, then the next wait delivers the full requested pass immediately', () => {
+  seat();
+  recordHelmPass('fleet', loadConfig().helm);
+  addTodo('fleet', 'Check the package');
+  setGoals('fleet', goalDate(new Date(), 'UTC'), ['Submit the package']);
+  const requested = run(['todo', 'recheck', '--session', session]);
+  expect(requested.status, requested.stderr).toBe(0);
+  expect(requested.stdout).toContain('requestedAt:');
+  const pending = readHelmPassRequest('fleet');
+  expect(pending).toBeDefined();
+  const peek = run(['man', 'wait', '--session', session, '--peek']);
+  expect(peek.stdout).toMatch(/^pass-due.*requested/);
+  expect(readHelmPassRequest('fleet')).toEqual(pending);
+  const delivered = run(['man', 'wait', '--session', session, '--timeout', '60']);
+  expect(delivered.status, delivered.stderr).toBe(0);
+  expect(delivered.stdout).toMatch(/^pass-due.*requested/);
+  expect(delivered.stdout).toContain('Check the package');
+  expect(delivered.stdout).toContain('Submit the package');
+  expect(readHelmPassRequest('fleet')).toBeUndefined();
+}, 15_000);
+
+it('a request wakes an already waiting helm instead of waiting for its quiet timeout', async () => {
+  seat();
+  recordHelmPass('fleet', loadConfig().helm);
+  const child = spawn(process.execPath, [cli, 'man', 'wait', '--session', session, '--timeout', '4'], { cwd: home, env: environment(), stdio: 'pipe' });
+  let output = '';
+  child.stdout.on('data', (data: Buffer) => { output += data.toString(); });
+  const ended = new Promise<void>((resolve, reject) => { child.once('error', reject); child.once('exit', () => resolve()); });
+  child.stdin.end();
+  try {
+    const watcher = path.join(home, 'watchers', `${session}.json`);
+    const deadline = Date.now() + 3000;
+    while (!fs.existsSync(watcher) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(fs.existsSync(watcher)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    requestHelmPass('fleet');
+    await ended;
+    expect(child.exitCode).toBe(0);
+    expect(output).toMatch(/^pass-due.*requested/);
+    expect(output).not.toContain('timeout: true');
+    expect(readHelmPassRequest('fleet')).toBeUndefined();
+  } finally {
+    if (child.exitCode === null) { child.kill(); await ended; }
+  }
+}, 10_000);
 
 it('sign-on delivers the full due pass without a new command or charter rule', () => {
   addTodo('fleet', 'Check the release');

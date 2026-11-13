@@ -17,9 +17,15 @@ export interface HelmPass {
 export interface HelmPassView {
   grounds: string;
   lastPassAt?: string;
+  requestedAt?: string;
 }
 
-export type HelmPassReason = 'daily' | 'interval' | 'stale-todos';
+/** A person's request for the next todo/goals pass, retained until delivery. */
+export interface HelmPassRequest {
+  at: string;
+}
+
+export type HelmPassReason = 'requested' | 'daily' | 'interval' | 'stale-todos';
 
 /** Current standing pass requirement; reading it never acknowledges it. */
 export interface HelmPassStatus {
@@ -32,6 +38,35 @@ function helmPassFile(grounds: string): string {
   // Use the same grounds validation as the daily goals store.
   goalsFile(grounds, '2000-01-01');
   return path.join(lobstahHome(), 'passes', `${grounds}.json`);
+}
+
+/** A pass request shares its grounds validation and directory with the pass record. */
+function helmPassRequestFile(grounds: string): string {
+  return helmPassFile(grounds).replace(/\.json$/, '.request.json');
+}
+
+/** A pending explicit pass request; a read never acknowledges it. */
+export function readHelmPassRequest(grounds: string): HelmPassRequest | undefined {
+  try {
+    const request = JSON.parse(fs.readFileSync(helmPassRequestFile(grounds), 'utf8')) as HelmPassRequest;
+    return request && Number.isFinite(Date.parse(request.at)) ? request : undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return undefined;
+    throw error;
+  }
+}
+
+/** Request one pass without changing todos or goals; repeated presses retain the standing request. */
+export function requestHelmPass(grounds: string, now: number = Date.now()): HelmPassRequest {
+  const pending = readHelmPassRequest(grounds);
+  if (pending) return pending;
+  const request: HelmPassRequest = { at: new Date(now).toISOString() };
+  const file = helmPassRequestFile(grounds);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = uniqueTempPath(file);
+  fs.writeFileSync(temporary, `${JSON.stringify(request)}\n`);
+  atomicRenameSync(temporary, file);
+  return request;
 }
 
 /** Last completed pass, or none for an absent or invalid record. */
@@ -51,6 +86,7 @@ export function helmPassStatus(grounds: string, config: HelmConfig, now = Date.n
   const lastPass = readHelmPass(grounds);
   const stale = staleTodos(listTodos(grounds), config.todoStaleDays, now);
   const reasons: HelmPassReason[] = [];
+  if (readHelmPassRequest(grounds)) reasons.push('requested');
   if (!lastPass || goalDate(new Date(lastPass.at), config.timezone) !== goalDate(new Date(now), config.timezone)) reasons.push('daily');
   if (lastPass && config.passIntervalSecs > 0 && now - Date.parse(lastPass.at) >= config.passIntervalSecs * 1000) reasons.push('interval');
   if (stale.some((todo) => !lastPass?.reviewedTodos.some((reviewed) => reviewed.id === todo.id && reviewed.updatedAt === todo.updatedAt))) reasons.push('stale-todos');
@@ -69,5 +105,7 @@ export function recordHelmPass(grounds: string, config: HelmConfig, note?: strin
   const temporary = uniqueTempPath(file);
   fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`);
   atomicRenameSync(temporary, file);
+  const request = readHelmPassRequest(grounds);
+  if (request && Date.parse(request.at) <= now) fs.rmSync(helmPassRequestFile(grounds), { force: true });
   return record;
 }
