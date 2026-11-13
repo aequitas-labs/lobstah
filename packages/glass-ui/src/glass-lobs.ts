@@ -3,7 +3,7 @@
  * page's Lobs component. The page's bundle imports it, so the browser and
  * the tests run the same code — keep it free of Node imports.
  */
-import { decisionHash, reportPageUrl } from './glass-diff.js';
+import { decisionHash, prHash, reportPageUrl } from './glass-diff.js';
 import type { ModalRef } from './glass-diff.js';
 
 export interface LobAttention {
@@ -85,7 +85,10 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
       if ((x.kind ?? 'question') === 'question' && x.key)
         return { key: 'question:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
       // A review request opens the PR in its review tool, where the staged draft is sent.
-      if (x.kind === 'review' && x.key && x.prUrl) return { key: 'review:' + x.key, text: x.note || x.verb, label, href: x.reviewUrl ?? x.prUrl, ...hide };
+      if ((x.kind === 'review' || x.kind === 'pr:draft') && x.key && x.prUrl) {
+        const key = x.key.replace(/^review:/, 'pr:');
+        return { key: x.kind + ':' + x.key, text: x.note || x.verb, label, hash: prHash(key) };
+      }
       // A report opens its own page in a new tab.
       if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };
       return typeof x.kind === 'string' && (x.kind.startsWith('pr:') || x.kind === 'stack-ready') && x.prUrl

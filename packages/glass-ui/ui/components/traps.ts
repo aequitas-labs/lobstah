@@ -44,7 +44,10 @@ function row(t: GlassTrap, grants: Grant[]) {
 export function trapTitleLink(trap: GlassTrap): Children {
   const open = (event: MouseEvent): void => {
     event.stopPropagation();
-    if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) opener('trap', trap.trapId)();
+    if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
+      event.preventDefault();
+      opener('trap', trap.trapId)();
+    }
   };
   return html`<a href=${trapPageUrl(trap.trapId)} onClick=${open}>${trapDisplayName(trap)}</a>`;
 }

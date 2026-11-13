@@ -85,6 +85,8 @@ export interface GlassState {
 export interface Lightbox {
   src: string;
   name: string;
+  images?: Array<{ src: string; name: string }>;
+  index?: number;
 }
 
 /** A file picked for an answer, read as base64 for the POST. */

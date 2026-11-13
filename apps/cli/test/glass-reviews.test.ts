@@ -101,14 +101,14 @@ describe('the Reviews tab', () => {
     expect(g.$$('[role="status"]').map((status) => status.textContent)).toContain('Approved #7');
   });
 
-  it('deep links open Reviews despite stored filters, mark the target seen, and keep needs-you', async () => {
+  it('legacy deep links open Reviews despite stored filters and leave the draft pending', async () => {
     const r = review(7, { state: 'drafted', verdict: 'approve', needsYou: true, seenAt: ago(10) });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards', repo: 'other', q: 'unrelated' }, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g); await g.go('#review-review%3Aacme%2Fweb%237');
     expect(g.$('#tabs a[data-tab="reviews"]')?.classList.contains('on')).toBe(true);
     expect(g.$('[data-review]')?.classList.contains('seen')).toBe(true);
     expect(g.$('#reviews')?.textContent).toContain('needs you');
-    expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-seen', payload: { key: r.key } });
+    expect(g.posts()).toEqual([]);
     expect(g.$('#tabs a[data-tab="reviews"] .dbadge')?.textContent).toBe('1');
   });
 
@@ -167,7 +167,9 @@ describe('the Reviews tab', () => {
     expect(box.querySelector('.rv-person')?.textContent).toContain('Dana Developer');
     expect(box.querySelector('.rv-person')?.textContent).toContain('automatic');
     expect(box.querySelector('.rv-staged')?.getAttribute('href')).toContain('#pullrequestreview-99');
-    expect([...box.querySelectorAll('button')].find((b) => b.textContent === 'Dismiss')?.getAttribute('title')).toContain('does not decline the review on GitHub');
+    (box.querySelector('.splitcaret') as unknown as HTMLElement).click();
+    await g.settle();
+    expect([...box.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Dismiss')?.getAttribute('title')).toContain('does not decline the review on GitHub');
     // An avatar that can't load (offline, or a page that blocks it) shows the asker's initials.
     box.querySelector('.rv-person img')!.dispatchEvent(new g.window.Event('error'));
     await g.settle();
@@ -236,7 +238,7 @@ describe('the Reviews tab', () => {
     expect(g.$$('#reviews .rv-controls input, #reviews .rv-controls select, #reviews .rv-controls button')).toEqual([]);
     expect(g.posts().some(p => JSON.parse(p.body).kind === 'review-mode')).toBe(false);
   });
-  it('rows open the review tool as seen; explicit actions send guarded requests', async () => {
+  it('rows open the PR view without acknowledgement; explicit actions send guarded requests', async () => {
     const g = await loadGlass(GLASS_PAGE, fleet(), { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g);
     await g.go('#reviews');
@@ -249,7 +251,10 @@ describe('the Reviews tab', () => {
     expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Mute this PR']);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
-    expect(g.opened().at(-1)?.[0]).toBe('https://app.graphite.com/github/pr/acme/web/7');
+    expect(g.window.location.hash).toBe('#pr/pr%3Aacme%2Fweb%237');
+    expect(g.posts()).toEqual([]);
+    (g.$('.detail-close') as unknown as HTMLElement).click();
+    await g.settle();
     (rows[2]!.querySelector('button') as unknown as HTMLElement).click();
     await g.settle();
     const sent = g.posts().find((p) => JSON.parse(p.body).kind === 'review-draft')!;
@@ -272,12 +277,12 @@ describe('the Reviews tab', () => {
     expect(g.$$('#deck section h2').map((h) => h.textContent)).not.toContain('reviews →');
   });
 
-  it('a review lob opens the PR in its review tool', () => {
+  it('a review lob opens the PR view without acknowledging it', () => {
     const [lob] = lobItems(
       [{ kind: 'review', key: 'review:acme/web#7', stateHash: 'h', id: 'review:acme/web#7', lane: 'chore', verb: 'drafted', note: 'acme/web#7 pr 7', prUrl: 'https://github.com/acme/web/pull/7', reviewUrl: 'https://app.graphite.com/github/pr/acme/web/7' }],
       { lobs: true },
     );
-    expect(lob).toMatchObject({ key: 'review:review:acme/web#7', label: 'review request', href: 'https://app.graphite.com/github/pr/acme/web/7' });
+    expect(lob).toMatchObject({ key: 'review:review:acme/web#7', label: 'review request', hash: '#pr/pr%3Aacme%2Fweb%237' });
   });
 });
 
@@ -336,7 +341,7 @@ describe('review requests on /requests', () => {
     const { base, token } = await start();
     const redraft = await send(base, token, 'review-redraft', { key: 'review:acme/web#7' });
     expect(redraft.status).toBe(409);
-    expect(((await redraft.json()) as { reason: string }).reason).toContain('only a stale or failed round re-drafts');
+    expect(((await redraft.json()) as { reason: string }).reason).toContain('only a drafted, stale or failed round re-drafts');
     expect((await send(base, token, 'review-dismiss', { key: 'review:acme/web#7' })).status).toBe(200);
     expect(latestRound(readReview('review:acme/web#7')!)).toMatchObject({ state: 'dismissed', by: 'glass' });
     expect((await send(base, token, 'review-dismiss', { key: 'not-a-review' })).status).toBe(400);

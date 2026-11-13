@@ -1,4 +1,7 @@
 import { linkParts } from '../../src/glass-links.js';
+import { showModal } from '../actions.js';
+import { getState } from '../store.js';
+import { prHash } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 
@@ -12,8 +15,20 @@ import type { Children } from '../html.js';
 const stop = (e: Event) => e.stopPropagation();
 
 /** One URL as a link; `label` is what it shows (a cut URL keeps its whole href). */
-export const UrlLink = (url: string, label: string = url): Children =>
-  html`<a class="autolink" href=${url} target="_blank" rel="noopener noreferrer" onClick=${stop}>${label}</a>`;
+export const UrlLink = (url: string, label: string = url): Children => {
+  const snapshot = getState().snapshot;
+  const pr = snapshot?.prs?.find((pr) => pr.url === url);
+  const review = snapshot?.reviews?.find((review) => review.url === url);
+  const key = pr?.key ?? review?.key.replace(/^review:/, 'pr:');
+  return key
+    ? html`<a class="autolink" href=${prHash(key)} onClick=${(event: MouseEvent) => {
+        stop(event);
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        showModal('pr', key);
+      }}>${label}</a>`
+    : html`<a class="autolink" href=${url} target="_blank" rel="noopener noreferrer" onClick=${stop}>${label}</a>`;
+};
 
 /**
  * Text with each bare URL as a link. Empty or missing text renders nothing.
