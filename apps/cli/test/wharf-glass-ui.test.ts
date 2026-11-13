@@ -267,7 +267,7 @@ it("renders the wharf in the local glass's own views and tabs", async () => {
   expect(g.doc.querySelector('.headerline h1')?.textContent).toContain('spyglass');
   expect(g.text('.chips')).toContain('helm live');
   expect(g.text('.chips')).not.toContain('daemon');
-  expect(g.text('#deck')).toContain('in flight');
+  expect(g.text('#deck')).toContain('In flight');
   expect(g.text('#deck')).not.toContain('PRs');
   expect(g.text('#foot')).toContain('lobstah · wharf · PR watches and repair run on your boats');
 });
@@ -384,6 +384,7 @@ it('Ctrl+Enter queues the helm message as its button does, only when there is on
 
 it('boats show repos and check-in, no edit/grant controls; revoke and delete each require confirmation', async () => {
   const g = await page('/#boats');
+  expect(g.doc.querySelector('#boats .page-head h1')?.textContent).toBe('Boats');
   // The card shows the boat's access and age; a tap shows its repos, last check-in and trap request.
   expect(g.text('#boats')).not.toContain('github.com/aequitas-labs/lobstah');
   (g.doc.querySelector('#boats .card') as unknown as HTMLElement).click();

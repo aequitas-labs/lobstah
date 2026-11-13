@@ -167,7 +167,7 @@ it.each(['table', 'cards'])('renders Todos as one compact read-only checklist wi
   const snapshot = emptyFleet(); snapshot.todos = buildGlassSnapshot().todos;
   const page = await loadGlass(GLASS_PAGE, snapshot, { now: Date.now(), prefs: { view } });
   try {
-    expect(page.$('.todos h2')?.textContent).toBe('Todos');
+    expect(page.$('.todos .section-head h2 a')?.textContent).toBe('Todos · 2 →');
     // One list, one row per Todo — never a card per Todo, in any view.
     expect(page.$$('.todos ul.todo-checklist')).toHaveLength(1);
     expect(page.$$('.todos .card, .todos .cards')).toHaveLength(0);

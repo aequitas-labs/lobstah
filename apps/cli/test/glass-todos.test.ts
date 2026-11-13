@@ -116,7 +116,9 @@ describe('the schedule box', () => {
     await clickIn(g, row(g, 4), 'Set a time');
     await clickIn(g, row(g, 4), 'Tomorrow 09:00');
     expect((row(g, 4).querySelector('input[name=until]') as HTMLInputElement).value).toBe('tomorrow 09:00');
-    row(g, 4).querySelector('form')!.dispatchEvent(new g.window.Event('submit', { bubbles: true, cancelable: true }) as unknown as Event);
+    row(g, 4)
+      .querySelector('form')!
+      .dispatchEvent(new g.window.Event('submit', { bubbles: true, cancelable: true }) as unknown as Event);
     await g.settle();
     const post = g.posts().find((p) => p.url.includes('/requests'))!;
     expect(JSON.parse(post.body)).toEqual({ kind: 'todo-schedule', payload: { grounds: 'fleet', id: 4, until: 'tomorrow 09:00' } });
@@ -143,12 +145,15 @@ describe('the schedule box', () => {
 describe('the Deck preview', () => {
   it('still lists at most five rows, with chips and no button', async () => {
     const dueAt = new Date(NOW + HOUR).toISOString();
-    const g = await open(Array.from({ length: 8 }, (_, i) => todo({ id: i + 1, dueAt })), '#deck');
+    const g = await open(
+      Array.from({ length: 8 }, (_, i) => todo({ id: i + 1, dueAt })),
+      '#deck',
+    );
     const rows = g.$$('#deck .todo-check');
     expect(rows).toHaveLength(5);
     expect(rows[0]!.querySelector('.badge')).not.toBeNull();
     expect(rows[0]!.querySelector('button')).toBeNull();
-    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('More (3)');
+    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('+3 more →');
   });
 });
 
@@ -165,7 +170,7 @@ describe('the count', () => {
     const rows = openRows(g, 'deck');
     expect(rows).toHaveLength(5);
     expect(rows.every((r) => !r.classList.contains('done'))).toBe(true);
-    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('More (20)');
+    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('+20 more →');
     const done = g.$('#deck .todos .todo-done-today')!;
     expect(done.textContent).toBe('50 done today');
     expect(done.getAttribute('href')).toBe('#todos');

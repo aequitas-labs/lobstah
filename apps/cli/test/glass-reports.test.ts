@@ -75,14 +75,15 @@ const click = async (g: GlassDom, el: Element | null) => {
   (el as HTMLElement).click();
   await g.settle();
 };
-const reportsSection = (g: GlassDom) => g.$$('#deck .deckgrid > section').find((s) => text(s.querySelector('h2')) === 'reports →')!;
+const reportsSection = (g: GlassDom) =>
+  g.$$('#deck .deckgrid > section').find((s) => s.querySelector('.section-head h2 a')?.firstChild?.textContent?.trim() === 'Reports')!;
 
 describe('glass: the deck reports block', () => {
   it('lists reports after Landed, newest first regardless of acknowledgment: title, then who filed it, the age, and acked; no badge', async () => {
     for (const view of ['table', 'cards'] as const) {
       const g = await page(everyAttentionFleet(), { prefs: { view } });
-      const headings = g.$$('#deck .deckgrid > section').map((s) => text(s.querySelector('h2')));
-      expect(headings.indexOf('reports →')).toBe(headings.indexOf('Landed · 24h →') + 1);
+      const headings = g.$$('#deck .deckgrid > section').map((s) => s.querySelector('.section-head h2 a')?.firstChild?.textContent?.trim());
+      expect(headings.indexOf('Reports')).toBe(headings.indexOf('Landed · 24h') + 1);
       const rows = [...reportsSection(g).querySelectorAll(view === 'cards' ? '.card' : '.deckline')];
       expect(rows.map((r) => text(r.querySelector('b')))).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
       expect(reportsSection(g).querySelectorAll('.badge')).toHaveLength(0);
