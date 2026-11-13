@@ -7,6 +7,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ANSWER_INLINE_MAX_BYTES, askDecision, claimBait, decodeFrame, enqueue, ensureLayout, listGrants, listNotices, loadConfig, readDecisionAnswer, settlePermissionCards, signOnTrap } from '@lobstah/core';
 import type { ClientSocketMessage, MirrorStatus, WharfMirrorCall } from '@lobstah/core';
+import { readHelmPassRequest } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { askPermission } from '../src/grants-cli.js';
 import { MIRROR_IDLE_READ_MS, MIRROR_STALE_NOTICE_MS, MIRROR_WATCHED_READ_MS, WharfMirror, loopbackGlass, startWharfMirror } from '../src/wharf-mirror.js';
@@ -318,6 +319,13 @@ describe('relayed calls', () => {
     await mirror(wharf).onCall(call('answer', { write: { kind: 'decision-answer', payload: { key: meta.key, option: 'Yes' } } }));
     expect(wharf.answers.get('answer')?.status).toBe(201);
     expect(readDecisionAnswer(meta.key)).toMatchObject({ option: 'Yes', by: 'wharf' });
+  });
+
+  it('relays a person’s recheck request and retains it on the boat until its helm delivers the pass', async () => {
+    const wharf = new FakeWharf();
+    await mirror(wharf).onCall(call('recheck', { write: { kind: 'helm-pass-request', payload: { grounds: 'home' } } }));
+    expect(wharf.answers.get('recheck')?.status).toBe(200);
+    expect(JSON.parse(wharf.answers.get('recheck')!.body).requestedAt).toBe(readHelmPassRequest('fleet')?.at);
   });
 
   it('brings the files a person attached on the hosted glass to the local answer', async () => {

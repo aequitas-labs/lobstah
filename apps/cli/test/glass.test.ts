@@ -28,6 +28,25 @@ afterEach(() => {
 const UUID = '33333333-3333-3333-3333-333333333333';
 
 describe('glass snapshot', () => {
+  it('carries roster capacity, available workers and harness counts without counting departed traps', () => {
+    for (const repo of ['web', 'empty']) fs.mkdirSync(path.join(home, repo));
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.web]\npath = '${path.join(home, 'web')}'\ntraps = 5\n[repos.empty]\npath = '${path.join(home, 'empty')}'\ntraps = 2\n`);
+    for (const [trapId, harness] of [['free', 'codex'], ['busy', 'claude']]) {
+      fs.writeFileSync(path.join(home, 'soaking', `${trapId}.json`), JSON.stringify({
+        trapId, name: `${trapId}-crab`, repo: 'web', harness, sessionId: `${trapId}-session`,
+        worktree: path.join(home, trapId!), cwd: home, signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(),
+      }));
+    }
+    enqueue({ id: UUID, repo: 'web', brief: 'Queued work', for: 'wt:busy' });
+    reserveTrap({ repo: 'web', name: 'new-crab', harness: 'codex', startSecs: 60 });
+    fs.mkdirSync(path.join(home, 'roster'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'roster', 'departed.json'), JSON.stringify({ trapId: 'departed', name: 'old-crab', repo: 'web', harness: 'claude', state: 'stowed', worktree: home }));
+    expect(buildGlassSnapshot().repoTraps).toEqual([
+      { repo: 'web', used: 3, limit: 5, free: 1, harnesses: [{ harness: 'claude', count: 1 }, { harness: 'codex', count: 2 }] },
+      { repo: 'empty', used: 0, limit: 2, free: 0, harnesses: [] },
+    ]);
+  });
+
   it('marks a budget stop as work saved for continuation in the payload', () => {
     enqueue({ id: UUID, repo: 'web', brief: 'do the thing' }, 'work');
     appendStatus(UUID, 'work', 'failed', 'budget: out of time; checkpoint committed; send continue to resume');
@@ -78,16 +97,16 @@ describe('glass snapshot', () => {
     expect(t?.notices.map((n) => n.kind)).toContain('trap-stowed');
   });
 
-  it('uses the roster session and harness after sign-off, not an old notice', () => {
+  it('uses the roster state, session and harness after sign-off, not an old notice', () => {
     fs.mkdirSync(path.join(home, 'roster'), { recursive: true });
     fs.writeFileSync(path.join(home, 'roster', 'deadbeef.json'), JSON.stringify({
-      trapId: 'deadbeef', name: 'fresh-cove', harness: 'codex', sessionId: 'current-session',
+      trapId: 'deadbeef', name: 'fresh-cove', harness: 'codex', sessionId: 'current-session', state: 'ghosted', repo: 'web', worktree: '/tmp/saved-trap',
       link: 'codex://threads/current-session', window: { bundleId: 'com.openai.codex' },
     }));
     postNotice({ kind: 'trap-signed-on', text: 'trap signed on (claude, web, wt)', refId: 'deadbeef', by: 'old-session' });
     postNotice({ kind: 'trap-stowed', text: 'gone', refId: 'deadbeef' });
     expect(buildGlassSnapshot().traps.find((t) => t.trapId === 'deadbeef')).toMatchObject({
-      live: false, harness: 'codex', sessionId: 'current-session',
+      live: false, harness: 'codex', sessionId: 'current-session', rosterState: 'ghosted', repo: 'web', worktree: '/tmp/saved-trap',
       link: 'codex://threads/current-session', window: { bundleId: 'com.openai.codex' },
     });
   });

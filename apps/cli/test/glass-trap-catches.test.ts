@@ -44,7 +44,7 @@ describe('trap catches by id', () => {
       expect(text(g.$('#traps'))).not.toMatch(/keeper|\d+ catch/);
       await g.go('#deck');
       expect(text(g.$('#deck'))).toContain('🦞 12');
-      expect(text(g.$('#deck'))).toContain('🦞 999+');
+      expect(text(g.$('#deck .deck-traps'))).not.toContain('🦞 999+');
     });
   }
 
@@ -82,7 +82,7 @@ describe('trap catches by id', () => {
     expect(catches[1]).toContain('unknown');
   });
 
-  it('a working trap reads its current catch from dispatches on the deck and the Traps tab', async () => {
+  it('a working trap reads its current catch on the Traps tab and stays off the attention deck', async () => {
     const d = acceptanceFleet();
     const t = d.traps.find((x) => x.trapId === 't1')!;
     const current = d.dispatches.find((x) => x.id === t.catches[0])!;
@@ -94,6 +94,6 @@ describe('trap catches by id', () => {
     const row = g.$$('#traps tr.rowhead').find((r) => text(r).includes('wt:t1'))!;
     expect(text(row)).toContain(`working · ${current.id.slice(0, 8)}`);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain(`working · ${current.id.slice(0, 8)}`);
+    expect(text(g.$('#deck .deck-traps'))).not.toContain(`working · ${current.id.slice(0, 8)}`);
   });
 });

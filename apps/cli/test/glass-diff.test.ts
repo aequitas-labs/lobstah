@@ -66,7 +66,7 @@ describe('resume command', () => {
 
 describe('glass section selectors', () => {
   it('finds a trap by its two-word name in the deck and Traps tab', () => {
-    const s = { ...snapshot(), traps: [{ ...snapshot().traps[0]!, name: 'amber-gull', label: 'amber-gull (wt:aa)' }] };
+    const s = { ...snapshot(), traps: [{ ...snapshot().traps[0]!, name: 'amber-gull', label: 'amber-gull (wt:aa)', live: false, rosterState: 'ghosted' as const }] };
     const input = diff.sectionInputs(s, ui({ st: { view: 'table', lane: '', repo: '', verb: '', q: 'AMBER-GULL' } }), NOW);
     expect(input.deck.traps.map((seat: { x: { trapId: string } }) => seat.x.trapId)).toEqual(['aa']);
     expect(input.traps.list.map((seat: { x: { trapId: string } }) => seat.x.trapId)).toEqual(['aa']);
@@ -93,10 +93,10 @@ describe('glass section selectors', () => {
       return [ids(input.deck.traps), ids(input.traps.list)];
     };
     const expected = ['l1', 'l2', 'l3', 'g1', 's1'];
-    expect(ordered(traps)).toEqual([expected, expected]);
+    expect(ordered(traps)).toEqual([['g1'], expected]);
     expect(ordered(traps.map((t) => t.live ? { ...t, heartbeatAt: iso(t.trapId === 'l1' ? 2_000 : 2 * 60_000),
       claimed: t.trapId === 'l1' ? 'dispatch' : undefined, firstParkedAt: t.trapId === 'l2' ? undefined : iso(20 * 60_000) } : t)))
-      .toEqual([expected, expected]);
+      .toEqual([['g1'], expected]);
   });
 
   it('routes the URL hash to a tab, deck by default', () => {

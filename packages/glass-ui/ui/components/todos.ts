@@ -6,6 +6,7 @@ import { Age, lastPassText } from './common.js';
 import { LinkedText } from './links.js';
 import { can } from '../backend.js';
 import { Button } from './button.js';
+import { RecheckAll } from './recheck-all.js';
 import { ITEM_ICON } from './icons.js';
 import { TodoSnooze, todoDueText } from './todo-snooze.js';
 /** A goal day starts at this local hour, as it does for goals and the done-today list. */
@@ -83,13 +84,13 @@ export function Todos({
 }) {
   const open = todos.filter((t) => !t.done);
   const doneToday = todos.filter((t) => t.done);
-  if (preview && !open.length && !doneToday.length) return null;
+  if (preview && !open.length && !doneToday.length && !passes.length) return null;
   const shown = preview ? open.slice(0, 5) : open;
   const grounds = new Set(todos.map((t) => t.grounds)).size > 1;
-  const shownPasses = passes.filter((pass) => !todos.length || todos.some((todo) => todo.grounds === pass.grounds));
+  const shownPasses = passes;
   const row = (todo: TodoView): Children =>
     html`<${TodoRow} key=${`todo:${todo.grounds}:${todo.id}`} todo=${todo} preview=${preview} grounds=${grounds} />`;
-  return html`<section class="todos"><h2>${preview ? 'Todos' : 'TODOs'}</h2>${shownPasses.map((pass) => html`<div class="dim">${shownPasses.length > 1 ? pass.grounds + ' · ' : ''}${lastPassText(pass.lastPassAt)}</div>`)}${note && html`<div class="dim">${LinkedText(note)}</div>`}${!open.length && html`<div class="empty">No open TODOs</div>`}<ul class="todo-checklist">${shown.map(row)}</ul>${preview && open.length > 5 && html`<a class="deckmore" href="#todos">More (${open.length - 5})</a>`}${
+  return html`<section class="todos"><div class="todo-heading"><h2>${preview ? 'Todos' : 'TODOs'}</h2>${shownPasses.length === 1 && html`<${RecheckAll} pass=${shownPasses[0]} />`}</div>${shownPasses.map((pass) => html`<div class="todo-pass"><span class="dim">${shownPasses.length > 1 ? pass.grounds + ' · ' : ''}${lastPassText(pass.lastPassAt)}</span>${shownPasses.length > 1 && html`<${RecheckAll} pass=${pass} />`}</div>`)}${note && html`<div class="dim">${LinkedText(note)}</div>`}${!open.length && html`<div class="empty">No open TODOs</div>`}<ul class="todo-checklist">${shown.map(row)}</ul>${preview && open.length > 5 && html`<a class="deckmore" href="#todos">More (${open.length - 5})</a>`}${
     doneToday.length > 0 &&
     (preview
       ? html`<a class="dim todo-done-today" href="#todos">${doneToday.length} done today</a>`

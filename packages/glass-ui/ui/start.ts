@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import type { GlassSnapshot } from '@lobstah/core';
-import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
+import { NO_OLDER, trapFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
 import {
   closeDecision,
   closeLightbox,
@@ -149,6 +149,8 @@ function startReportPage(key: string): Array<() => void> {
 
 function startGlass(): Array<() => void> {
   initState(initialState());
+  const linkedTrap = trapFromHash(location.hash);
+  if (linkedTrap) pendingOpen = { kind: 'trap', id: linkedTrap };
 
   let paintedRoute: ReturnType<typeof currentRoute> | undefined;
   let hadSnapshot = false;
@@ -209,6 +211,11 @@ function startGlass(): Array<() => void> {
       focusDecision,
       ...(location.hash.startsWith('#review-') ? { prefs: { ...getState().prefs, repo: '', q: '' } } : {}),
     });
+    const linkedTrap = trapFromHash(location.hash);
+    if (linkedTrap) {
+      pendingOpen = { kind: 'trap', id: linkedTrap };
+      openPending();
+    }
     // A `#decision/<key>` link (a lob, the pet) opens that decision too.
     if (focusDecision) openDecision(focusDecision);
     if (route === 'stats') void loadStats();

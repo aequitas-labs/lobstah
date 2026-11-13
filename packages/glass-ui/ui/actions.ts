@@ -571,6 +571,11 @@ export async function scheduleTodo(
   });
 }
 
+/** Request a todo/goals pass on these grounds, leaving the review work to the helm. */
+export async function requestHelmPass(grounds: string): Promise<string | undefined> {
+  return glassRequest('helm-pass-request', { grounds });
+}
+
 /** Queue a message for the helm about a job. Resolves to the refusal, or undefined once it is queued. */
 export async function messageHelm(dispatch: string, text: string): Promise<string | undefined> {
   return glassRequest('message', { dispatch, text });
