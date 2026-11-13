@@ -52,6 +52,40 @@ export const STALE_SEAT_MS = 1800000;
 /** A trap's catch count as its badge shows it: capped at 999+. */
 export const catchCount = (count: number): string => (count > 999 ? '999+' : String(count));
 
+/** The Traps page's grouping, shared with its stored browser preference. */
+export type TrapGrouping = 'repo' | 'harness' | 'status';
+
+/** Current reasons to put a trap on the deck, independent of a quiet heartbeat alone. */
+export type TrapAttentionReason = 'ghosted' | 'start failed' | 'needs decision' | 'blocked' | 'permission' | 'stalled' | 'not listening';
+
+/** Use recorded lifecycle, permission and dispatch-progress signals, without guessing at terminal contents. */
+export function deckTrapAttention(trap: GlassTrapView, snapshot: Pick<GlassSnapshot, 'decisions' | 'attention'>): TrapAttentionReason | undefined {
+  if (trap.starting?.failedAt) return 'start failed';
+  const lifecycle = trap.notices.find((notice) => ['trap-signed-on', 'trap-stowed', 'trap-ghosted'].includes(notice.kind));
+  if (!trap.live && (trap.rosterState === 'ghosted' || (!trap.rosterState && lifecycle?.kind === 'trap-ghosted'))) return 'ghosted';
+  if (!trap.live) return undefined;
+  const current = trap.catches.find((dispatch) => dispatch.id === trap.claimed && dispatch.bucket === 'active');
+  if (!current) return undefined;
+  if (current.verb === 'blocked') return 'blocked';
+  if (current.verb === 'needs-decision' || current.waiting?.on === 'person') return 'needs decision';
+  if (snapshot.decisions?.some((card) => card.permission && !card.readOnly && card.dispatch === current.id)) return 'permission';
+  const progress = snapshot.attention.find((item) => item.kind === 'dispatch-progress' && item.id === current.id && item.lane === current.lane);
+  if (progress?.verb === 'stalled') return 'stalled';
+  if (progress?.verb === 'idle-while-working') return 'not listening';
+  return undefined;
+}
+
+/** A trap's own route, usable from the deck, a copied link, or another device. */
+export function trapPageUrl(trapId: string): string {
+  return `#trap/${encodeURIComponent(trapId)}`;
+}
+
+/** Read a trap route without accepting an invalid or unbounded identifier. */
+export function trapFromHash(hash: string): string | undefined {
+  const match = /^#trap\/([A-Za-z0-9_-]{1,128})$/.exec(hash);
+  return match?.[1];
+}
+
 /** This browser's preferences and filters (localStorage `spyglass`). */
 export interface GlassPrefs {
   view: 'table' | 'cards';
@@ -62,6 +96,7 @@ export interface GlassPrefs {
   lobs: boolean;
   chain: boolean;
   noticeKind: string;
+  trapGroup?: TrapGrouping;
 }
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
@@ -525,6 +560,7 @@ export interface DeckInputs {
   reviews: GlassReview[];
   inflight: GlassDispatchSummary[];
   traps: Seat<GlassTrapView>[];
+  repoTraps?: GlassSnapshot['repoTraps'];
   stacks: GlassStack[];
   prs: GlassPr[];
   /** The helms' open to-dos, oldest first within each grounds. */
@@ -563,7 +599,7 @@ export interface SectionInputs {
   };
   deck: DeckInputs;
   dispatches: { view: GlassPrefs['view'] | undefined; chain: boolean | undefined; list: GlassDispatchSummary[] };
-  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps'] };
+  traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps']; groupBy?: TrapGrouping };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
   reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[] };
@@ -609,9 +645,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     .sort(reviewOrder);
   const stacks = (d.stacks || []).filter(inRepo);
   const prs = (d.prs || []).filter(inRepo);
-  const deckTraps = traps.filter(
-    (t) => seated(t) || (t.notices || []).some((n) => (n.kind === 'trap-stowed' || n.kind === 'trap-ghosted') && recent(n.at, 3600000)),
-  );
+  const deckTraps = traps.map((trap) => trapView(d, trap)).filter((trap) => deckTrapAttention(trap, d) !== undefined);
   const noAge = ({ ageSecs, ...a }: TendAttention): DeckAttention => a;
   return {
     chips: {
@@ -633,7 +667,8 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       reports,
       reviews: [],
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', verb: '' })),
-      traps: deckTraps.map((t) => seat(trapView(d, t))),
+      traps: deckTraps.map(seat),
+      repoTraps: d.repoTraps?.filter((row) => matchesRepo(row.repo, st)),
       stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
       prs: prs.filter((p) => p.state === 'OPEN'),
       todos: (d.todos || []).filter((t) => hasQuery(t.grounds, t.id, t.text)),
@@ -643,6 +678,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     dispatches: { view: st.view, chain: st.chain, list: d.dispatches.filter((x) => matches(x, st)) },
     traps: {
       configured: d.configuredTraps,
+      groupBy: st.trapGroup,
       view: st.view,
       list: traps.map((t) => seat(trapView(d, t))),
     },
