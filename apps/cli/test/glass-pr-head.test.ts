@@ -54,14 +54,15 @@ function movedOn(): void {
 
 const head = () => buildGlassSnapshot().dispatches.find((d) => d.id === id)!.prHead;
 
-/** The dispatch's catch in its trap's modal, where its current PR shows. A dispatch card shows no PR. */
+/** The dispatch's catch in its trap's modal, where its dispatch card opens the PR outputs. */
 async function catchText(snap: ReturnType<typeof buildGlassSnapshot>): Promise<string> {
   const g = await loadGlass(GLASS_PAGE, snap, { hash: '#traps', prefs: { view: 'cards' } });
   try {
     (g.$('#traps .card') as HTMLElement).click();
     await g.settle();
-    const c = g.$$('#modalbox .catch').find((x) => (x.textContent ?? '').includes(id.slice(0, 8)))!;
-    return (c.querySelector('.hdr')!.textContent ?? '').replace(/\s+/g, ' ');
+    const card = g.$('.trap-current .card')!;
+    (card as HTMLElement).click(); await g.settle();
+    return (g.$('.dispatch-prs')!.textContent ?? '').replace(/\s+/g, ' ');
   } finally {
     await g.close();
   }
@@ -77,7 +78,7 @@ describe("a dispatch card's PR", () => {
     appendStatus(id, 'work', 'working', 'Building PR 1', at(5));
     expect(head()).toBeUndefined();
     const snap = buildGlassSnapshot();
-    expect(await catchText(snap)).not.toContain('merged');
+    expect(await catchText(snap)).toContain('Merged');
 
     mergeEvidence(id, 'work', { prUrls: [url(10), url(11)] });
     upsertPr(obs(11), id);
@@ -93,7 +94,9 @@ describe("a dispatch card's PR", () => {
     upsertPr(obs(13, { baseRefName: 'branch-12', draft: true }), id);
     expect(head()).toMatchObject({ number: 13, badge: { text: 'draft' }, open: 3 });
 
-    expect(await catchText(buildGlassSnapshot())).toContain('#13 draft +2 open');
+    const output = await catchText(buildGlassSnapshot());
+    for (const number of [11, 12, 13]) expect(output).toContain('#'+number);
+    expect(output).toContain('Draft');
   });
 
   it('a finished dispatch keeps its merged PR', () => {

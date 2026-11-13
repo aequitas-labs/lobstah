@@ -203,9 +203,13 @@ function startGlass(): Array<() => void> {
     routeReport(report);
     if (report !== null) return;
     const modal = detailFromHash(location.hash);
-    routeDetailView(modal);
-    if (modal) return;
     const focusDecision = decisionFromHash(location.hash);
+    // A decision, like a report, stays above the detail that opened it.
+    if (!focusDecision) routeDetailView(modal);
+    if (modal) {
+      if (getState().decisionModal) closeDecision();
+      return;
+    }
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({
       route,

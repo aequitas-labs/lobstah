@@ -5,6 +5,7 @@ import {
   answerSummary,
   applyBeats,
   decisionCards,
+  decisionFromHash,
   decisionNeighbours,
   filteredDecisionCards,
   modalItem,
@@ -151,7 +152,10 @@ export function stepDecision(dir: -1 | 1): void {
   if (next) setState({ decisionModal: { key: next.key } });
 }
 
-export const closeDecision = (): void => setState({ decisionModal: null });
+export const closeDecision = (): void => {
+  setState({ decisionModal: null });
+  if (isDetail(getState().modal) && decisionFromHash(location.hash)) history.back();
+};
 
 /** Hotkeys reach the first nine answers only: 1–9. */
 export const HOTKEY_MAX = 9;

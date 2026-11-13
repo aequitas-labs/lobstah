@@ -74,7 +74,7 @@ describe('the dispatch view', () => {
   });
   it('omits empty sections and does not offer local cancellation', async () => {
     const d=fleet(); const x=d.x;
-    x.note=undefined;x.evidence=undefined;x.prList=undefined;x.log=[];x.inbox=[];x.messages=[];x.brief='';x.attachments=[];
+    x.note=undefined;x.waiting=undefined;x.activity=undefined;x.evidence=undefined;x.prList=undefined;x.log=[];x.inbox=[];x.messages=[];x.brief='';x.attachments=[];
     d.d.prs=[];d.d.reports=[];
     const g=await loadGlass(GLASS_PAGE,d.d,{now:NOW,hash:'#dispatch/'+encodeURIComponent('work:'+x.id)});opened.push(g);
     expect(g.$('.dispatch-now, .dispatch-prs, .dispatch-report, .dispatch-brief, .dispatch-activity, .view-messages')).toBeNull();

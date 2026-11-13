@@ -6,7 +6,18 @@ import { can, capabilities, fileUrl } from '../backend.js';
 import { html } from '../html.js';
 import { Button } from './button.js';
 import { CardLink, SplitButton } from './card.js';
-import { cmdRow, ImageThumb, attachmentRows, NamedText, TrapName, trapRoutes, viewerHasTerminal, reviewLink } from './common.js';
+import {
+  ActivityLine,
+  WaitingLine,
+  cmdRow,
+  ImageThumb,
+  attachmentRows,
+  NamedText,
+  TrapName,
+  trapRoutes,
+  viewerHasTerminal,
+  reviewLink,
+} from './common.js';
 import { DetailFrame } from './detail-frame.js';
 import { Ago, WorkerLine, ViewMessages } from './detail-parts.js';
 import { Dialog } from './dialog.js';
@@ -81,7 +92,7 @@ export function DispatchView({
   );
   return html`<${DetailFrame} identity=${html`<span>${x.repo && `${x.repo} · `}<${Button} class="copy-id" action=${copy(x.id)} done="Dispatch ID copied" title=${x.id}>${x.id.slice(0, 8)}<//></span>`} open=${top}>
     <header class="pr-view-head"><h2>${LinkedText(x.title || x.id.slice(0, 8))}</h2><div class="pr-view-chips">${StatusChip(x.verb, isIconVerb(x.verb) ? VERB_TONE[x.verb] : 'dim')}${StatusChip(x.lane, 'dim')}${x.waiting && StatusChip(`waiting on ${x.waiting.on}`, 'dim')}</div><div class="view-meta">${trapId && html`${TrapName(trapId)} · `}${worker && html`<${WorkerLine} worker=${worker} />`}${started && html` · started ${Ago(started)}`}</div></header>
-    ${x.note && html`<section class="dispatch-now"><h4>Now <span class="dim">${Ago(x.verbAt)}</span></h4><div class="loglines">${NamedText(x.note)}</div>${x.activity && html`<p class="dim">${LinkedText(x.activity.summary)} · ${Ago(x.activity.at)}</p>`}${x.waiting?.link && html`<div>${LinkedText(x.waiting.link)}</div>`}</section>`}
+    ${(x.note || x.activity || x.waiting) && html`<section class="dispatch-now"><h4>Now <span class="dim">${Ago(x.note ? x.verbAt : (x.activity?.at ?? x.waiting?.since))}</span></h4>${x.note && html`<div class="loglines">${NamedText(x.note)}</div>`}${ActivityLine(x)}${WaitingLine(x, true)}</section>`}
     ${
       (prs.length > 0 || unobserved.length > 0) &&
       html`<section class="dispatch-prs"><h4>PRs</h4><div class="detail-cards">${prs.map((pr) => prCard(pr, { attention: snapshot.attention }))}${unobserved.map(

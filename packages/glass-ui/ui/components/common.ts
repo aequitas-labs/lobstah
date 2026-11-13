@@ -91,7 +91,7 @@ export const ActivityLine = (x: Pick<GlassDispatchSummary, 'activity'>) =>
 const safeHref = (u: string | undefined): string | undefined => (u && /^https?:\/\//i.test(u) ? u : undefined);
 
 /** `paused: waiting on review · 12m · <link>`: what the worker waits on outside lobstah, and for how long. */
-export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>) => {
+export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>, ago = false) => {
   const w = x.waiting;
   if (!w) return undefined;
   const href = safeHref(w.link);
@@ -101,7 +101,7 @@ export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>) =
   } catch {
     label = href;
   }
-  return html`<div class="waiting">${x.verb}: waiting on ${w.on} · ${Age(w.since)}${
+  return html`<div class="waiting">${x.verb}: waiting on ${w.on} · ${Age(w.since)}${ago ? ' ago' : ''}${
     href && [' · ', html`<a href=${href} target="_blank" rel="noopener noreferrer" onClick=${stop}>${label}</a>`]
   }</div>`;
 };
