@@ -538,6 +538,8 @@ export type ReviewRequestKind =
   | 'review-request-changes'
   | 'review-comment'
   | 'review-dismiss'
+  | 'review-mute'
+  | 'review-unmute'
   | 'review-redraft'
   | 'review-draft';
 
@@ -548,7 +550,7 @@ export type ReviewRequestKind =
  */
 export async function reviewRequest(kind: ReviewRequestKind, payload: Record<string, unknown>): Promise<string | undefined> {
   // A source without review actions shows none; a view it records (review-seen) is skipped.
-  if (!can('review-request')) return 'Reviews are read-only here.';
+  if (!can('review-request') && !can('review-dismiss') && !can('review-mute') && !can('review-unmute')) return 'Reviews are read-only here.';
   return glassRequest(kind, payload);
 }
 
@@ -570,6 +572,16 @@ export async function cancelJob(dispatch: string): Promise<string | undefined> {
 /** Ask the boat that drafted a review to dismiss it (and its pending draft). */
 export async function dismissReview(key: string): Promise<string | undefined> {
   return glassRequest('review-dismiss', { key });
+}
+
+/** Mute every future review round for a PR. */
+export async function muteReviewPr(key: string): Promise<string | undefined> {
+  return glassRequest('review-mute', { key });
+}
+
+/** Resume review rounds for a muted PR. */
+export async function unmuteReviewPr(key: string): Promise<string | undefined> {
+  return glassRequest('review-unmute', { key });
 }
 
 async function glassRequest(kind: string, payload: Record<string, unknown>): Promise<string | undefined> {

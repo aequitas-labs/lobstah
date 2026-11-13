@@ -101,6 +101,7 @@ import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
+import { muteReview, unmuteReview } from '@lobstah/core';
 import { glassReviews } from './reviews.js';
 import { reviewSetupView } from './reviews-setup.js';
 import { buildTendReport, landedCatches, walkingAttention } from './tend.js';
@@ -1168,17 +1169,21 @@ export function serveGlass(
           case 'review-request-changes':
           case 'review-comment':
           case 'review-dismiss':
+          case 'review-mute':
+          case 'review-unmute':
           case 'review-draft':
           case 'review-redraft': {
             // On-demand jobs follow the repo's current draft/publish setting.
             const key = (body.payload as { key?: unknown } | undefined)?.key;
             if (typeof key !== 'string' || !key.startsWith('review:') || key.length > 200) return reply(400, { ok: false, reason: 'A review key is required.' });
             if (body.kind === 'review-seen') { const ok = markReviewSeen(key); return reply(ok ? 200 : 404, { ok }); }
-            acknowledgeReview(key);
+            if (body.kind !== 'review-mute' && body.kind !== 'review-unmute') acknowledgeReview(key);
             const current = readReview(key);
             if (body.kind === 'review-skip' && current && latestRound(current)?.state === 'posted') return reply(200, { ok: true });
             const event = body.kind === 'review-approve' ? 'APPROVE' : body.kind === 'review-request-changes' ? 'REQUEST_CHANGES' : body.kind === 'review-comment' ? 'COMMENT' : undefined;
             const act = event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
+              : body.kind === 'review-mute' ? Promise.resolve(muteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
+              : body.kind === 'review-unmute' ? Promise.resolve(unmuteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : ['review-dismiss', 'review-skip'].includes(body.kind) ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),

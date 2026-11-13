@@ -40,11 +40,12 @@ it('honors global and repo timestamp overrides and validates settings', () => {
   for (const requestedAfter of [false, 123, 'bad date']) expect(() => parseReviews({ requestedAfter })).toThrow('requestedAfter');
 });
 
-it('never upgrades a draft-only receipt or an automatic round after lowering to on-demand', () => {
-  const round = { publish: true, draftOnly: false } as Parameters<typeof reviewCanPublish>[2];
-  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'auto-review' }), 'web', round)).toBe(true);
-  for (const mode of ['notify', 'on-demand', 'auto-draft']) expect(reviewCanPublish(parseReviews({ enabled: true, mode }), 'web', round)).toBe(false);
-  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'on-demand', publish: true }), 'web', { ...round, onDemand: true })).toBe(true);
-  expect(reviewCanPublish(parseReviews({ enabled: false, mode: 'auto-review' }), 'web', round)).toBe(false);
-  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'auto-review' }), 'web', { ...round, publish: false, draftOnly: true })).toBe(false);
+it('auto-posts only a captured verdict setting and respects the current mode', () => {
+  const round = { verdict: 'approve', autoPostApprove: 'auto-post', autoPostRequestChanges: 'ask' } as Parameters<typeof reviewCanPublish>[2];
+  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'auto-draft', autoPostApprove: 'auto-post' }), 'web', round)).toBe(true);
+  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'auto-draft' }), 'web', round)).toBe(false);
+  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'notify', autoPostApprove: 'auto-post' }), 'web', round)).toBe(false);
+  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'on-demand', autoPostApprove: 'auto-post' }), 'web', { ...round, onDemand: true })).toBe(true);
+  expect(reviewCanPublish(parseReviews({ enabled: false, mode: 'auto-draft', autoPostApprove: 'auto-post' }), 'web', round)).toBe(false);
+  expect(reviewCanPublish(parseReviews({ enabled: true, mode: 'auto-draft', autoPostApprove: 'auto-post', autoPostRequestChanges: 'auto-post' }), 'web', { ...round, autoPostApprove: 'ask' })).toBe(false);
 });

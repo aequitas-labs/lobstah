@@ -339,6 +339,8 @@ export interface GlassReview {
   repoKey?: string;
   mode?: import('./reviews.js').ReviewMode;
   publish?: boolean;
+  mutedAt?: string;
+  postedReviewUrl?: string;
   requestedBy?: string;
   asker?: string;
   askerName?: string;
@@ -598,7 +600,7 @@ export interface GlassSnapshot {
   sessionGrants?: import('./grants.js').Grant[];
   /** Every other grant in force: intent grants, commands and files. */
   standingGrants?: import('./grants.js').Grant[];
-  reviewSetup?: { enabled: boolean; mode: import('./reviews.js').ReviewMode; publish?: boolean; perRepo?: Record<string, { mode: import('./reviews.js').ReviewMode; publish: boolean; overridden: boolean }>; identity?: string; running: boolean };
+  reviewSetup?: { enabled: boolean; mode: import('./reviews.js').ReviewMode; publish?: boolean; autoPostApprove?: import('./reviews.js').ReviewAutoPost; autoPostRequestChanges?: import('./reviews.js').ReviewAutoPost; perRepo?: Record<string, { mode: import('./reviews.js').ReviewMode; publish: boolean; autoPostApprove: import('./reviews.js').ReviewAutoPost; autoPostRequestChanges: import('./reviews.js').ReviewAutoPost; overridden: boolean }>; identity?: string; running: boolean };
   /** The helms' open to-dos, every grounds; the deck lists them. */
   todos?: TodoView[];
   /** A short note when to-dos sit past `[helm].todoStaleDays`. */

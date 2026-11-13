@@ -322,7 +322,7 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Signed-in person | POST requests | Queue a bounded message or trap-start request for the helm |
 | Read / leased helm | GET requests; POST requests/:id/receipt, execute | Explicit receipt then execute a live message request |
 | Addressed work boat | GET requests/starts; POST requests/:id/start | Read only its helm-authorized trap starts; consume once or record repo refusal before expiry |
-| Signed-in person | POST requests (kind `review-dismiss`) | Ask the boat that published a review to dismiss it (deleting the pending draft); authorized at once and addressed to that boat, no helm and no event. Sending a review happens in the review tool |
+| Signed-in person | POST requests (kind `review-dismiss`, `review-mute`, or `review-unmute`) | Dismiss one round (deleting its pending draft), or mute/unmute future review rounds for its PR; authorized at once and addressed to the boat that published the review, no helm and no event. Sending a review happens in the review tool |
 | Addressed work boat | GET requests/reviews; POST requests/:id/start | Read the review requests addressed to it; mark each done or refused before expiry. The boat acts on GitHub with its own token |
 | Mirror boat | PUT mirror/snapshot | Replace this boat's latest glass snapshot: gzip, at most 2 MB, never carrying the page token. A boat with its socket open sends it as a `snapshot` frame instead |
 | Mirror boat | POST mirror/calls/:id/take, answer | Take a pushed call, then answer it with the local glass's status, type and body; a boat with its socket open answers with an `answer` frame instead. `GET mirror/calls` is 410: calls are pushed, never polled |
@@ -402,7 +402,7 @@ delivers Slack, and sets the next one. With nothing due there is no alarm, so
 an idle account costs nothing. Native tests evict the DO with a connected
 socket, then resume it, ping it while it hibernates, and run the alarm.
 Report evidence is data, not hosted executable HTML. No GitHub polling or worker
-execution is moved into this service; a review is staged and dismissed by the boat that published it and sent from the review tool, never by the wharf.
+execution is moved into this service; a review is staged, dismissed, muted or unmuted by the boat that published it and sent from the review tool, never by the wharf.
 
 Files are immutable by idempotency key and dispatch- or document-scoped, including report
 Markdown and images. Downloads force octet-stream, attachment disposition,

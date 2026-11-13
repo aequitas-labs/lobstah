@@ -105,6 +105,9 @@ export const GLASS_ACTIONS = [
   'cancel',
   /** Ask the boat that drafted a review to dismiss it. */
   'review-dismiss',
+  /** Mute or unmute all review rounds for one PR. */
+  'review-mute',
+  'review-unmute',
   /** Run a run card's script on this Mac. Only the local glass runs anything. */
   'run',
 ] as const;

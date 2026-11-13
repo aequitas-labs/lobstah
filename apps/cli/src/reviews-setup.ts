@@ -117,7 +117,7 @@ export function reviewSetupView() {
   const cfg = config.reviews;
   const perRepo = Object.fromEntries(Object.keys(config.repos).map(key => {
     const settings = reviewSettings(cfg, key);
-    return [key, { mode: settings.mode, publish: settings.publish, overridden: cfg.perRepo[key]?.mode !== undefined || cfg.perRepo[key]?.publish !== undefined }];
+    return [key, { mode: settings.mode, publish: settings.publish, autoPostApprove: settings.autoPostApprove, autoPostRequestChanges: settings.autoPostRequestChanges, overridden: cfg.perRepo[key]?.mode !== undefined || cfg.perRepo[key]?.publish !== undefined || cfg.perRepo[key]?.autoPostApprove !== undefined || cfg.perRepo[key]?.autoPostRequestChanges !== undefined }];
   }));
-  return { enabled: cfg.enabled, mode: cfg.mode, publish: cfg.publish, perRepo, identity: cfg.identity, running: pickRunning() };
+  return { enabled: cfg.enabled, mode: cfg.mode, publish: cfg.publish, autoPostApprove: cfg.autoPostApprove, autoPostRequestChanges: cfg.autoPostRequestChanges, perRepo, identity: cfg.identity, running: pickRunning() };
 }

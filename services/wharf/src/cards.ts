@@ -27,6 +27,8 @@ export function answerLabel(action: GlassCardAction, words?: string): string {
     case 'allow-always': return 'Allow always';
     case 'deny': return 'No';
     case 'seen': return 'seen';
+    case 'review-mute': return 'Mute this PR';
+    case 'review-unmute': return 'Unmute';
     default: return action.kind;
   }
 }
@@ -84,10 +86,10 @@ export function reviewCard(d: WharfDocument): ProjectedCard {
   const r = d.review!;
   const ended = d.withdrawn ? 'withdrawn' : REVIEW_ENDED[r.state];
   return {
-    family: 'review', key: d.id, stateHash: `${r.round}:${r.state}:${r.headSha ?? ''}:${r.stands ? 'stands' : ''}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.at, ...(d.grounds ? { grounds: d.grounds } : {}),
+    family: 'review', key: d.id, stateHash: `${r.round}:${r.state}:${r.headSha ?? ''}:${r.stands ? 'stands' : ''}:${r.muted ? 'muted' : ''}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.at, ...(d.grounds ? { grounds: d.grounds } : {}),
     title: firstLine(d.title, 300), ...(r.reason ? { summary: r.reason } : {}), item: { kind: 'review', id: d.id },
     links: [...(r.open ? [{ label: 'Open review', url: r.open }] : []), { label: 'Open PR', url: r.pr }],
-    actions: !ended && r.stands ? [{ kind: 'review-dismiss' }] : [],
+    actions: [...(!ended && r.stands ? [{ kind: 'review-dismiss' as const }] : []), { kind: r.muted ? 'review-unmute' as const : 'review-mute' as const }],
     quiet: !r.stands,
     ...(ended ? { terminal: { state: ended, at: d.at, outcome: r.state } } : {}),
   };
@@ -217,7 +219,7 @@ function cardLink(value: unknown): GlassCardLink {
   requireThat(parsed?.protocol === 'https:' && !parsed.username && !parsed.password, 400, 'card links must be https URLs');
   return { label: text(l.label, 75), url };
 }
-const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss'];
+const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute'];
 function cardAction(value: unknown): GlassCardAction {
   const a = object(value);
   requireThat(ACTION_KINDS.includes(String(a.kind)), 400, 'unknown card action');

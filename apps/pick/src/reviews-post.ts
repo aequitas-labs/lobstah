@@ -22,8 +22,7 @@ import { loadPickupConfig } from './config.js';
 const API = 'https://api.github.com';
 
 /**
- * Automated reviews may comment or request changes for blocking findings.
- * APPROVE requires an approve verdict and a human glass action.
+ * Automated reviews may post only an explicitly enabled approve or request-changes verdict.
  */
 export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
 
@@ -169,6 +168,7 @@ function postRefusal(key: string, round: ReviewRound, by: PostBy): string | unde
   const current = item && latestRound(item);
   if (!item || !current || current.id !== round.id || current.state !== 'drafted' || current.headSha !== item.pr.headSha)
     return `${key}: this round is no longer ready to publish`;
+  if (by === 'auto' && item.mutedAt) return `${key}: automatic posting is disabled while this PR is muted`;
   if (current.dispatch && dispatchWasCancelled(current.dispatch, 'chore')) return `${key}: the review job was cancelled`;
   if (by === 'auto' && !reviewCanPublish(loadConfig().reviews, item.pr.repoKey, current)) return `${key}: automatic publishing is off for this round`;
   return undefined;
@@ -193,14 +193,24 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   if (refused) return { posted: false, why: refused };
   const draft = readRoundDraft(key, r.id);
   if ('error' in draft) return { posted: false, why: `${key}: ${draft.error}` };
-  const event = opts.event ?? (draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
+  const event = opts.event ?? (opts.by === 'auto' && draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
   if (!['COMMENT', 'REQUEST_CHANGES', 'APPROVE'].includes(event)) return { posted: false, why: 'invalid review event' };
   const expected = draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT';
   if (opts.by === 'glass' && event !== expected) return { posted: false, why: 'the action does not match the draft verdict' };
-  if (opts.by === 'auto' && (event === 'APPROVE' || draft.verdict === 'approve')) return { posted: false, why: 'approval needs your explicit click' };
-  if (opts.by === 'auto' && event !== expected) return { posted: false, why: 'automatic publishing must follow the blocking findings' };
-  if (event === 'APPROVE' && (opts.by !== 'glass' || draft.verdict !== 'approve' || draft.blocking.length)) return { posted: false, why: 'approval requires an approve verdict and your explicit click' };
+  if (opts.by === 'auto' && !['APPROVE', 'REQUEST_CHANGES'].includes(event)) return { posted: false, why: 'automatic posting is only available for approve and request-changes verdicts' };
+  if (opts.by === 'auto' && event !== expected) return { posted: false, why: 'automatic posting must follow the draft verdict' };
+  if (event === 'APPROVE' && (!['glass', 'auto'].includes(opts.by) || draft.verdict !== 'approve' || draft.blocking.length)) return { posted: false, why: 'approval requires an approve verdict with no blocking findings' };
   if (event === 'REQUEST_CHANGES' && !draft.blocking.length) return { posted: false, why: 'request changes requires blocking findings' };
+  if (opts.by === 'auto') {
+    const identity = loadConfig().reviews.identity?.toLowerCase();
+    if (!identity) return { posted: false, why: 'automatic posting needs a configured reviewer identity' };
+    try {
+      const author = await github<{ login?: string }>(f, token(), 'GET', '/user');
+      if (author.login?.toLowerCase() !== identity) return { posted: false, why: `automatic posting is disabled because the GitHub token belongs to ${author.login ?? 'an unknown identity'}, not ${identity}` };
+    } catch (err) {
+      return { posted: false, why: `automatic posting could not confirm the configured reviewer identity: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
   const lock = receipt(key, r.id, 'posted.json', opts.by, at);
   if (!lock) return { posted: false, why: `${key}: a post of this round is already in flight or done` };
   try {

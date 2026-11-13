@@ -517,18 +517,20 @@ Run `lobstah setup reviews` (optional `--identity <login>`) to derive the GitHub
 
 When someone asks `[reviews].identity` for a review, `lobstah pick`
 files a review item ([pickup.md](pickup.md), "Review requests"). It searches
-as that identity, with its token source, independently of `[pickup.github]`. Identity defaults to `gh api user`; the token source defaults to `gh auth token`. Existing pickup credentials remain a fallback. Mode, publish, cost bounds, and skip rules can be overridden per repo under `[repos.<key>.reviews]`; those overrides win over `[reviews]`. The glass repo filter scopes the mode switch and Publish toggle to that repo; All repos edits the global default. `lobstah doctor` shows each repo’s effective mode before pick is installed.
+as that identity, with its token source, independently of `[pickup.github]`. Identity defaults to `gh api user`; the token source defaults to `gh auth token`. Existing pickup credentials remain a fallback. Mode, per-verdict auto-post choices, cost bounds, and skip rules can be overridden per repo under `[repos.<key>.reviews]`; those overrides win over `[reviews]`. The glass Reviews page shows the effective choices for the selected repo.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | Opt-in. Off means no search call at all. |
 | `repos` | `"configured"` | `"configured"`: only PRs in a `[repos.*]` origin. `"any"`: every repo the token can see. |
-| `mode` | `"notify"` | `"notify"`: silent requests in Reviews; `"on-demand"`: only the glass Review action starts a round; `"auto-draft"`: new requests get trap drafts staged pending; `"auto-review"`: new requests get drafts published as REQUEST_CHANGES with blockers, COMMENT otherwise; approve verdicts wait for a click. |
+| `mode` | `"notify"` | `"notify"`: requests appear in Reviews; `"on-demand"`: only the glass Review action starts a round; `"auto-draft"` and `"auto-review"`: new requests get automatic drafts. The per-verdict settings below decide whether a completed review posts automatically. |
 | `publish` | `false` (`true` for auto-review) | The glass draft/publish toggle, including on-demand jobs. Switching it changes auto-draft ↔ auto-review. Each job remembers whether publishing was enabled when it started. |
+| `autoPostApprove` | `"ask"` | `"ask"`: wait for a person to post an approve draft; `"auto-post"`: post it automatically when the configured reviewer identity matches the GitHub token. |
+| `autoPostRequestChanges` | `"ask"` | `"ask"`: wait for a person to post a request-changes draft; `"auto-post"`: post it automatically when the configured reviewer identity matches the GitHub token. |
 | `identity` | `gh api user` | The reviewer login. |
 | `tokenCommand`, `tokenFile`, `tokenEnv` | `gh auth token` | Token sources, using the same precedence as pickup. |
 | `work` | legacy | `"off"` maps to on-demand, `"trap"`/`"headless"` map to auto-draft; explicit mode wins. The worker choice still applies to automatic jobs. |
-| `post` | legacy | `"draft"` stages pending; `"auto"` maps to auto-review. Explicit mode/publish wins. Automatic publishing uses REQUEST_CHANGES for blockers or COMMENT; APPROVE requires a click in the glass. All publishing refuses stale drafts. |
+| `post` | legacy | `"draft"` stages pending; `"auto"` maps to auto-review. Explicit mode/publish wins. Legacy publishing does not enable either per-verdict auto-post setting. Comments-only drafts always wait for a person. All posting refuses stale drafts. |
 | `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
@@ -539,6 +541,8 @@ as that identity, with its token source, independently of `[pickup.github]`. Ide
 Setup records the activation time when settings change. For hand-edited settings, the next poll records the transition. Older requests remain available for an explicit Review action. Cancelling a review dispatch fails its round and stops the trap at its next tool hook; cancelled rounds cannot publish.
 
 Requests land silently in the Reviews inbox with a tab count, never on deck or tend. Draft-ready and automatic-published notifications use `[hooks.notify]` and the pet, with a `#review-<encoded key>` link to the row. The hook gets `LOBSTAH_NOTE`, `LOBSTAH_VERB` (`draft-ready`, `needs-you`, `published`) and `LOBSTAH_URL` / `LOBSTAH_GLASS_URL`. Opening marks seen; a row action clears the notification and needs-you marker. Wharf notification delivery is deferred.
+
+Dismiss closes only that review round. A later commit, review request or re-request, or reopening can create a fresh round. **Mute this PR** suppresses future rounds until you choose **Unmute**; muted PRs remain visible in Reviews. Posted reviews show their posting time and link.
 
 ## `[permissions]` — the Claude Code auto-mode profile
 

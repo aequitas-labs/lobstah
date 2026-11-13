@@ -142,6 +142,23 @@ describe('review documents on wharf grounds', () => {
     ]);
   });
 
+  it('carries out hosted Mute and Unmute through the review boat', async () => {
+    request();
+    const item = readReview(KEY)!;
+    Object.assign(item.rounds[0]!, { state: 'drafted', wharf: { doc: DOC, mine: true } });
+    writeReview(item);
+    const calls: Call[] = [];
+    await runReviewRequests(() => {}, { backend: wharf(calls, { requests: [
+      { id: 'mute', kind: 'review-mute', document: DOC },
+      { id: 'unmute', kind: 'review-unmute', document: DOC },
+    ] }) });
+    expect(readReview(KEY)?.mutedAt).toBeUndefined();
+    expect(calls.filter((call) => call.path.startsWith('requests/') && call.path !== 'requests/reviews')).toEqual([
+      { path: 'requests/mute/start', body: {} },
+      { path: 'requests/unmute/start', body: {} },
+    ]);
+  });
+
   it('a wharf-grounds pick cycle with a drafted round publishes one review document', async () => {
     request();
     const item = readReview(KEY)!;

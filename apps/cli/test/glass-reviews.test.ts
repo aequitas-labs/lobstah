@@ -92,6 +92,25 @@ describe('the Reviews tab', () => {
     expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-seen', payload: { key: r.key } });
     expect(g.$('#tabs a[data-tab="reviews"] .dbadge')?.textContent).toBe('1');
   });
+
+  it('shows mute and unmute controls and links to the time of a posted review', async () => {
+    const post = () => ({ status: 200, body: { ok: true } });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [review(7), review(8, { state: 'posted', stands: false, postedAt: ago(60), postedReviewUrl: 'https://github.com/acme/web/pull/8#pullrequestreview-88' })] }, { now: NOW, prefs: { view: 'cards' }, post });
+    open.push(g); await g.go('#reviews');
+    expect(g.$('#reviews')?.textContent).toContain('Mute this PR');
+    const mute = g.$$('#reviews button').find(button => button.textContent === 'Mute this PR') as unknown as HTMLElement;
+    mute.click(); await g.settle();
+    expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-mute', payload: { key: 'review:acme/web#7' } });
+    const posted = g.$('#reviews a[href="https://github.com/acme/web/pull/8#pullrequestreview-88"]');
+    expect(posted?.textContent).toContain('Posted');
+
+    const muted = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [review(7, { mutedAt: ago(30) })] }, { now: NOW, prefs: { view: 'cards' }, post });
+    open.push(muted); await muted.go('#reviews');
+    const unmute = muted.$$('#reviews button').find(button => button.textContent === 'Unmute') as unknown as HTMLElement;
+    expect(unmute).toBeTruthy();
+    unmute.click(); await muted.settle();
+    expect(muted.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-unmute', payload: { key: 'review:acme/web#7' } });
+  });
   it('shows every round state, cached requester avatars, automatic attribution, and the pending review link', async () => {
     const d = { ...fleet(), reviews: REVIEW_ROUND_STATES.map((state, i) => review(20 + i, {
       state, stands: ['requested', 'drafted', 'stale', 'failed'].includes(state),
@@ -117,7 +136,7 @@ describe('the Reviews tab', () => {
     expect(box.querySelector('.rv-person')?.textContent).toContain('Dana Developer');
     expect(box.querySelector('.rv-person')?.textContent).toContain('automatic');
     expect(box.querySelector('.rv-staged')?.getAttribute('href')).toContain('#pullrequestreview-99');
-    expect([...box.querySelectorAll('button')].find((b) => b.textContent === 'Skip')?.getAttribute('title')).toContain('does not decline the review on GitHub');
+    expect([...box.querySelectorAll('button')].find((b) => b.textContent === 'Dismiss')?.getAttribute('title')).toContain('does not decline the review on GitHub');
     // An avatar that can't load (offline, or a page that blocks it) shows the asker's initials.
     box.querySelector('.rv-person img')!.dispatchEvent(new g.window.Event('error'));
     await g.settle();
@@ -137,6 +156,18 @@ describe('the Reviews tab', () => {
     expect(g.$('#reviews .rv-controls')?.textContent).toContain('Publish: off');
     expect(g.$$('#reviews .rv-controls input, #reviews .rv-controls select, #reviews .rv-controls button')).toEqual([]);
     expect(g.posts().some(p => JSON.parse(p.body).kind === 'review-mode')).toBe(false);
+  });
+
+  it('shows grounds and per-repo auto-post choices under Configuration', async () => {
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviewSetup: { enabled: true, mode: 'auto-draft', autoPostApprove: 'ask', autoPostRequestChanges: 'ask', running: true, perRepo: { web: { mode: 'auto-draft', publish: false, autoPostApprove: 'auto-post', autoPostRequestChanges: 'ask', overridden: true } } } }, {
+      now: NOW,
+      settings: { file: '~/.lobstah/config.toml', versions: { rows: [], match: true, text: 'Versions match' }, grounds: [], repos: [], sections: [] },
+    });
+    open.push(g); await g.go('#settings');
+    expect(g.$('#settings')?.textContent).toContain('Review posting');
+    expect(g.$('#settings')?.textContent).toContain('Default');
+    expect(g.$('#settings')?.textContent).toContain('Approve: ask · Request changes: ask');
+    expect(g.$('#settings')?.textContent).toContain('Approve: auto-post · Request changes: ask');
   });
 
   it('a workflow request names the PR author and uses the configured review tool', () => {
@@ -162,7 +193,7 @@ describe('the Reviews tab', () => {
     const g = await loadGlass(GLASS_PAGE, {
       ...fleet(), repos: ['web'],
       reviews: [review(8, { mode: 'on-demand', publish: true })],
-      reviewSetup: { enabled: true, mode: 'notify', publish: false, running: true, perRepo: { web: { mode: 'on-demand', publish: true, overridden: true } } },
+      reviewSetup: { enabled: true, mode: 'notify', publish: false, running: true, perRepo: { web: { mode: 'on-demand', publish: true, autoPostApprove: 'ask', autoPostRequestChanges: 'ask', overridden: true } } },
     }, { now: NOW, prefs: { repo: 'web' }, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g);
     await g.go('#reviews');
@@ -182,9 +213,9 @@ describe('the Reviews tab', () => {
     const rows = g.$$('#reviews tr.rowhead');
     expect(rows.map((r) => r.querySelector('td')?.textContent)).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
     expect(rows[1]!.textContent).toContain('drafted');
-    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Publish comment', 'Skip']);
-    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Redraft', 'Skip']);
-    expect(rows[3]!.querySelectorAll('button')).toHaveLength(0);
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Publish comment', 'Mute this PR', 'Dismiss']);
+    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Redraft', 'Mute this PR', 'Dismiss']);
+    expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Mute this PR']);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
     expect(g.opened().at(-1)?.[0]).toBe('https://app.graphite.com/github/pr/acme/web/7');
@@ -278,6 +309,18 @@ describe('review requests on /requests', () => {
     expect((await send(base, token, 'review-dismiss', { key: 'review:acme/web#7' })).status).toBe(200);
     expect(latestRound(readReview('review:acme/web#7')!)).toMatchObject({ state: 'dismissed', by: 'glass' });
     expect((await send(base, token, 'review-dismiss', { key: 'not-a-review' })).status).toBe(400);
+  });
+
+  it('mutes a PR through future requests and resumes when unmuted', async () => {
+    const key = 'review:acme/web#7';
+    observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' }, round: { id: 'RRE_7', requestedAt: ago(60) } });
+    const { base, token } = await start();
+    expect((await send(base, token, 'review-mute', { key })).status).toBe(200);
+    expect(readReview(key)?.mutedAt).toEqual(expect.any(String));
+    expect(observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'bbbbbbb2' }, round: { id: 'RRE_8', requestedAt: ago(30) } }).opened).toBe(false);
+    expect((await send(base, token, 'review-unmute', { key })).status).toBe(200);
+    expect(readReview(key)?.mutedAt).toBeUndefined();
+    expect(observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'bbbbbbb2' }, round: { id: 'RRE_8', requestedAt: ago(30) } }).opened).toBe(true);
   });
 
   it('Skip acknowledges a published notification without changing or deleting the sent review', async () => {

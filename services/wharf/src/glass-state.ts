@@ -54,6 +54,7 @@ export class GlassState {
       ...(m.requestedBy !== undefined ? { requestedBy: text(m.requestedBy, 100) } : {}),
       ...(m.headSha !== undefined ? { headSha: text(m.headSha, 64) } : {}),
       ...(m.stands !== undefined ? { stands: m.stands === true } : {}),
+      ...(m.muted !== undefined ? { muted: m.muted === true } : {}),
       ...(m.reason !== undefined ? { reason: text(m.reason, 500) } : {}),
       ...(m.open !== undefined ? { open: this.reviewLink(m.open) } : {}) };
   }

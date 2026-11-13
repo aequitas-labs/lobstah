@@ -1,4 +1,4 @@
-import type { GlassSettings, SettingRow } from '@lobstah/core';
+import type { GlassSettings, GlassSnapshot, SettingRow } from '@lobstah/core';
 import { html } from '../html.js';
 import { can, capabilities } from '../backend.js';
 import { passkeysWorkHere, registerRunPasskey, runPasskeyUrl } from '../actions.js';
@@ -73,23 +73,29 @@ export function Settings({
   error,
   passkeys,
   passkey,
+  reviewSetup,
   helms = [],
 }: {
   page: GlassSettings | null;
   error: string | null;
   passkeys?: { count: number; newestAt?: string };
   passkey?: GlassState['runPasskey'];
+  reviewSetup?: GlassSnapshot['reviewSetup'];
   helms?: Array<{ grounds: string; chat?: string }>;
 }) {
   const title = html`<h1 class="pagetitle">${TAB_ICON.settings}Configuration</h1>`;
   const runs = html`<${RunPasskeySettings} passkeys=${passkeys} passkey=${passkey} />`;
+  const reviewPosting = reviewSetup && html`<section><h2>Review posting</h2><p class="dim">Read-only · edit config.toml to change</p><div class="cfgrows">
+    <div class="cfgrow"><span class="cfgkey">Default</span><span class="cfgvalue">Approve: ${reviewSetup.autoPostApprove ?? 'ask'} · Request changes: ${reviewSetup.autoPostRequestChanges ?? 'ask'}</span><span class="cfgsource">grounds</span></div>
+    ${Object.entries(reviewSetup.perRepo ?? {}).map(([key, value]) => html`<div key=${key} class="cfgrow"><span class="cfgkey">${key}</span><span class="cfgvalue">Approve: ${value.autoPostApprove ?? 'ask'} · Request changes: ${value.autoPostRequestChanges ?? 'ask'}</span><span class="cfgsource">repo</span></div>`)}
+  </div></section>`;
   const chat =
     helms.length > 0 &&
     html`<section class="cfghelms"><h2>Helm chat</h2><div class="cfgrows">${helms.map(
       (helm) =>
         html`<div key=${helm.grounds} class="cfgrow" data-helm-chat=${helm.grounds}><span class="cfgkey">${helm.grounds}</span><span class="cfgvalue">${helm.chat ?? 'full'}</span><span class="cfgsource"></span></div>`,
     )}</div></section>`;
-  if (!page) return [title, runs, chat, html`<div class=${error ? 'bad' : 'dim'}>${error ?? 'Loading configuration'}</div>`];
+  if (!page) return [title, runs, chat, reviewPosting, html`<div class=${error ? 'bad' : 'dim'}>${error ?? 'Loading configuration'}</div>`];
   return html`${title}${runs}${chat}<div class="cfg">
     <p class="dim">Read-only. Values marked Set come from <code>${page.file}</code>. Secrets are masked.</p>
     ${error && html`<div class="bad">${error}</div>`}
@@ -115,5 +121,6 @@ export function Settings({
         html`<section key=${repo.key} class="cfgrepo"><h3>${repo.key} <span class=${'cfgtraps' + (repo.traps.limit !== undefined && repo.traps.used > repo.traps.limit ? ' warn' : ' dim')}>${trapCountText(repo.traps)}</span></h3>${rowsOf(repo.rows)}</section>`,
     )}
     ${page.sections.map((section) => html`<section key=${section.title}><h2>${section.title}</h2>${rowsOf(section.rows)}</section>`)}
+    ${reviewPosting}
   </div>`;
 }
