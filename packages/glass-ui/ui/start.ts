@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import type { GlassSnapshot } from '@lobstah/core';
-import { NO_OLDER, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
+import { NO_OLDER, prFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
 import {
   closeDecision,
   closeLightbox,
@@ -13,6 +13,7 @@ import {
   receive,
   reviewRequest,
   routeReport,
+  routePrView,
   sendAnswer,
   showModal,
   stepDecision,
@@ -44,7 +45,7 @@ const initialState = (): GlassState => ({
   route: currentRoute(),
   reportSheet: reportFromHash(location.hash),
   prefs: location.hash.startsWith('#review-') ? { ...loadPrefs(), repo: '', q: '' } : loadPrefs(),
-  modal: null,
+  modal: prFromHash(location.hash) ? { type: 'pr', key: prFromHash(location.hash)! } : null,
   detail: null,
   older: NO_OLDER,
   olderLoading: null,
@@ -176,7 +177,6 @@ function startGlass(): Array<() => void> {
       if (row && reviewScrolled !== key) {
         reviewScrolled = key;
         row.scrollIntoView?.({ block: 'center' });
-        void reviewRequest('review-seen', { key });
       }
     } else reviewScrolled = null;
   };
@@ -198,6 +198,9 @@ function startGlass(): Array<() => void> {
   paint();
 
   const unroute = onRoute((route) => {
+    const pr = prFromHash(location.hash);
+    routePrView(pr);
+    if (pr) return;
     // A report opens in the sheet over the tab, which keeps its place underneath.
     const report = reportFromHash(location.hash);
     routeReport(report);

@@ -8,6 +8,8 @@ import {
   decisionNeighbours,
   filteredDecisionCards,
   modalItem,
+  prHash,
+  prFromHash,
   openDecisionOrder,
   unreadDecisions,
 } from '../src/glass-diff.js';
@@ -478,8 +480,49 @@ export const markStale = (): void => setState({ stale: true });
 export const openLightbox = (src: string, name: string): void => setState({ lightbox: { src, name } });
 export const closeLightbox = (): void => setState({ lightbox: null });
 
+let prPushed = false;
+let prScroll: number | undefined;
+
+/** Keep the tab and its scroll position under a PR route, including browser Back. */
+export function routePrView(key: string | null): void {
+  const modal = getState().modal;
+  if (key) {
+    if (modal?.type !== 'pr' || modal.key !== key) setState({ modal: { type: 'pr', key }, detail: null });
+  } else if (modal?.type === 'pr') {
+    prPushed = false;
+    setState({ modal: null, detail: null });
+    const y = prScroll;
+    prScroll = undefined;
+    if (y !== undefined) setTimeout(() => window.scrollTo(0, y), 0);
+  }
+}
+
+/** Close a PR opened here through browser history, or keep a direct link inside the glass. */
+function closePrView(): void {
+  if (prPushed) {
+    prPushed = false;
+    history.back();
+    return;
+  }
+  history.replaceState(null, '', '#' + getState().route);
+  routePrView(null);
+}
+
 export function showModal(type: ModalType, key: string): void {
   const state = getState();
+  if (type === 'review') {
+    showModal('pr', key.replace('review:', 'pr:'));
+    return;
+  }
+  if (type === 'pr') {
+    if (!prFromHash(location.hash)) {
+      prPushed = true;
+      prScroll = window.scrollY;
+    }
+    location.hash = prHash(key);
+    routePrView(key);
+    return;
+  }
   const modal = { type, key };
   if (type === 'dispatch') {
     // Its detail loads now; the modal shows the summary meanwhile.
@@ -493,6 +536,10 @@ export function showModal(type: ModalType, key: string): void {
 
 /** Close the modal. */
 export function closeModal(): void {
+  if (getState().modal?.type === 'pr') {
+    closePrView();
+    return;
+  }
   setState({ modal: null, detail: null });
 }
 

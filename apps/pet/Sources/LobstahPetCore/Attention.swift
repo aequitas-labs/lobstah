@@ -48,7 +48,7 @@ public struct AttentionItem: Decodable, Equatable {
   public var identity: String { "\(kind ?? "question"):\(key ?? id)" }
 
   /** PR pets open the repo review tool; review notifications open their row in the glass. */
-  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready" ) ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
+  public var prLink: URL? { ((kind?.hasPrefix("pr:") ?? false) || kind == "stack-ready" || kind == "review" ) ? (reviewUrl ?? prUrl).flatMap(URL.init(string:)) : nil }
 
   /**
    * The glass this item belongs to: the one place that picks between the
@@ -94,7 +94,13 @@ public struct AttentionItem: Decodable, Equatable {
       return GlassTarget(hash: address.url.fragment.map { "#\($0)" } ?? "", url: address.url)
     }
     guard let key, let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
-    if kind == "review", let url = URL(string: "\(glass.absoluteString)/#review-\(encoded)") { return GlassTarget(hash: "#review-\(encoded)", url: url) }
+    if kind == "review" || kind == "pr:draft" {
+      let prKey = key.replacingOccurrences(of: "review:", with: "pr:")
+      guard let prEncoded = prKey.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+      var components = URLComponents(url: address.url, resolvingAgainstBaseURL: false)
+      components?.percentEncodedFragment = "pr/\(prEncoded)"
+      if let url = components?.url { return GlassTarget(hash: "#pr/\(prEncoded)", url: url) }
+    }
     if let url = reportLink(glass: glass) { return GlassTarget(hash: "#report/\(encoded)", url: url) }
     if let url = decisionLink(glass: glass) { return GlassTarget(hash: "#decision/\(encoded)", url: url) }
     return nil
@@ -165,7 +171,7 @@ public func clickAttentionItem(
   acknowledge: ([String]) -> Void
 ) {
   let address = item.glassAddress(local: glass)
-  if let url = item.prLink {
+  if let url = item.prLink, item.kind != "pr:draft" && item.kind != "review" {
     open(url)
   } else if let target = item.glassTarget(glass: glass) {
     let isDecision = item.kind == "decision"
@@ -191,8 +197,7 @@ public func clickAttentionItem(
   } else {
     focusHelm(glass)
   }
-  if item.kind == "review", let key = item.key { acknowledge(["reviews", "seen", key]) }
-  else if let args = item.ackArguments { acknowledge(args) }
+  if item.kind != "review" && item.kind != "pr:draft", let args = item.ackArguments { acknowledge(args) }
 }
 
 /// Items this pet clicked or acknowledged: identity → the stateHash it hid,

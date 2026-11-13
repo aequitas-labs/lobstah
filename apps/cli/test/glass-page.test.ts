@@ -28,7 +28,7 @@ it.each([
   const links = g.$$('a').map((a) => a.getAttribute('href') ?? '');
   expect(links.some((url) => url.startsWith(prefix!))).toBe(true);
   expect(links.filter((url) => /^https:\/\/github.com\/acme\/web\/pull\//.test(url))).toEqual([]);
-  expect(g.$$('#lobs a').some((a) => (a.getAttribute('href') ?? '').startsWith(prefix!))).toBe(true);
+  expect(g.$$('#lobs a').some((a) => (a.getAttribute('href') ?? '').startsWith('#pr/'))).toBe(true);
 });
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-glass-page-'));
@@ -910,14 +910,14 @@ describe('glass page: modals', () => {
     expect(g.$$('#modalbox form, #modalbox [method]')).toHaveLength(0);
   });
 
-  it('the PR modal shows the stack, the dispatch chain, and the watch cursor', async () => {
+  it('the PR view shows its title, stack, dispatch chain and watch', async () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#prs', '#42');
     const box = g.$('#modalbox')!;
-    expect(text(box.querySelector('h3'))).toBe(`#42 ${PR_TITLES[42]} checks 3/4`);
-    expect(text(box)).toContain('#41 → #42 → #43 · 2 of 3 · floor main · blocked by #41');
-    expect(box.querySelector('b')?.textContent).toBe('#42');
-    expect(g.$$('#modalbox .cmd code').map(text)).toEqual(['eyJoIjoiYWJjIn0-a-long-opaque-cursor']);
+    expect(text(box.querySelector('h2'))).toBe(PR_TITLES[42]);
+    expect(text(box)).toContain('#41 → #42 → #43 · 2 of 3 · base main · waiting for #41');
+    expect([...box.querySelectorAll('b')].some(b => b.textContent === '#42')).toBe(true);
+    expect(text(box)).toContain('checked 60s ago');
     // The chain links open the dispatch modals.
     await click(
       g,
@@ -1086,10 +1086,10 @@ describe('glass page: PRs', () => {
   it('titles: the PR modal header shows the title; a PR without one shows the number alone', async () => {
     const g = await page(acceptanceFleet());
     await openRow(g, '#prs', '#41');
-    expect(text(g.$('#modalbox h3'))).toBe(`#41 ${PR_TITLES[41]} green`);
+    expect(text(g.$('#modalbox h2'))).toBe(PR_TITLES[41]);
     await escape(g);
     await openRow(g, '#prs', '#43');
-    expect(text(g.$('#modalbox h3'))).toBe('#43 draft');
+    expect(text(g.$('#modalbox h2'))).toBe('acme/web#43');
   });
 
   it('a dispatch row carries its PR link, evidence badge, and merge gate', async () => {
@@ -1251,7 +1251,7 @@ describe('glass page: lobs', () => {
       ['A', 'which base should #43 target?'],
       ['A', 'draft #43 draft'],
     ]);
-    expect(lobs[1]!.getAttribute('href')).toBe('https://github.com/acme/web/pull/43');
+    expect(lobs[1]!.getAttribute('href')).toBe('#pr/pr%3Aacme%2Fweb%2343');
     const key = acceptanceFleet().attention.find((a) => a.kind === 'question')!.key!;
     expect(lobs[0]!.getAttribute('href')).toBe(`#decision/${encodeURIComponent(key)}`);
     await click(g, lobs[0]!);

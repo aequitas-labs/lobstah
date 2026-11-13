@@ -136,12 +136,12 @@ describe('glass links: the local glass', () => {
     // The note is in the Dispatches table and the dispatch's modal; a dispatch card leaves it out.
     const g = await page(linkFleet(), { prefs: { view: 'table' }, hash: '#dispatches' });
     const host = g.$$('#dispatches tr').find((r) => r.textContent?.includes('cccccccc'))!;
-    expect(links(host)).toEqual([ext(PR)]);
+    expect(links(host)).toEqual([['#pr/pr%3Aacme%2Fweb%2343', PR, null, null]]);
     expect(host.querySelector('script')).toBeNull();
     expect(host.textContent).toContain('<script>alert(1)</script> review ');
     (host.querySelector('a.autolink') as HTMLElement).click();
     await g.settle();
-    expect(g.$('#overlay')!.className).not.toBe('open');
+    expect(g.window.location.hash).toBe('#pr/pr%3Aacme%2Fweb%2343');
   });
 
   it('the dispatch modal links its last note, log, and evidence', async () => {
@@ -151,8 +151,8 @@ describe('glass links: the local glass', () => {
     const box = g.$('#modalbox')!;
     const hrefs = links(box).map((l) => l[0]);
     expect(hrefs).toContain('http://127.0.0.1:5173/review/abc');
-    expect(hrefs).toContain(PR);
-    expect(hrefs.every((h) => /^https?:\/\//.test(h!))).toBe(true);
+    expect(hrefs).toContain('#pr/pr%3Aacme%2Fweb%2343');
+    expect(hrefs.every((h) => /^https?:\/\//.test(h!) || h!.startsWith('#pr/'))).toBe(true);
     expect(box.querySelector('script')).toBeNull();
   });
 
@@ -160,7 +160,7 @@ describe('glass links: the local glass', () => {
     const g = await page(linkFleet(), { hash: '#notices' });
     expect(links(g.$('#notices'))).toEqual([ext('https://github.com/acme/web/pull/40')]);
     await g.go('#deck');
-    expect(links(g.$('#daily-goals'))).toEqual([ext('https://github.com/acme/web/pull/41')]);
+    expect(links(g.$('#daily-goals'))).toEqual([['#pr/pr%3Aacme%2Fweb%2341', 'https://github.com/acme/web/pull/41', null, null]]);
     const todos = g.$$('#deck section').find((s) => s.querySelector('h2')?.textContent === 'Todos')!;
     expect(links(todos)).toEqual([ext('https://docs.example/a'), ext('https://docs.example/b')]);
   });

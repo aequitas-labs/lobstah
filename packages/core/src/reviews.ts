@@ -574,7 +574,7 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
 }
 
 /**
- * Re-draft a stale or failed round: it becomes requested again at the PR's
+ * Re-draft a drafted, stale or failed round: it becomes requested again at the PR's
  * current head, and the next pick cycle starts a job for it. Returns the
  * item, or why it cannot.
  */
@@ -582,7 +582,7 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   const item = readReview(key);
   const r = item && latestRound(item);
   if (!item || !r) return `no review item ${key}`;
-  if (r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
+  if (!['drafted', 'stale', 'failed'].includes(r.state)) return `${key}: the newest round is ${r.state}; only a drafted, stale or failed round re-drafts`;
   const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, verdict: _v, blocking: _b, notification: _n, needsYou: _y, seenAt: _seen, acknowledgedAt: _ack, ...rest } = r;
   item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha, byHand: true };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });

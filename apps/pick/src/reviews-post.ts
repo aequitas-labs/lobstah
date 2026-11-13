@@ -314,7 +314,7 @@ export async function dismissReviewRound(key: string, by: string, opts: Opts = {
 export async function redraftReviewRound(key: string, opts: Opts = {}): Promise<string | undefined> {
   const item = readReview(key);
   const r = item && latestRound(item);
-  if (r && r.state !== 'stale' && r.state !== 'failed') return `${key}: the newest round is ${r.state}; only a stale or failed round re-drafts`;
+  if (r && !['drafted', 'stale', 'failed'].includes(r.state)) return `${key}: the newest round is ${r.state}; only a drafted, stale or failed round re-drafts`;
   const why = await discardStaged(key, opts);
   if (why) return why;
   const out = redraftReview(key, opts.now);

@@ -84,7 +84,7 @@ export function App({ state }: { state: GlassState }) {
     html`<${LightboxView} box=${state.lightbox} />`,
     settingsOpen &&
       html`<${Dialog} title="Settings" icon=${ITEM_ICON.settings} cls="settings-dialog" onClose=${closeModal}><${SettingsBody} prefs=${state.prefs} /><//>`,
-    html`<div id="overlay" class=${state.modal && d && !settingsOpen ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
+    html`<div id="overlay" class=${state.modal && d && !settingsOpen ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class=${'modal' + (state.modal?.type === 'pr' || state.modal?.type === 'review' ? ' view-modal' : '')} id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
     d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`,

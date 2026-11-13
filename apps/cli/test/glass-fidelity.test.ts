@@ -63,6 +63,8 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * `<a class="lob" href="#decision/<key>">` folds back to the old
  * `<div class="lob">` (foldPrTitles), and the lobs are left out of the
  * computed-style check on both pages.
+ * PR views intentionally replace the old PR modal; glass-pr-view.test.ts covers
+ * them. Draft lobs route internally now; their destinations normalize below.
  * The glass also links each bare http(s) URL in free text on purpose
  * (glass-links.test.ts tests it): an `<a class="autolink">` folds back to
  * its text (foldPrTitles).
@@ -223,6 +225,11 @@ function foldPrTitles(el: Element): Node {
   for (const n of copy.querySelectorAll('.claimedby')) n.remove();
   for (const n of copy.querySelectorAll('.trapname')) n.replaceWith(doc.createTextNode(n.textContent ?? ''));
   for (const n of copy.querySelectorAll('a.autolink')) n.replaceWith(doc.createTextNode(n.textContent ?? ''));
+  for (const a of copy.querySelectorAll('a.lob[href^="#pr/"]')) {
+    const key = decodeURIComponent(a.getAttribute('href')!.slice(4));
+    const ref = /^pr:([^#]+)#(\d+)$/.exec(key);
+    if (ref) a.setAttribute('href', `https://github.com/${ref[1]}/pull/${ref[2]}`);
+  }
   for (const a of copy.querySelectorAll('a.lob[href^="#decision/"]')) {
     const div = doc.createElement('div');
     for (const attr of a.attributes) if (attr.name !== 'href' && attr.name !== 'title') div.setAttribute(attr.name, attr.value);
@@ -393,7 +400,10 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
       for (let i = 0; i < legacy.views.length; i++) {
         const [step, want] = legacy.views[i]!;
         const got = built.views[i]![1];
-        for (const k of Object.keys(want)) expect(got[k], `${name} · ${step} · ${k}`).toBe(want[k]);
+        for (const k of Object.keys(want)) {
+          if (step.startsWith('modal pr ') && k === 'modalbox') continue;
+          expect(got[k], `${name} · ${step} · ${k}`).toBe(want[k]);
+        }
       }
     }, 60_000);
   }

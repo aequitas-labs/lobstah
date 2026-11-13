@@ -3,6 +3,7 @@ import { imageDisplay, markdownImageSources, markdownTasks, parseMarkdown, safeH
 import type { ImageSurface, MdBlock, MdInline } from '../../src/glass-markdown.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
+import { h } from 'preact';
 import { checklistSource, hasChecklistSource } from '../checklists.js';
 import type { Children } from '../html.js';
 import { Button } from './button.js';
@@ -109,6 +110,7 @@ function RemoteImage({ url, alt, open }: { url: string; alt: string; open?: Open
   const img = html`<img src=${url} alt=${alt} loading="lazy" referrerpolicy="no-referrer" onError=${() => setFailed(true)} />`;
   if (!open) return img;
   const click = (e: Event) => {
+    e.preventDefault();
     e.stopPropagation();
     open(url, alt || url);
   };
@@ -302,4 +304,62 @@ export function MarkdownElements({
     ),
     error && html`<p class="bad" role="alert">${error}</p>`,
   ];
+}
+
+/** Render GitHub's HTML through a tag and URL allowlist; attributes and executable content never pass through. */
+export function GitHubDescription({ source, openImage }: { source: string; openImage?: OpenImage }): Children {
+  const doc = new DOMParser().parseFromString(source, 'text/html');
+  const allowed = new Set([
+    'p',
+    'div',
+    'span',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'ul',
+    'ol',
+    'li',
+    'blockquote',
+    'pre',
+    'code',
+    'table',
+    'thead',
+    'tbody',
+    'tr',
+    'th',
+    'td',
+    'strong',
+    'em',
+    'del',
+    'br',
+    'hr',
+    'details',
+    'summary',
+    'kbd',
+    'sup',
+    'sub',
+  ]);
+  const blocked = new Set(['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'math', 'template']);
+  const render = (node: Node): Children => {
+    if (node.nodeType === 3) return node.textContent;
+    if (node.nodeType !== 1) return null;
+    const element = node as Element,
+      tag = element.tagName.toLowerCase();
+    if (blocked.has(tag)) return null;
+    const children = [...node.childNodes].map(render);
+    if (tag === 'a') {
+      const href = safeHref(element.getAttribute('href') ?? '');
+      return href ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, children) : children;
+    }
+    if (tag === 'img') {
+      const src = element.getAttribute('src') ?? '';
+      if (!/^https:\/\//i.test(src)) return null;
+      return html`<${RemoteImage} url=${src} alt=${element.getAttribute('alt') ?? ''} open=${openImage} />`;
+    }
+    return allowed.has(tag) ? h(tag, {}, children) : children;
+  };
+  return html`<div class="md github-description">${[...doc.body.childNodes].map(render)}</div>`;
 }

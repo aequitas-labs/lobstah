@@ -1,7 +1,7 @@
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
-import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
-import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView } from '../../src/glass-diff.js';
+import { dispatchReport, modalItem, reportPageUrl } from '../../src/glass-diff.js';
+import type { DispatchDetail, GlassPrefs, ModalRef } from '../../src/glass-diff.js';
 import { cancelJob, closeModal, showModal, messageHelm, setPrefs } from '../actions.js';
 import { useState } from 'preact/hooks';
 import { html } from '../html.js';
@@ -42,7 +42,7 @@ import { TAB_ICON } from './icons.js';
 import { getState } from '../store.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 import { GrantChip } from './session-grants.js';
-import { reviewModal } from './reviews.js';
+import { PrView } from './pr-view.js';
 import { Button } from './button.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR or report. */
@@ -62,55 +62,6 @@ export function SettingsBody({ prefs }: { prefs: GlassPrefs }) {
     visibleTabs().includes('settings') &&
     html`<p class="dim settings-config">Daemon and grounds settings are in <a href="#settings" onClick=${closeModal}>${TAB_ICON.settings}Configuration</a></p>`
   }`;
-}
-
-function stackLine(p: PrModalView['pr'], s: NonNullable<PrModalView['stack']>) {
-  const numbers = stackNumbers(s.numbers, new Map(s.numbers.map((n, i) => [n, s.titles[i]])), p.number);
-  const next = s.nextMergeable
-    ? [' · ', html`<span class="ok">next mergeable</span>`]
-    : s.blockedBy
-      ? ' · blocked by #' + s.blockedBy
-      : s.nextNumber
-        ? ' · next is #' + s.nextNumber
-        : '';
-  return [s.title && [html`<b>${LinkedText(s.title)}</b>`, ' · '], numbers, ' · ', s.position, ' of ', s.size, ' · floor ', s.floor, next];
-}
-
-/** A dispatch-chain link: opens that dispatch's modal instead of following the #. */
-const follow = (key: string) => (e: Event) => {
-  e.preventDefault();
-  showModal('dispatch', key);
-};
-
-function prModal(d: GlassSnapshot, key: string) {
-  const v = prModalView(d, key)!,
-    p = v.pr,
-    s = v.stack,
-    w = v.watch;
-  const review = prReview(p);
-  const chain = v.chain.length
-    ? v.chain.flatMap((c, i) => [
-        i ? ' → ' : '',
-        c.culled
-          ? html`<span class="dim">${c.id.slice(0, 8)} (culled)</span>`
-          : [html`<a href="#" onClick=${follow(c.modalKey!)}>${c.id.slice(0, 8)}</a>`, ' ', html`<span class="dim">${c.verb}</span>`],
-      ])
-    : html`<span class="dim">none</span>`;
-  const watch = w
-    ? [
-        html`<div>${w.key} · owner ${w.owner || '?'} · ${w.lastCheckedAt ? ['checked ', Age(w.lastCheckedAt), ' ago'] : 'never checked'}</div>`,
-        w.lastError && html`<div class="bad">${LinkedText(w.lastError)}</div>`,
-        html`<div class="dim" style="font-size:11px;margin-top:4px">cursor</div>`,
-        cmdRow(w.cursor),
-      ]
-    : html`<div class="dim">no watch — <code>lobstah watch add ${p.url}</code> registers one</div>`;
-  return [
-    close,
-    html`<h3>${prLink(p)} ${LinkedText(p.title)} <span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>${p.draft && p.badge.text !== 'draft' && [' ', html`<span class="badge pr-draft">draft</span>`]}</h3>`,
-    html`<div class="sub">${p.repo} · ${p.state} · observed ${Age(p.observedAt)} ago${p.gate && ' · gate ' + p.gate}</div>`,
-    html`<div class="sec">checks</div><div>${prChecks(p)}</div><div class="sec">review</div><div>${review || html`<span class="dim">no review yet</span>`}</div><div class="sec">merge</div><div>${prMerge(p)}</div>${p.repairWait && html`<div class="sec">repair waits</div><div>${p.repairWait.heldBy}: ${LinkedText(p.repairWait.reason)}${p.repairWait.until ? ' · until ' + p.repairWait.until : ''}</div>`}<div class="sec">refs</div><div>${p.headRefName || '?'} → ${p.baseRefName || '?'}</div><div class="sec">stack</div><div>${s ? stackLine(p, s) : html`<span class="dim">not stacked</span>`}</div><div class="sec">dispatch chain</div><div>${chain}</div><div class="sec">watch</div>`,
-    watch,
-  ];
 }
 
 function helmModal(h: GlassHelm) {
@@ -328,8 +279,8 @@ export function Modal({
   if (!item) return null;
   // Settings open in a Dialog of their own (app.ts).
   if (modal.type === 'settings') return null;
-  if (modal.type === 'pr') return prModal(snapshot, modal.key);
-  if (modal.type === 'review') return [close, reviewModal(item as GlassReview)];
+  if (modal.type === 'pr') return html`<${PrView} snapshot=${snapshot} prKey=${modal.key} />`;
+  if (modal.type === 'review') return html`<${PrView} snapshot=${snapshot} prKey=${modal.key.replace('review:', 'pr:')} />`;
   if (modal.type === 'helm') return helmModal(item as GlassHelm);
   if (modal.type === 'dispatch') {
     const report = dispatchReport(snapshot, item as GlassDispatchSummary);

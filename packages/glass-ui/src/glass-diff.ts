@@ -158,7 +158,16 @@ export type GlassTab = (typeof GLASS_TABS)[number];
 export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
   if (tab.startsWith('review-')) return 'reviews';
+  if (tab.startsWith('pr/')) return 'prs';
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
+}
+
+/** A PR view can be opened from a card, pet or copied link. */
+export const prHash = (key: string): string => `#pr/${encodeURIComponent(key)}`;
+export function prFromHash(hash: string | undefined | null): string | null {
+  const match = /^#pr\/(.+)$/.exec(hash ?? '');
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]!); } catch { return null; }
 }
 
 /** `#decision/<key>`: the deck, scrolled to that decision's card. */
@@ -461,7 +470,7 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null, detail?: Dis
     // The detail has the brief, log, and whole note; the summary keeps its PR badges.
     return summary && full ? { ...summary, ...full } : (summary ?? full ?? null);
   }
-  if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || null;
+  if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || (d.reviews || []).find(v => v.key.replace('review:', 'pr:') === modal.key) || null;
   if (modal.type === 'review') return (d.reviews || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError, helms: d.helms };
   const t = d.traps.find((v) => v.trapId === modal.key);

@@ -4,6 +4,7 @@ import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
+import { readPrDetails } from './pr-details.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
@@ -919,6 +920,8 @@ export function serveGlass(
     focus?: (reg: TrapRegistration) => Promise<FocusResult>;
     snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
     presence?: GlassPresence;
+    /** Read a fresh PR description with this server's forge sign-in. */
+    prDetails?: typeof readPrDetails;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
     runWindows?: RunWindows;
@@ -1518,6 +1521,21 @@ export function serveGlass(
       const ok = req.method === 'GET';
       res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(ok ? glassSettings() : { error: 'GET required' }));
+    } else if (req.url?.startsWith('/data/pr/')) {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'GET required' })); return;
+      }
+      let key: string;
+      try { key = decodeURIComponent(req.url.slice('/data/pr/'.length)); }
+      catch { res.writeHead(400); res.end(); return; }
+      const fleet = snapshot({ local: false });
+      if (!fleet.prs.some(pr => pr.key === key) && !fleet.reviews?.some(review => review.key.replace(/^review:/, 'pr:') === key)) {
+        res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ error: 'PR not found' })); return;
+      }
+      void (options.prDetails ?? readPrDetails)(key).then(details => {
+        res.writeHead(details ? 200 : 404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(details ?? { error: 'PR description could not be read' }));
+      }).catch(error => fail(req, res, error));
     } else if (req.url?.startsWith('/data/')) {
       // History the poll leaves out, and one dispatch's detail: built on the
       // snapshot thread when there is one. Nothing else lives under /data/.
