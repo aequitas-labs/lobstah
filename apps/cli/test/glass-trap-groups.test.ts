@@ -172,8 +172,8 @@ it('falls back for an invalid stored choice and still works when storage is unav
 });
 
 it('shows repo capacity, available workers and the accessible harness mix, including an empty repo', async () => {
-  const page = await open();
-  const rows = page.$$('.trap-overview-row');
+  const page = await open({ hash: '#deck' });
+  const rows = page.$$('#deck .trap-overview-row');
   expect(rows[0]?.textContent).toContain('web3/10 in use · 1 free');
   expect(rows[1]?.textContent).toContain('api2 in use · 1 free');
   expect(rows[2]?.textContent).toContain('empty0/4 in use · 0 free');
@@ -181,9 +181,9 @@ it('shows repo capacity, available workers and the accessible harness mix, inclu
   expect(rows[0]?.querySelector('[aria-label="Claude"]')?.parentElement?.textContent).toContain('1');
 });
 
-it('keeps the deck preview free of the Traps page controls and overview', async () => {
+it('keeps grouping and history controls on the Traps page while the overview is on deck', async () => {
   const page = await open({ hash: '#deck' });
-  expect(page.$('#deck .trap-overview')).toBeNull();
+  expect(page.$('#deck .trap-overview')).not.toBeNull();
   expect(page.$('#deck .trap-inactive')).toBeNull();
   expect(page.$('#deck [aria-label="Group traps by"]')).toBeNull();
 });

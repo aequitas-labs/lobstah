@@ -421,6 +421,8 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
   repoLabel?: string;
   /** Signed on now (the registration exists), including when its beat is stale. */
   live: boolean;
+  /** The existing roster's departure state, so ghosted and deliberately stowed seats stay distinct. */
+  rosterState?: 'live' | 'stowed' | 'ghosted';
   /** Parked and recently beating; false for a stale or never-parked registration. */
   listening?: boolean;
   /** A reserved trap no session has signed on as yet (`man throw`); `live` is false. */
