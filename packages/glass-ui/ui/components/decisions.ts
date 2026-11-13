@@ -24,6 +24,7 @@ import { getState } from '../store.js';
 import { Age, ImageThumb, NamedText, RepoName, opener } from './common.js';
 import { Markdown } from './report.js';
 import { LinkedText } from './links.js';
+import { SectionHead } from './section-head.js';
 import { PermissionsProposalCard } from './permissions-proposal.js';
 import { RunActions, RunCardBody } from './run-card.js';
 import { RUN_DECLINE, RunKindIcon, RunStatusIcon, runStatus } from './run-status.js';
@@ -253,6 +254,7 @@ export function DeckDecisions({
   viewedHere,
   unread,
   recentRuns = [],
+  page = false,
 }: {
   cards: DecisionCard[];
   drafts: Record<string, DecisionDraft>;
@@ -260,11 +262,17 @@ export function DeckDecisions({
   viewedHere: Record<string, true>;
   unread: number;
   recentRuns?: RecentRun[];
+  page?: boolean;
 }) {
-  const body = cards.length
-    ? html`<ul class="dlist">${cards.map((c) => row(c, drafts[c.key], !!viewedHere[c.key], c.key === focus))}</ul>`
+  const ordered = [...cards].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const shown = page ? ordered : ordered.slice(0, 3);
+  const body = shown.length
+    ? html`<ul class="dlist">${shown.map((c) => row(c, drafts[c.key], !!viewedHere[c.key], c.key === focus))}</ul>`
     : html`<div class="empty">none</div>`;
-  return html`<section class="decisions"><h2>decisions${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`}</h2>${body}<${RecentRuns} runs=${recentRuns} /></section>`;
+  const heading = page
+    ? html`<${SectionHead} title="Decisions" count=${cards.length} page />`
+    : html`<${SectionHead} title="Decisions" count=${cards.length} href="#decisions" badge=${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`} />`;
+  return html`<section class="decisions">${heading}${body}${!page && ordered.length > shown.length && html`<a class="deckmore" href="#decisions">+${ordered.length - shown.length} more →</a>`}<${RecentRuns} runs=${recentRuns} /></section>`;
 }
 
 /** The modal's key legend: what each key does here. */

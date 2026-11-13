@@ -14,7 +14,6 @@ import { Card, OpenIcon } from './card.js';
 import {
   Harness,
   mailCell,
-  NewTrap,
   opener,
   startCommands,
   Table,
@@ -45,7 +44,10 @@ function row(t: GlassTrap, grants: Grant[]) {
 export function trapTitleLink(trap: GlassTrap): Children {
   const open = (event: MouseEvent): void => {
     event.stopPropagation();
-    if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) opener('trap', trap.trapId)();
+    if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
+      event.preventDefault();
+      opener('trap', trap.trapId)();
+    }
   };
   return html`<a href=${trapPageUrl(trap.trapId)} onClick=${open}>${trapDisplayName(trap)}</a>`;
 }
@@ -144,7 +146,7 @@ export function Traps({ inp, grants = [] }: { inp: SectionInputs['traps']; grant
   const active = list.filter((trap) => !inactiveTrap(trap));
   const inactive = list.filter(inactiveTrap);
   const grouping = inp.groupBy ?? 'repo';
-  const head = html`<div class="tabhead trap-controls"><div class="seg" role="group" aria-label="Group traps by">${(['repo', 'harness', 'status'] as const).map((choice) => html`<${Button} key=${choice} pressed=${grouping === choice} onClick=${() => setPrefs({ trapGroup: choice })}>${choice.charAt(0).toUpperCase() + choice.slice(1)}<//>`)}</div><${NewTrap} /></div>`;
+  const head = html`<div class="tabhead trap-controls"><div class="seg" role="group" aria-label="Group traps by">${(['repo', 'harness', 'status'] as const).map((choice) => html`<${Button} key=${choice} pressed=${grouping === choice} onClick=${() => setPrefs({ trapGroup: choice })}>${choice.charAt(0).toUpperCase() + choice.slice(1)}<//>`)}</div></div>`;
   const configured = inp.configured?.length
     ? html`<div class="cards configured-traps">${inp.configured.map((profile) => html`<div class="card"><div class="top"><b>trap:${profile.profile}</b><span class="badge">${profile.state}</span></div><div class="meta">${profile.grounds} · <${HarnessIcon} harness=${profile.harness} /> · ${profile.surface} · ${profile.capacity}</div>${profile.cwd && html`<div class="note">${profile.cwd}</div>`}${profile.pending?.length && html`<div class="note">Queued: ${profile.pending.join(', ')}</div>`}${profile.start && validDesktopStartLink(profile.start.url) && html`<${DesktopStartAction} url=${profile.start.url} />`}</div>`)}</div>`
     : null;

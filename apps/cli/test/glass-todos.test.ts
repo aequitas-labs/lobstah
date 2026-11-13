@@ -236,7 +236,7 @@ describe('the Deck preview', () => {
     expect(rows).toHaveLength(5);
     expect(rows[0]!.querySelector('.badge')).not.toBeNull();
     expect(rows.every((row) => row.querySelector('button')?.getAttribute('aria-label') === 'Snooze')).toBe(true);
-    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('More (3)');
+    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('+3 more →');
   });
 });
 
@@ -253,7 +253,7 @@ describe('the count', () => {
     const rows = openRows(g, 'deck');
     expect(rows).toHaveLength(5);
     expect(rows.every((r) => !r.classList.contains('done'))).toBe(true);
-    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('More (20)');
+    expect(g.$('#deck .todos .deckmore')!.textContent).toBe('+20 more →');
     const done = g.$('#deck .todos .todo-done-today')!;
     expect(done.textContent).toBe('50 done today');
     expect(done.getAttribute('href')).toBe('#todos');

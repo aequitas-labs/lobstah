@@ -58,7 +58,8 @@ describe('the copy pass on the glass', () => {
     const g = await page(d, { hash: '#traps', prefs: { view: 'table' } });
     (g.$$('#traps .rowhead').find((r) => text(r).includes(gone.trapId)) as HTMLElement).click();
     await g.settle();
-    expect(text(g.$('#modalbox'))).toContain('signed off · its history is below');
+    expect(text(g.$('#modalbox .pr-view-chips'))).toContain('signed off');
+    expect(g.$('.trap-lifecycle')).not.toBeNull();
   });
 
   it('decision cards: new and seen (C11), a tap closes (C13), and errors lead with the next step (C14, C15)', async () => {

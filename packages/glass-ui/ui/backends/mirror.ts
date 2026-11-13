@@ -1,5 +1,6 @@
 import type {
   GlassDecision,
+  GlassPrDetails,
   GlassDispatch,
   GlassOlderKind,
   GlassOlderPage,
@@ -338,6 +339,15 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
       return { kind: 'snapshot', snapshot: await load(), etag: null };
     },
     snapshot: load,
+    prDetails: async (key) => {
+      if (!merged) await load();
+      const sourceKey = route(key).boat ? key : key.replace('pr:', 'review:');
+      return readFor<GlassPrDetails>(
+        sourceKey,
+        (local) => `/data/pr/${encodeURIComponent(local.replace('review:', 'pr:'))}`,
+        async () => ({ ok: false, status: 404 }),
+      );
+    },
     dispatch: (id) =>
       readFor<GlassDispatch>(
         id,

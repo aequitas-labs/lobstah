@@ -9,6 +9,7 @@ import { Button } from './button.js';
 import { RecheckAll } from './recheck-all.js';
 import { ITEM_ICON } from './icons.js';
 import { TodoSnooze, todoDueText } from './todo-snooze.js';
+import { SectionHead } from './section-head.js';
 /** A goal day starts at this local hour, as it does for goals and the done-today list. */
 const GOAL_DAY_START_HOUR = 4;
 /** Whether an instant falls in the current goal day, in the browser's zone. */
@@ -90,7 +91,7 @@ export function Todos({
   const shownPasses = passes;
   const row = (todo: TodoView): Children =>
     html`<${TodoRow} key=${`todo:${todo.grounds}:${todo.id}`} todo=${todo} preview=${preview} grounds=${grounds} />`;
-  return html`<section class="todos"><div class="todo-heading"><h2>${preview ? 'Todos' : 'TODOs'}</h2>${shownPasses.length === 1 && html`<${RecheckAll} pass=${shownPasses[0]} />`}</div>${shownPasses.map((pass) => html`<div class="todo-pass"><span class="dim">${shownPasses.length > 1 ? pass.grounds + ' · ' : ''}${lastPassText(pass.lastPassAt)}</span>${shownPasses.length > 1 && html`<${RecheckAll} pass=${pass} />`}</div>`)}${note && html`<div class="dim">${LinkedText(note)}</div>`}${!open.length && html`<div class="empty">No open TODOs</div>`}<ul class="todo-checklist">${shown.map(row)}</ul>${preview && open.length > 5 && html`<a class="deckmore" href="#todos">More (${open.length - 5})</a>`}${
+  return html`<section class="todos">${preview ? html`<${SectionHead} title="Todos" count=${open.length} href="#todos" action=${shownPasses.length === 1 && html`<${RecheckAll} pass=${shownPasses[0]} />`} />` : html`<div class="todo-heading"><h2>TODOs</h2>${shownPasses.length === 1 && html`<${RecheckAll} pass=${shownPasses[0]} />`}</div>`}${shownPasses.map((pass) => html`<div class="todo-pass"><span class="dim">${shownPasses.length > 1 ? pass.grounds + ' · ' : ''}${lastPassText(pass.lastPassAt)}</span>${shownPasses.length > 1 && html`<${RecheckAll} pass=${pass} />`}</div>`)}${note && html`<div class="dim">${LinkedText(note)}</div>`}${!open.length && html`<div class="empty">No open TODOs</div>`}<ul class="todo-checklist">${shown.map(row)}</ul>${preview && open.length > 5 && html`<a class="deckmore" href="#todos">+${open.length - 5} more →</a>`}${
     doneToday.length > 0 &&
     (preview
       ? html`<a class="dim todo-done-today" href="#todos">${doneToday.length} done today</a>`

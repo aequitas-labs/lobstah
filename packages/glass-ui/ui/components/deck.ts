@@ -36,13 +36,13 @@ import {
 import { GrantChip } from './session-grants.js';
 import { trapCard, trapTitleLink } from './traps.js';
 import { TrapOverview } from './trap-overview.js';
-import { SectionHead } from './section-head.js';
 import { dispatchCard } from './dispatches.js';
 import { Card } from './card.js';
 import { getState } from '../store.js';
 import { openReport, reportCard, reportMeta } from './reports.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
+import { SectionHead } from './section-head.js';
 import { Todos } from './todos.js';
 import type { DecisionDraft } from '../store.js';
 import { visibleTabs } from '../backend.js';
@@ -135,7 +135,7 @@ function deckItem(it: DeckItem, view: View) {
 const more = (n: number, tab: string) => n > 0 && html`<a class="deckmore" href=${'#' + tab}>+${n} more →</a>`;
 
 /** What an empty deck section says, where "none" doesn't say what is missing. */
-const EMPTY: Record<string, string> = { 'in flight': 'nothing in flight', reports: 'no reports yet' };
+const EMPTY: Record<string, string> = { 'In flight': 'nothing in flight', Reports: 'no reports yet' };
 
 function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number, view: View, headAction?: Children) {
   // A section for a tab this page's source does not fill is not shown, empty or otherwise.
@@ -147,7 +147,8 @@ function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number,
       ? html`<div class="cards">${lines}</div>`
       : lines
     : html`<div class="empty">${EMPTY[title] ?? 'none'}</div>`;
-  return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
+  const headTitle = title === 'Landed · 24h' ? title : title[0]!.toUpperCase() + title.slice(1);
+  return html`<section><${SectionHead} title=${headTitle} count=${items.length} href=${'#' + tab} action=${headAction} />${body}${more(items.length - shown.length, tab)}</section>`;
 }
 
 /** Only attention cases get rows; the fleet overview remains useful even when every trap is healthy. */
@@ -275,6 +276,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${trapBlock(traps, inp.repoTraps, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('In flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('Reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${trapBlock(traps, inp.repoTraps, view)}</div>`,
   ];
 }

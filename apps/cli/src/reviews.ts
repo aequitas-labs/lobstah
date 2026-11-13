@@ -38,7 +38,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
     out.push({
       verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
-      ...(draft && !('error' in draft) ? { summary: draft.body } : {}),
+      ...(draft && !('error' in draft) ? { summary: draft.body, comments: draft.comments } : {}),
       mode: reviewSettings(config, item.pr.repoKey).mode,
       publish: reviewSettings(config, item.pr.repoKey).publish,
       key: item.key,

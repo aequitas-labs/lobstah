@@ -29,7 +29,7 @@ import { ITEM_ICON } from './icons.js';
 export { ageText };
 
 /** An age ("3m"), recomputed each render; unchanged text leaves the node alone. */
-export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''}>${ageText(iso)}</span>`;
+export const Age = (iso: string | undefined | null) => html`<span data-age=${iso ?? ''} title=${iso || undefined}>${ageText(iso)}</span>`;
 
 /** The same pass age beside goals and todos, recomputed when the glass refreshes. */
 export function lastPassText(at: string | undefined): string {
@@ -91,7 +91,7 @@ export const ActivityLine = (x: Pick<GlassDispatchSummary, 'activity'>) =>
 const safeHref = (u: string | undefined): string | undefined => (u && /^https?:\/\//i.test(u) ? u : undefined);
 
 /** `paused: waiting on review · 12m · <link>`: what the worker waits on outside lobstah, and for how long. */
-export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>) => {
+export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>, ago = false) => {
   const w = x.waiting;
   if (!w) return undefined;
   const href = safeHref(w.link);
@@ -101,7 +101,7 @@ export const WaitingLine = (x: Pick<GlassDispatchSummary, 'waiting' | 'verb'>) =
   } catch {
     label = href;
   }
-  return html`<div class="waiting">${x.verb}: waiting on ${w.on} · ${Age(w.since)}${
+  return html`<div class="waiting">${x.verb}: waiting on ${w.on} · ${Age(w.since)}${ago ? ' ago' : ''}${
     href && [' · ', html`<a href=${href} target="_blank" rel="noopener noreferrer" onClick=${stop}>${label}</a>`]
   }</div>`;
 };
@@ -190,16 +190,16 @@ export function trapRoutes(t: GlassTrap): TrapRoute[] {
   const here = onThisMachine(t);
   const routes: TrapRoute[] = [];
   if (here && can('focus') && (viewer!.windowFocus || t.link)) {
-    const clicked = (e: Event) => {
+    const clicked = async (e: Event) => {
       stop(e);
-      void openTrapWindow(t.trapId);
+      return openTrapWindow(t.trapId);
     };
     routes.push({
       kind: 'raise',
       name: 'Raise window',
       where: 'on this Mac',
       control: (text) =>
-        html`<${Button} class="open" title="Raise this trap's window on this Mac" aria-label="Raise this trap's window on this Mac" onClick=${clicked}>${text}<//>`,
+        html`<${Button} class="open" title="Raise this trap's window on this Mac" aria-label="Raise this trap's window on this Mac" action=${clicked} sending="Raising…" done="Window raised">${text}<//>`,
     });
   }
   if (t.liveLink) {
@@ -370,7 +370,7 @@ export const ImageThumb = (src: string, name: string, cls = 'thumb') =>
     title=${'view ' + name}
     onClick=${(e: Event) => {
       stop(e);
-      openLightbox(src, name);
+      openLightbox(src, name, e.currentTarget as Element);
     }}
   >
     <img src=${src} alt=${name} loading="lazy" />
@@ -392,7 +392,8 @@ export const attachmentRows = (items: readonly Attachment[], fileUrl?: (name: st
 const TRAP_ADDRESS = /\bwt:([a-z0-9][a-z0-9-]*)/g;
 
 /** The trap's name from the snapshot (the live registration's, else the name registry's), if known. */
-const knownTrapName = (trapId: string): string | undefined => getState().snapshot?.trapNames?.[trapId];
+const knownTrapName = (trapId: string): string | undefined =>
+  getState().snapshot?.trapNames?.[trapId] ?? getState().snapshot?.traps.find((trap) => trap.trapId === trapId)?.name;
 
 /** Text with each `wt:<id>` shown by the trap's name; `wt:<id>` stays where no name is known. */
 export const namedText = (text: string): string =>
@@ -921,7 +922,7 @@ export function NewTrap() {
     if (!error) setOpen(false);
     return error;
   };
-  const trigger = html`<${Button} onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+ New trap<//>`;
+  const trigger = html`<${Button} variant="icon" class="new-trap" label="New trap" onClick=${(e: Event) => (stop(e), setOpen(true), setResult(null))}>+<//>`;
   // A modal on a desktop, a sheet on a phone (Dialog); the form's fields stack in it.
   return html`<span class="newtrap">${trigger}${
     open &&

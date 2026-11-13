@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import type { GlassSnapshot } from '@lobstah/core';
-import { NO_OLDER, trapFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
+import { NO_OLDER, detailHash, detailFromHash, trapFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
 import {
   closeDecision,
   closeLightbox,
@@ -13,6 +13,7 @@ import {
   receive,
   reviewRequest,
   routeReport,
+  routeDetailView,
   sendAnswer,
   showModal,
   stepDecision,
@@ -44,8 +45,8 @@ const initialState = (): GlassState => ({
   route: currentRoute(),
   reportSheet: reportFromHash(location.hash),
   prefs: location.hash.startsWith('#review-') ? { ...loadPrefs(), repo: '', q: '' } : loadPrefs(),
-  modal: null,
-  detail: null,
+  modal: detailFromHash(location.hash),
+  detail: detailFromHash(location.hash)?.type === 'dispatch' ? { key: detailFromHash(location.hash)!.key } : null,
   older: NO_OLDER,
   olderLoading: null,
   olderError: null,
@@ -117,7 +118,11 @@ function openPending(): void {
   const { kind, id } = pendingOpen;
   pendingOpen = undefined;
   if (kind === 'trap') {
-    if (d.traps.some((t) => t.trapId === id)) showModal('trap', id);
+    if (d.traps.some((t) => t.trapId === id)) {
+      // Replace a legacy link so Back cannot reopen the same detail.
+      if (trapFromHash(location.hash) === id) history.replaceState(history.state, '', detailHash({ type: 'trap', key: id }));
+      showModal('trap', id);
+    }
   } else {
     const x = d.dispatches.find((v) => v.id === id);
     if (x) showModal('dispatch', `${x.lane}:${x.id}`);
@@ -178,7 +183,6 @@ function startGlass(): Array<() => void> {
       if (row && reviewScrolled !== key) {
         reviewScrolled = key;
         row.scrollIntoView?.({ block: 'center' });
-        void reviewRequest('review-seen', { key });
       }
     } else reviewScrolled = null;
   };
@@ -200,11 +204,18 @@ function startGlass(): Array<() => void> {
   paint();
 
   const unroute = onRoute((route) => {
-    // A report opens in the sheet over the tab, which keeps its place underneath.
+    // Reports stay over the detail that opened them.
     const report = reportFromHash(location.hash);
     routeReport(report);
     if (report !== null) return;
+    const modal = detailFromHash(location.hash);
     const focusDecision = decisionFromHash(location.hash);
+    // A decision, like a report, stays above the detail that opened it.
+    if (!focusDecision) routeDetailView(modal);
+    if (modal) {
+      if (getState().decisionModal) closeDecision();
+      return;
+    }
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({
       route,

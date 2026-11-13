@@ -85,7 +85,7 @@ describe('a PR card', () => {
     await click(g, openLink);
     expect(g.$('#overlay')!.className).not.toBe('open');
     await click(g, card);
-    expect(text(g.$('#modalbox .sub'))).toContain('gate waiting-approval');
+    expect(text(g.$('#modalbox .pr-view-chips'))).toContain('waiting-approval');
   });
 
   it('chips what a badge that is not green says, offers Merge when green where it applies, and acks on open instead of an Ack button', async () => {
@@ -212,11 +212,12 @@ describe('a review card', () => {
     expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #7 · 🪤 wt:t1');
     expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
-    // The main action as a big button with its ▾, then mute and Open draft; dismiss waits in the menu.
+    // Skip and Mute PR are in the menu beside the main action; Open stays on the bar.
     const bar = [...card(7).querySelectorAll('.gactions button, .gactions a')].map((b) => text(b) || b.getAttribute('aria-label'));
-    expect(bar).toEqual(['Approve', 'More actions', 'Mute this PR', 'Open draft']);
+    expect(bar).toEqual(['Approve', 'More actions', 'Open draft']);
     await click(g, card(7).querySelector('.gactions .splitcaret'));
-    expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Dismiss']);
+    expect(card(7).querySelector('.cmenulist')?.parentElement).toBe(card(7).querySelector('.split'));
+    expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Skip', 'Mute PR']);
     expect(g.$('#overlay')!.className).not.toBe('open');
     expect(chips(8)).toEqual(['drafting']);
     expect(chips(9)).toEqual(['approved']);
@@ -233,6 +234,10 @@ describe('a review card', () => {
     expect(card(8).querySelector('.gactions a')!.getAttribute('aria-label')).toBe('Open');
     expect(card(9).className).toContain('gcard-edge gedge-ok');
     expect(card(9).className).toContain('quiet');
+    expect(card(9).querySelector('.split-menu-only')).toBeTruthy();
+    expect([...card(9).querySelectorAll('.gactions button')].map((b) => text(b) || b.getAttribute('aria-label'))).toEqual(['More actions']);
+    await click(g, card(9).querySelector('.gactions .splitmore'));
+    expect([...card(9).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Mute PR']);
     // Who asked and the reason are in the modal, not on the card.
     expect(text(card(7))).not.toContain('maya');
     // Sending a review verdict is one click; the card never opens.
@@ -243,18 +248,21 @@ describe('a review card', () => {
     expect(sends().map((p) => JSON.parse(p.body))).toEqual([{ kind: 'review-approve', payload: { key: 'review:acme/web#7' } }]);
   });
 
-  it('opens its modal, marked seen, with who asked, the reason, the pending review and the actions', async () => {
+  it('opens the PR view without acknowledgement, with who asked, the reason, the pending review and the actions', async () => {
     const r = review(9, { state: 'stale', reason: 'the head moved', staged: true });
     const g = await page({ ...emptyFleet(), focusToken: 'tok', reviews: [r] }, '#reviews', () => ({ status: 200, body: { ok: true } }));
     await click(g, g.$('#reviews .card'));
     expect(g.opened()).toEqual([]);
-    expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'review-seen', payload: { key: r.key } });
+    expect(g.posts()).toEqual([]);
     const box = g.$('#modalbox')!;
-    expect(text(box.querySelector('h3'))).toContain('acme/web#9 pr 9');
-    expect(text(box.querySelector('.sub'))).toContain('the head moved');
+    expect(text(box.querySelector('h2'))).toBe('pr 9');
+    expect(text(box)).toContain('acme/web#9');
+    expect(text(box)).toContain('the head moved');
     expect(text(box.querySelector('.rv-person'))).toContain('maya');
-    expect(text(box.querySelector('.rv-staged'))).toBe('Open pending review');
+    expect(text(box.querySelector('.rv-staged'))).toBe('Open draft');
     // Its actions; the modal's close is a button too.
-    expect([...box.querySelectorAll('button:not(.x)')].map(text)).toEqual(['Redraft', 'Mute this PR', 'Dismiss']);
+    expect(text(box.querySelector('.detail-actions'))).toContain('Redraft');
+    await click(g, box.querySelector('.splitcaret'));
+    expect([...box.querySelectorAll('[role=menuitem]')].map(text)).toEqual(['Dismiss', 'Mute PR']);
   });
 });

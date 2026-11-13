@@ -130,6 +130,10 @@ export const ActionIcon = {
   publish: actionIcon('<path d="M14 2L1.8 7.2l4.8 1.8L14 2zM6.6 9l1.8 4.8L14 2"/>'),
   skip: actionIcon('<path d="M3 3.5l5.5 4.5L3 12.5zM9.5 3.5l5 4.5-5 4.5M13 3.5v9"/>'),
   caret: actionIcon('<path d="M4.5 6.5L8 10l3.5-3.5"/>'),
+  more: actionIcon(
+    '<circle cx="3" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1" fill="currentColor" stroke="none"/>',
+  ),
+  mute: actionIcon('<path d="M5 6a3 3 0 0 1 6 0c0 4 1.3 4.8 2 5.5H3C3.7 10.8 5 10 5 6Z"/><path d="m2 2 12 12M6.5 13a1.5 1.5 0 0 0 3 0"/>'),
 };
 
 /** One of a card's other actions, in its ▾ menu. */
@@ -145,12 +149,11 @@ export interface MenuAction {
 }
 
 /**
- * A card's main action as one big button, with a ▾ that opens the rest as a
- * small menu, each with its icon beside its words. With nothing else to
- * offer it is the big button alone. The menu closes on a pick, a click
- * elsewhere, or Escape; clicks inside it never reach the card.
+ * A card's main action and the menu above it. Without a main action, an
+ * ellipsis opens the menu. The menu closes on a pick, a click elsewhere, or
+ * Escape; clicks inside it never reach the card.
  */
-export function SplitButton({ main, more }: { main: Children; more: MenuAction[] }) {
+export function SplitButton({ main, more }: { main?: Children; more: MenuAction[] }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -169,13 +172,13 @@ export function SplitButton({ main, more }: { main: Children; more: MenuAction[]
     };
   }, [open]);
   if (!more.length) return main;
-  return html`<span class="split" ref=${box} onClick=${(e: Event) => e.stopPropagation()}>${main}<span class="cmenu"><${Button} variant="icon" class="splitcaret"
+  return html`<span class=${'split' + (main ? '' : ' split-menu-only')} ref=${box} onClick=${(e: Event) => e.stopPropagation()}>${main}<${Button} variant="icon" class=${main ? 'splitcaret' : 'splitmore'}
         aria-haspopup="menu"
         aria-expanded=${open ? 'true' : 'false'}
         aria-label="More actions"
         title="More actions"
         onClick=${() => setOpen(!open)}
-      >${ActionIcon.caret}<//>${
+      >${main ? ActionIcon.caret : ActionIcon.more}<//>${
         open &&
         html`<span class="cmenulist" role="menu">${more.map((m) =>
           m.action
@@ -189,7 +192,7 @@ export function SplitButton({ main, more }: { main: Children; more: MenuAction[]
                 m.onClick?.(e);
               }}>${m.icon}<span>${m.label}</span></button>`,
         )}</span>`
-      }</span></span>`;
+      }</span>`;
 }
 
 /** Opening outside the glass: GitHub's Octicon "link-external" (link-external-16, @primer/octicons, MIT), in the text's color. */

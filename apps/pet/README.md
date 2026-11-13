@@ -18,8 +18,7 @@ to the helm through the focus ladder:
 
 Every attention kind walks (`attentionKinds` in `config.toml` picks them),
 its bubble led by a short label: `draft`, `review`, `checks`, `ready`,
-`landed`, or nothing for a question or a decision (its title only). Clicking a PR or stack pet opens the
-PR in the repo's `reviewTool`, the same as the glass, instead of the helm; right-click adds **Open PR**.
+`landed`, or nothing for a question or a decision (its title only). Clicking a review request or draft pet opens the PR view in the glass, with the full draft findings before the description. Opening it leaves the draft pending. Other PR and stack pets open the PR in the repo's `reviewTool`. Right-click keeps **Open PR**.
 Clicking a decision pet opens the glass at the decision's card; the card
 stays until the decision is answered or withdrawn.
 Clicking a report pet opens the glass at the report. Opening a report in
@@ -50,8 +49,8 @@ and the pet brings its app forward instead of opening a new tab:
 With no page seen recently, or no glass running, the click opens a new tab
 as before (a decision with a live helm brings up the helm instead). A page
 hidden behind another tab or a closed pane applies the item when it is
-shown again; a pane or tab that closed says goodbye and is forgotten at once. Any pet
-click also acknowledges the item (`lobstah attention ack <key> --by pet`),
+shown again; a pane or tab that closed says goodbye and is forgotten at once. Other pet
+clicks acknowledge the item (`lobstah attention ack <key> --by pet`),
 so that pet stops walking until the item's state changes; right-click
 **Acknowledge** does only that. The pet hides a clicked item itself at
 once, keyed on its `stateHash` like the glass's clicked lobs, so a slow or
