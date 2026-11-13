@@ -12,7 +12,7 @@ import { host } from '../host.js';
 import { getState } from '../store.js';
 import { prsNeedingYou } from './prs.js';
 import { Button } from './button.js';
-import { ITEM_ICON, TAB_ICON } from './icons.js';
+import { DispatchIcon, StateIcon, ITEM_ICON, TAB_ICON } from './icons.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -54,7 +54,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
     ),
     inp.stats && html`<span class="chip" title="catches today">🦞 ${inp.stats.catchesToday}</span>`,
     d.slots &&
-      html`<span class="chip">active ${icon('🎣', 'headless')} ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
+      html`<span class="chip">active <span role="img" aria-label="headless">${DispatchIcon}</span> ${d.slots.headless} of ${d.slots.limit}; ${icon('🪤', 'traps')} ${d.slots.traps}${d.slots.parked ? `; parked: ${d.slots.parked} (no slot)` : ''}</span>`,
     d.heavy &&
       d.heavy.tickets.length > 0 &&
       html`<span class="chip" title="The machine's line for heavy commands">⛰️ ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` · ${d.heavy.waiting} waiting` : ''}</span>`,
@@ -239,7 +239,7 @@ function Strip({ d, inp }: { d: GlassSnapshot; inp: SectionInputs['chips'] }) {
   const parts = [
     inp.stats && html`<span title="catches today">🦞 ${inp.stats.catchesToday}</span>`,
     d.slots && html`<span title="traps">🪤 ${d.slots.traps} ${d.slots.traps === 1 ? 'trap' : 'traps'}</span>`,
-    d.slots && html`<span title="headless slots in use">🎣 ${d.slots.headless} of ${d.slots.limit}</span>`,
+    d.slots && html`<span title="headless slots in use">${DispatchIcon} ${d.slots.headless} of ${d.slots.limit}</span>`,
     d.heavy &&
       d.heavy.tickets.length > 0 &&
       html`<span title="The machine's line for heavy commands">⛰️ ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` +${d.heavy.waiting}` : ''}</span>`,
@@ -338,7 +338,7 @@ export function Header({
     html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1>${d && inp && html`<span class="phone-helm"><${HelmPill} inp=${inp.chips} /></span>`}<span id="settings-slot"><${Button} variant="icon" id="gearbtn" label="Settings" onClick=${() => showModal('settings', 'browser')}>${ITEM_ICON.settings}<//></span></div>`,
     d?.usageLimits?.map(
       (limit) =>
-        html`<div class="usage-limit-banner" role="status"><b>${limit.account} limited</b> · ${limit.traps.length} traps · ${limit.resetAt ? `resets ${new Date(limit.resetAt).toLocaleString()}` : 'reset time unknown'}${limit.waiting.length ? ` · ${limit.waiting.length} catches waiting` : ' · pickup waits'}<details><summary>Limit details</summary>${LinkedText(limit.reason)}${limit.waiting.length > 0 && html`<ul>${limit.waiting.map((id) => html`<li>${d.dispatches.find((dispatch) => dispatch.id === id)?.title || id}</li>`)}</ul>`}</details></div>`,
+        html`<div class="usage-limit-banner" role="status"><${StateIcon} state="limited" /><b>${limit.account} limited</b> · ${limit.traps.length} traps · ${limit.resetAt ? `resets ${new Date(limit.resetAt).toLocaleString()}` : 'reset time unknown'}${limit.waiting.length ? ` · ${limit.waiting.length} catches waiting` : ' · pickup waits'}<details><summary>Limit details</summary>${LinkedText(limit.reason)}${limit.waiting.length > 0 && html`<ul>${limit.waiting.map((id) => html`<li>${d.dispatches.find((dispatch) => dispatch.id === id)?.title || id}</li>`)}</ul>`}</details></div>`,
     ),
     d && inp && html`<${Strip} d=${d} inp=${inp.chips} />`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,

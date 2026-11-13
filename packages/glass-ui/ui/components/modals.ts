@@ -1,3 +1,4 @@
+import { DispatchIcon, StateIcon } from './icons.js';
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
@@ -93,7 +94,11 @@ function prModal(d: GlassSnapshot, key: string) {
         i ? ' → ' : '',
         c.culled
           ? html`<span class="dim">${c.id.slice(0, 8)} (culled)</span>`
-          : [html`<a href="#" onClick=${follow(c.modalKey!)}>${c.id.slice(0, 8)}</a>`, ' ', html`<span class="dim">${c.verb}</span>`],
+          : [
+              html`<a href="#" onClick=${follow(c.modalKey!)}>${DispatchIcon}${c.id.slice(0, 8)}</a>`,
+              ' ',
+              html`<span class="dim"><${StateIcon} state=${c.verb} />${c.verb}</span>`,
+            ],
       ])
     : html`<span class="dim">none</span>`;
   const watch = w
@@ -106,7 +111,7 @@ function prModal(d: GlassSnapshot, key: string) {
     : html`<div class="dim">no watch — <code>lobstah watch add ${p.url}</code> registers one</div>`;
   return [
     close,
-    html`<h3>${prLink(p)} ${LinkedText(p.title)} <span class=${'badge ' + prBadgeClass(p.badge)}>${p.badge.text}</span>${p.draft && p.badge.text !== 'draft' && [' ', html`<span class="badge pr-draft">draft</span>`]}</h3>`,
+    html`<h3>${prLink(p)} ${LinkedText(p.title)} <span class=${'badge ' + prBadgeClass(p.badge)}><${StateIcon} state=${p.badge.text} />${p.badge.text}</span>${p.draft && p.badge.text !== 'draft' && [' ', html`<span class="badge pr-draft">draft</span>`]}</h3>`,
     html`<div class="sub">${p.repo} · ${p.state} · observed ${Age(p.observedAt)} ago${p.gate && ' · gate ' + p.gate}</div>`,
     html`<div class="sec">checks</div><div>${prChecks(p)}</div><div class="sec">review</div><div>${review || html`<span class="dim">no review yet</span>`}</div><div class="sec">merge</div><div>${prMerge(p)}</div>${p.repairWait && html`<div class="sec">repair waits</div><div>${p.repairWait.heldBy}: ${LinkedText(p.repairWait.reason)}${p.repairWait.until ? ' · until ' + p.repairWait.until : ''}</div>`}<div class="sec">refs</div><div>${p.headRefName || '?'} → ${p.baseRefName || '?'}</div><div class="sec">stack</div><div>${s ? stackLine(p, s) : html`<span class="dim">not stacked</span>`}</div><div class="sec">dispatch chain</div><div>${chain}</div><div class="sec">watch</div>`,
     watch,
@@ -146,7 +151,7 @@ function dispatchModal(x: GlassDispatchSummary | GlassDispatch, report: GlassRep
         capabilities().daemon && viewerHasTerminal() && [html`<div class="sec">open this session</div>`, cmdRow('lobstah attach ' + x.id)];
   return [
     close,
-    html`<h3>${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}>${x.verb}</span></h3>`,
+    html`<h3>${DispatchIcon}${x.id.slice(0, 8)} <span class=${'badge v-' + x.verb}><${StateIcon} state=${x.verb} />${x.verb}</span></h3>`,
     html`<div class="sub">${x.repo} · ${x.lane} ${x.bucket} · ${Age(x.verbAt)}${x.for && [' · ', addrCell(x)]} ${prCell(x)}</div>`,
     session,
     x.worker && html`<${WorkerDetails} worker=${x.worker} headless=${!x.claimedBy?.startsWith('wt:')} />`,
@@ -260,7 +265,7 @@ function trapModal(t: GlassTrap) {
   const messages = t.messages.length
     ? t.messages.map(
         (m) =>
-          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn">pending</span>` : html`<span class="ok">delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => fileUrl({ kind: 'trap', trapId: t.trapId }, name)) : ''}</div>`,
+          html`<div key=${m.file} class=${'msg' + (m.from === 'helm' ? ' from-helm' : '')}><div class="hdr">from ${m.from} · ${m.at && [Age(m.at), ' ago']} · ${m.state === 'pending' ? html`<span class="warn"><${StateIcon} state="pending" />pending</span>` : html`<span class="ok"><${StateIcon} state="received" />delivered</span>`}</div>${LinkedText(m.text)}${m.attachments?.length ? attachmentRows(m.attachments, (name) => fileUrl({ kind: 'trap', trapId: t.trapId }, name)) : ''}</div>`,
       )
     : html`<div class="empty">none</div>`;
   const sessionRow = trapSessionRow(t);
@@ -268,14 +273,14 @@ function trapModal(t: GlassTrap) {
   const catches = t.catches.length
     ? t.catches.map(
         (c) =>
-          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}>${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prHeadCell(c)}</div>${
+          html`<div key=${c.lane + ':' + c.id} class="catch click" onClick=${opener('dispatch', c.lane + ':' + c.id)}><div class="hdr"><b>${DispatchIcon}${c.id.slice(0, 8)}</b><span class=${'badge v-' + c.verb}><${StateIcon} state=${c.verb} />${c.verb}</span><span class="dim">${Age(c.verbAt)}</span>${prHeadCell(c)}</div>${
             c.note && html`<div class="loglines">${NamedText(c.note)}</div>`
           }</div>`,
       )
     : html`<div class="empty">none yet</div>`;
   return [
     close,
-    html`<h3>🪤 ${trapDisplayName(t)} <span class="badge">${t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
+    html`<h3>🪤 ${trapDisplayName(t)} <span class="badge"><${StateIcon} state=${t.usageLimit ? 'limited' : t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'} />${t.usageLimit ? 'limited' : t.requested ? 'requested' : t.starting ? (t.starting.failedAt ? 'start failed' : 'starting') : t.live ? 'live' : 'signed off'}</span></h3>`,
     html`<div class="sub trap-address">${trapScope(t)}${trapScope(t) && ' · '}wt:${t.trapId}</div>`,
     html`<${WorkerDetails} worker=${t} />`,
     t.worktree && html`<div class="sub">${t.worktree}</div>`,

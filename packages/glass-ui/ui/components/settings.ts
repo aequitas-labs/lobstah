@@ -85,7 +85,9 @@ export function Settings({
 }) {
   const title = html`<h1 class="pagetitle">${TAB_ICON.settings}Configuration</h1>`;
   const runs = html`<${RunPasskeySettings} passkeys=${passkeys} passkey=${passkey} />`;
-  const reviewPosting = reviewSetup && html`<section><h2>Review posting</h2><p class="dim">Read-only · edit config.toml to change</p><div class="cfgrows">
+  const reviewPosting =
+    reviewSetup &&
+    html`<section><h2>Review posting</h2><p class="dim">Read-only · edit config.toml to change</p><div class="cfgrows">
     <div class="cfgrow"><span class="cfgkey">Default</span><span class="cfgvalue">Approve: ${reviewSetup.autoPostApprove ?? 'ask'} · Request changes: ${reviewSetup.autoPostRequestChanges ?? 'ask'}</span><span class="cfgsource">grounds</span></div>
     ${Object.entries(reviewSetup.perRepo ?? {}).map(([key, value]) => html`<div key=${key} class="cfgrow"><span class="cfgkey">${key}</span><span class="cfgvalue">Approve: ${value.autoPostApprove ?? 'ask'} · Request changes: ${value.autoPostRequestChanges ?? 'ask'}</span><span class="cfgsource">repo</span></div>`)}
   </div></section>`;

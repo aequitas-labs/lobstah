@@ -1,3 +1,4 @@
+import { DispatchIcon, StateIcon } from './icons.js';
 import type { Notice } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
@@ -7,7 +8,7 @@ import { LinkedText } from './links.js';
 
 /** The Notices tab: always a table, whatever the view. */
 const row = (n: Notice) =>
-  html`<tr key=${n.seq}><td class="dim">${Age(n.at)}</td><td>${n.kind}</td><td class="grow">${LinkedText(n.text)}</td><td class="dim">${n.repo ?? ''}</td></tr>`;
+  html`<tr key=${n.seq}><td class="dim">${Age(n.at)}</td><td>${/dispatch|catch|bait/.test(n.kind) && DispatchIcon}<${StateIcon} state=${n.kind.replace(/^(trap|dispatch|review|pr|catch)-/, '')} />${n.kind}</td><td class="grow">${LinkedText(n.text)}</td><td class="dim">${n.repo ?? ''}</td></tr>`;
 
 export const Notices = ({ inp, more }: { inp: SectionInputs['notices']; more?: OlderControl }) => [
   Table(['at', 'kind', 'text', 'repo'], inp.list.map(row), 'no notices'),

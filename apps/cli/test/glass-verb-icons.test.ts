@@ -5,6 +5,7 @@ import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, acceptanceFleet, ago, trapStatesFleet } from './fixtures/glass-snapshots.js';
 import { VERB_TONE, isIconVerb, verbIconLabel } from '../../../packages/glass-ui/ui/components/run-status.js';
+import { stateIconName } from '../../../packages/glass-ui/ui/components/icons.js';
 import type { VerbIconVerb } from '../../../packages/glass-ui/ui/components/run-status.js';
 
 /**
@@ -37,7 +38,7 @@ const VERBS: Array<{ verb: VerbIconVerb; tone: string; label: string; draws: str
   { verb: 'done', tone: 'ok', label: 'Done · 2m', draws: 'path[d="M3 8.5l3.2 3.2L13 4.8"]' },
   { verb: 'failed', tone: 'bad', label: 'Failed · 8m', draws: 'path[d="M4 4l8 8M12 4l-8 8"]' },
 ];
-const SINCE: Record<VerbIconVerb, number> = { working: 12 * MIN, 'needs-decision': 5 * MIN, blocked: 40_000, paused: 180 * MIN, done: 2 * MIN, failed: 8 * MIN };
+const SINCE: Record<VerbIconVerb, number> = { working: 12 * MIN, 'needs-decision': 5 * MIN, blocked: 40_000, paused: 180 * MIN, done: 2 * MIN, failed: 8 * MIN, queued: MIN, limited: MIN, unknown: MIN };
 const WAITING: Partial<Record<VerbIconVerb, string>> = { 'needs-decision': 'person', paused: 'heavy' };
 
 /** One in-flight dispatch in each verb, newest first in the list's order. */
@@ -66,6 +67,19 @@ function verbsFleet(): GlassFullSnapshot {
 }
 
 describe('a verb icon', () => {
+  it('distinguishes a usage limit from paused or failed and resolves domain state labels', () => {
+    expect(stateIconName('limited')).toBe('limited');
+    expect(stateIconName('paused')).toBe('paused');
+    expect(stateIconName('failed')).toBe('failed');
+    expect(stateIconName('not listening')).toBe('not-listening');
+    expect(stateIconName('request_changes')).toBe('changes-requested');
+    expect(stateIconName('checks 2/3 failed')).toBe('failed');
+    expect(stateIconName('checks 2/3')).toBe('waiting');
+    expect(stateIconName('checks unknown')).toBe('unknown');
+    expect(stateIconName('needs-app-start')).toBe('starting');
+    expect(stateIconName('toString')).toBe('unknown');
+  });
+
   it('says the verb, how long it has been in it, and what it waits on', () => {
     const at = new Date(Date.now() - 12 * MIN).toISOString();
     expect(verbIconLabel('working', at)).toBe('Working · 12m');
@@ -73,9 +87,9 @@ describe('a verb icon', () => {
     expect(verbIconLabel('needs-decision')).toBe('Needs decision');
   });
 
-  it('has one tone per verb, and only the six report verbs have icons', () => {
-    expect(VERB_TONE).toEqual({ working: 'warn', 'needs-decision': 'info', blocked: 'bad', paused: 'dim', done: 'ok', failed: 'bad' });
-    expect(['queued', 'unknown', 'toString'].filter(isIconVerb)).toEqual([]);
+  it('has one tone per verb, and all dispatch states have icons', () => {
+    expect(VERB_TONE).toEqual({ working: 'warn', 'needs-decision': 'info', blocked: 'bad', paused: 'dim', done: 'ok', failed: 'bad', queued: 'dim', limited: 'bad', unknown: 'dim' });
+    expect(['queued', 'limited', 'unknown', 'toString'].filter(isIconVerb)).toEqual(['queued', 'limited', 'unknown']);
   });
 });
 
@@ -101,13 +115,13 @@ describe('a dispatch card', () => {
     expect(working.querySelector('.rundot')).toBeTruthy();
   });
 
-  it('keeps the word for a queued dispatch', async () => {
+  it.each(['queued', 'limited', 'unknown'] as const)('names a %s dispatch icon for screen readers', async (verb) => {
     const d = verbsFleet();
-    d.dispatches[0] = { ...d.dispatches[0]!, verb: 'queued', bucket: 'queued' };
+    d.dispatches[0] = { ...d.dispatches[0]!, verb, bucket: 'queued' };
     const g = await page(d, '#dispatches');
     const card = g.$$('#dispatches .card').find((c) => text(c.querySelector('.gtitle')) === 'A working dispatch')!;
-    expect(text(card.querySelector('.gtop .gchip'))).toBe('queued');
-    expect(card.querySelector('.verbicon')).toBeNull();
+    expect(card.querySelector(`.verb-${verb}`)?.getAttribute('aria-label')).toContain(verb.charAt(0).toUpperCase() + verb.slice(1));
+    expect(card.querySelector(`.verb-${verb} svg`)).not.toBeNull();
   });
 });
 

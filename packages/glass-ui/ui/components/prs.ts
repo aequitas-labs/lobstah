@@ -1,3 +1,4 @@
+import { StateIcon } from './icons.js';
 import { useState } from 'preact/hooks';
 import { ackPrAttention, requestPrMerge, requestStackMerge } from '../actions.js';
 import type { DeckAttention } from '../../src/glass-diff.js';
@@ -89,7 +90,7 @@ function prTable(inp: PrsInputs, older: unknown) {
       html`<tr key=${'stack:' + s.id}><th colspan="8">${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}</th></tr>`,
       ...prs.map(
         (p) =>
-          html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}${p.mergeRequest && [' · ', mergeNote(p)]} <${MergeWhenGreen} p=${p} /></td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
+          html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td><${StateIcon} state=${p.draft ? 'draft' : p.state} />${stateText(p)}</td><td><${StateIcon} state=${p.badge.text} />${prChecks(p)}</td><td><${StateIcon} state=${p.reviewDecision ?? 'unknown'} />${prReview(p)}</td><td><${StateIcon} state=${p.badge.merge ?? 'unknown'} />${prMerge(p)}${p.mergeRequest && [' · ', mergeNote(p)]} <${MergeWhenGreen} p=${p} /></td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
       ),
     ]);
   const cols = ['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'];
@@ -233,7 +234,7 @@ export interface PrCardParts {
  * `hover` replaces that title with more than the word says.
  */
 export const StatusChip = (word: string, cls: string, hover?: string) =>
-  html`<span class=${'gchip ' + cls + (word.length > 12 ? ' long' : '')} title=${hover ?? (word.length > 12 ? word : undefined)}>${word}</span>`;
+  html`<span class=${'gchip ' + cls + (word.length > 12 ? ' long' : '')} title=${hover ?? (word.length > 12 ? word : undefined)}>${!/^\d+ PRs?$/.test(word) && html`<${StateIcon} state=${word} />`}${word}</span>`;
 
 /**
  * The one layout for PR and review cards:

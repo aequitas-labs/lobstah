@@ -649,7 +649,7 @@ describe('glass page: tabs and hash routing', () => {
   it('gives a signed-off trap a grey state dot', async () => {
     const g = await page(acceptanceFleet(), { hash: '#traps', prefs: { view: 'table' } });
     const t2 = g.$$('#traps tr.rowhead').find((tr) => text(tr).includes('wt:t2'))!;
-    expect([...t2.querySelector('.trapdot')!.classList]).toEqual(['dot', 'trapdot', 'dim']);
+    expect([...t2.querySelector('.trapdot')!.classList]).toEqual(['trapdot', 'dim']);
   });
 
   it('shows the ↗ Open button on live traps in the table, cards, deck, and modal only', async () => {
@@ -1126,7 +1126,7 @@ describe('glass page: On deck', () => {
     const flight = g.$$('#deck section')[1]!;
     // Two lines: the instruction and its status chip; the repo and trap, with the queue time at the right.
     const line = [...flight.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line.querySelector('.gchip'))).toBe('queued');
+    expect(line.querySelector('.verb-queued')?.getAttribute('aria-label')).toContain('Queued');
     expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
     expect(text(line.querySelector('.gright'))).toBe('60s ago');
   });

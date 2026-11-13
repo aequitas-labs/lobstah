@@ -1,3 +1,4 @@
+import { StateIcon } from './icons.js';
 import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
 import { RepoIcon } from './card.js';
 import type { CardState } from './card.js';
@@ -785,9 +786,13 @@ export function trapDotTone(t: GlassTrap): 'ok' | 'warn' | 'bad' | 'dim' {
 }
 
 /** A trap's state for its card's chip: one lowercase word, in the state dot's tone. */
-export function trapStatus(t: GlassTrap): { word: string; tone: 'ok' | 'warn' | 'bad' | 'dim' } {
+export function trapStatus(t: GlassTrap): { word: string; tone: 'ok' | 'warn' | 'bad' | 'dim'; iconState: string } {
   const s = trapState(t);
-  return { word: s.kind === 'parked' ? 'waiting' : s.kind, tone: trapDotTone(t) };
+  return {
+    word: s.kind === 'parked' ? 'waiting' : s.kind,
+    tone: trapDotTone(t),
+    iconState: s.kind === 'idle' && !s.listening ? 'not listening' : s.kind,
+  };
 }
 
 /** What a trap is doing now, without its state word: its card's third line. */
@@ -867,7 +872,7 @@ const workTitle = (c: GlassDispatchSummary) => c.title.slice(0, 40) || '(no titl
 /** One current activity line for deck and traps tab, from the shared snapshot, led by the state dot. */
 export function trapNow(t: GlassTrap): Children {
   const s = trapState(t);
-  const dot = html`<span class=${'dot trapdot ' + trapDotTone(t)}></span>`;
+  const dot = html`<span class=${'trapdot ' + trapDotTone(t)}><${StateIcon} state=${trapStatus(t).iconState} /></span>`;
   if (s.kind === 'limited') return [dot, html`<span class="bad">limited</span>`, ' · ', trapWork(t)];
   if (s.kind === 'requested') return [dot, html`<span class="dim">${requestedText(t, s.helmOn)}</span>`];
   if (s.kind === 'starting') return [dot, 'starting · waiting for its session to sign on'];

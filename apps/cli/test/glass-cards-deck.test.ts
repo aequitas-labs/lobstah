@@ -46,7 +46,7 @@ describe('a dispatch card', () => {
     // The id, note, worker, PR, waiting and activity lines are in the dispatch's modal.
     expect(card.querySelector('.gnow')).toBeNull();
     expect(card.querySelector('.gfoot')).toBeNull();
-    expect(card.querySelector('.gicon')).toBeNull();
+    expect(card.querySelector('.gicon .dispatch-icon')).not.toBeNull();
     expect(text(card)).not.toContain(x.note ?? '');
   });
 
