@@ -35,7 +35,7 @@ export function trapRows(now = Date.now(), repos?: readonly string[], cfg: Pick<
       worker: liveWorker(r), repo: r.configured ? `trap:${r.configured.profile} (${r.configured.grounds}, ${r.configured.surface})` : r.repo ?? '(addressed only)', worktree: r.worktree,
       claimed: availability.dispatch, availability: availability.text,
       listening: r.firstParkedAt === undefined ? 'never' : hbAgeSecs <= 10 ? 'now' : `${hbAgeSecs}s ago`,
-      state: undefined as 'starting' | 'start-failed' | 'stowed' | 'ghosted' | undefined,
+      state: (availability.state === 'limited' ? 'limited' : undefined) as 'limited' | 'starting' | 'start-failed' | 'stowed' | 'ghosted' | undefined,
     };
   });
   for (const r of reservations) {

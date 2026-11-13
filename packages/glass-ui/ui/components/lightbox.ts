@@ -1,6 +1,7 @@
 import { closeLightbox } from '../actions.js';
 import { html } from '../html.js';
 import type { Lightbox } from '../store.js';
+import { Button } from './button.js';
 
 /**
  * The in-page image overlay: every image in the glass (decision cards,
@@ -15,7 +16,7 @@ export function LightboxView({ box }: { box: Lightbox | null }) {
     if (e.target === e.currentTarget) closeLightbox();
   };
   return html`<div id="lightbox" class="lightbox" role="dialog" aria-label=${box.name} onClick=${onBackdrop}>
-    <button type="button" class="lbclose" title="close" onClick=${closeLightbox}>×</button>
+    <${Button} variant="icon" class="lbclose" label="close" onClick=${closeLightbox}>×<//>
     <img class="lbimg" src=${box.src} alt=${box.name} referrerpolicy="no-referrer" />
     <a class="lboriginal" href=${box.src} target="_blank" rel="noopener noreferrer">open original · ${box.name}</a>
   </div>`;

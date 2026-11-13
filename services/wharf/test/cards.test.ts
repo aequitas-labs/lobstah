@@ -2,6 +2,7 @@ import { env, SELF, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, expect, it } from 'vitest';
 import type { Account } from '../src/account.js';
 import { glassTables } from '../src/glass-state.js';
+import { reviewCard } from '../src/cards.js';
 import { authFixtures } from './auth-fixture.js';
 import type { GlassCard } from '../../../packages/core/src/backend-model.js';
 
@@ -21,6 +22,12 @@ beforeEach(async () => {
     // Request counts live in the instance's memory, not in meta.
     (_instance as unknown as { budgets: Map<string, unknown> }).budgets.clear();
   });
+});
+
+it('keeps a muted review card visible with Unmute', () => {
+  const doc = { id: 'rv-1', kind: 'review', title: 'acme/web#7', at: '2026-11-12T12:00:00.000Z', author: 'boat:1', published: true, attachments: [], review: { pr: 'https://github.com/acme/web/pull/7', round: 'RRE_7', state: 'drafted', stands: true } } as const;
+  expect(reviewCard(doc).actions).toContainEqual({ kind: 'review-mute' });
+  expect(reviewCard({ ...doc, review: { ...doc.review, muted: true } }).actions).toEqual([{ kind: 'review-dismiss' }, { kind: 'review-unmute' }]);
 });
 async function boat(name: string, permissions: string[]) {
   const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name, permissions }, key: `issue-${++sequence}` })));

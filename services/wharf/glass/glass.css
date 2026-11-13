@@ -260,17 +260,10 @@ body:has(.auth-shell) {
   display: grid;
   gap: 12px;
 }
+/* The consent and pairing buttons are the glass's Button atom (lg), as wide as their card. */
+.auth-consent-primary,
 .auth-consent-secondary {
-  min-height: 52px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  cursor: pointer;
-}
-.auth-consent-secondary:hover:not(:disabled) {
-  background: var(--card);
+  width: 100%;
 }
 .auth-consent-link {
   color: var(--link);

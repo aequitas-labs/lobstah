@@ -15,6 +15,7 @@ import {
   configPermissionMode,
   normalizePermissionMode,
   rosterByAddress,
+  setRosterProfile,
   shellQuote,
   terminalAppName,
   isTerminalApp,
@@ -35,7 +36,7 @@ import {
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { codexThreadHolders, modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
 import { randomUUID } from 'node:crypto';
-import { listCodexHooks } from './codex-hook-list.js';
+import { listCodexHooks, type CodexHookList } from './codex-hook-list.js';
 import { prepareCodexServer } from './codex-server.js';
 import { codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
 import { trapTabTitle } from './terminal-title.js';
@@ -263,6 +264,8 @@ type Launched = Pick<ThrowResult, 'trap' | 'action' | 'why' | 'checkout' | 'term
 /** What every throw takes. */
 export interface ThrowOptions {
   cfg: Config;
+  /** An explicit named throw changes the saved launch harness and starts cold across harnesses. */
+  harness?: string;
   by?: string;
   timeoutSecs?: number;
   adapter?: (app: TerminalApp) => TerminalAdapter;
@@ -326,7 +329,7 @@ function giveUp(trapId: string, label: string, repo: string | undefined, retry: 
  * Why a Codex trap may not have signed on: the hooks that would hold it at
  * "Hooks need review" before its first prompt, or that none would.
  */
-export function codexStallReason(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string } = {}): string {
+export function codexStallReason(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string; listed?: CodexHookList } = {}): string {
   const blockers = codexTrapHookBlockers(cwd, opts);
   if (blockers.length === 0) return 'no hook would hold it at Codex\'s hook review';
   const named = blockers.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ');
@@ -403,7 +406,7 @@ async function launchAndWait(
       if (w.launched.harness === 'codex') {
         // Keep both the ticket and the fence: an already-open slow session
         // can redeem late, and retry cannot create a competing writer.
-        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${folderTrust}; ${codexStallReason(w.command.cwd)}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying${shows}`);
+        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${folderTrust}; ${codexStallReason(w.command.cwd, { listed: await (opts.listHooks ?? listCodexHooks)(w.command.cwd) })}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying${shows}`);
       }
       giveUp(w.trapId, w.label, w.repo, w.retry, w.started, `no sign-on within ${timeoutSecs}s`);
       throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged${shows}`);
@@ -422,8 +425,8 @@ async function launchAndWait(
  */
 export async function throwTrap(opts: ThrowOptions & { address: string }): Promise<ThrowResult> {
   const started = Date.now();
-  let [row] = planThrow(opts.cfg, { names: [opts.address] });
-  const entry = rosterByAddress(opts.address);
+  let [row] = planThrow(opts.cfg, { names: [opts.address] }, { harness: opts.harness });
+  let entry = rosterByAddress(opts.address);
   if (!row || !entry) throw new Error(`no roster record for ${opts.address} — \`lobstah man roster\` lists the traps a throw can bring back`);
   const label = trapLabel(entry);
   if (row.sessionHeld && opts.stopStale && entry.harness === 'codex' && entry.sessionId) {
@@ -431,12 +434,16 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
     const stopped = await (opts.stopStaleWriters ?? stopStaleCodexWriters)(entry.sessionId);
     const survived = stopped.filter((s) => s.ending === 'survived').map((s) => s.pid);
     if (survived.length) throw new Error(`not throwing ${label}: Codex process ${survived.join(', ')} still holds its thread after SIGKILL`);
-    [row] = planThrow(opts.cfg, { names: [opts.address] });
+    [row] = planThrow(opts.cfg, { names: [opts.address] }, { harness: opts.harness });
     if (!row) throw new Error(`no roster record for ${opts.address}`);
   }
   if (row.sessionHeld) throw new Error(`not throwing ${label}: ${row.why}`);
   if (row.action === 'skip') throw new TrapStartingError(`not throwing ${label}: ${row.why}`);
   if (row.action === 'unresolved') throw new Error(`cannot throw ${label}: ${row.why}`);
+  if (opts.harness) {
+    if (!['claude', 'codex'].includes(opts.harness)) throw new Error('--harness takes claude or codex');
+    entry = setRosterProfile(entry.trapId, { harness: opts.harness }) ?? entry;
+  }
   const terminal = row.terminal ?? 'terminal';
   const adapter = resolveAdapter(opts, terminal, label, row.terminalFrom ?? 'default');
   const repo = opts.cfg.repos[entry.repo!]!;

@@ -63,7 +63,9 @@ afterEach(async () => {
   delete process.env.LOBSTAH_HOME;
 });
 async function page(d: GlassSnapshot, opts: Partial<GlassDomOptions> = {}): Promise<GlassDom> {
-  const g = await loadGlass(GLASS_PAGE, d, { now: NOW, files: { [md(TRAP_KEY)]: TRAP_MD, [md(HELM_KEY)]: HELM_MD }, ...opts });
+  // Each report's row, as its /meta serves it: the sheet and the report's page read it first.
+  const rows = Object.fromEntries((d.reports ?? []).map((r) => [`/report/${encodeURIComponent(r.key)}/meta`, JSON.stringify(r)]));
+  const g = await loadGlass(GLASS_PAGE, d, { now: NOW, files: { ...rows, [md(TRAP_KEY)]: TRAP_MD, [md(HELM_KEY)]: HELM_MD }, ...opts });
   open.push(g);
   return g;
 }
@@ -275,19 +277,28 @@ describe('glass: a report page', () => {
     expect(text(g.$('.reportview .bad'))).toBe('report not found (404)');
   });
 
-  it('an old #report/<key> link goes to the report page and starts nothing else', async () => {
-    for (const key of [HELM_KEY, TRAP_KEY]) {
-      const g = await page(everyAttentionFleet(), { hash: '#report/' + encodeURIComponent(key) });
-      expect(g.replaced()).toEqual([pagePath(key)]);
-      expect(g.fetches()).toBe(0);
-    }
+  it("a #report/<key> link opens the report's sheet over the deck, and Back keeps you on the glass", async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#report/' + encodeURIComponent(TRAP_KEY) });
+    expect(g.replaced()).toEqual([]);
+    expect(g.window.location.pathname).toBe('/');
+    const sheet = g.$('.rsheet')!;
+    expect(sheet.getAttribute('role')).toBe('dialog');
+    expect(text(sheet.querySelector('.rbartitle'))).toBe('Tray findings');
+    expect(text(sheet.querySelector('.reportview'))).toContain('The tray fits the base plate.');
+    expect(g.reportFetches()).toContain(md(TRAP_KEY));
+    // The deck is underneath, as it was.
+    expect(g.$('#page-deck')!.className).toBe('tabpage on');
+    // A link opened it, so Back replaces its hash with the tab's: nothing leaves the glass.
+    await click(g, sheet.querySelector('.rback'));
+    expect(g.$('.rsheet')).toBeNull();
+    expect(g.window.location.hash).toBe('#deck');
   });
 
   it("a dispatch's modal names its report and links to the page; it renders no markdown", async () => {
     const g = await page(everyAttentionFleet(), { hash: '#dispatches' });
     await click(g, g.$$('#dispatches tr.rowhead').find((r) => text(r).includes('cccccccc')) ?? null);
     expect(g.$$('#modalbox .sec').map(text)).toContain('report · Tray findings');
-    const link = [...g.$$('#modalbox a')].find((a) => text(a) === 'open the report ↗')!;
+    const link = [...g.$$('#modalbox a')].find((a) => text(a) === 'open the report')!;
     expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([
       pagePath(TRAP_KEY),
       '_blank',
@@ -345,12 +356,16 @@ describe('glass: the Reports tab', () => {
     expect(byRepo.$$('#reports tr.rowhead').map((r) => text(r.querySelector('td')))).toEqual(['Tray findings', 'Build timings']);
   });
 
-  it("a row, a card, or the title opens the report's own page in a new tab", async () => {
+  it('a row, a card, its arrow, or the title opens the report in the sheet, never a new tab', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#reports' });
-    await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Build timings')) ?? null);
-    const buildKey = (everyAttentionFleet().reports ?? []).find((r) => r.title === 'Build timings')!.key;
-    expect(g.opened()).toEqual([[`/report/${encodeURIComponent(buildKey)}`, '_blank', 'noopener']]);
+    await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Tray findings')) ?? null);
+    expect(g.opened()).toEqual([]);
+    expect(g.window.location.hash).toBe('#report/' + encodeURIComponent(TRAP_KEY));
+    expect(text(g.$('.rsheet .rbartitle'))).toBe('Tray findings');
+    // The tab stays underneath: still Reports, with no modal.
+    expect(g.$('#page-reports')!.className).toBe('tabpage on');
     expect(g.$('#overlay')!.className).toBe('');
+    // The title link keeps its page for a ⌘-click; a plain click opens the sheet too.
     const title = g.$$('#reports tr.rowhead td a').find((a) => text(a) === 'Fleet notes')!;
     expect([title.getAttribute('href'), title.getAttribute('target'), title.getAttribute('rel')]).toEqual([
       `/report/${encodeURIComponent(HELM_KEY)}`,
@@ -359,14 +374,64 @@ describe('glass: the Reports tab', () => {
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     const card = cards.$$('#reports .card').find((c) => text(c).includes('Tray findings'))!;
-    const open = card.querySelector('.gtop a.gopen')!;
-    expect([open.getAttribute('href'), open.getAttribute('target'), open.getAttribute('rel')]).toEqual([
-      `/report/${encodeURIComponent(TRAP_KEY)}`,
-      '_blank',
-      'noopener',
-    ]);
     await click(cards, card);
-    expect(cards.opened()).toEqual([[`/report/${encodeURIComponent(TRAP_KEY)}`, '_blank', 'noopener']]);
+    expect(text(cards.$('.rsheet .rbartitle'))).toBe('Tray findings');
+    expect(cards.opened()).toEqual([]);
+    // The arrow opens the same sheet (Chris: nothing special for the arrow).
+    const arrows = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
+    const arrow = arrows
+      .$$('#reports .card')
+      .find((c) => text(c).includes('Fleet notes'))!
+      .querySelector('.gtop a.gopen')!;
+    const plain = new arrows.window.MouseEvent('click', { bubbles: true, cancelable: true });
+    arrow.dispatchEvent(plain as never);
+    await arrows.settle();
+    expect(plain.defaultPrevented).toBe(true);
+    expect(text(arrows.$('.rsheet .rbartitle'))).toBe('Fleet notes');
+    // A ⌘-click still follows the link to a new tab.
+    const meta = new arrows.window.MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+    arrow.dispatchEvent(meta as never);
+    expect(meta.defaultPrevented).toBe(false);
+  });
+
+  it('acks the report once its text shows in the sheet, as its own page does', async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' }, reportToken: 'tok' });
+    await click(g, g.$$('#reports .card').find((c) => text(c).includes('Tray findings')) ?? null);
+    await g.settle();
+    const acks = g.posts().filter((p) => p.body.includes('report-viewed'));
+    expect(acks).toHaveLength(1);
+    expect(JSON.parse(acks[0]!.body)).toEqual({ kind: 'report-viewed', payload: { key: TRAP_KEY } });
+  });
+
+  it('closes the sheet with Back, Escape or the back gesture, and the tab keeps its place', async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
+    const open = async () => click(g, g.$$('#reports .card').find((c) => text(c).includes('Tray findings')) ?? null);
+    g.window.scrollTo(0, 400);
+    await open();
+    expect(g.$('.rsheet')).toBeTruthy();
+    // Back has focus, so Enter or Space closes it.
+    expect(g.$(':focus')?.className).toContain('rback');
+    // Back returns to the entry before it, scrolled where it was.
+    g.window.scrollTo(0, 0);
+    await click(g, g.$('.rsheet .rback'));
+    await new Promise((r) => setTimeout(r, 20));
+    await g.settle();
+    expect(g.$('.rsheet')).toBeNull();
+    expect(g.window.location.hash).toBe('#reports');
+    expect(g.window.scrollY).toBe(400);
+    // Escape closes it too.
+    await open();
+    g.window.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    await g.settle();
+    expect(g.$('.rsheet')).toBeNull();
+    // The back gesture is a hash change back to the tab.
+    await open();
+    g.window.location.hash = '#reports';
+    g.window.dispatchEvent(new g.window.HashChangeEvent('hashchange'));
+    await g.settle();
+    expect(g.$('.rsheet')).toBeNull();
+    expect(g.$('#page-reports')!.className).toBe('tabpage on');
   });
 });
 
@@ -462,21 +527,23 @@ describe('glass: short card badges stay whole', () => {
 });
 
 describe('glass: the open-window button', () => {
-  it('is a themed ↗ Open button at the right of the bottom bar, and its click does not open the trap modal', async () => {
+  it("is a themed Open button, its icon at the right of a card's boat line, and its click does not open the trap modal", async () => {
     const d = everyAttentionFleet();
     d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     d.focusToken = 'fixture-token';
     for (const view of ['cards', 'table'] as const) {
       const g = await page(d, { hash: '#traps', prefs: { view } });
-      const button = g.$(view === 'cards' ? '#traps .card .gactions .gopenbtn button' : '#traps tr.rowhead td:last-child button')!;
-      expect(text(button)).toBe('↗ Open');
-      expect(button.className).toBe('btn open');
+      const button = g.$(view === 'cards' ? '#traps .card .gfoot .gopenbtn button' : '#traps tr.rowhead td:last-child button')!;
+      // A card shows the icon alone, named; the table keeps its words.
+      if (view === 'cards') expect([text(button), !!button.querySelector('svg.openicon')]).toEqual(['', true]);
+      else expect(text(button)).toBe('↗ Open');
+      expect(button.className).toBe('btn btn-secondary open');
       await click(g, button);
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
-    const button = deck.$('#deck .card .gactions .gopenbtn button')!;
-    expect(text(button)).toBe('↗ Open');
+    const button = deck.$('#deck .card .gfoot .gopenbtn button')!;
+    expect(button.querySelector('svg.openicon')).toBeTruthy();
     await click(deck, button);
     expect(deck.$('#overlay')!.className).toBe('');
   });
@@ -585,8 +652,10 @@ describe('glass: the report page route', () => {
   const get = (base: string, url: string, host?: string): Promise<{ status?: number; type?: string; body: string }> =>
     new Promise((resolve, reject) => {
       const req = httpRequest(`${base}${url}`, { headers: host ? { Host: host } : {} }, (res) => {
+        // Decode across chunks: a multi-byte character can straddle a network boundary.
+        res.setEncoding('utf8');
         let body = '';
-        res.on('data', (c: Buffer) => (body += c.toString('utf8')));
+        res.on('data', (chunk: string) => (body += chunk));
         res.on('end', () => resolve({ status: res.statusCode, type: String(res.headers['content-type'] ?? ''), body }));
       });
       req.on('error', reject);

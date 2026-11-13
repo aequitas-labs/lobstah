@@ -14,7 +14,8 @@ import { Dispatches } from './dispatches.js';
 import { Footer, Header } from './header.js';
 import { Lobs } from './lobs.js';
 import { LightboxView } from './lightbox.js';
-import { Modal } from './modals.js';
+import { ReportSheet } from './report-view.js';
+import { Modal, SettingsBody } from './modals.js';
 import { Notices } from './notices.js';
 import { PRs } from './prs.js';
 import { Reports } from './reports.js';
@@ -22,6 +23,8 @@ import { Reviews } from './reviews.js';
 import { Stats } from './stats.js';
 import { SessionGrants } from './session-grants.js';
 import { Settings } from './settings.js';
+import { Dialog } from './dialog.js';
+import { ITEM_ICON } from './icons.js';
 import { Traps } from './traps.js';
 import { Todos } from './todos.js';
 import { host } from '../host.js';
@@ -57,10 +60,12 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'todos') return html`<${Todos} passes=${d?.helmPasses} todos=${inp.deck.todos} note=${inp.deck.todoNote} />`;
     if (t === 'grants') return html`<${SessionGrants} grants=${d?.sessionGrants ?? []} standing=${d?.standingGrants ?? []} />`;
     if (t === 'settings')
-      return html`<${Settings} page=${state.settings} error=${state.settingsError} passkeys=${state.snapshot?.runPasskeys} passkey=${state.runPasskey} />`;
+      return html`<${Settings} page=${state.settings} error=${state.settingsError} passkeys=${state.snapshot?.runPasskeys} passkey=${state.runPasskey} helms=${d?.helms ?? []} reviewSetup=${state.snapshot?.reviewSetup} />`;
     if (t === 'stats') return html`<${Stats} page=${state.stats} error=${state.statsError} focus=${state.statsFocus} />`;
     return html`<${Notices} inp=${inp.notices} more=${more('notices')} />`;
   };
+  // The glass's own settings open in a Dialog (a sheet on a phone), not the overlay's modal.
+  const settingsOpen = state.modal?.type === 'settings';
   const onOverlay = (e: Event) => {
     if (e.target === e.currentTarget) closeModal();
   };
@@ -74,8 +79,11 @@ export function App({ state }: { state: GlassState }) {
     ),
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
+    d && html`<${ReportSheet} reportKey=${state.reportSheet ?? null} />`,
     html`<${LightboxView} box=${state.lightbox} />`,
-    html`<div id="overlay" class=${state.modal && d ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
+    settingsOpen &&
+      html`<${Dialog} title="Settings" icon=${ITEM_ICON.settings} cls="settings-dialog" onClose=${closeModal}><${SettingsBody} prefs=${state.prefs} /><//>`,
+    html`<div id="overlay" class=${state.modal && d && !settingsOpen ? 'open' : d ? '' : undefined} onClick=${onOverlay}><div class="modal" id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div></div>`,
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
     d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`,

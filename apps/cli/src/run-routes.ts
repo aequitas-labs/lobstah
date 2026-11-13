@@ -160,7 +160,7 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
             },
           };
         const keys = readRunPasskeys(keysFile);
-        if (!keys.length) return refuse(409, relayed ? PAIR_FIRST : 'Set up a passkey in Settings to run cards.');
+        if (!keys.length) return refuse(409, relayed ? PAIR_FIRST : 'Set up a passkey in Configuration to run cards.');
         const rpId = relayed ? keys[0]!.rpId : RUN_RP_ID;
         return {
           status: 200,

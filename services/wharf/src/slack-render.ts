@@ -86,7 +86,7 @@ function offered(actions: GlassCardAction[]): string[] {
   return lines;
 }
 /** Actions a card offers that its Slack message does not take: they are named, and done in the glass. */
-const GLASS_ONLY: Partial<Record<GlassCardAction['kind'], string>> = { 'message-helm': 'message the helm', cancel: 'cancel the job', 'review-dismiss': 'dismiss the review' };
+const GLASS_ONLY: Partial<Record<GlassCardAction['kind'], string>> = { 'message-helm': 'message the helm', cancel: 'cancel the job', 'review-dismiss': 'dismiss the review', 'review-mute': 'mute the PR', 'review-unmute': 'unmute the PR' };
 function inGlass(actions: GlassCardAction[], controls: CardControl[]): string {
   const names = actions.flatMap((a) => (GLASS_ONLY[a.kind] && !controls.some((c) => c.action.kind === a.kind) ? [GLASS_ONLY[a.kind]!] : []));
   return names.length ? `In the glass you can also ${names.join(', ')}.` : '';
@@ -103,6 +103,8 @@ function controlLabel(action: GlassCardAction, optionNumber: number): string {
     case 'allow-always': return 'Allow always';
     case 'deny': return 'No';
     case 'message-helm': return 'Message the helm…';
+    case 'review-mute': return 'Mute this PR';
+    case 'review-unmute': return 'Unmute';
     default: return action.kind;
   }
 }

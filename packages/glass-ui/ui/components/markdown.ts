@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { checklistSource, hasChecklistSource } from '../checklists.js';
 import type { Children } from '../html.js';
+import { Button } from './button.js';
 
 /** Shared safe Markdown: raw HTML stays text; images resolve to owned files, or to https on a card. */
 type Image = (name: string, alt: string) => Children;
@@ -66,7 +67,7 @@ function CopyableBlock({ text }: { text: string }) {
     e.stopPropagation();
     void copy();
   };
-  return html`<div class="mdcodewrap"><pre class="mdcode"><code ref=${code}>${text}</code></pre><button type="button" class="copybtn" title=${note.title} aria-label=${note.title} onClick=${click}>${note.icon}</button></div>`;
+  return html`<div class="mdcodewrap"><pre class="mdcode"><code ref=${code}>${text}</code></pre><${Button} variant="icon" class="copybtn" label=${note.title} onClick=${click}>${note.icon}<//></div>`;
 }
 
 /**

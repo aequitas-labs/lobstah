@@ -34,6 +34,8 @@ export interface Descriptor {
   /** Configured targets carry no repo; legacy repo descriptors keep their existing shape. */
   target?: ConfiguredTrapTarget;
   brief: string;
+  /** Git progress and prior catch evidence carried into a cold trap handover. */
+  handoff?: string;
   harness?: string;
   /** `harness` was named on the command line (`dispatch`/`swap --harness`),
    * not inherited from a default. An explicit harness that differs from a

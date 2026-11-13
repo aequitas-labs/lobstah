@@ -59,17 +59,31 @@ describe('glassHost', () => {
     expect(glassHost(SAFARI_UA)).toBe('safari');
     expect(glassHost('Mozilla/5.0 (Macintosh; Intel Mac OS X 15.6; rv:140.0) Gecko/20100101 Firefox/140.0')).toBe('firefox');
     expect(glassHost(`${CHROME_UA} Edg/154.0.0.0`)).toBe('edge');
-    expect(glassHost('Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Code/1.104.0 Chrome/138.0 Electron/37.2.3 Safari/537.36')).toBe('electron');
+    expect(glassHost('Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Code/1.104.0 Chrome/138.0 Electron/37.2.3 Safari/537.36')).toBe(
+      'electron',
+    );
     expect(glassHost('')).toBe('other');
   });
 });
 
 describe('validShowHash: what location.hash accepts', () => {
   it('takes a tab, a decision, a report, or nothing', () => {
-    for (const ok of ['', '#prs', '#deck', '#decision/fleet%2Fabc', '#decision/work:1234', '#report/r-1']) expect(validShowHash(ok), ok).toBe(true);
+    for (const ok of ['', '#prs', '#deck', '#decision/fleet%2Fabc', '#decision/work:1234', '#report/r-1'])
+      expect(validShowHash(ok), ok).toBe(true);
   });
   it('refuses anything else', () => {
-    for (const bad of ['prs', '#nope', '#decision/', '#decision/%E0', '#report/a b', 'javascript:alert(1)', '#report/x\n', `#report/${'x'.repeat(1100)}`, 7, null]) {
+    for (const bad of [
+      'prs',
+      '#nope',
+      '#decision/',
+      '#decision/%E0',
+      '#report/a b',
+      'javascript:alert(1)',
+      '#report/x\n',
+      `#report/${'x'.repeat(1100)}`,
+      7,
+      null,
+    ]) {
       expect(validShowHash(bad), String(bad)).toBe(false);
     }
   });
@@ -125,7 +139,14 @@ describe('GlassPresence', () => {
     p.seen('page-claude', true, CLAUDE_PANE_UA);
     now += 1500;
     const r = p.show('#decision/abc');
-    expect(r).toMatchObject({ delivered: true, page: 'page-claude', host: 'claude', visible: true, seenAgoMs: 1500, userAgent: CLAUDE_PANE_UA });
+    expect(r).toMatchObject({
+      delivered: true,
+      page: 'page-claude',
+      host: 'claude',
+      visible: true,
+      seenAgoMs: 1500,
+      userAgent: CLAUDE_PANE_UA,
+    });
     expect(r.id).toMatch(/^[A-Za-z0-9_-]{12}$/);
     expect(p.seen('page-other', true, CHROME_UA)).toBeNull();
     expect(p.seen('page-claude', true, CLAUDE_PANE_UA)).toEqual({ id: r.id, hash: '#decision/abc' });
@@ -243,12 +264,25 @@ describe('the glass server', () => {
     expect(await requestShow(port, '#prs', 2000, true)).toEqual({ delivered: false });
     await raw('/api/presence?page=page-installed&vis=visible&app=1', { headers: { Origin: base, 'User-Agent': CHROME_UA } });
     const cli = path.resolve(import.meta.dirname, '../dist/main.js');
-    const { stdout } = await promisify(execFile)(process.execPath, [cli, 'glass', 'show', '#decision/abc', '--port', String(port), '--json', '--app'], { env: { ...process.env, LOBSTAH_HOME: home } });
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [cli, 'glass', 'show', '#decision/abc', '--port', String(port), '--json', '--app'],
+      { env: { ...process.env, LOBSTAH_HOME: home } },
+    );
     const result = JSON.parse(stdout) as { id: string };
     expect(result).toMatchObject({ delivered: true, page: 'page-installed', visible: true });
     expect((await presence('page-browser', 'visible', CHROME_UA)).body.show).toBeNull();
-    expect((await raw('/api/presence?page=page-installed&vis=visible&app=1', { headers: { Origin: base, 'User-Agent': CHROME_UA } })).body.show).toEqual({ id: result.id, hash: '#decision/abc' });
-    expect((await raw('/api/show', { headers: { 'content-type': 'application/json', 'x-lobstah-show-secret': secret }, body: JSON.stringify({ hash: '#prs', app: 'yes' }) })).status).toBe(400);
+    expect(
+      (await raw('/api/presence?page=page-installed&vis=visible&app=1', { headers: { Origin: base, 'User-Agent': CHROME_UA } })).body.show,
+    ).toEqual({ id: result.id, hash: '#decision/abc' });
+    expect(
+      (
+        await raw('/api/show', {
+          headers: { 'content-type': 'application/json', 'x-lobstah-show-secret': secret },
+          body: JSON.stringify({ hash: '#prs', app: 'yes' }),
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it('forgets a page on its goodbye beacon', async () => {
@@ -275,7 +309,9 @@ describe('the glass server', () => {
     for (const bad of ['javascript:alert(1)', '#nope', '#report/a b', 42]) {
       expect((await show(bad)).status, String(bad)).toBe(400);
     }
-    expect((await raw('/api/show', { headers: { 'content-type': 'application/json', 'x-lobstah-show-secret': secret }, body: '{' })).status).toBe(400);
+    expect(
+      (await raw('/api/show', { headers: { 'content-type': 'application/json', 'x-lobstah-show-secret': secret }, body: '{' })).status,
+    ).toBe(400);
   });
 
   it('answers the CLI client, and says so when no glass runs', async () => {
@@ -339,14 +375,15 @@ describe('the glass page', () => {
     expect(g.window.location.hash).toBe('#decision/abc');
   });
 
-  it('ignores a hash location.hash would not take, and sends a report to its page', async () => {
+  it("ignores a hash location.hash would not take, and opens a report's sheet in place", async () => {
     const g = await page({ hash: '#deck' });
     g.queueShow({ id: 'bad-1', hash: 'javascript:alert(1)' });
     await g.poll();
     expect(g.window.location.hash).toBe('#deck');
     g.queueShow({ id: 'rep-1', hash: '#report/r-1' });
     await g.poll();
-    expect(g.assigned()).toEqual(['/report/r-1']);
+    expect(g.assigned()).toEqual([]);
+    expect(g.window.location.hash).toBe('#report/r-1');
   });
 
   it('applies a show that arrives while hidden, on the heartbeat', async () => {

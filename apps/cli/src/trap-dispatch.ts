@@ -47,7 +47,7 @@ export function createTrapDispatchScheduler(options: Pick<ThrowOptions, 'adapter
         if (!queuedDescriptor(d.id, lane)) return; // A listener won before startup began.
         const opts = { ...options, cfg, onLaunch: (launch: { trap: string }) => { label = withTrapRepo(d.repo, launch.trap); } };
         if (choice.action === 'return') await throwTrap({ ...opts, address: `wt:${choice.row.trapId}` });
-        else await throwNew({ ...opts, repo: d.repo!, harness: d.harness, reason: choice.why });
+        else await throwNew({ ...opts, repo: d.repo!, harness: choice.harness ?? d.harness, reason: choice.why });
         log(`trap ${label}: listening for queued ${d.repo} work`);
       })().catch((error) => {
         const reason = error instanceof Error ? error.message : String(error);

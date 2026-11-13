@@ -18,6 +18,8 @@ import { DeviceConsent } from './device.js';
 import { PasskeyPairing } from './pairing.js';
 import { requestState } from './model.js';
 import { glassSocket } from './socket.js';
+import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
+import { ITEM_ICON } from '../../../../packages/glass-ui/ui/components/icons.js';
 
 /**
  * The hosted glass: GitHub sign-in around the shared glass, which runs on the
@@ -150,7 +152,7 @@ function MirrorChips({ backend }: { backend: MirrorBackend }) {
 function HostedCard({ backend }: { backend: HostedBackend }): ReturnType<typeof html> | null {
   const match = /^#card\/(c\d{1,15})$/.exec(location.hash);
   if (!match) return null;
-  return html`<section class="card"><button class="btn" onClick=${() => { location.hash = '#deck'; }}>Close card</button><${CardDetail}
+  return html`<section class="card"><${Button} onClick=${() => { location.hash = '#deck'; }}>Close card<//><${CardDetail}
     id=${match[1]}
     load=${(id: string) => json<import('../../../../packages/core/src/backend-model.js').GlassCard>(`/api/glass/cards/${encodeURIComponent(id)}`)}
     open=${(item: import('../../../../packages/core/src/backend-model.js').GlassCardItem) => { location.hash = `#${item.kind}/${item.id}`; }}
@@ -182,7 +184,7 @@ function start(mirror = false): void {
   page = startGlassPage(backend, {
     chips: () => [
       'boats' in backend ? html`<${MirrorChips} backend=${backend} />` : html`<span class="chip">${backend.account()?.helmLive ? 'helm live' : 'no helm signed on'}</span>`,
-      html`<button class="btn" onClick=${() => void signOut()}>Sign out</button>`,
+      html`<${Button} onClick=${() => void signOut()}>${ITEM_ICON.signOut}Sign out<//>`,
     ],
     banner: () => [
       notice && html`<div class=${notice.bad ? 'bad' : 'ok'} role=${notice.bad ? 'alert' : 'status'}>${notice.text}</div>`,

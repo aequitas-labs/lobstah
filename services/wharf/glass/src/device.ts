@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { HttpError, json } from './api.js';
 import { html, value } from './common.js';
 import logo from '../../../../docs/assets/favicon.png';
+import { Button } from '../../../../packages/glass-ui/ui/components/button.js';
 
 /**
  * Boat approval on /device: its own consent page, not the glass. It names the
@@ -132,7 +133,7 @@ export function DeviceConsent({ signedOut }: { signedOut: (status: 401 | 403) =>
     body = html`<form class="auth-consent-form" onSubmit=${(e: Event) => {
       e.preventDefault();
       if (code.trim()) void inspect(code.trim());
-    }}><label for="auth-consent-code">Code</label><input id="auth-consent-code" autocomplete="off" autocapitalize="characters" spellcheck=${false} maxLength="128" value=${code} onInput=${(e: Event) => setCode(value(e))} /><button class="auth-github auth-consent-primary" disabled=${!code.trim()}>Check code</button></form>`;
+    }}><label for="auth-consent-code">Code</label><input id="auth-consent-code" autocomplete="off" autocapitalize="characters" spellcheck=${false} maxLength="128" value=${code} onInput=${(e: Event) => setCode(value(e))} /><${Button} variant="primary" size="lg" type="submit" class="auth-consent-primary" disabled=${!code.trim()}>Check code<//></form>`;
   else if (step.kind === 'review') {
     const d = step.device,
       options = choices(d.requestedPermissions),
@@ -141,7 +142,7 @@ export function DeviceConsent({ signedOut }: { signedOut: (status: 401 | 403) =>
       options.length > 1
         ? html`<label class="auth-consent-access">Access <select aria-label="Access" value=${choice} onChange=${(e: Event) => setChoice(value(e))}>${options.map((o) => html`<option value=${o}>${ACCESS[o]!.label}</option>`)}</select></label>`
         : html`<p class="auth-consent-access">Access: <b>${ACCESS[choice]!.label}</b></p>`
-    }<div class="auth-consent-lists"><div><h3>It can</h3><ul>${can.map((t) => html`<li>${t}</li>`)}</ul></div>${cannot.length > 0 && html`<div><h3>It can't</h3><ul>${cannot.map((t) => html`<li>${t}</li>`)}</ul></div>`}</div><div class="auth-consent-actions"><button class="auth-github auth-consent-primary" disabled=${busy} onClick=${() => void decide(true)}>Approve</button><button class="auth-consent-secondary" disabled=${busy} onClick=${() => void decide(false)}>Deny</button></div>`;
+    }<div class="auth-consent-lists"><div><h3>It can</h3><ul>${can.map((t) => html`<li>${t}</li>`)}</ul></div>${cannot.length > 0 && html`<div><h3>It can't</h3><ul>${cannot.map((t) => html`<li>${t}</li>`)}</ul></div>`}</div><div class="auth-consent-actions"><${Button} variant="primary" size="lg" class="auth-consent-primary" disabled=${busy} onClick=${() => void decide(true)}>Approve<//><${Button} size="lg" class="auth-consent-secondary" disabled=${busy} onClick=${() => void decide(false)}>Deny<//></div>`;
   } else if (step.kind === 'approved' || step.kind === 'denied' || step.kind === 'unusable') body = html`<a class="auth-consent-link" href="/">Open the glass</a>`;
 
   return html`<div class="auth-shell"><header class="auth-brand"><img src=${logo} width="64" height="64" alt="Lobstah lobster and star" /><b>lobstah spyglass</b></header><main class="auth-main auth-consent-main"><section class="auth-card auth-consent-card" aria-labelledby="auth-title" aria-busy=${step.kind === 'checking'}><div class="auth-card-body"><h2 id="auth-title" ref=${heading} tabindex="-1" role=${step.kind === 'checking' ? 'status' : undefined}>${title}</h2>${detail && html`<p id="auth-detail" class="auth-detail">${detail}</p>`}${error && html`<p class="bad" role="alert">${error}</p>`}${body}</div></section></main><footer class="auth-footer">Nobody stares at the water</footer></div>`;

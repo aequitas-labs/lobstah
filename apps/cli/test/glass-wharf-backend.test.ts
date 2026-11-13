@@ -115,7 +115,7 @@ describe('the wharf backend', () => {
 
   it('fills only the tabs the wharf has, takes none of the local-only actions, and runs no daemon', () => {
     expect(WHARF_CAPABILITIES.tabs).toEqual(['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
-    expect([...WHARF_CAPABILITIES.actions]).toEqual(['message-helm', 'cancel', 'review-dismiss', 'attention-ack']);
+    expect([...WHARF_CAPABILITIES.actions]).toEqual(['message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'attention-ack']);
     expect(WHARF_CAPABILITIES.daemon).toBe(false);
   });
 

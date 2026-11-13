@@ -426,12 +426,13 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
 
   push('lobstah', 'ok', `v${lobstahVersion()} at ${process.argv[1] ?? '?'}`);
   for (const row of pluginRows(lobstahVersion())) push(row.check, row.status, row.detail);
-  for (const h of [claudeHooks(), codexHooks({ listed: await listCodexHooks(process.cwd()) })]) {
+  const listed = await listCodexHooks(process.cwd());
+  for (const h of [claudeHooks(), codexHooks({ listed })]) {
     const row = hookRow(h, now);
     push(row.check, row.status, row.detail);
   }
   try {
-    const trapHooks = codexTrapHooksRow(loadConfig().repos);
+    const trapHooks = codexTrapHooksRow(loadConfig().repos, { listed });
     push(trapHooks.check, trapHooks.status, trapHooks.detail);
   } catch {
     // an unloadable config is already its own row

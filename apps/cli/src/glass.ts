@@ -2,6 +2,7 @@ import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
 import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
+import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
@@ -100,6 +101,7 @@ import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
+import { muteReview, unmuteReview } from '@lobstah/core';
 import { glassReviews } from './reviews.js';
 import { reviewSetupView } from './reviews-setup.js';
 import { buildTendReport, landedCatches, walkingAttention } from './tend.js';
@@ -108,7 +110,7 @@ import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
 import { deriveGlassPrs, dispatchPrHead, dispatchPrList } from './glass-prs.js';
 import { githubViewer } from './pr-ownership.js';
-import { PrMergeRefused, cancelPrMerge, prMergeMethod, requestPrMerge } from './pr-merge.js';
+import { PrMergeRefused, cancelPrMerge, cancelStackMerge, prMergeMethod, requestPrMerge, requestStackMerge } from './pr-merge.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -174,6 +176,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['review-draft', 1024],
   ['pr-ack', 256 * 1024],
   ['pr-merge', 1024],
+  ['stack-merge', 1024],
   ['attention-ack', 1024],
 ]);
 
@@ -348,6 +351,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
   const log = readStatusLog(id, r.lane);
   const last = log.at(-1);
   const claim = r.bucket === 'active' ? readSessionClaim(id, r.lane) : undefined;
+  const usageLimit = dispatchUsageLimit(id, r.lane);
   const evidence = readEvidence(id, r.lane);
   const inboxDir = path.join(laneDirs(r.lane).inbox, id);
   return {
@@ -366,13 +370,13 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     // is the queue time.
     // An active dispatch a trap claimed, with no log, is working since
     // the claim.
-    verb:
+    verb: usageLimit ? 'limited' :
       r.bucket === 'queued' && log.length === 0
         ? ('queued' as const)
         : (last?.verb ?? (claim ? ('working' as const) : ('unknown' as const))),
     ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
     // Held for free space: the note carries the reason.
-    note: (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
+    note: (usageLimit ? `Waiting on ${usageLimit.account} usage limit${usageLimit.resetAt ? ` · resets ${usageLimit.resetAt}` : ''}` : undefined) ?? (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
       ? `repair chore waits for ${r.d.for} until ${r.d.systemRepair.trapWaitUntil}` : undefined) ??
       (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
     verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
@@ -731,6 +735,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
       ...(registered && harness === 'claude' ? trapLiveView(t, claudeProcesses()) : {}),
       sessionId,
       harness,
+      usageLimit: harness ? trapUsageLimit({ harness, window, link, configured: roster?.configured }) : undefined,
       desktopThread: (harness === 'codex' && !!sessionId && !!codexDesktopThread(sessionId)) || undefined,
       live: registered,
       listening,
@@ -772,6 +777,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   const attention = attentionSnapshot();
   return {
     now: new Date().toISOString(),
+    usageLimits: usageLimitGroups(),
     goals: visibleGoals(cfg),
     helmPasses: helmPassViews(cfg),
     version: lobstahVersion(),
@@ -1163,17 +1169,21 @@ export function serveGlass(
           case 'review-request-changes':
           case 'review-comment':
           case 'review-dismiss':
+          case 'review-mute':
+          case 'review-unmute':
           case 'review-draft':
           case 'review-redraft': {
             // On-demand jobs follow the repo's current draft/publish setting.
             const key = (body.payload as { key?: unknown } | undefined)?.key;
             if (typeof key !== 'string' || !key.startsWith('review:') || key.length > 200) return reply(400, { ok: false, reason: 'A review key is required.' });
             if (body.kind === 'review-seen') { const ok = markReviewSeen(key); return reply(ok ? 200 : 404, { ok }); }
-            acknowledgeReview(key);
+            if (body.kind !== 'review-mute' && body.kind !== 'review-unmute') acknowledgeReview(key);
             const current = readReview(key);
             if (body.kind === 'review-skip' && current && latestRound(current)?.state === 'posted') return reply(200, { ok: true });
             const event = body.kind === 'review-approve' ? 'APPROVE' : body.kind === 'review-request-changes' ? 'REQUEST_CHANGES' : body.kind === 'review-comment' ? 'COMMENT' : undefined;
             const act = event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
+              : body.kind === 'review-mute' ? Promise.resolve(muteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
+              : body.kind === 'review-unmute' ? Promise.resolve(unmuteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : ['review-dismiss', 'review-skip'].includes(body.kind) ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),
@@ -1192,6 +1202,24 @@ export function serveGlass(
             } catch (error) {
               if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
               return reply(500, { ok: false, reason: 'The merge request could not be stored.' });
+            }
+          }
+          case 'stack-merge': {
+            const payload = body.payload as { stack?: unknown; cancel?: unknown } | undefined;
+            const stack = payload?.stack;
+            if (typeof stack !== 'string' || !/^pr:[^\s]{1,300}$/.test(stack)) return reply(400, { ok: false, reason: 'A stack is required.' });
+            if (payload?.cancel === true) {
+              const cancelled = cancelStackMerge(stack);
+              return cancelled === 'merging'
+                ? reply(409, { ok: false, reason: "GitHub is already merging it, so it can't be cancelled." })
+                : reply(200, { ok: true, stack, cancelled: cancelled === 'cancelled' });
+            }
+            try {
+              const request = requestStackMerge(stack, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass');
+              return reply(200, { ok: true, stack, method: request.method });
+            } catch (error) {
+              if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
+              return reply(500, { ok: false, reason: 'The stack merge request could not be stored.' });
             }
           }
           case 'pr-ack':

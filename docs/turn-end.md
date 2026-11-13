@@ -41,7 +41,9 @@ A registration, written into `waits` (one file per tool, any name ending in
 | `cwd` | Where to run `wait`. Optional; the owner's `cwd` otherwise. |
 | `cursor` | Where `{cursor}` starts. Optional. |
 
-`wait` prints `{ "cursor": "<next>", "summary": "<one line>" }`. The owner
+`wait` prints `{ "cursor": "<next>", "summary": "<one line>" }` and exits 0.
+With nothing new by its own deadline, it prints nothing and exits 0 or 2.
+Any other exit is an error, with the reason on stderr. The owner
 replaces `{cursor}` in the command with the last cursor it printed (the
 registration's `cursor` the first time), quoted for the shell. `wait` must
 not move what `read` shows the agent: the agent reads it later.
@@ -71,9 +73,10 @@ not move what `read` shows the agent: the agent reads it later.
   A trap that's gone gets a continuation of its dispatch, one at a time.
 - A pointer still unread after 15 minutes raises one `trap-not-receiving`
   notice to the helm: the trap has stopped receiving.
-- A wait that exits non-zero within 10 seconds without printing has failed:
-  it retries after 5 s, doubling to at most 5 minutes, and the record keeps
-  the last error line. A later exit is a quiet timeout, and it runs again.
+- A wait that ends without printing, with exit 0 or 2, timed out quietly
+  and runs again. Any other exit code is a failure, however long the wait
+  ran: it retries after 5 s, doubling to at most 5 minutes, and the record
+  keeps its last stderr line for doctor.
 - A record ends when its registration file is removed while the trap is
   live, or when its dispatch finishes.
 

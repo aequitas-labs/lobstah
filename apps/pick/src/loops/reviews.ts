@@ -183,6 +183,7 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
  */
 async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
   for (const item of listReviews()) {
+    if (item.mutedAt) continue;
     const r = latestRound(item);
     if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
     const draft = readRoundDraft(item.key, r.id);
@@ -190,7 +191,7 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
     if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking)) {
       r.verdict = draft.verdict; r.blocking = draft.blocking; writeReview(item);
     }
-    const publish = draft.verdict !== 'approve' && reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r);
+    const publish = reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r, draft.verdict);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
       log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
@@ -326,6 +327,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
   const scopes = backendScopes(cfg);
   let started = startedToday(items, now);
   for (const item of items) {
+    if (item.mutedAt) continue;
     if (manualKey && item.key !== manualKey) continue;
     const r = latestRound(item);
     if (!r) continue;
@@ -387,6 +389,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       delete r.byHand;
       r.publish = settings.publish;
       r.draftOnly = !settings.publish;
+      r.autoPostApprove = settings.autoPostApprove;
+      r.autoPostRequestChanges = settings.autoPostRequestChanges;
       delete r.reason;
       save();
       started++;

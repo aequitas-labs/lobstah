@@ -154,6 +154,50 @@ export const closeDecision = (): void => setState({ decisionModal: null });
 /** Hotkeys reach the first nine answers only: 1–9. */
 export const HOTKEY_MAX = 9;
 
+/** Whether this page pushed the open report's history entry, so Back can return to the entry before it. */
+let reportPushed = false;
+/** Where the page was scrolled when the sheet opened, to put it back on close: going back to `#deck` would jump to the tab's top. */
+let reportScroll: number | undefined;
+
+/**
+ * Open a report in the sheet over the glass: a `#report/<key>` hash, a new
+ * history entry, so the browser's back button and the phone's back gesture
+ * close it. The tab underneath keeps its place and scroll.
+ */
+export function openReportSheet(key: string): void {
+  reportPushed = true;
+  reportScroll = window.scrollY;
+  location.hash = '#report/' + encodeURIComponent(key);
+}
+
+/** The hash named a report, or stopped naming one (start.ts onRoute). */
+export function routeReport(key: string | null): void {
+  const closing = key === null && !!getState().reportSheet;
+  if (key === null) reportPushed = false;
+  if ((getState().reportSheet ?? null) !== key) setState({ reportSheet: key });
+  if (closing && reportScroll !== undefined) {
+    const y = reportScroll;
+    reportScroll = undefined;
+    // After the browser's own jump to the tab's anchor.
+    setTimeout(() => window.scrollTo(0, y), 0);
+  }
+}
+
+/**
+ * Close the sheet: back to the entry this page pushed, or, for a sheet a
+ * link opened, replace its hash with the tab's so nothing leaves the glass.
+ */
+export function closeReportSheet(): void {
+  if (!getState().reportSheet) return;
+  if (reportPushed) {
+    reportPushed = false;
+    history.back();
+    return;
+  }
+  history.replaceState(null, '', '#' + getState().route);
+  routeReport(null);
+}
+
 /** The decision the modal shows now, if any. */
 function shownDecision() {
   const key = getState().decisionModal?.key;
@@ -275,7 +319,7 @@ export async function loadSettings(): Promise<void> {
     if (!r.ok) throw new Error(`/data/settings answered ${r.status}`);
     setState({ settings: r.data, settingsError: null });
   } catch {
-    setState({ settingsError: 'Settings could not be read' });
+    setState({ settingsError: 'Configuration could not be read' });
   } finally {
     settingsInflight = false;
   }
@@ -494,6 +538,8 @@ export type ReviewRequestKind =
   | 'review-request-changes'
   | 'review-comment'
   | 'review-dismiss'
+  | 'review-mute'
+  | 'review-unmute'
   | 'review-redraft'
   | 'review-draft';
 
@@ -504,7 +550,8 @@ export type ReviewRequestKind =
  */
 export async function reviewRequest(kind: ReviewRequestKind, payload: Record<string, unknown>): Promise<string | undefined> {
   // A source without review actions shows none; a view it records (review-seen) is skipped.
-  if (!can('review-request')) return 'Reviews are read-only here.';
+  if (!can('review-request') && !can('review-dismiss') && !can('review-mute') && !can('review-unmute'))
+    return 'Reviews are read-only here.';
   return glassRequest(kind, payload);
 }
 
@@ -526,6 +573,16 @@ export async function cancelJob(dispatch: string): Promise<string | undefined> {
 /** Ask the boat that drafted a review to dismiss it (and its pending draft). */
 export async function dismissReview(key: string): Promise<string | undefined> {
   return glassRequest('review-dismiss', { key });
+}
+
+/** Mute every future review round for a PR. */
+export async function muteReviewPr(key: string): Promise<string | undefined> {
+  return glassRequest('review-mute', { key });
+}
+
+/** Resume review rounds for a muted PR. */
+export async function unmuteReviewPr(key: string): Promise<string | undefined> {
+  return glassRequest('review-unmute', { key });
 }
 
 async function glassRequest(kind: string, payload: Record<string, unknown>): Promise<string | undefined> {
@@ -605,6 +662,41 @@ export async function requestPrMerge(key: string, cancel = false): Promise<void>
             return rest;
           }
           return { ...p, mergeRequest: { at, method: result.method ?? 'squash' } };
+        }),
+      },
+    });
+  }
+}
+
+/**
+ * Ask the boat to merge a whole stack of your PRs once every one is green,
+ * or cancel that. The snapshot shows the request from the next poll; this
+ * marks it at once.
+ */
+export async function requestStackMerge(stack: string, cancel = false): Promise<void> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) throw new Error('Reload the glass before merging.');
+  const response = await backend().request<{ ok: boolean; reason?: string; method?: 'merge' | 'squash' | 'rebase' }>(
+    'stack-merge',
+    { stack, ...(cancel ? { cancel: true } : {}) },
+    token,
+  );
+  const result = response.body;
+  if (!response.ok || !result.ok)
+    throw new Error(result.reason ?? (cancel ? 'Could not cancel the merge.' : 'Could not ask for the merge.'));
+  const snapshot = getState().snapshot;
+  if (snapshot) {
+    const at = new Date().toISOString();
+    setState({
+      snapshot: {
+        ...snapshot,
+        stacks: snapshot.stacks.map((s) => {
+          if (s.id !== stack) return s;
+          if (cancel) {
+            const { mergeRequest: _gone, ...rest } = s;
+            return rest;
+          }
+          return { ...s, mergeRequest: { at, method: result.method ?? 'squash' } };
         }),
       },
     });

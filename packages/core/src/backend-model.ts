@@ -38,7 +38,7 @@ export interface EventBatch { events: BackendEvent[]; cursor: string }
 export interface WharfFile { id: string; name: string; size: number }
 /** A review document's PR and round state, kept by the boat that publishes it. */
 export interface WharfReviewMeta {
-  pr: string; round: string; state: string; requestedBy?: string; headSha?: string; stands?: boolean; reason?: string;
+  pr: string; round: string; state: string; requestedBy?: string; headSha?: string; stands?: boolean; muted?: boolean; reason?: string;
   /** The PR in the repo's review tool, where the staged draft is sent. */
   open?: string;
 }
@@ -62,7 +62,7 @@ export interface WharfDocumentSummary {
   ack?: WharfAck;
 }
 /** What a person asks of a review document; the boat that published it carries it out. Sending happens in the review tool. */
-export const WHARF_REVIEW_REQUEST_KINDS = ['review-dismiss'] as const;
+export const WHARF_REVIEW_REQUEST_KINDS = ['review-dismiss', 'review-mute', 'review-unmute'] as const;
 /**
  * Where a person's request for new work came from: their message in their
  * private chat with the wharf's Slack app. The thread it starts continues it.
@@ -108,7 +108,7 @@ export type GlassCardAction =
   | { kind: 'seen' }
   | { kind: 'message-helm' }
   | { kind: 'cancel' }
-  | { kind: 'review-dismiss' };
+  | { kind: 'review-dismiss' | 'review-mute' | 'review-unmute' };
 export interface GlassCardLink { label: string; url: string }
 /** A card that no longer stands: who or what ended it, and how. */
 export interface GlassCardTerminal {
@@ -262,9 +262,9 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
  * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [
-  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'pr-merge', 'attention-ack',
+  'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'pr-ack', 'pr-merge', 'stack-merge', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
-  'review-approve', 'review-comment', 'review-dismiss', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
+  'review-approve', 'review-comment', 'review-dismiss', 'review-mute', 'review-unmute', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
   // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.
   'run-pair-challenge', 'run-pair-register',
   // A Run from the hosted glass: the boat checks a phone's passkey (or that page's window key) and runs only its stored script.

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { BackendError, backendScopes, latestRound, listReviews, loadConfig, prReviewUrl, reviewStands, wharfFor, writeReview, reviewAsker } from '@lobstah/core';
+import { BackendError, backendScopes, latestRound, listReviews, loadConfig, muteReview, unmuteReview, prReviewUrl, reviewStands, wharfFor, writeReview, reviewAsker } from '@lobstah/core';
 import type { BackendScope, ReviewItem, ReviewRound, WharfHumanRequest } from '@lobstah/core';
 import { dismissReviewRound } from './reviews-post.js';
 
@@ -19,6 +19,8 @@ export interface ReviewWharfOptions {
   backend?: (scope: BackendScope) => ReviewWharf;
   /** Dismiss a round (deleting its pending review); pick's dismissReviewRound by default. */
   dismiss?: (key: string) => Promise<string | undefined>;
+  mute?: (key: string) => Promise<string | undefined>;
+  unmute?: (key: string) => Promise<string | undefined>;
   now?: number;
 }
 
@@ -81,6 +83,7 @@ function meta(item: ReviewItem, r: ReviewRound) {
     round: r.id,
     state: r.state,
     stands: reviewStands(r),
+    muted: !!item.mutedAt,
     headSha: r.headSha,
     requestedBy: reviewAsker(item, r).login,
     ...(r.reason ? { reason: r.reason.slice(0, 500) } : {}),
@@ -145,7 +148,10 @@ export async function runReviewRequests(log: (m: string) => void = () => {}, opt
     }
     for (const req of Array.isArray(requests) ? requests : []) {
       const item = listReviews().find((i) => latestRound(i)?.wharf?.doc === req.document && latestRound(i)?.wharf?.mine);
-      const refused = !item ? 'this boat has no such review' : req.kind === 'review-dismiss' ? await dismiss(item.key) : `unknown review request ${req.kind}`;
+      const refused = !item ? 'this boat has no such review' : req.kind === 'review-dismiss' ? await dismiss(item.key)
+        : req.kind === 'review-mute' ? await (opts.mute ? opts.mute(item.key) : Promise.resolve(muteReview(item.key))).then((r) => typeof r === 'string' ? r : undefined)
+        : req.kind === 'review-unmute' ? await (opts.unmute ? opts.unmute(item.key) : Promise.resolve(unmuteReview(item.key))).then((r) => typeof r === 'string' ? r : undefined)
+        : `unknown review request ${req.kind}`;
       try {
         await backend.request(`requests/${req.id}/start`, refused ? { refused: refused.slice(0, 500) } : {}, `${req.id}-${refused ? 'refuse' : 'done'}`);
         log(`${req.document}: ${req.kind} ${refused ? `refused: ${refused}` : 'done'}`);

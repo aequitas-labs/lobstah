@@ -87,6 +87,8 @@
   /* stacking: every modal's layer, the decision modal above it, and the new-decision alert always below both */
   --layer-modal: 10;
   --layer-decision-modal: 15;
+  /* A report's sheet: over the tabs and their modal, under the decision modal and the image overlay. */
+  --layer-sheet: 12;
   --layer-alert: calc(var(--layer-modal) - 1);
   /* the phone's bottom bar: its row's height, above the safe-area inset */
   --bottombar-height: 44px;
@@ -177,7 +179,7 @@ h2 {
   padding: 3px 9px;
 }
 .controls select,
-.newtrap select,
+.newtrap-form select,
 .controls input[type='search'] {
   background: var(--card);
   border: 1px solid var(--line);
@@ -203,8 +205,8 @@ h2 {
   height: 14px;
   accent-color: var(--link);
 }
-/* The tab bar: On deck and Reviews always; the other tabs inline from 900px, where all ten
-   fit on one line (about 840px with two-digit badges), else behind More at the bar's right. */
+/* The tab bar: On deck and Reviews always; the other tabs inline from 1200px, where all twelve
+   with their icons fit on one line (about 1150px), else behind More at the bar's right. */
 .navbar {
   display: flex;
   align-items: stretch;
@@ -245,7 +247,7 @@ h2 {
 .nav-toggle:hover {
   color: var(--fg);
 }
-@media (max-width: 899px) {
+@media (max-width: 1199px) {
   .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='prs']) {
     display: none;
   }
@@ -404,13 +406,7 @@ h2 {
   padding: 0 10px;
 }
 .bbclose {
-  flex: 0 0 44px;
-  background: none;
-  border: 0;
-  color: var(--dim);
-  font: inherit;
-  font-size: 16px;
-  cursor: pointer;
+  flex: 0 0 auto;
 }
 .repochips {
   display: flex;
@@ -465,9 +461,6 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-}
-.pmyou .btn {
-  min-height: 44px;
 }
 @media (max-width: 699px) {
   .phone-helm {
@@ -716,13 +709,6 @@ a.deckline > .dim {
   grid-template-columns: repeat(auto-fill, minmax(min(var(--deck-card-min), 100%), 1fr));
   gap: 10px;
 }
-.deckstack {
-  margin-bottom: 9px;
-}
-.deckstack > .dim {
-  font-size: 11px;
-  margin: 3px 0 5px;
-}
 .stacktitle {
   color: var(--fg);
   font-size: 13px;
@@ -730,28 +716,15 @@ a.deckline > .dim {
   letter-spacing: normal;
   text-transform: none;
 }
-.deckmember {
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .seg {
   display: inline-flex;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
 }
-.seg button {
-  background: var(--card);
+.seg .btn {
   border: none;
-  color: var(--dim);
-  font: inherit;
-  padding: 4px 11px;
-  cursor: pointer;
-}
-.seg button.on {
-  background: var(--seg-on);
-  color: var(--fg);
+  border-radius: 0;
 }
 .wrap {
   overflow-x: auto;
@@ -1170,27 +1143,66 @@ tr.rowhead:hover {
 .catchn {
   white-space: nowrap;
 }
-/* A small themed button, as the copy buttons are. */
+/*
+ * The Button atom (components/button.ts): every button on the glass, local
+ * and hosted. md is 32px tall with 12px words, the default everywhere; lg is
+ * 40px with 14px words, for the decision dock and a run card's row. Variants
+ * change color only; molecules (a split button, an option card, a segmented
+ * control) add layout only. No rule elsewhere sizes a button.
+ */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 0 12px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 5px;
   color: var(--dim);
   font: inherit;
-  font-size: 11px;
-  padding: 1px 8px;
-  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
+}
+/* Pressed: a toggle that is on, a chosen option. */
+.btn.on,
+.btn[aria-pressed='true'] {
+  background: var(--seg-on);
+  border-color: var(--link);
+  color: var(--fg);
+}
+.btn-primary {
+  color: var(--fg);
+  border-color: var(--line-hover);
+}
+.btn-danger,
+.btn-danger:hover {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--bg);
+}
+/* An icon alone: a square, named by its label. */
+.btn-icon {
+  min-width: 32px;
+  padding: 0;
+}
+.btn-lg {
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+.btn-lg.btn-icon {
+  min-width: 40px;
+  padding: 0;
 }
 .btn:hover {
   color: var(--fg);
   border-color: var(--line-hover);
-}
-.btn.danger,
-.btn.danger:hover {
-  background: var(--bad);
-  border-color: var(--bad);
-  color: var(--bg);
 }
 .badge {
   border-radius: var(--badge-radius);
@@ -1350,6 +1362,103 @@ a.lob.extlink::after {
 #overlay.open {
   display: block;
 }
+/* A dialog (components/dialog.ts): a centered modal on a desktop, a sheet from the bottom on a phone. */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--scrim);
+}
+.dialog {
+  width: min(440px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--modal-radius);
+  padding: 12px 18px 16px;
+  outline: none;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.dialog-head h3 {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  font-size: 14px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 16px;
+}
+.newtrap-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.settings-config {
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+.settings-config a {
+  display: inline-flex;
+  align-items: center;
+}
+@media (max-width: 699px) {
+  .dialog-scrim {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .dialog {
+    width: 100%;
+    max-height: 85dvh;
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+}
+/* A menu icon (components/icons.ts) before its words; alone in the gear and the bottom bar. */
+.navicon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+}
+.bbicon .navicon,
+#gearbtn .navicon {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+/* A button already spaces its icon from its words. */
+.btn .navicon {
+  margin-right: 0;
+}
+.pagetitle {
+  display: flex;
+  align-items: center;
+  margin: 4px 0 12px;
+  font-size: 16px;
+}
+.pagetitle .navicon {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+}
 .modal {
   max-width: var(--modal-width);
   margin: 0 auto;
@@ -1363,13 +1472,6 @@ a.lob.extlink::after {
   position: absolute;
   top: 8px;
   right: 12px;
-  cursor: pointer;
-  color: var(--dim);
-  font-size: 18px;
-  line-height: 1;
-}
-.modal .x:hover {
-  color: var(--fg);
 }
 .modal h3 {
   margin: 0 24px 2px 0;
@@ -1444,14 +1546,6 @@ a.lob.extlink::after {
 .route > * {
   min-width: 0;
 }
-/* A finger needs more room than a pointer. */
-@media (pointer: coarse) {
-  .btn.open {
-    display: inline-block;
-    margin-block: 4px;
-    padding: 8px 12px;
-  }
-}
 .loglines {
   color: var(--dim);
   font-size: 12px;
@@ -1483,19 +1577,6 @@ a.lob.extlink::after {
 }
 .cmd code.copied {
   border-color: var(--ok);
-}
-.cmd button {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  color: var(--dim);
-  font: inherit;
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-.cmd button:hover {
-  color: var(--fg);
 }
 .chip.click {
   cursor: pointer;
@@ -1599,21 +1680,8 @@ a.lob {
   }
 }
 #gearbtn {
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--dim);
-  font: inherit;
-  font-size: 13px;
-  padding: 1px 7px;
   margin-left: 8px;
-  cursor: pointer;
   vertical-align: 1px;
-}
-#gearbtn:hover,
-#gearbtn.on {
-  color: var(--fg);
-  border-color: var(--line-hover);
 }
 .settings .row {
   display: flex;
@@ -1695,6 +1763,13 @@ a.lob {
 .drow .dsent {
   flex: 0 0 auto;
 }
+/* A run card's terminal, before its title (components/run-status.ts RunKindIcon). */
+.drow .runkind {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-self: center;
+  color: var(--dim);
+}
 /* A dispatch on the deck's list view: two lines, the same parts as its card. */
 .deckrow {
   display: flex;
@@ -1713,20 +1788,6 @@ a.lob {
 .drow .dlink,
 .dmodal .dlink {
   color: var(--link);
-}
-.dstate {
-  font-size: var(--badge-font);
-  border-radius: var(--badge-radius);
-  padding: var(--badge-pad);
-  border: 1px solid var(--line);
-  color: var(--dim);
-}
-.dstate.unread {
-  border-color: var(--bad);
-  color: var(--bad);
-}
-.dstate.answered {
-  color: var(--ok);
 }
 /* The unread count: on the deck tab and the decisions heading. */
 .dbadge {
@@ -1759,13 +1820,6 @@ a.lob {
 .dmodal:focus {
   outline: none;
 }
-.dmodal .x {
-  background: none;
-  border: none;
-  font: inherit;
-  font-size: 18px;
-  color: var(--dim);
-}
 /* The card's head, body and dock: one box from 700px up (the wrappers add nothing), a page of its own on a phone. */
 .dhead,
 .dbody,
@@ -1797,15 +1851,10 @@ a.lob {
   .dmodal .x {
     top: var(--space-2);
     right: var(--space-2);
-    min-width: 44px;
-    min-height: 44px;
   }
   .dhead .dnav {
     margin: 0;
     justify-content: space-between;
-  }
-  .dhead .dnav .btn {
-    min-height: 44px;
   }
   .dbody {
     display: block;
@@ -1831,13 +1880,7 @@ a.lob {
   }
   .ddock .btn.dopt {
     width: 100%;
-    min-height: 44px;
     align-items: center;
-  }
-  /* A finger's target in the composer's toolbar. */
-  .ddock .btn.dicon {
-    width: 40px;
-    height: 40px;
   }
 }
 .dnav {
@@ -1911,12 +1954,7 @@ a.lob {
   cursor: pointer;
 }
 .dalert .dx {
-  background: none;
-  border: none;
-  color: var(--dim);
-  font: inherit;
-  font-size: 15px;
-  cursor: pointer;
+  flex: 0 0 auto;
 }
 .dcount {
   display: inline-block;
@@ -1989,13 +2027,13 @@ a.lob {
   gap: 6px;
   margin: 8px 0 6px;
 }
-/* A long label wraps inside its button; the key badge stays on the first line. */
+/* An option card: an option's words, wrapping inside the atom; its key badge stays on the first line. */
 .btn.dopt {
-  display: inline-flex;
   align-items: baseline;
+  justify-content: flex-start;
   max-width: 100%;
-  font-size: 12px;
-  padding: 3px 12px;
+  padding-block: 8px;
+  line-height: 1.3;
   color: var(--fg);
   white-space: normal;
   text-align: left;
@@ -2003,11 +2041,6 @@ a.lob {
 .btn.dopt .dtext {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-.btn.dopt.on,
-.btn.dopt.proposal-edit[aria-pressed='true'] {
-  background: var(--seg-on);
-  border-color: var(--link);
 }
 /* What an option covers, as a permission card's "Allow always" says it. */
 .btn.dopt .dnote {
@@ -2120,21 +2153,6 @@ a.lob {
   gap: 4px;
   padding: 0 4px 4px;
 }
-/* Attach and Send: quiet icon buttons, the same square; each named by its aria-label and title. */
-.btn.dicon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 0;
-  background: none;
-}
-.btn.dicon:hover {
-  background: var(--card);
-}
 .dattach {
   position: relative;
 }
@@ -2181,23 +2199,12 @@ a.lob {
   border-radius: var(--badge-radius);
   padding: 0 0 0 6px;
 }
-.dfoot .dx {
-  background: none;
-  border: none;
-  color: var(--dim);
-  cursor: pointer;
-  font: inherit;
-}
 .dfoot .derr {
   font-size: 11px;
 }
-/* Send: the primary color while it can send, muted while it sends. */
+/* Send sits at the toolbar's right. */
 .btn.dsend {
   margin-left: auto;
-  color: var(--link);
-}
-.btn.dsend:disabled {
-  color: var(--dim);
 }
 /* The send shortcut's hint (send-key.ts), quiet beside Send in the subtitle gray. */
 .sendhint {
@@ -2270,12 +2277,6 @@ a.lob {
   position: absolute;
   top: 12px;
   right: 16px;
-  background: none;
-  border: none;
-  color: var(--fg);
-  font-size: 28px;
-  line-height: 1;
-  cursor: pointer;
 }
 .lightbox .lboriginal {
   color: var(--link);
@@ -2350,18 +2351,6 @@ a.lob {
   position: absolute;
   top: 4px;
   right: 4px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--dim);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  line-height: 1;
-  padding: 3px 5px;
-}
-.copybtn:hover {
-  color: var(--fg);
 }
 .copyinline {
   cursor: copy;
@@ -2443,6 +2432,44 @@ a.lob {
  * definite width, so a wide table or code line scrolls in its own box and
  * never widens the page; long tokens (paths, hashes, URLs) wrap.
  */
+/*
+ * A report's sheet over the glass (components/report-view.ts ReportSheet): a
+ * bar with Back and the title, then the report, scrolling on its own so the
+ * tab underneath keeps its place.
+ */
+.rsheet {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-sheet);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.rbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+.rbartitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.rbody {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The report keeps the page's side gutter inside the sheet, at every width. */
+.rbody .reportview {
+  padding: var(--space-3) var(--space-4) 48px;
+}
 .reportview {
   width: 100%;
   max-width: 1100px;
@@ -2892,10 +2919,6 @@ footer .glass-brand {
 .standing-grants {
   margin-bottom: 12px;
 }
-.standing-grant .top > .grant-lead {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
 .grant-patterns {
   margin: 4px 0;
   padding: 0;
@@ -2978,6 +3001,15 @@ footer .glass-brand {
   margin: 4px 0 0;
   padding-left: 18px;
 }
+.usage-limit-banner {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
 .runmeta {
   display: flex;
   flex-wrap: wrap;
@@ -3005,15 +3037,27 @@ footer .glass-brand {
   max-width: 420px;
   box-sizing: border-box;
 }
+/* A run card's actions in the dock: why Run waits, if it does, then one row of large buttons. */
 .runfoot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+.runnote {
+  font-size: 12px;
+}
+.runactions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  align-items: center;
 }
-.runbtn:not([disabled]) {
-  border-color: var(--ok);
-  color: var(--ok);
+.runactions .btn {
+  flex: 1 1 0;
+}
+/* Decline keeps its number key's hint, quietly. */
+.runactions .btn.dopt .dkey {
+  font-size: 11px;
 }
 /* A run's status as an icon (components/run-status.ts), its words in its name and tooltip. */
 .runicon {
@@ -3082,9 +3126,6 @@ footer .glass-brand {
 }
 .runlog .tu {
   text-decoration: underline;
-}
-a.runbtn {
-  text-decoration: none;
 }
 /* An interactive run's console line: it reads as the next line of the terminal above it. */
 .runconsole {
@@ -3217,6 +3258,84 @@ a.runbtn {
 .gactions .gopenbtn {
   margin-left: auto;
 }
+/*
+ * Every button on a card is one size, 32px tall with 12px words, 6px apart,
+ * in a tighter bar. It wins over the finger-sized Open (pointer: coarse),
+ * which the table and the modals keep.
+ */
+.gactions {
+  gap: 6px;
+  padding-top: 6px;
+}
+/* Still the bar's right-hand corner on every card. */
+.gactions .gopenbtn {
+  margin-left: auto;
+}
+/* A trap's Open, at the right of its boat line. */
+.gfoot .gright {
+  margin-left: auto;
+}
+.gfoot {
+  align-items: center;
+}
+.gactions .acticon {
+  flex: 0 0 auto;
+}
+/* The big button joined to its ▾, which opens the other actions upward. */
+.split {
+  display: inline-flex;
+}
+.split > .btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.split .splitcaret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 0;
+  min-width: 28px;
+}
+.cmenu {
+  position: relative;
+  display: inline-flex;
+}
+.cmenulist {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 4px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--line-hover);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.cmenuitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cmenuitem:hover,
+.cmenuitem:focus-visible {
+  background: var(--row-hover);
+}
+.cmenuitem svg {
+  flex: 0 0 auto;
+  color: var(--dim);
+}
 /* A report card's way out: a small arrow at the far right of its top line. */
 .gopen {
   flex: 0 0 auto;
@@ -3228,4 +3347,73 @@ a.runbtn {
 .gopen:hover,
 .gopen:focus-visible {
   color: var(--fg);
+}
+
+.boats-section > h2,
+.boat-settings > h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--fg);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.boats-section > p {
+  margin: 0 0 16px;
+}
+.boats-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+}
+.boat-card .gcontext .gtext {
+  display: block;
+  white-space: normal;
+  overflow: visible;
+}
+.boat-details {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 8px;
+  margin: 4px 0;
+}
+.boat-details dt {
+  color: var(--dim);
+}
+.boat-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.boat-settings {
+  margin-top: 28px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+.boat-settings fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.boat-settings .btn + .btn {
+  margin-left: 8px;
+}
+@media (max-width: 699px) {
+  .boat-settings {
+    padding: 16px;
+  }
+}
+
+.boat-state-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  vertical-align: -3px;
+  margin-right: 5px;
+}
+.boat-state-icon > svg {
+  width: 100%;
+  height: 100%;
+  margin: 0;
 }

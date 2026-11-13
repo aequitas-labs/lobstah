@@ -6,7 +6,7 @@ import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import type { SectionInputs } from '../../src/glass-diff.js';
 import { catchCount } from '../../src/glass-diff.js';
 import { html } from '../html.js';
-import { Card } from './card.js';
+import { Card, OpenIcon } from './card.js';
 import {
   Harness,
   mailCell,
@@ -39,14 +39,16 @@ function row(t: GlassTrap, grants: Grant[]) {
 
 /**
  * A trap as a card, the same on every glass and at every width: its name,
- * harness and state chip; its repo and catches; what it is doing now; the
- * boat it runs on; and a bottom bar with ↗ Open at its right. The session, worktree, heartbeat, mail
+ * harness and state chip; its repo and catches; what it is doing now; and
+ * the boat it runs on, with the Open icon at the right of that line. The session, worktree, heartbeat, mail
  * and grants are in the trap's modal.
  */
 export function trapCard(t: GlassTrap) {
   const status = trapStatus(t);
   const boat = trapBoat(t);
   const scope = trapScope(t) || (t.live ? 'addressed bait only' : '');
+  // Open, as its icon, at the right of the boat's line: the card has no bar of its own.
+  const open = trapOpen(t, OpenIcon);
   return html`<${Card}
     key=${t.trapId}
     title=${trapDisplayName(t)}
@@ -62,9 +64,8 @@ export function trapCard(t: GlassTrap) {
     contextTitle=${scope}
     now=${trapWork(t)}
     nowTitle=${trapWorkText(t)}
-    foot=${boat && { left: ['⛵ ', boat] }}
+    foot=${(boat || open) && { left: boat && ['⛵ ', boat], right: open }}
     extra=${startCommands(t)}
-    actions=${trapOpen(t)}
     quiet=${!t.live && !t.starting}
     onClick=${opener('trap', t.trapId)}
   />`;

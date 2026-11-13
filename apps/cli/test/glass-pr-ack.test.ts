@@ -70,12 +70,8 @@ const click = async (g: GlassDom, stack: string) => {
 const sent = (g: GlassDom, i = -1) => (JSON.parse(g.posts().at(i)!.body).payload.items as Array<{ key: string; stateHash: string }>).map((a) => a.key).sort();
 
 describe('glass PR Ack stack', () => {
-  it.each([
-    ['#prs', 'table'],
-    ['#prs', 'cards'],
-    ['#deck', 'table'],
-    ['#deck', 'cards'],
-  ])('on %s (%s) acks one stack, leaving the other stack and the lone PR, and stands again for a new state', async (hash, view) => {
+  // The PRs table keeps its Ack buttons; a card acks by opening (below). The deck shows no PRs.
+  it.each([['#prs', 'table']])('on %s (%s) acks one stack, leaving the other stack and the lone PR, and stands again for a new state', async (hash, view) => {
     const d = fleet();
     const g = await page(d, { hash, prefs: { view }, post: acking(d) });
     expect(g.$$('button').some((b) => b.textContent === 'Ack all')).toBe(false);
@@ -95,6 +91,18 @@ describe('glass PR Ack stack', () => {
     g.serve(d);
     await g.poll();
     expect(ackFor(g, A)?.textContent).toBe('Ack stack');
+  });
+
+  it('on #prs (cards) has no Ack buttons: opening a stack acks it, leaving the other stack and the lone PR', async () => {
+    const d = fleet();
+    const g = await page(d, { hash: '#prs', prefs: { view: 'cards' }, post: acking(d) });
+    expect(buttons(g)).toHaveLength(0);
+    (g.$$('#prs .stackcard').find((c) => c.getAttribute('data-stack') === A) as HTMLElement).click();
+    await g.settle();
+    expect(g.posts()).toHaveLength(1);
+    expect(g.posts()[0]!.headers['x-lobstah-token']).toBe('page-token');
+    expect(sent(g)).toEqual(stackKeys(d, A));
+    expect(d.attention.filter((a) => a.acked).map((a) => a.key).sort()).toEqual(stackKeys(d, A));
   });
 
   it("a lone PR's Ack acks only that PR", async () => {
@@ -129,15 +137,4 @@ describe('glass PR Ack stack', () => {
     expect(g.posts()).toHaveLength(2);
   });
 
-  it('does not open the PR when the deck line is clicked through its Ack stack', async () => {
-    const d = fleet();
-    const g = await page(d, { hash: '#deck', post: acking(d) });
-    await click(g, B);
-    expect(g.posts()).toHaveLength(1);
-    expect(g.$('#modalbox h3')).toBeNull();
-    // The line itself still opens its PR.
-    (g.$$('.deckline').find((l) => l.textContent?.includes('#70')) as HTMLElement).click();
-    await g.settle();
-    expect(g.$('#modalbox h3')).not.toBeNull();
-  });
 });

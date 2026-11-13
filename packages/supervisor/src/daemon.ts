@@ -430,6 +430,8 @@ export function poolPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => vo
 }
 
 export interface DaemonHooks {
+  /** Detects provider limits before ghost sweeping and delivers due reset wakes without holding the tick. */
+  usageLimits?: (now: number, log: (message: string) => void) => void;
   culler?: DaemonCuller;
   /** Free-space reader; tests inject a fake so they never read the real disk. */
   freeBytes?: FreeBytesReader;
@@ -591,6 +593,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   // Wedge handling waits one wedge threshold after a resume for events to flow again.
   const wedgeGrace = resumed !== undefined && now - resumed <= wedgeMs;
   writeHeartbeat(cfg);
+  try { hooks.usageLimits?.(now, log); }
+  catch (error) { log(`usage limits: ${error instanceof Error ? error.message : String(error)}`); }
   try {
     hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
   } catch (err) {

@@ -81,6 +81,8 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  * (glass-decisions.test.ts covers those).
  */
 function withoutNewTabs(g: GlassDom): void {
+  // Provider-limited workers add a filter state the frozen page did not have.
+  for (const option of g.$$('#f-verb option')) if (option.textContent === 'limited') option.remove();
   for (const el of g.$$('.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar')) el.remove();
   // The phone's header parts are new (glass-phone-nav.test.ts tests them); the filter row now names its tab for them.
   const controls = g.$('.controls');
@@ -129,16 +131,30 @@ function canon(node: Node, skeletonOnly = false): string {
     const el = c as Element;
     if (el.tagName === 'SCRIPT') continue;
     if (el.tagName === 'BUTTON' && el.classList.contains('thumb')) continue;
+    // Menu icons (components/icons.ts) are new beside each view's name; the gear's replaced its ⚙.
+    if (el.tagName.toLowerCase() === 'svg' && el.classList.contains('navicon')) {
+      if (el.parentElement?.id === 'gearbtn') text += '⚙';
+      continue;
+    }
     // Where a link out of the glass opens, and its ↗ mark, are html.ts's rule now; glass-links tests them.
     const external = el.tagName === 'A' && isExternalHref(el.getAttribute('href') ?? '', el.ownerDocument.location.origin);
+    // Every button is the Button atom now (components/button.ts): its variant and size classes and its
+    // type="button" are the atom's own; glass-button.test.ts tests them. The role classes still compare.
+    const atom = el.classList.contains('btn') || (el.tagName === 'BUTTON' && el.getAttribute('type') === 'button');
+    // The modal's close was a span; it is the atom's icon button now, so a keyboard reaches it.
+    const close = el.classList.contains('x');
     const attrs = [...el.attributes]
       .filter((a) => !a.name.startsWith('on') && a.name !== 'selected' && a.name !== 'title')
+      .filter((a) => !(atom && el.tagName === 'BUTTON' && a.name === 'type' && a.value === 'button'))
+      .filter((a) => !(close && a.name === 'aria-label'))
+      // A button's name that only repeats its title: the atom sets both on an icon button, the old page often only one.
+      .filter((a) => !((el.tagName === 'BUTTON' || el.tagName === 'A') && a.name === 'aria-label' && a.value === el.getAttribute('title')))
       .filter((a) => !(external && (a.name === 'target' || a.name === 'rel')))
-      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )(long|extlink)(?= |$)/g, '').trim() : a.value] as const)
+      .map((a) => [a.name, a.name === 'style' ? normStyle(a.value) : a.name === 'class' ? a.value.replace(/(^| )(long|extlink|btn|btn-(?:primary|secondary|danger|icon|lg))(?= |$)/g, '').trim() : a.value] as const)
       .filter(([n, v]) => !((n === 'class' || n === 'style') && v === ''))
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([n, v]) => `${n}=${JSON.stringify(v)}`);
-    out += `<${el.tagName.toLowerCase()}${attrs.length ? ' ' + attrs.join(' ') : ''}>${canon(el, skeletonOnly)}</>`;
+    out += `<${close ? 'close' : el.tagName.toLowerCase()}${attrs.length ? ' ' + attrs.join(' ') : ''}>${canon(el, skeletonOnly)}</>`;
   }
   flush();
   return out;
@@ -246,6 +262,8 @@ function capture(g: GlassDom): Record<string, string> {
   }
   // A closed modal is hidden: the old page left its last markup behind the closed overlay, the new one unmounts it.
   if (g.$('#overlay')!.className !== 'open') out.modalbox = '(closed)';
+  // Settings left the overlay for a dialog (components/dialog.ts); glass-page tests it.
+  if (g.$('.settings-dialog') || (out.modalbox !== '(closed)' && g.$('#modalbox .settings'))) out.modalbox = '(settings in a dialog)';
   const tab = activeTab(g);
   out.tab = tab;
   // The glass intentionally grew a trap-window action in these two views.
@@ -263,6 +281,7 @@ function capture(g: GlassDom): Record<string, string> {
     const el = g.$('#' + id) as HTMLElement | null;
     out[`${id}.display`] = el ? `${el.style.display}|${el.className}` : '<missing>';
   }
+  if (out.modalbox === '(settings in a dialog)') out['overlay.display'] = '(settings in a dialog)';
   for (const id of ['f-lane', 'f-repo', 'f-verb', 'f-kind', 'f-q']) out[`${id}.value`] = (g.$('#' + id) as HTMLInputElement).value;
   out.chain = String((g.$('#f-chain') as HTMLInputElement).checked);
   out.tabs = g.$$('#tabs a, .tabpage').map((a) => `${a.getAttribute('href') ?? a.id}:${a.className}`).join(' ');
@@ -393,8 +412,9 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
+          // Every button is the Button atom (components/button.ts), sized and colored there; glass-button.test.ts tests it.
           // A verb cell is colored as its icon is (components/run-status.ts VERB_TONE); glass-verb-icons.test.ts tests it.
-          .filter((el) => !el.matches('#dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *'))
+          .filter((el) => !el.matches('.btn, .btn *, button, button *, .x, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *'))
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
           .forEach((el, i) => {
             const cs = g.window.getComputedStyle(el as never);

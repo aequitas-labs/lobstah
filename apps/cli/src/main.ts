@@ -242,6 +242,9 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
+import { createUsageLimitWatch } from './usage-limit-watch.js';
+import { swapTrapCatch } from './trap-swap.js';
+import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
 import { createTurnWaits } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
@@ -255,6 +258,7 @@ import { livenessView } from './liveness-view.js';
 import { cliCuller } from './auto-cull.js';
 import { MANUAL } from './manual.js';
 import { decisionEventFields, decisionLine } from './decisions.js';
+import { openCardsAtStop } from './open-cards.js';
 import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
@@ -289,7 +293,7 @@ import {
   runPrCheck,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
-import { mergeRequestedPrs } from './pr-merge.js';
+import { mergeRequestedPrs, mergeRequestedStacks } from './pr-merge.js';
 import { createRunCleanup } from './run-cleanup.js';
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
@@ -916,7 +920,8 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
     const queued = bucket === 'queue';
     const log = readStatusLog(id, lane);
     const claimedAt = bucket === 'active' ? readSessionClaim(id, lane)?.at : undefined;
-    const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
+    const limited = dispatchUsageLimit(id, lane);
+    const state = limited ? 'limited' : displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
     const activity = bucket === 'active' ? activityView(readActivity(id, lane), staleSecs) : undefined;
     const waiting = bucket === 'active' ? waitingView(log.at(-1)) : undefined;
     const updated =
@@ -929,7 +934,7 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
       bucket,
       state,
       updated,
-      waiting: waiting ? waitingText(waiting) : '',
+      waiting: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : waiting ? waitingText(waiting) : '',
       activity: activity ? activityLine(activity) : '',
     };
   });
@@ -1413,7 +1418,8 @@ async function mainCli(): Promise<void> {
       const names = trapNamer();
       const since = queuedAt(id, lane);
       const claimedAt = claim?.at;
-      const state = displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
+      const limited = dispatchUsageLimit(id, lane);
+      const state = limited ? 'limited' : displayState({ log, lastEventAt: lastEventAt(id, lane), queued: since !== undefined, claimedAt });
       // Activity only while the dispatch is live: a finished one did its last thing.
       const live = fs.existsSync(path.join(laneDirs(lane).active, id));
       const activity = live ? activityView(readActivity(id, lane), wedgeSecs()) : undefined;
@@ -1424,6 +1430,7 @@ async function mainCli(): Promise<void> {
           id,
           lane,
           state,
+          ...(limited ? { usageLimit: limited.reason, resetAt: limited.resetAt } : {}),
           ...(progress ? { attention: progress.state, reason: progress.text } : {}),
           ...(descriptor?.systemRepair ? {
             repairPr: descriptor.pr?.url ?? '(unknown)',
@@ -1899,6 +1906,13 @@ async function mainCli(): Promise<void> {
       }
       const lane = findLane(id);
       const activeDir = path.join(laneDirs(lane).active, id);
+      if (readSessionClaim(id, lane)?.by.startsWith('wt:') || queuedDescriptor(id, lane)?.for?.startsWith('wt:')) {
+        const harness = opt('--harness') ?? resolveSessionHarness(id, loadConfig(), lane).harness;
+        if (!harness) throw new Error('name the target harness with --harness claude|codex');
+        const result = await swapTrapCatch(id, lane, { cfg: loadConfig(), harness, model: opt('--model'), effort: opt('--effort'), by: callerSession(opt('--session'))?.id });
+        console.log(toonKV({ id, harness: result.harness, swapped: true, trap: result.trap, session: result.registration.sessionId }));
+        break;
+      }
       if (!fs.existsSync(activeDir)) throw new Error(`${id} is not active — swap only applies to in-flight dispatches`);
 
       const descFile = path.join(activeDir, 'descriptor.json');
@@ -2385,7 +2399,7 @@ async function mainCli(): Promise<void> {
         }
         console.log(`warning: ${BYPASS_WARNING}`);
       }
-      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
+      const base = { cfg: cfgThrow, by: callerThrow?.id, timeoutSecs, reason, harness: opt('--harness'), ...(bypass ? { bypass } : {}), ...(has('--remote-control') ? { remoteControl: true } : {}) };
       const configuredThrowName = pos.length === 1 ? (pos[0]!.startsWith('trap:') ? pos[0]!.slice(5) : rosterByAddress(pos[0]!)?.configured?.profile) : undefined;
       if (configuredThrowName) {
         const name = configuredThrowName, profile = cfgThrow.traps?.[name];
@@ -2468,7 +2482,7 @@ async function mainCli(): Promise<void> {
         const repoSel = opt('--repo');
         if (repoSel !== undefined && !cfgThrow.repos[repoSel]) throw new Error(`no repo "${repoSel}" is configured (configured: ${Object.keys(cfgThrow.repos).join(', ') || 'none'})`);
         gateHelm(callerThrow);
-        const rows = planThrow(cfgThrow, { all: has('--all'), ...(repoSel !== undefined ? { repo: repoSel } : {}) }, { repos: throwGrounds?.repos });
+        const rows = planThrow(cfgThrow, { all: has('--all'), ...(repoSel !== undefined ? { repo: repoSel } : {}) }, { repos: throwGrounds?.repos, harness: opt('--harness') });
         const results = await throwBatch({ ...base, rows });
         console.log(json ? JSON.stringify({ results }, null, 2) : batchText(results));
         if (results.some((r) => r.result === 'failed')) process.exitCode = 1;
@@ -2514,7 +2528,7 @@ async function mainCli(): Promise<void> {
       const caller = callerSession(opt('--session'));
       const groundsName = opt('--grounds') ?? (caller?.id !== undefined ? helmOf(caller.id)?.grounds : undefined);
       const grounds = groundsName !== undefined ? resolveGrounds(cfg, groundsName) : undefined;
-      const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos });
+      const rows = planThrow(cfg, { names: pos, all, repo }, { repos: grounds?.repos, harness: opt('--harness') });
       // Each repo's traps in use against its cap: a resume past the cap waits like a new trap.
       const capacity = repoTrapRows(cfg, [...new Set(rows.flatMap((r) => (r.repo && cfg.repos[r.repo] ? [r.repo] : [])))].sort());
       if (has('--json')) {
@@ -3099,11 +3113,16 @@ async function mainCli(): Promise<void> {
           } else clearParkRenewal(trapReg.trapId);
           break;
         }
+        /** Peek before blocking; record card reminders only when Stop emits them. */
+        const cardsAtStop = (consume: boolean): string => {
+          const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
+          return helmNow ? openCardsAtStop(helmNow, loadConfig(), consume) : '';
+        };
         const emit = (reason: string) => {
           const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
           const rule = helmChatRule(helmNow?.grounds);
           stopBlocked = true;
-          console.log(JSON.stringify({ decision: 'block', reason: [reason, rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
+          console.log(JSON.stringify({ decision: 'block', reason: [reason, cardsAtStop(true), rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
         };
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
@@ -3193,6 +3212,7 @@ async function mainCli(): Promise<void> {
           }
           const d = dueDigest();
           if (d) blockDigest(d);
+          else if (cardsAtStop(false)) emit('');
           break; // otherwise conversational turns end free
         }
         const remindMs = (cfgHaul.remindSecs ?? 900) * 1000;
@@ -3223,7 +3243,7 @@ async function mainCli(): Promise<void> {
           // watcher; with no watcher it rides on the arm block below. Due sent
           // lines are listed with any block, paced like a question.
           const progress = progressLines();
-          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0;
+          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0 || !!cardsAtStop(false);
           const unanswered = blocking ? dueUnanswered(true, remindMs, Date.now(), matchHelm) : [];
           if (blocking) {
             new IdleWait(hook.session_id, cfgHaul.wait).woke(helmWakeKeys({ events: evs, watches: watched, notices, replies }));
@@ -3268,7 +3288,7 @@ async function mainCli(): Promise<void> {
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
         const quiet = () =>
-          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0;
+          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0 && !cardsAtStop(false);
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (!idle.expired()) {
@@ -3982,12 +4002,15 @@ async function mainCli(): Promise<void> {
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
             // "Merge when green" from the glass: merge, repair, or tell the helm it's stuck.
             mergeRequestedPrs(log);
+            // "Merge stack when green": repair, link on GitHub, then one merge for the whole stack.
+            mergeRequestedStacks(log);
             stampRepairerBeat(now);
           },
           todoFiring: createTodoFiring(),
           runCleanup: createRunCleanup(),
           codexServerWatch: createCodexServerWatch(),
           codexClaimWatch: createCodexClaimWatch(),
+          usageLimits: createUsageLimitWatch(),
           turnWaits: createTurnWaits().pass,
           codexHookWatch: createCodexHookWatch(),
         });

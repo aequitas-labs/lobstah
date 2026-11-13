@@ -22,7 +22,7 @@ import { viewerDevice } from '../../../core/src/viewer-device.js';
  */
 export const WHARF_CAPABILITIES: GlassCapabilities = {
   tabs: ['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports'],
-  actions: new Set(['message-helm', 'cancel', 'review-dismiss', 'attention-ack']),
+  actions: new Set(['message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'attention-ack']),
   daemon: false,
 };
 
@@ -195,8 +195,8 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
         return { ok: done.ok, status: done.status, body: (done.ok ? { ok: true, acked } : done.body) as T };
       }
       // The boat that drafted the review dismisses it; the wharf never touches GitHub.
-      if (kind === 'review-dismiss')
-        return (await post('/api/glass/requests', { id: crypto.randomUUID(), kind: 'review-dismiss', document: p.key })) as GlassWrite<T>;
+      if (['review-dismiss', 'review-mute', 'review-unmute'].includes(kind))
+        return (await post('/api/glass/requests', { id: crypto.randomUUID(), kind, document: p.key })) as GlassWrite<T>;
       return refused<T>('This is not available on the wharf.');
     },
     focus: async () => refused('Window focus works only in the local glass.'),

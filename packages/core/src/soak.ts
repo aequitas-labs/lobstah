@@ -33,6 +33,7 @@ import { sessionWorker } from './session-workers.js';
 import { workerLabel, workerMetadata } from './worker-metadata.js';
 import type { WorkerConfig, WorkerMetadata } from './worker-metadata.js';
 import { resumeTrapTurn } from './trap-turn.js';
+import { dispatchUsageLimit, trapUsageLimit } from './usage-limits.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -666,6 +667,7 @@ export function unreportedTrapBait(reg: TrapRegistration): { id: string; lane: L
 /** Surface an unacknowledged claim even when its park keeps heartbeating. */
 export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.claimIdleNoticeSecs * 1000): void {
   for (const reg of listTraps()) {
+    if (trapUsageLimit(reg)) continue; // A known provider hold is not an unread claim.
     const bait = unreportedTrapBait(reg);
     if (!bait || cancelRequested(bait.id, bait.lane)) continue;
     const age = now - Date.parse(bait.claim.at);
@@ -689,7 +691,7 @@ export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.cl
  * only unfinished catches go back to the queue. Used by `stow` and the ghost sweep — the two
  * paths where a claimant stops answering for its claim.
  */
-export function releaseCatch(reg: TrapRegistration): { requeued?: string; finalized?: string } {
+export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued?: string; finalized?: string } {
   const id = reg.claimed;
   if (!id) return {};
   const lane = laneOf(id);
@@ -735,6 +737,8 @@ function configuredTargetMatches(reg: TrapRegistration, descriptor: Descriptor):
 }
 
 function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor } | null {
+  // A provider limit holds addressed work in place and leaves general work for another harness.
+  if (trapUsageLimit(reg)) return null;
   if (hasOpenCatch(reg) || reg.hostedCatch) return null;
   if (!acquireDesktopLease(reg)) return null;
   const mine = `wt:${reg.trapId}`;
@@ -783,7 +787,7 @@ const msOf = (iso: string): number => Date.parse(iso) || 0;
 
 /** Heartbeat fresh enough that the daemon should leave matching bait alone. */
 export function trapReady(reg: TrapRegistration, deferMs: number, now = Date.now()): boolean {
-  return now - msOf(reg.heartbeatAt) <= deferMs && !hasOpenCatch(reg);
+  return !trapUsageLimit(reg) && now - msOf(reg.heartbeatAt) <= deferMs && !hasOpenCatch(reg);
 }
 
 /**
@@ -853,6 +857,8 @@ export function pauseExpiry(entry: StatusEntry, pausedTtlMs: number): number {
 export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 86400_000): GhostSweepAction[] {
   const actions: GhostSweepAction[] = [];
   for (const reg of listTraps()) {
+    // A known provider limit is not a vanished worker; keep its identity until reset or explicit stow.
+    if (trapUsageLimit(reg)) continue;
     // A fresh park heartbeat or a fresh tool beat: the session is alive.
     if (now - trapLastSeen(reg) <= ttlMs) continue;
     // Waiting for a slot or running in one, whatever the pause's expiry says.
@@ -929,6 +935,7 @@ export function noticeOrphanedBait(now = Date.now(), graceMs = 0): void {
   for (const id of pendingIds('work')) {
     const d = queuedDescriptor(id, 'work');
     if (!d?.for) continue;
+    if (dispatchUsageLimit(id, 'work')) continue; // Its provider hold already has one fleet-level notice.
     const to = addressedTrap(d);
     // A reserved trap (starting, or failed to start) still holds its address.
     if (to !== undefined && (traps.has(to) || readReservation(to))) continue;
@@ -951,7 +958,7 @@ export function baitBrief(id: string, d: Descriptor): string {
   return [
     `You are a lobstah worker session and have been assigned dispatch ${id}.`,
     '',
-    d.target ? CONFIGURED_TRAP_INSTRUCTION : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
+    d.target ? CONFIGURED_TRAP_INSTRUCTION : d.handoff ? 'Continue in THIS worktree on its existing task branch; read the handover before changing it.' : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
     `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" ${d.target ? '[--report <file>] [--attach <file>]' : '[--pr <url>]'}\` (or \`failed\`).`,
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     '`working` means you are still executing and will report again. If the next move belongs to a person or to the helm, report `needs-decision` with the question. If you are waiting on an external await, report `paused` and name it. Never end a turn on `working`.',
@@ -965,6 +972,7 @@ export function baitBrief(id: string, d: Descriptor): string {
     'The task:',
     '',
     d.brief,
+    ...(d.handoff ? ['', d.handoff] : []),
     ...(d.attachments?.length ? ['', attachmentBlock(d.attachments)] : []),
   ].join('\n');
 }

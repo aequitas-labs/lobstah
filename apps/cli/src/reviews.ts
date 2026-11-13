@@ -63,7 +63,9 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       prHeadSha: item.pr.headSha,
       ...(r.draftedAt ? { draftedAt: r.draftedAt } : {}),
       ...(r.postedAt ? { postedAt: r.postedAt } : {}),
+      ...(r.postedReviewId ? { postedReviewUrl: `${item.pr.url}#pullrequestreview-${r.postedReviewId}` } : {}),
       ...(r.by ? { by: r.by } : {}),
+      ...(item.mutedAt ? { mutedAt: item.mutedAt } : {}),
       ...(r.staged ? { staged: true } : {}),
       ...(r.dispatch ? { dispatch: r.dispatch } : {}),
     });

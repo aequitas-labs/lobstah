@@ -87,13 +87,20 @@ export function glassOrigin(value: unknown): string | undefined {
 export class WharfBackend implements CoordinationBackend {
   /** Where this wharf's glass is, once a response has named it. */
   glass?: string;
-  constructor(public location: BackendLocation, private token: string,
+  constructor(public location: BackendLocation, private token: string | (() => string),
     private options: { session?: string; worker?: string; fetch?: typeof fetch } = {}) {
-    if (!token) throw new BackendError(401, `set the credential in ${location.tokenEnv}`);
+    // A mirror's provider may be waiting for the person to log in; requests validate it when used.
+    if (typeof token === 'string') this.credential();
+  }
+  /** Long-lived mirror clients read a replacement credential before each request. */
+  private credential(): string {
+    const token = typeof this.token === 'function' ? this.token() : this.token;
+    if (!token) throw new BackendError(401, `set the credential in ${this.location.tokenEnv}`);
+    return token;
   }
   async request(path: string, body?: unknown, key?: string, method?: string): Promise<unknown> {
     const url = `${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`;
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.token}` };
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.credential()}` };
     if (key) headers['Idempotency-Key'] = key;
     if (this.options.session) headers['X-Lobstah-Helm'] = this.options.session;
     let response: Response;
@@ -217,14 +224,14 @@ export class WharfBackend implements CoordinationBackend {
   private async raw(path: string, method: string, body?: Uint8Array, headers: Record<string, string> = {}): Promise<Response> {
     try {
       return await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`, {
-        method, headers: { Authorization: `Bearer ${this.token}`, ...headers },
+        method, headers: { Authorization: `Bearer ${this.credential()}`, ...headers },
         ...(body ? { body: new Uint8Array(body).buffer } : {}), signal: AbortSignal.timeout(30000), redirect: 'manual',
       });
     } catch { throw new BackendError(503, 'backend unavailable; state unknown (no local fallback)'); }
   }
   private async uploadPath(path: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
     const response = await (this.options.fetch ?? fetch)(`${this.location.url}/v1/accounts/${encodeURIComponent(this.location.account)}/${path}`, {
-      method: 'POST', headers: { Authorization: `Bearer ${this.token}`, 'Idempotency-Key': key, 'X-File-Name': name,
+      method: 'POST', headers: { Authorization: `Bearer ${this.credential()}`, 'Idempotency-Key': key, 'X-File-Name': name,
         ...(this.options.session ? { 'X-Lobstah-Helm': this.options.session } : {}) },
       body: new Uint8Array(bytes).buffer, signal: AbortSignal.timeout(30000), redirect: 'manual',
     });

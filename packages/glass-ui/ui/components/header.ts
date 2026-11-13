@@ -6,10 +6,13 @@ import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { GrantChip } from './session-grants.js';
 import { Age, Harness, opener } from './common.js';
+import { LinkedText } from './links.js';
 import { capabilities, visibleTabs } from '../backend.js';
 import { host } from '../host.js';
 import { getState } from '../store.js';
 import { prsNeedingYou } from './prs.js';
+import { Button } from './button.js';
+import { ITEM_ICON, TAB_ICON } from './icons.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -25,9 +28,10 @@ const TAB_LABEL: Record<GlassTab, string> = {
   todos: 'TODOs',
   notices: 'Notices',
   stats: 'Stats',
-  settings: 'Settings',
+  // lobstah's own settings; Settings is the glass's (this device and this view, behind the gear).
+  settings: 'Configuration',
 };
-const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'unknown'];
+const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'limited', 'done', 'failed', 'unknown'];
 
 /** An emoji standing in for a word: screen readers and hover still say the word. */
 const icon = (glyph: string, word: string) => html`<span role="img" aria-label=${word} title=${word}>${glyph}</span>`;
@@ -56,7 +60,7 @@ function chips(d: GlassSnapshot, inp: SectionInputs['chips']) {
       html`<span class="chip" title="The machine's line for heavy commands">⛰️ ${d.heavy.running}/${d.heavy.slots}${d.heavy.waiting ? ` · ${d.heavy.waiting} waiting` : ''}</span>`,
     inp.helms.map(
       ({ x: h, stale }) =>
-        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds} · chat ${h.chat ?? 'full'}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span><${GrantChip} session=${h.sessionId} grants=${d.sessionGrants} /></span>`,
+        html`<span key=${h.grounds} class="chip click" onClick=${opener('helm', h.grounds)}>⛵ <${Harness} worker=${h} label=${html`<b>${h.man}</b>`} cls="" /> <span class="dim">helm ${h.grounds}</span> <span class=${stale ? 'warn' : 'ok'}>${stale && 'stale '}${Age(h.heartbeatAt)} ago</span><${GrantChip} session=${h.sessionId} grants=${d.sessionGrants} /></span>`,
     ),
     host().chips?.(),
   ];
@@ -127,7 +131,7 @@ function badgeLabel(t: GlassTab, n: number): string {
  */
 const PINNED: readonly GlassTab[] = ['deck', 'reviews', 'prs'];
 /** glass.css's breakpoint: from this width every tab is inline and More is hidden. */
-const ALL_TABS_FIT = '(min-width: 900px)';
+const ALL_TABS_FIT = '(min-width: 1200px)';
 
 /**
  * Whether every tab fits on one line. Below that width (a narrow desktop
@@ -204,7 +208,7 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
     return count > 0 && html`<span class="dbadge" aria-label=${badgeLabel(t, count)}>${count}</span>`;
   };
   const link = (t: GlassTab, inMenu = false) =>
-    html`<a key=${t} href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${inMenu ? close : undefined}>${TAB_LABEL[t]}${badge(t)}</a>`;
+    html`<a key=${t} href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${inMenu ? close : undefined}>${TAB_ICON[t]}${TAB_LABEL[t]}${badge(t)}</a>`;
   // With the active tab behind More, More carries the active tab's underline.
   const here = moreTabs.includes(tab);
   return html`<div class="navbar" ref=${root}>
@@ -244,19 +248,6 @@ function Strip({ d, inp }: { d: GlassSnapshot; inp: SectionInputs['chips'] }) {
   return html`<div class="phone-strip">${parts.flatMap((p, i) => (i ? [html`<span class="dim" aria-hidden="true"> · </span>`, p] : [p]))}</div>`;
 }
 
-const svg = (body: string) =>
-  html`<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: body }}></svg>`;
-const DECK_ICON = svg(
-  '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
-);
-const SEARCH_ICON = svg('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
-const MENU_ICON = svg('<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>');
-/** Reviews: a speech bubble. PRs: a pull request. Both from the same Feather set as the bar's other icons. */
-const REVIEWS_ICON = svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>');
-const PRS_ICON = svg(
-  '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/>',
-);
-
 /** The bar at the bottom of a phone: On deck, Reviews and PRs with labels, then Search and Menu as icons. */
 function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: SectionInputs; tab: GlassTab; st: GlassPrefs; unread: number }) {
   const [mode, setMode] = useState<'bar' | 'search' | 'menu'>('bar');
@@ -295,7 +286,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
       html`<button key=${repo || '*'} type="button" class=${'repochip' + (st.repo === repo ? ' on' : '')} aria-pressed=${st.repo === repo} onClick=${() => setPrefs({ repo })}>${label}</button>`;
     return html`<div class="bottombar searching" ref=${root}>
       <div class="repochips" aria-label="repos">${chip('', 'all repos')}${repos.map((r) => chip(r, r))}</div>
-      <div class="bbrow"><input ref=${search} type="search" aria-label="search" placeholder="search id · note · brief" value=${st.q} onInput=${(e: Event) => setPrefs({ q: value(e) })} /><button type="button" class="bbclose" aria-label="close search" onClick=${() => setMode('bar')}>✕</button></div>
+      <div class="bbrow"><input ref=${search} type="search" aria-label="search" placeholder="search id · note · brief" value=${st.q} onInput=${(e: Event) => setPrefs({ q: value(e) })} /><${Button} variant="icon" class="bbclose" label="close search" onClick=${() => setMode('bar')}>✕<//></div>
     </div>`;
   }
   const tabs = visibleTabs();
@@ -308,21 +299,21 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
       mode === 'menu' &&
       html`<div class="phonemenu" id="phone-menu" role="menu" aria-label="Spyglass menu">
         <div class="pmsec">views</div>
-        <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${() => setMode('bar')}>${TAB_LABEL[t]}</a>`)}</nav>
+        <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${() => setMode('bar')}>${TAB_ICON[t]}${TAB_LABEL[t]}</a>`)}</nav>
         ${fleet && html`<div class="pmsec">fleet</div><div class="pmchips">${fleet}</div>`}
         <div class="pmsec">you</div>
-        <div class="pmyou"><button type="button" class="btn" role="menuitem" onClick=${() => {
+        <div class="pmyou"><${Button} role="menuitem" onClick=${() => {
           setMode('bar');
           showModal('settings', 'browser');
-        }}>⚙ settings</button>${host().signOut && html`<button type="button" class="btn" role="menuitem" onClick=${() => host().signOut!()}>Sign out</button>`}</div>
+        }}>${ITEM_ICON.settings}Settings<//>${host().signOut && html`<${Button} role="menuitem" onClick=${() => host().signOut!()}>${ITEM_ICON.signOut}Sign out<//>`}</div>
       </div>`
     }
     <nav class="bbrow" aria-label="Spyglass">
-      ${link('deck', DECK_ICON, count(unread, badgeLabel('deck', unread)))}
-      ${link('reviews', REVIEWS_ICON, count(reviews, badgeLabel('reviews', reviews)))}
-      ${link('prs', PRS_ICON, count(prsWaiting, badgeLabel('prs', prsWaiting)))}
-      <button type="button" class=${'bbitem bbiconly' + (st.q || st.repo ? ' on' : '')} aria-label="Search" onClick=${() => setMode('search')}><span class="bbicon">${SEARCH_ICON}</span></button>
-      <button type="button" class=${'bbitem bbiconly' + (mode === 'menu' ? ' on' : '')} aria-label="Menu" aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${MENU_ICON}</span></button>
+      ${link('deck', TAB_ICON.deck, count(unread, badgeLabel('deck', unread)))}
+      ${link('reviews', TAB_ICON.reviews, count(reviews, badgeLabel('reviews', reviews)))}
+      ${link('prs', TAB_ICON.prs, count(prsWaiting, badgeLabel('prs', prsWaiting)))}
+      <button type="button" class=${'bbitem bbiconly' + (st.q || st.repo ? ' on' : '')} aria-label="Search" onClick=${() => setMode('search')}><span class="bbicon">${ITEM_ICON.search}</span></button>
+      <button type="button" class=${'bbitem bbiconly' + (mode === 'menu' ? ' on' : '')} aria-label="Menu" aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${ITEM_ICON.menu}</span></button>
     </nav>
   </div>`;
 }
@@ -344,7 +335,11 @@ export function Header({
   unread?: number;
 }) {
   return [
-    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1>${d && inp && html`<span class="phone-helm"><${HelmPill} inp=${inp.chips} /></span>`}<span id="settings-slot"><button id="gearbtn" title="settings" aria-label="settings" onClick=${() => showModal('settings', 'browser')}>⚙</button></span></div>`,
+    html`<div class="headerline"><h1><img class="glass-brand" src=${logo} alt="lobstah" /> spyglass<span id="stale" style=${d || stale ? (stale ? 'display:inline' : 'display:none') : undefined}> · STALE FEED</span></h1>${d && inp && html`<span class="phone-helm"><${HelmPill} inp=${inp.chips} /></span>`}<span id="settings-slot"><${Button} variant="icon" id="gearbtn" label="Settings" onClick=${() => showModal('settings', 'browser')}>${ITEM_ICON.settings}<//></span></div>`,
+    d?.usageLimits?.map(
+      (limit) =>
+        html`<div class="usage-limit-banner" role="status"><b>${limit.account} limited</b> · ${limit.traps.length} traps · ${limit.resetAt ? `resets ${new Date(limit.resetAt).toLocaleString()}` : 'reset time unknown'}${limit.waiting.length ? ` · ${limit.waiting.length} catches waiting` : ' · pickup waits'}<details><summary>Limit details</summary>${LinkedText(limit.reason)}${limit.waiting.length > 0 && html`<ul>${limit.waiting.map((id) => html`<li>${d.dispatches.find((dispatch) => dispatch.id === id)?.title || id}</li>`)}</ul>`}</details></div>`,
+    ),
     d && inp && html`<${Strip} d=${d} inp=${inp.chips} />`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
     html`<${Navigation} d=${d} tab=${tab} unread=${unread} />`,

@@ -1,15 +1,6 @@
-import type { GlassPr, GlassSnapshot, GlassStack, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
-import {
-  DECK_TRAPS_MAX,
-  INFLIGHT_MAX,
-  LANDED_MAX,
-  REPORTS_MAX,
-  catchCount,
-  goalLine,
-  prBadgeClass,
-  reportPageUrl,
-} from '../../src/glass-diff.js';
-import type { DeckAttention, DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
+import type { GlassSnapshot, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
+import { DECK_TRAPS_MAX, INFLIGHT_MAX, LANDED_MAX, REPORTS_MAX, catchCount, goalLine, reportPageUrl } from '../../src/glass-diff.js';
+import type { DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
 import {
@@ -19,15 +10,11 @@ import {
   NamedText,
   WorkerAddress,
   namedText,
-  KIND_TONE,
   ageText,
   badgeLong,
   badgeTitle,
   NewTrap,
   opener,
-  prName,
-  stackNumbers,
-  stackTitle,
   startCommands,
   trapNow,
   trapNowText,
@@ -44,8 +31,7 @@ import { trapCard } from './traps.js';
 import { dispatchCard } from './dispatches.js';
 import { Card } from './card.js';
 import { getState } from '../store.js';
-import { reportCard, reportMeta } from './reports.js';
-import { PrAck, prCard } from './prs.js';
+import { openReport, reportCard, reportMeta } from './reports.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
 import { Todos } from './todos.js';
@@ -54,9 +40,9 @@ import { visibleTabs } from '../backend.js';
 import type { GlassTab } from '../../src/glass-diff.js';
 
 /**
- * On deck: decisions (full-row cards), in flight, landed in the last 24h, reviews waiting on you (only when some are), reports, traps,
- * and open PR stacks. The dispatch, trap, and landed items follow the site-wide view;
- * decisions are always full-row cards; PRs have their own stack presentation.
+ * On deck: decisions (full-row cards), in flight, landed in the last 24h, reviews waiting on you (only when some are), reports
+ * and traps. The dispatch, trap, and landed items follow the site-wide view; decisions are always full-row cards. PRs live on
+ * the PRs tab, as stack cards.
  */
 
 interface DeckItem {
@@ -71,8 +57,10 @@ interface DeckItem {
   metaText?: string;
   /** A control at the right end of the card's foot line, or the row's end. */
   action?: Children;
-  /** A page this item opens in a new tab, instead of `open`. */
+  /** A page this item links to, for a new tab, instead of `open`. */
   href?: string;
+  /** What a plain click on that link does in the glass instead (a report's sheet). */
+  here?: (e: Event) => void;
   /** A block under the card or line: a starting trap's start commands. */
   extra?: Children;
   /** The item's own card, used as is in the cards view: a trap's, a dispatch's. */
@@ -121,11 +109,11 @@ function deckItem(it: DeckItem, view: View) {
   const worker = it.worker && html`<${Harness} worker=${it.worker} />`;
   if (view === 'cards' && it.card) return it.card;
   if (it.href) {
-    // A page of its own, in a new tab (a report).
+    // A page of its own (a report): a plain click opens its sheet, a ⌘-click a new tab.
     const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
     return view === 'cards'
-      ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener"><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
-      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener">${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
+      ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
+      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
   }
   if (view !== 'cards' && it.row) return it.row;
   if (view === 'cards')
@@ -151,60 +139,6 @@ function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number,
       : lines
     : html`<div class="empty">${EMPTY[title] ?? 'none'}</div>`;
   return html`<section><h2><a href=${'#' + tab}>${title} →</a></h2>${headAction && html`<div class="tabhead">${headAction}</div>`}${body}${more(items.length - shown.length, tab)}</section>`;
-}
-
-function deckStack(
-  s: GlassStack,
-  members: GlassPr[],
-  standing: Map<string, DeckAttention[]>,
-  view: View,
-  attention: readonly DeckAttention[],
-) {
-  const ack = html`<${PrAck} stack=${s} prs=${members} attention=${attention} />`;
-  const next = members.find((p) => p.number === s.nextNumber) || members[0];
-  const chain = stackNumbers(s.numbers, new Map(members.map((p) => [p.number, p.title])));
-  const nextText = next ? 'next #' + next.number : 'nothing mergeable';
-  if (view === 'cards') {
-    // An acked PR is greyed, as an acked report is.
-    const card = (p: GlassPr) => {
-      const kinds = standing.get(p.key) || [];
-      return prCard(p, { quiet: kinds.length > 0 && kinds.every((a) => a.acked), attention, stack: members.length === 1 ? s : undefined });
-    };
-    // A lone PR's card has its own Ack; a stack of several keeps Ack stack on its line.
-    return html`<div key=${s.id} class="deckstack"><div class="dim">${stackTitle(s)}${chain} · ${nextText}${members.length > 1 && ack}</div>${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}<div class="cards">${members.map(card)}</div></div>`;
-  }
-  const badges = members.flatMap((p) =>
-    (standing.get(p.key) || []).map(
-      (a) =>
-        html`<span class=${'badge ' + (KIND_TONE[a.kind] || prBadgeClass(p.badge)) + (a.acked ? ' acked' : '')}>#${p.number} ${p.badge.text}</span>`,
-    ),
-  );
-  const spaced = badges.flatMap((b, i) => (i ? [' ', b] : [b]));
-  const lone = members.length === 1 ? members[0] : undefined;
-  return html`<div key=${s.id} class=${'deckline' + (next ? ' click' : '')} onClick=${next && opener('pr', next.key)}>${stackTitle(s)}${lone ? prName(lone) : html`<b>${chain}</b>`} <span class="dim">· ${nextText}</span>${badges.length > 0 && [' · ', spaced]}${ack}${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}${!lone && members.map((p) => html`<div key=${p.key} class="deckmember dim">${prName(p)}</div>`)}</div>`;
-}
-
-function deckPrs(inp: DeckInputs, view: View) {
-  if (!visibleTabs().includes('prs')) return null;
-  const shown = inp.stacks.slice(0, 3);
-  const standing = new Map<string, DeckAttention[]>();
-  for (const a of inp.prAttention) {
-    const kinds = standing.get(a.key) || [];
-    kinds.push(a);
-    standing.set(a.key, kinds);
-  }
-  const body = shown.length
-    ? shown.map((s) =>
-        deckStack(
-          s,
-          inp.prs.filter((p) => p.stackId === s.id).sort((a, b) => a.position - b.position),
-          standing,
-          view,
-          inp.prAttention,
-        ),
-      )
-    : html`<div class="empty">none</div>`;
-  return html`<section><h2><a href="#prs">PRs →</a></h2>${body}${more(inp.stacks.length - shown.length, 'prs')}</section>`;
 }
 
 export function Deck({
@@ -290,6 +224,7 @@ export function Deck({
       meta: meta.nodes,
       metaText: meta.text,
       href: reportPageUrl(r.key),
+      here: openReport(r),
       acked: !!r.acked,
     };
   });
@@ -325,6 +260,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}${deckPrs(inp, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('in flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${deckBlock('traps', traps, 'traps', DECK_TRAPS_MAX, view, html`<${NewTrap} />`)}</div>`,
   ];
 }

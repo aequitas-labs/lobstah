@@ -115,6 +115,28 @@ describe("a Codex trap's project hooks", () => {
     });
   });
 
+  it("names another plugin's untrusted hooks, once for every repo; a trusted, disabled or lobstah hook is not one", () => {
+    const hook = (key: string, trustStatus: string, command = 'ume hook stop') => [key, { key, command, currentHash: 'sha256:x/sha256:y', trustStatus }] as const;
+    const listed = new Map([
+      hook('ume@ume:hooks/hooks.json:stop:0:0', 'untrusted'),
+      hook('ume@ume:hooks/hooks.json:session_start:0:0', 'modified', 'ume hook session-start'),
+      hook('ume@ume:hooks/hooks.json:session_end:0:0', 'untrusted', 'ume hook session-end'),
+      hook('notes@acme:hooks/hooks.json:stop:0:0', 'trusted', 'notes stop'),
+      hook('lobstah@lobstah:hooks/hooks.json:stop:0:0', 'untrusted', 'lobstah hook stop'),
+    ]);
+    fs.appendFileSync(config, '[hooks.state."ume@ume:hooks/hooks.json:session_end:0:0"]\nenabled=false\n');
+    const blockers = codexTrapHookBlockers(worktree, { env: { CODEX_HOME: home }, listed });
+    expect(blockers.map((b) => [b.key, b.reason])).toEqual([
+      ['ume@ume:hooks/hooks.json:stop:0:0', 'ume@ume never trusted'],
+      ['ume@ume:hooks/hooks.json:session_start:0:0', 'ume@ume changed since it was trusted'],
+    ]);
+    expect(codexStallReason(worktree, { env: { CODEX_HOME: home }, listed })).toContain('ume@ume:hooks/hooks.json:stop:0:0 (`ume hook stop`, ume@ume never trusted)');
+    const row = codexTrapHooksRow({ web: { path: main }, api: { path: main } }, { env: { CODEX_HOME: home }, listed });
+    expect(row.status).toBe('fail');
+    expect(row.detail.match(/ume@ume:hooks\/hooks\.json:stop:0:0/g)).toHaveLength(1);
+    expect(row.detail).toContain('every repo: ume@ume:hooks/hooks.json:stop:0:0');
+  });
+
   describe('launch-only folder trust', () => {
     const trapId = 'aabbccdd';
     const folderTrust = () => codexTrapFolderTrust(worktree, trapId, { env: { CODEX_HOME: home } });

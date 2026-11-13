@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from 'preact/hooks';
 import { TerminalOutput } from './terminal.js';
 import { RunStatusIcon, runStatus } from './run-status.js';
+import { Button } from './button.js';
 
 /**
  * A run card's body in the decision modal: the script in full, with every
@@ -85,7 +86,7 @@ export function runBlocked(run: GlassRunCard, passkeys?: number): string | undef
   if (!count)
     return hosted
       ? 'Pair this phone first: run lobstah run passkey add --hosted on the Mac.'
-      : 'Set up a passkey in Settings to run cards.';
+      : 'Set up a passkey in Configuration to run cards.';
   return undefined;
 }
 
@@ -153,10 +154,10 @@ function ConsoleLine({ cardKey, onSent }: { cardKey: string; onSent: (secret: st
         void send();
       }}
     />${secret && html`<${Eye} shown=${shown} onToggle=${() => setShown(!shown)} />`}</div>
-    <button type="button" class=${'btn runsecret' + (secret ? ' on' : '')} aria-pressed=${secret ? 'true' : 'false'} title="Mask this line and scrub its value from the output" onClick=${() => {
+    <${Button} class="runsecret" pressed=${secret} title="Mask this line and scrub its value from the output" onClick=${() => {
       setSecret(!secret);
       setShown(false);
-    }}>secret</button>
+    }}>secret<//>
     <span class="dim">Enter sends the line</span>
     ${error && html`<span class="bad">${error}</span>`}
   </div>`;
@@ -184,10 +185,35 @@ function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; 
   </div>`;
 }
 
-export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: string; run: GlassRunCard; readOnly?: boolean }) {
-  const blocked = runBlocked(run);
-  // Typed values live only in this component until Run sends them, then they are cleared.
-  const [values, setValues] = useState<Record<string, string>>({});
+/**
+ * What has been typed into a run card's inputs, by card key, until Run sends
+ * it or the card leaves the modal. Only this module's memory holds it, as the
+ * card's own state once did: the card body shows the fields, and the dock's
+ * Run button needs to know what is missing.
+ */
+const typed = new Map<string, Record<string, string>>();
+const typedListeners = new Set<() => void>();
+
+/** A card's typed inputs and the setter both the body and the dock share; either re-renders on a change. */
+function useTyped(cardKey: string): [Record<string, string>, (values: Record<string, string>) => void] {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const listener = () => bump((n) => n + 1);
+    typedListeners.add(listener);
+    return () => {
+      typedListeners.delete(listener);
+    };
+  }, []);
+  const set = (values: Record<string, string>) => {
+    if (Object.keys(values).length) typed.set(cardKey, values);
+    else typed.delete(cardKey);
+    for (const listener of typedListeners) listener();
+  };
+  return [typed.get(cardKey) ?? {}, set];
+}
+
+/** A run card's live state: this tab's run, else the attempt its record saved. */
+function runViewOf(cardKey: string, run: GlassRunCard): RunView | undefined {
   const saved = run.latest;
   const local = getState().runs?.[cardKey];
   const restored = saved
@@ -201,22 +227,28 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
       }
     : undefined;
   // A failed output poll must still offer Stop while the saved attempt is running.
-  const view =
-    local?.error && !local.result && restored ? { ...local, ...restored, output: local.output, error: local.error } : (local ?? restored);
+  return local?.error && !local.result && restored
+    ? { ...local, ...restored, output: local.output, error: local.error }
+    : (local ?? restored);
+}
+
+export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: string; run: GlassRunCard; readOnly?: boolean }) {
+  const blocked = runBlocked(run);
+  const [values, setValues] = useTyped(cardKey);
+  const saved = run.latest;
+  const view = runViewOf(cardKey, run);
   useEffect(() => {
     if (saved && can('run')) void followRunCard(cardKey);
   }, [cardKey, saved?.id, saved?.state]);
-  const hosted = run.boat !== undefined;
-  const here = passkeysWorkHere(hosted);
-  const confirmed = runWindowMinutes(run.boat ?? '');
-  const missing = run.inputs.filter((i) => !values[i.name]).map((i) => i.name);
+  // Typed values never outlive the card on screen.
+  useEffect(
+    () => () => {
+      typed.delete(cardKey);
+    },
+    [cardKey],
+  );
+  const here = passkeysWorkHere(run.boat !== undefined);
   const locked = readOnly || !!blocked || !!view?.busy;
-  const start = () => {
-    const inputs = values;
-    setValues({});
-    sentSecrets.delete(cardKey);
-    void runRunCard(cardKey, run.scriptSha256, inputs);
-  };
   return html`<div class="runcard" data-run=${cardKey}>
     <div class="runhead"><span class="badge warn">runs on ${run.boat ?? (getState().snapshot?.viewer?.machine || 'this machine')}</span>${run.proposedBy && html`<span class="dim"> proposed by ${run.proposedBy}</span>`}</div>
     <${Script} run=${run} />
@@ -245,35 +277,69 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
         /></label>`,
       )}</div>`
     }
-    ${
-      can('run') &&
-      (!readOnly || view?.busy) &&
-      html`<div class="runfoot">
-        ${
-          view?.busy
-            ? html`<button type="button" class="btn danger" onClick=${() => void stopRunCard(cardKey)}>Stop</button>`
-            : here || blocked || hosted
-              ? html`<button type="button" class="btn runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}</button>`
-              : html`<a class="btn runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}</a>`
-        }
-        ${view?.result && html`<button type="button" class="btn" onClick=${() => void dismissRunCard(cardKey)}>Dismiss</button>`}
-        ${
-          !view?.busy &&
-          html`<span class="dim">${
-            blocked
-              ? !run.altered && blocked
-              : confirmed
-                ? `Confirmed for ${confirmed} more ${confirmed === 1 ? 'minute' : 'minutes'}.`
-                : here
-                  ? 'Confirm with your passkey to run.'
-                  : hosted
-                    ? "This browser can't use passkeys."
-                    : 'Passkeys work from the glass at localhost.'
-          }</span>`
-        }
-      </div>`
-    }
     ${!view && html`<div class="runstate dim">Ready</div>`}
     <${RunOutput} view=${view} cardKey=${cardKey} interactive=${!!run.interactive} />
+  </div>`;
+}
+
+/**
+ * A run card's actions, one row of large buttons in the decision's dock:
+ * Run (Run again once it ran), Stop while it runs, and beside it Decline
+ * before a run or Dismiss after one. Why Run can't be pressed yet, or how
+ * long a passkey confirmation lasts, sits on the line above. Run renders
+ * only where the source runs things; elsewhere the row holds Decline alone.
+ */
+export function RunActions({
+  cardKey,
+  run,
+  readOnly = false,
+  decline,
+}: {
+  cardKey: string;
+  run: GlassRunCard;
+  readOnly?: boolean;
+  /** The decision's Decline button, while the card can still be declined. */
+  decline?: unknown;
+}) {
+  const [values, setValues] = useTyped(cardKey);
+  const blocked = runBlocked(run);
+  const view = runViewOf(cardKey, run);
+  const hosted = run.boat !== undefined;
+  const here = passkeysWorkHere(hosted);
+  const confirmed = runWindowMinutes(run.boat ?? '');
+  const missing = run.inputs.filter((i) => !values[i.name]).map((i) => i.name);
+  const locked = readOnly || !!blocked || !!view?.busy;
+  const start = () => {
+    const inputs = values;
+    setValues({});
+    sentSecrets.delete(cardKey);
+    void runRunCard(cardKey, run.scriptSha256, inputs);
+  };
+  const runs = can('run') && (!readOnly || !!view?.busy);
+  const primary =
+    runs &&
+    (view?.busy
+      ? html`<${Button} variant="danger" size="lg" onClick=${() => void stopRunCard(cardKey)}>Stop<//>`
+      : here || blocked || hosted
+        ? html`<${Button} variant="primary" size="lg" class="runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} onClick=${start}>${view?.result ? 'Run again' : 'Run'}<//>`
+        : html`<${Button} variant="primary" size="lg" class="runbtn" href=${runPasskeyUrl(`#decision/${encodeURIComponent(cardKey)}`)}>${view?.result ? 'Run again from localhost' : 'Run from localhost'}<//>`);
+  const second =
+    view?.result && runs ? html`<${Button} size="lg" onClick=${() => void dismissRunCard(cardKey)}>Dismiss<//>` : !view?.busy && decline;
+  const note =
+    runs &&
+    !view?.busy &&
+    (blocked
+      ? !run.altered && blocked
+      : confirmed
+        ? `Confirmed for ${confirmed} more ${confirmed === 1 ? 'minute' : 'minutes'}.`
+        : here
+          ? 'Confirm with your passkey to run.'
+          : hosted
+            ? "This browser can't use passkeys."
+            : 'Passkeys work from the glass at localhost.');
+  if (!primary && !second) return null;
+  return html`<div class="runfoot">
+    ${note && html`<div class="runnote dim">${note}</div>`}
+    <div class="runactions">${primary}${second}</div>
   </div>`;
 }

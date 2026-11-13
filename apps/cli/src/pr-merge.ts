@@ -12,9 +12,11 @@ import {
   withPrLock,
   writePr,
   type Config,
+  stackMergeStep,
   type PrMergeMethod,
   type PrMergeRequest,
   type PrRecord,
+  type StackMergeRequest,
 } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
@@ -40,7 +42,11 @@ export function repoKeyForForge(cfg: Pick<Config, 'repos'>, forgeRepo: string): 
  * How a PR in this forge repo merges: its repo's `[repos.<key>].mergeMethod`,
  * else the `[pickup.github]` merge method, else squash.
  */
-export function prMergeMethod(cfg: Pick<Config, 'repos'>, forgeRepo: string, pickup: () => PrMergeMethod | undefined = pickupMergeMethod): PrMergeMethod {
+export function prMergeMethod(
+  cfg: Pick<Config, 'repos'>,
+  forgeRepo: string,
+  pickup: () => PrMergeMethod | undefined = pickupMergeMethod,
+): PrMergeMethod {
   const key = repoKeyForForge(cfg, forgeRepo);
   return (key && cfg.repos[key]?.mergeMethod) || pickup() || 'squash';
 }
@@ -66,7 +72,11 @@ function pickupMergeMethod(now = Date.now()): PrMergeMethod | undefined {
  * not known to be someone else's. The request stands until the PR merges,
  * closes, or `cancelPrMerge`.
  */
-export function requestPrMerge(key: string, by: string, opts: { viewer?: () => string | undefined; now?: number; cfg?: Config } = {}): PrMergeRequest {
+export function requestPrMerge(
+  key: string,
+  by: string,
+  opts: { viewer?: () => string | undefined; now?: number; cfg?: Config } = {},
+): PrMergeRequest {
   const cfg = opts.cfg ?? loadConfig();
   return withPrLock(key, () => {
     const pr = readPr(key);
@@ -117,7 +127,9 @@ function ghMerge(pr: PrRecord, method: PrMergeMethod): { ok: true } | { ok: fals
     timeout: 60_000,
     windowsHide: true,
   });
-  return res.status === 0 ? { ok: true } : { ok: false, why: (res.stderr || res.stdout || `gh exited ${res.status}`).trim().split('\n')[0]! };
+  return res.status === 0
+    ? { ok: true }
+    : { ok: false, why: (res.stderr || res.stdout || `gh exited ${res.status}`).trim().split('\n')[0]! };
 }
 
 /**
@@ -160,7 +172,10 @@ export function mergeRequestedPrs(log: (message: string) => void, deps: PrMergeD
         writePr({ ...pr, mergeRequest: { ...request, stuckHeadSha: pr.headSha } });
         postNotice({
           kind: 'repair-stopped',
-          text: `#${pr.number} ${pr.title ?? ''}: asked to merge when green, but its repair stopped (${step.why}). It needs you. (${pr.url})`.replace(/ +/g, ' '),
+          text: `#${pr.number} ${pr.title ?? ''}: asked to merge when green, but its repair stopped (${step.why}). It needs you. (${pr.url})`.replace(
+            / +/g,
+            ' ',
+          ),
           refId: pr.key,
           dedupeKey: `merge-stuck-${pr.key}-${pr.headSha}`,
         });
@@ -200,4 +215,232 @@ export function repairBrief(pr: PrRecord, why: 'checks' | 'conflict'): string {
     `- Keep the change to what makes it green.`,
     `- Report \`done --pr ${pr.url}\` once it's pushed. lobstah merges it when its checks pass.`,
   ].join('\n');
+}
+
+/**
+ * A stack's PRs bottom first, from its bottom PR: each next one is the PR in
+ * the same repo whose base is the branch of the one below. A fork in the
+ * chain (two PRs on one branch) ends it there.
+ */
+export function stackChain(root: PrRecord, records: readonly PrRecord[]): PrRecord[] {
+  const chain = [root];
+  for (;;) {
+    const top = chain.at(-1)!;
+    const next = records.filter((r) => r.repo === top.repo && !!top.headRefName && r.baseRefName === top.headRefName && !chain.includes(r));
+    if (next.length !== 1) return chain;
+    chain.push(next[0]!);
+  }
+}
+
+/**
+ * Ask the boat to merge a whole stack once every PR in it is green
+ * (`stack-merge`). The stack is named by its bottom PR's key, as the glass
+ * names it, and must hold several PRs that are all the person's own or a
+ * dispatch's. The request lives on the bottom PR's record until the stack
+ * has merged, one PR closes, GitHub refuses, or `cancelStackMerge`.
+ */
+export function requestStackMerge(
+  stackKey: string,
+  by: string,
+  opts: { viewer?: () => string | undefined; now?: number; cfg?: Config; records?: PrRecord[] } = {},
+): StackMergeRequest {
+  const cfg = opts.cfg ?? loadConfig();
+  const records = opts.records ?? readPrs();
+  return withPrLock(stackKey, () => {
+    const root = readPr(stackKey);
+    if (!root) throw new PrMergeRefused(404, 'lobstah has no record of that stack.');
+    const members = stackChain(root, records);
+    const open = members.filter((p) => p.state === 'OPEN');
+    if (members.length < 2) throw new PrMergeRefused(409, 'That is a lone PR: use Merge when green on it.');
+    if (!open.length) throw new PrMergeRefused(409, 'That stack has nothing left to merge.');
+    const viewer = opts.viewer ?? (() => githubViewer());
+    if (!open.every((p) => mayAutoWatch(prAuthorship(p, viewer)))) {
+      throw new PrMergeRefused(403, "Only stacks of your own PRs, or a dispatch's, merge from the glass.");
+    }
+    const request: StackMergeRequest = root.stackMergeRequest ?? {
+      at: new Date(opts.now ?? Date.now()).toISOString(),
+      by,
+      method: prMergeMethod(cfg, root.repo),
+      numbers: members.map((p) => p.number),
+    };
+    writePr({ ...root, stackMergeRequest: request });
+    // Each PR's watch checks it every poll; a PR watched by no one yet gets one.
+    for (const p of open) {
+      const ref = parsePrRef(p.url);
+      if (ref && !readWatch(ref.key)) addPrWatch(ref);
+    }
+    return request;
+  });
+}
+
+/**
+ * Withdraw a stack's merge request: `cancelled`, `none` when there was none,
+ * or `merging` once GitHub has taken the merge, which can't be called back.
+ */
+export function cancelStackMerge(stackKey: string): 'cancelled' | 'none' | 'merging' {
+  return withPrLock(stackKey, () => {
+    const pr = readPr(stackKey);
+    if (!pr?.stackMergeRequest) return 'none';
+    if (pr.stackMergeRequest.merging) return 'merging';
+    const { stackMergeRequest: _gone, ...rest } = pr;
+    writePr(rest);
+    return 'cancelled';
+  });
+}
+
+/** One GitHub REST call: its JSON, or why it failed. */
+export type GithubApi = (
+  method: 'GET' | 'POST' | 'PUT',
+  path: string,
+  body?: unknown,
+) => { ok: true; json: Record<string, unknown> } | { ok: false; why: string };
+
+/** `gh api`, signed in as the person, with the body on stdin. */
+function ghApi(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): ReturnType<GithubApi> {
+  const res = spawnSync('gh', ['api', '-X', method, path, ...(body === undefined ? [] : ['--input', '-'])], {
+    encoding: 'utf8',
+    input: body === undefined ? undefined : JSON.stringify(body),
+    timeout: 60_000,
+    windowsHide: true,
+  });
+  if (res.status !== 0) return { ok: false, why: (res.stderr || res.stdout || `gh exited ${res.status}`).trim().split('\n')[0]! };
+  try {
+    return { ok: true, json: res.stdout.trim() ? (JSON.parse(res.stdout) as Record<string, unknown>) : {} };
+  } catch {
+    return { ok: false, why: 'GitHub answered with something that is not JSON.' };
+  }
+}
+
+/** Test seams for the stack merge pass. */
+export interface StackMergeDeps {
+  api?: GithubApi;
+  now?: number;
+}
+
+/**
+ * The daemon's pass over stack merge requests, once per tick, for each
+ * stack's bottom PR that holds one:
+ * - once GitHub has taken the merge, read its result: merged clears the
+ *   request when every PR merged; failed tells the helm and clears it;
+ * - every PR merged clears it; a PR closed unmerged tells the helm and clears it;
+ * - a red check or a conflict on a PR no dispatch owns files one repair per
+ *   head, as a single PR's merge does; a stuck repair tells the helm once;
+ * - once every open PR is green: link a plain stack on GitHub
+ *   (`POST repos/<repo>/stacks`, the call `gh stack submit` makes, so no
+ *   branch is checked out, rebased or pushed), then ask GitHub to merge the
+ *   top PR with everything under it (`PUT pulls/<top>/merge-async`), the
+ *   repo's way, on the head that was checked.
+ */
+export function mergeRequestedStacks(log: (message: string) => void, deps: StackMergeDeps = {}): void {
+  const api = deps.api ?? ghApi;
+  const cfg = loadConfig();
+  for (const record of readPrs()) {
+    if (!record.stackMergeRequest) continue;
+    withPrLock(record.key, () => {
+      const root = readPr(record.key);
+      const request = root?.stackMergeRequest;
+      if (!root || !request) return;
+      const save = (patch: Partial<StackMergeRequest>) => writePr({ ...root, stackMergeRequest: { ...request, ...patch } });
+      const clear = () => {
+        const { stackMergeRequest: _gone, ...rest } = root;
+        writePr(rest);
+      };
+      const tell = (why: string, end: boolean) => {
+        const text = `Stack through #${request.numbers.at(-1)} (${root.repo}): ${why}`;
+        if (request.stuck !== why) {
+          log(text);
+          postNotice({ kind: 'stack-stopped', text, refId: root.key, dedupeKey: `stack-merge-${root.key}-${why}` });
+        }
+        if (end) clear();
+        else if (request.stuck !== why) save({ stuck: why });
+      };
+      const members = request.numbers.map((n) => (n === root.number ? root : readPr(`pr:${root.repo}#${n}`)));
+      if (members.some((m) => !m)) return tell('lobstah lost track of a PR in it; ask again from the glass.', true);
+      const prs = members as PrRecord[];
+      const step = stackMergeStep(prs);
+      if (step.kind === 'done') {
+        log(`merged the stack through #${request.numbers.at(-1)} (${root.repo}), as asked from the glass`);
+        return clear();
+      }
+      if (step.kind === 'closed') return tell(`#${step.number} closed without merging, so the stack merge stopped.`, true);
+      if (request.merging) {
+        const result = api(
+          'GET',
+          `repos/${root.repo}/pulls/${request.merging.number}/merge-async/${encodeURIComponent(request.merging.id)}`,
+        );
+        if (!result.ok) return log(`could not read the stack merge through #${request.merging.number}, will try again: ${result.why}`);
+        if (result.json.status === 'failed') {
+          const details = result.json.details as { message?: string } | undefined;
+          return tell(`GitHub refused the merge: ${details?.message ?? 'no reason given'}.`, true);
+        }
+        // Pending or queued: the PRs' own records say when each merges.
+        return;
+      }
+      if (step.kind === 'stuck') return tell(`${step.why}. It needs you.`, false);
+      if (step.kind === 'wait') return;
+      if (step.kind === 'repair') {
+        const pr = step.pr;
+        // A dispatch's PR: the daemon's PR repair already works it ([watch].autoRepair).
+        if (pr.dispatches.length > 0) return;
+        if (request.repairs?.[pr.number] === pr.headSha) return;
+        const repo = repoKeyForForge(cfg, pr.repo);
+        if (!repo) return log(`cannot repair ${pr.key} for its stack's merge: no configured repo has ${pr.repo} as its origin`);
+        const id = randomUUID();
+        enqueue({ id, repo, trapAny: true, brief: repairBrief(pr, step.why) });
+        save({ repairs: { ...request.repairs, [pr.number]: pr.headSha } });
+        return log(`filed repair ${id.slice(0, 8)} for ${pr.key} (${step.why}), so its stack can merge`);
+      }
+      // Every open PR is green: link the stack on GitHub if it isn't, then merge the top.
+      const top = prs.filter((p) => p.state === 'OPEN').at(-1)!;
+      let linked = request.linked;
+      if (!linked) {
+        const pull = api('GET', `repos/${root.repo}/pulls/${top.number}`);
+        linked = pull.ok ? stackNumber(pull.json.stack) : undefined;
+        if (!linked) {
+          const made = api('POST', `repos/${root.repo}/stacks`, {
+            pull_requests: prs.filter((p) => p.state === 'OPEN').map((p) => p.number),
+          });
+          if (!made.ok) return tell(`it could not be linked as a stack on GitHub: ${made.why}`, true);
+          linked = stackNumber(made.json) ?? stackNumber(made.json.stack);
+          if (!linked) return tell('GitHub linked no stack for it.', true);
+          log(`linked ${root.repo} #${prs[0]!.number}..#${top.number} as stack ${linked} on GitHub, to merge it`);
+        }
+      }
+      const merge = api('PUT', `repos/${root.repo}/pulls/${top.number}/merge-async`, {
+        merge_method: request.method,
+        sha: top.headSha,
+        merge_action: 'default',
+      });
+      if (!merge.ok) {
+        if (linked !== request.linked) save({ linked });
+        return log(`could not ask GitHub to merge the stack through #${top.number}, will try again: ${merge.why}`);
+      }
+      const details = merge.json.details as { uuid?: string; message?: string } | undefined;
+      if (merge.json.status === 'failed') return tell(`GitHub refused the merge: ${details?.message ?? 'no reason given'}.`, true);
+      if (merge.json.status === 'merged') {
+        log(`GitHub merged the stack through #${top.number} (${root.repo}), as asked from the glass`);
+        return save({
+          linked,
+          merging: {
+            id: details?.uuid ?? 'merged',
+            number: top.number,
+            headSha: top.headSha,
+            at: new Date(deps.now ?? Date.now()).toISOString(),
+          },
+        });
+      }
+      if (!details?.uuid) return log(`GitHub took the stack merge through #${top.number} but named no id; will ask again`);
+      save({
+        linked,
+        merging: { id: details.uuid, number: top.number, headSha: top.headSha, at: new Date(deps.now ?? Date.now()).toISOString() },
+      });
+      log(`asked GitHub to merge the stack through #${top.number} (${root.repo}) as ${request.method}, as asked from the glass`);
+    });
+  }
+}
+
+/** A stack's number from GitHub's answer: `{ number }`, else none. */
+function stackNumber(value: unknown): number | undefined {
+  const n = (value as { number?: unknown } | null | undefined)?.number;
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : undefined;
 }

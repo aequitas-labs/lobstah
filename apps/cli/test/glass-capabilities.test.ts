@@ -83,21 +83,17 @@ describe('a glass shows only what its source can fill and do', () => {
     expect(narrow.$('#traps .newtrap')).toBeNull();
   });
 
-  it('shows helm chat as a value without controls when the source cannot change it', async () => {
+  it('shows Settings (this device and view) everywhere, and helm chat only on Configuration, as a value', async () => {
     const { local, narrow } = await both('#deck');
     for (const g of [local, narrow]) {
       (g.$('#gearbtn') as HTMLElement).click();
       await g.settle();
+      expect(g.$$('.settings-dialog .settings .seg button')).toHaveLength(4);
+      expect(g.$('.settings-dialog [data-helm-chat]')).toBeNull();
     }
-    expect(local.$('[data-helm-chat]')).not.toBeNull();
-    expect(narrow.$('.settings')).not.toBeNull();
-    expect(narrow.$('[data-helm-chat]')?.textContent).toContain('full');
-    expect(narrow.$('[data-helm-chat] button')).toBeNull();
-    expect(narrow.$('[data-helm-chat] input')).toBeNull();
-    for (const g of [local, narrow]) {
-      expect(g.$$('.settings .seg button')).toHaveLength(4);
-      expect(g.$$('[data-helm-chat] input, [data-helm-chat] button, [data-helm-chat] select')).toEqual([]);
-    }
+    await local.go('#settings');
+    expect(local.$('#settings [data-helm-chat]')?.textContent).toContain('full');
+    expect(local.$$('[data-helm-chat] input, [data-helm-chat] button, [data-helm-chat] select')).toEqual([]);
   });
   it('shows a run card with no Run button where its source runs nothing, as the wharf does', async () => {
     expect(WHARF_CAPABILITIES.actions.has('run')).toBe(false);

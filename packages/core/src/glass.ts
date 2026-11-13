@@ -199,6 +199,10 @@ export interface GlassStack {
   title?: string;
   /** Shared stack readiness, absent for a lone PR or an incomplete chain. `state` leaves out what the heading says. */
   readiness?: { id: string; url: string; ready: number; total: number; allReady: boolean; text: string; state: string };
+  /** "Merge stack when green", while it stands: how it merges, and whether GitHub has taken the merge (it can't be cancelled then). */
+  mergeRequest?: { at: string; method: 'merge' | 'squash' | 'rebase'; merging?: boolean };
+  /** Whether every PR in it is the person's own or a dispatch's, so the glass may offer to merge the whole stack. */
+  mine?: boolean;
 }
 
 /** The evidence fields a dispatch's row shows: where it went and its PRs. */
@@ -227,7 +231,7 @@ export interface GlassDispatchSummary {
   followUp?: string;
   /** The brief's first line. */
   title: string;
-  verb: Verb | 'unknown' | 'queued';
+  verb: Verb | 'unknown' | 'queued' | 'limited';
   /** A budget stop: work is saved for continuation, distinct from a worker failure. */
   outOfTimeWorkSaved?: boolean;
   /** The last note; in /data, cut to NOTE_MAX characters. */
@@ -335,6 +339,8 @@ export interface GlassReview {
   repoKey?: string;
   mode?: import('./reviews.js').ReviewMode;
   publish?: boolean;
+  mutedAt?: string;
+  postedReviewUrl?: string;
   requestedBy?: string;
   asker?: string;
   askerName?: string;
@@ -400,6 +406,8 @@ export interface GlassMessage {
 
 /** A trap: live (a registration) or historical (only receipts, mail, and notices survive). */
 export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
+  /** Provider quota state takes precedence over a stale catch or heartbeat. */
+  usageLimit?: import('./usage-limits.js').UsageLimitGroup;
   desktopThread?: boolean;
   /** The Claude Remote Control URL Claude emitted for this live session. It opens on any device the owner is signed in on. */
   liveLink?: string;
@@ -527,6 +535,8 @@ export interface GlassHeavy {
 }
 
 export interface GlassSnapshot {
+  /** One banner per provider account and limit, shared by desktop and phone. */
+  usageLimits?: import('./usage-limits.js').UsageLimitGroup[];
   helmPasses?: HelmPassView[];
   goals?: Array<{ grounds: string; date: string; lines: string[] }>;
   backends?: Array<{ grounds: string; kind: 'local' | 'wharf'; wharf?: string; url?: string; unavailable?: string }>;
@@ -590,7 +600,7 @@ export interface GlassSnapshot {
   sessionGrants?: import('./grants.js').Grant[];
   /** Every other grant in force: intent grants, commands and files. */
   standingGrants?: import('./grants.js').Grant[];
-  reviewSetup?: { enabled: boolean; mode: import('./reviews.js').ReviewMode; publish?: boolean; perRepo?: Record<string, { mode: import('./reviews.js').ReviewMode; publish: boolean; overridden: boolean }>; identity?: string; running: boolean };
+  reviewSetup?: { enabled: boolean; mode: import('./reviews.js').ReviewMode; publish?: boolean; autoPostApprove?: import('./reviews.js').ReviewAutoPost; autoPostRequestChanges?: import('./reviews.js').ReviewAutoPost; perRepo?: Record<string, { mode: import('./reviews.js').ReviewMode; publish: boolean; autoPostApprove: import('./reviews.js').ReviewAutoPost; autoPostRequestChanges: import('./reviews.js').ReviewAutoPost; overridden: boolean }>; identity?: string; running: boolean };
   /** The helms' open to-dos, every grounds; the deck lists them. */
   todos?: TodoView[];
   /** A short note when to-dos sit past `[helm].todoStaleDays`. */

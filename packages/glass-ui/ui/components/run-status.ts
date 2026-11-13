@@ -1,6 +1,7 @@
 import type { RunResult, RunState } from '@lobstah/core';
 import { html } from '../html.js';
 import { ageText } from './age.js';
+import { DISPATCH_STATE_ICON } from './icons.js';
 
 /**
  * A run card's state as an icon instead of words: a green check once it
@@ -81,6 +82,11 @@ const ICON: Record<RunStatus, unknown> = {
   declined: svg('<circle cx="8" cy="8" r="6.2"/><path d="M3.6 12.4l8.8-8.8"/>'),
 };
 
+/** A run card's mark on the deck: a terminal before its title, in the row's grey. Its status stays at the row's end. */
+export const RunKindIcon = html`<span class="runkind" role="img" aria-label="Run card" title="Run card">${svg(
+  '<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6" stroke-width="1.5"/><path d="M4.6 6.3l2 1.7-2 1.7M8.4 10h3" stroke-width="1.5"/>',
+)}</span>`;
+
 /** The icon, named and titled with its words. */
 export function RunStatusIcon({ status, result, startedAt }: { status: RunStatus; result?: RunResult; startedAt?: string }) {
   const label = runStatusLabel(status, result, startedAt);
@@ -94,7 +100,7 @@ export function RunStatusIcon({ status, result, startedAt }: { status: RunStatus
  * check when done, and a red X when it failed. Its accessible name and
  * tooltip say the verb, how long it has been in it, and what it waits on.
  */
-export type VerbIconVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed';
+export type VerbIconVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed' | 'queued' | 'limited' | 'unknown';
 
 /** A verb's tone, one meaning everywhere: amber in progress, blue needs a decision, red blocked or failed, grey paused, green done. */
 export type VerbTone = 'ok' | 'warn' | 'bad' | 'dim' | 'info';
@@ -106,6 +112,9 @@ const VERB_WORD: Record<VerbIconVerb, string> = {
   paused: 'Paused',
   done: 'Done',
   failed: 'Failed',
+  queued: 'Queued',
+  limited: 'Limited',
+  unknown: 'Unknown',
 };
 
 /** Amber working, blue needs a decision, red blocked or failed, grey paused (a turn in the heavy line too), green done. */
@@ -116,9 +125,12 @@ export const VERB_TONE: Record<VerbIconVerb, VerbTone> = {
   paused: 'dim',
   done: 'ok',
   failed: 'bad',
+  queued: 'dim',
+  limited: 'bad',
+  unknown: 'dim',
 };
 
-/** True for the six report verbs; a queued or unknown dispatch keeps its word. */
+/** True for every displayed dispatch verb, including queued, limited and unknown. */
 export const isIconVerb = (verb: string): verb is VerbIconVerb => Object.hasOwn(VERB_WORD, verb);
 
 /** The verb icon's words: "Paused · 12m · waiting on review". */
@@ -130,6 +142,7 @@ export function verbIconLabel(verb: VerbIconVerb, at?: string, waitingOn?: strin
 }
 
 const VERB_ICON: Record<VerbIconVerb, unknown> = {
+  ...DISPATCH_STATE_ICON,
   working: ICON.running,
   // A raised open hand: three fingers, then the little finger running into the palm and thumb.
   'needs-decision': svg(

@@ -11,6 +11,7 @@ import { gitCommonDir, protectedRevision, trapRef } from './worktree-safety.js';
 import { codexDesktopThread, codexRolloutFile } from './resume.js';
 import { harnessProcessAlive } from './harness-process.js';
 import { sessionClaimedElsewhere, sessionHolders, sessionHolderText } from './session-holder.js';
+import { modelForHarness } from './models.js';
 
 /**
  * `man throw --plan`: what a throw would do for each selected trap, read
@@ -59,6 +60,8 @@ export interface ThrowSelection {
 }
 
 export interface ThrowPlanOptions {
+  /** A named throw's explicit harness wins over the saved profile. */
+  harness?: string;
   /** The grounds' repos; undefined = every repo. Applies to --all and --repo. */
   repos?: readonly string[];
   now?: number;
@@ -149,7 +152,8 @@ function startMode(
 /** One roster record's plan. */
 function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): ThrowPlanRow {
   const now = opts.now ?? Date.now();
-  const harness = entry.profile?.harness ?? entry.harness;
+  const harness = opts.harness ?? entry.profile?.harness ?? entry.harness;
+  const model = modelForHarness(harness, entry.profile?.model ?? entry.model).model;
   const held = unhandledTrapMessages(entry.trapId).length;
   const row: ThrowPlanRow = {
     trapId: entry.trapId,
@@ -158,8 +162,8 @@ function planEntry(entry: RosterEntry, cfg: Config, opts: ThrowPlanOptions): Thr
     action: 'unresolved',
     why: '',
     ...(harness ? { harness, harnessFrom: entry.profile?.harness ? 'profile' : 'last sign-on' } : {}),
-    ...((entry.profile?.model ?? entry.model) ? { model: entry.profile?.model ?? entry.model } : {}),
-    ...startConfig(entry, cfg),
+    ...(model ? { model } : {}),
+    ...startConfig(entry, cfg, harness),
     ...terminalFor(entry, cfg),
     worktree: entry.worktree,
     ...(entry.branch ? { branch: entry.branch } : {}),
@@ -262,9 +266,9 @@ function unrecordedAnchors(known: Set<string>): ThrowPlanRow[] {
  * its saved profile. The permission mode it was last seen in is left out: a
  * throw starts in auto unless the profile or the config names a mode.
  */
-function startConfig(entry: RosterEntry, cfg: Config): { config?: Record<string, string> } {
+function startConfig(entry: RosterEntry, cfg: Config, harness = entry.profile?.harness ?? entry.harness): { config?: Record<string, string> } {
   const { permissionMode: _seen, ...last } = entry.config ?? {};
-  const configured = configPermissionMode(cfg, entry.repo, entry.profile?.harness ?? entry.harness);
+  const configured = configPermissionMode(cfg, entry.repo, harness);
   const config = { ...last, ...(configured ? { permissionMode: configured } : {}), ...entry.profile?.config };
   return Object.keys(config).length ? { config } : {};
 }

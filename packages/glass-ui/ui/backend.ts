@@ -87,6 +87,8 @@ export const GLASS_ACTIONS = [
   'pr-ack',
   /** Merge one of your PRs when it's green, or cancel that. */
   'pr-merge',
+  /** Merge a whole stack of your PRs once every one is green, or cancel that. */
+  'stack-merge',
   /** Acknowledge the item a clicked lob walked, so the pet and every glass stop walking it. */
   'attention-ack',
   /** Ask for, see or dismiss a review round. */
@@ -103,6 +105,9 @@ export const GLASS_ACTIONS = [
   'cancel',
   /** Ask the boat that drafted a review to dismiss it. */
   'review-dismiss',
+  /** Mute or unmute all review rounds for one PR. */
+  'review-mute',
+  'review-unmute',
   /** Run a run card's script on this Mac. Only the local glass runs anything. */
   'run',
 ] as const;

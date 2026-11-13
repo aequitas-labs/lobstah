@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
+import { loadConfig } from './config.js';
 import { prLabel } from './pr.js';
 import type { DispatchLimits } from './types.js';
 import type { TendAttention } from './glass.js';
@@ -19,6 +20,8 @@ export const REVIEW_WORK = ['off', 'trap', 'headless'] as const;
 export type ReviewWork = (typeof REVIEW_WORK)[number];
 export const REVIEW_POST = ['draft', 'auto'] as const;
 export type ReviewPost = (typeof REVIEW_POST)[number];
+export const REVIEW_AUTO_POST = ['ask', 'auto-post'] as const;
+export type ReviewAutoPost = (typeof REVIEW_AUTO_POST)[number];
 export const REVIEW_MODES = ['notify', 'on-demand', 'auto-draft', 'auto-review'] as const;
 export type ReviewMode = (typeof REVIEW_MODES)[number];
 
@@ -28,6 +31,9 @@ export interface ReviewSettings {
   /** Old requests stay in the inbox: enabled uses the enable/automatic-mode activation time, or set an ISO timestamp. */
   requestedAfter: string;
   publish: boolean;
+  /** Whether completed approve and request-changes drafts post without a glass action. */
+  autoPostApprove: ReviewAutoPost;
+  autoPostRequestChanges: ReviewAutoPost;
   /** Who drafts: no one, a free trap of the repo (then headless after trapWaitSecs), or headless. */
   work: ReviewWork;
   /** `draft`: stage the draft as the identity's pending review, sent from the review tool. `auto`: publish by verdict once drafted; approval always waits for a person. */
@@ -63,6 +69,8 @@ export const DEFAULT_REVIEWS: ReviewsConfig = {
   mode: 'notify',
   requestedAfter: 'enabled',
   publish: false,
+  autoPostApprove: 'ask',
+  autoPostRequestChanges: 'ask',
   repos: 'configured',
   work: 'off',
   post: 'draft',
@@ -99,6 +107,8 @@ function parseSettings(raw: Record<string, unknown>, where: string): Partial<Rev
     if (typeof raw.publish !== 'boolean') throw new Error(`${where}.publish must be a boolean`);
     out.publish = raw.publish;
   }
+  if (raw.autoPostApprove !== undefined) out.autoPostApprove = oneOf(raw.autoPostApprove, REVIEW_AUTO_POST, `${where}.autoPostApprove`);
+  if (raw.autoPostRequestChanges !== undefined) out.autoPostRequestChanges = oneOf(raw.autoPostRequestChanges, REVIEW_AUTO_POST, `${where}.autoPostRequestChanges`);
   if (raw.work !== undefined) out.work = oneOf(raw.work, REVIEW_WORK, `${where}.work`);
   if (raw.requestedAfter !== undefined) {
     if (raw.requestedAfter !== 'enabled' && (typeof raw.requestedAfter !== 'string' || !Number.isFinite(Date.parse(raw.requestedAfter))))
@@ -177,6 +187,8 @@ export const reviewHash = (key: string): string => `#review-${encodeURIComponent
 export interface ReviewRound {
   /** The request event's id: one round per request. */
   id: string;
+  /** The GitHub request event that this round answers; synthetic ids split dismissed rounds by head. */
+  requestEventId?: string;
   requestedAt: string;
   requestedBy?: string;
   requestedByName?: string;
@@ -188,6 +200,9 @@ export interface ReviewRound {
   draftOnly?: boolean;
   /** Whether this job was explicitly started with publishing enabled. */
   publish?: boolean;
+  /** The per-verdict posting choices captured when this draft job started. */
+  autoPostApprove?: ReviewAutoPost;
+  autoPostRequestChanges?: ReviewAutoPost;
   /** An explicit Draft action started this job; automatic work cannot publish in on-demand mode. */
   onDemand?: boolean;
   /**
@@ -254,6 +269,10 @@ export interface ReviewItem {
   key: string;
   pr: ReviewPr;
   rounds: ReviewRound[];
+  /** A mute hides no history and suppresses new rounds and drafts until cleared. */
+  mutedAt?: string;
+  /** A dismissed request disappeared from a complete search and may later return on reopen or re-request. */
+  unseenAt?: string;
   updatedAt: string;
 }
 
@@ -364,10 +383,25 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
   const at = new Date(now).toISOString();
   const prior = readReview(key);
   const item: ReviewItem = prior ? { ...prior, pr: seen.pr, rounds: prior.rounds.map((r) => ({ ...r })) } : { key, pr: seen.pr, rounds: [], updatedAt: at };
-  const known = item.rounds.find((r) => r.id === seen.round.id);
+  const known = [...item.rounds].reverse().find((r) => r.id === seen.round.id || r.requestEventId === seen.round.id);
+  if (item.mutedAt) {
+    const changed = !prior || JSON.stringify(prior.pr) !== JSON.stringify(item.pr);
+    return { item: changed ? writeReview({ ...item, updatedAt: at }) : prior!, opened: false };
+  }
   if (known) {
+    const latest = latestRound(item);
+    if (latest === known && known.state === 'dismissed' && (known.headSha !== seen.pr.headSha || item.unseenAt)) {
+      const id = `${seen.round.id}@${seen.pr.headSha}`;
+      item.rounds.push({ ...seen.round, id, requestEventId: seen.round.id, headSha: seen.pr.headSha, state: 'requested', ...(seen.skip ? { reason: seen.skip } : {}) });
+      delete item.unseenAt;
+      return { item: writeReview({ ...item, updatedAt: at }), opened: true };
+    }
+    if (latest === known && known.state === 'withdrawn') {
+      const id = `${seen.round.id}@${seen.pr.headSha}`;
+      item.rounds.push({ ...seen.round, id, requestEventId: seen.round.id, headSha: seen.pr.headSha, state: 'requested', ...(seen.skip ? { reason: seen.skip } : {}) });
+      return { item: writeReview({ ...item, updatedAt: at }), opened: true };
+    }
     Object.assign(known, seen.round);
-    const latest = latestRound(item)!;
     if (latest === known && known.headSha !== seen.pr.headSha) {
       if (known.state === 'requested') known.headSha = seen.pr.headSha;
       else if (known.state === 'drafted') {
@@ -388,11 +422,29 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
   }
   item.rounds.push({
     ...seen.round,
+    requestEventId: seen.round.id,
     headSha: seen.pr.headSha,
     state: 'requested',
     ...(seen.skip ? { reason: seen.skip } : {}),
   });
   return { item: writeReview({ ...item, updatedAt: at }), opened: true };
+}
+
+/** Mute a PR's future review requests without hiding its review history. */
+export function muteReview(key: string, now = Date.now()): ReviewItem | string {
+  const item = readReview(key);
+  if (!item) return `no review item ${key}`;
+  if (item.mutedAt) return item;
+  return writeReview({ ...item, mutedAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() });
+}
+
+/** Resume review requests for a muted PR. */
+export function unmuteReview(key: string, now = Date.now()): ReviewItem | string {
+  const item = readReview(key);
+  if (!item) return `no review item ${key}`;
+  if (!item.mutedAt) return item;
+  const { mutedAt: _mutedAt, ...unmuted } = item;
+  return writeReview({ ...unmuted, updatedAt: new Date(now).toISOString() });
 }
 
 /**
@@ -406,6 +458,11 @@ export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item:
   const at = new Date(now).toISOString();
   for (const item of listReviews()) {
     const latest = latestRound(item);
+    if (!seen.has(item.key) && latest?.state === 'dismissed' && inScope(item) && !item.unseenAt) {
+      item.unseenAt = at;
+      writeReview({ ...item, updatedAt: at });
+      continue;
+    }
     if (seen.has(item.key) || !latest || !OPEN_STATES.includes(latest.state) || !inScope(item)) continue;
     latest.state = 'withdrawn';
     latest.reason = 'the request is gone: withdrawn, reviewed on GitHub, or the PR closed';
@@ -611,6 +668,7 @@ export function reviewAttention(now: number, items: ReviewItem[] = listReviews()
 
 /** Create one notification per completed draft/publish generation; no request notifications. */
 export function refreshReviewNotifications(now = Date.now()): Array<{ key: string; notification: ReviewNotification; hash: string }> {
+  const reviews = loadConfig().reviews;
   const events: Array<{ key: string; notification: ReviewNotification; hash: string }> = [];
   for (const item of listReviews()) {
     const r = latestRound(item);
@@ -623,7 +681,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
     if (completed && r.acknowledgedAt && r.acknowledgedAt >= completed) {
       writeReview(item); continue;
     }
-    const needsYou = r.state === 'drafted' && r.verdict === 'approve';
+    const needsYou = r.state === 'drafted' && !reviewCanPublish(reviews, item.pr.repoKey, r, r.verdict);
     r.needsYou = needsYou;
     delete r.seenAt;
     const verdict = (r.verdict ?? 'comment').replace('_', ' ');
@@ -637,7 +695,10 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
 }
 
 /** Current repo policy can lower a round's publishing permission; it cannot upgrade a draft-only receipt. */
-export function reviewCanPublish(config: ReviewsConfig, repoKey: string | undefined, round: ReviewRound): boolean {
+export function reviewCanPublish(config: ReviewsConfig, repoKey: string | undefined, round: ReviewRound, verdict?: ReviewVerdict): boolean {
   const settings = reviewSettings(config, repoKey);
-  return config.enabled && (settings.mode === 'auto-review' || (settings.mode === 'on-demand' && round.onDemand === true)) && settings.publish && (round.publish ?? !round.draftOnly);
+  const selected = verdict ?? round.verdict;
+  const configured = selected === 'approve' ? settings.autoPostApprove : selected === 'request_changes' ? settings.autoPostRequestChanges : 'ask';
+  const captured = selected === 'approve' ? round.autoPostApprove : selected === 'request_changes' ? round.autoPostRequestChanges : 'ask';
+  return config.enabled && configured === 'auto-post' && captured === 'auto-post' && (settings.mode.startsWith('auto-') || (settings.mode === 'on-demand' && round.onDemand === true));
 }

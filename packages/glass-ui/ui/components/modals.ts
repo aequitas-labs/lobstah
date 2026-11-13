@@ -1,12 +1,13 @@
 import type { GlassDispatch, GlassDispatchSummary, GlassHelm, GlassReport, GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
 import { dispatchReport, modalItem, prBadgeClass, prModalView, reportPageUrl } from '../../src/glass-diff.js';
-import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView, SettingsItem } from '../../src/glass-diff.js';
+import type { DispatchDetail, GlassPrefs, ModalRef, PrModalView } from '../../src/glass-diff.js';
 import { cancelJob, closeModal, showModal, messageHelm, setPrefs } from '../actions.js';
 import { useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { reportByline } from './report.js';
 import { LinkedText } from './links.js';
+import { openReport } from './reports.js';
 import {
   Age,
   WorkerDetails,
@@ -36,26 +37,31 @@ import {
   viewerHasTerminal,
   trapOpenRoutes,
 } from './common.js';
-import { can, capabilities, fileUrl } from '../backend.js';
+import { can, capabilities, fileUrl, visibleTabs } from '../backend.js';
+import { TAB_ICON } from './icons.js';
 import { getState } from '../store.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 import { GrantChip } from './session-grants.js';
 import { reviewModal } from './reviews.js';
+import { Button } from './button.js';
 
-/** The overlay's one modal: dispatch, trap, helm, PR, report, or ⚙ settings. */
+/** The overlay's one modal: dispatch, trap, helm, PR or report. */
 
-const close = html`<span class="x" onClick=${closeModal}>×</span>`;
+const close = html`<${Button} variant="icon" class="x" label="close" onClick=${closeModal}>×<//>`;
 
-/** Browser display preferences are editable; configuration and helm values stay read-only. */
-function settingsModal(item: SettingsItem, prefs: GlassPrefs) {
-  const viewOptions = html`<span class="seg" role="group" aria-label="view">${(['table', 'cards'] as const).map((view) => html`<button type="button" class=${view === prefs.view ? 'on' : ''} aria-pressed=${view === prefs.view} onClick=${() => setPrefs({ view })}>${view}</button>`)}</span>`;
-  const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<button type="button" class=${lobs === prefs.lobs ? 'on' : ''} aria-pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}</button>`)}</span>`;
-  const kinds = item.attentionError ? item.attentionError : (item.attentionKinds || []).join(' · ');
-  return [
-    close,
-    html`<h3>⚙ settings</h3>`,
-    html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this browser · cards or table</span></span>${viewOptions}</div><div class="row"><span class="lbl">lobs<span class="hint">this browser · crawling lobsters</span></span>${lobOptions}</div>${item.helms.map((helm) => html`<div class="row" data-helm-chat=${helm.grounds}><span class="lbl">helm chat · ${helm.grounds}</span><span>${helm.chat ?? 'full'}</span></div>`)}<div class="row"><span class="lbl">attention<span class="hint">kinds shown — attentionKinds in config.toml (read-only here)</span></span><span class="dim" style="font-size:11px;text-align:right;max-width:260px">${kinds}</span></div></div>`,
-  ];
+/**
+ * The glass's own settings, for this device and this view: cards or table,
+ * and the crawling lobs. lobstah's settings (the daemon, grounds and
+ * config.toml, attention kinds and helm chat among them) are Configuration,
+ * which it links to where this page has it.
+ */
+export function SettingsBody({ prefs }: { prefs: GlassPrefs }) {
+  const viewOptions = html`<span class="seg" role="group" aria-label="view">${(['table', 'cards'] as const).map((view) => html`<${Button} pressed=${view === prefs.view} onClick=${() => setPrefs({ view })}>${view}<//>`)}</span>`;
+  const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<${Button} pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}<//>`)}</span>`;
+  return html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this device · cards or table</span></span>${viewOptions}</div><div class="row"><span class="lbl">lobs<span class="hint">this device · crawling lobsters</span></span>${lobOptions}</div></div>${
+    visibleTabs().includes('settings') &&
+    html`<p class="dim settings-config">Daemon and grounds settings are in <a href="#settings" onClick=${closeModal}>${TAB_ICON.settings}Configuration</a></p>`
+  }`;
 }
 
 function stackLine(p: PrModalView['pr'], s: NonNullable<PrModalView['stack']>) {
@@ -119,11 +125,11 @@ function helmModal(h: GlassHelm) {
   ];
 }
 
-/** A dispatch's report, in its modal: the title and byline, and a link to the report's own page. */
+/** A dispatch's report, in its modal: the title and byline, and a link that opens it in the sheet over the modal. */
 function reportLink(r: GlassReport) {
   return [
     html`<div class="sec">report · ${LinkedText(r.title)}</div>`,
-    html`<div class="sub">${reportByline(r)} · <a href=${reportPageUrl(r.key)} target="_blank" rel="noopener">open the report ↗</a></div>`,
+    html`<div class="sub">${reportByline(r)} · <a href=${reportPageUrl(r.key)} target="_blank" rel="noopener" onClick=${openReport(r)}>open the report</a></div>`,
   ];
 }
 
@@ -192,12 +198,12 @@ function JobControls({ id }: { id: string }) {
           value=${message}
           onInput=${(e: Event) => setMessage((e.target as HTMLTextAreaElement).value)}
           onKeyDown=${onSendKey(canSend, () => void send())}
-        ></textarea><div class="jobsend"><button class="btn" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()}>Queue message for helm</button>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
+        ></textarea><div class="jobsend"><${Button} type="submit" aria-keyshortcuts=${sendShortcut()} disabled=${!canSend()}>Queue message for helm<//>${!touchOnly() && html`<${SendHint} />`}</div></form>`,
     can('cancel') &&
       html`<div class="sec">cancel</div>${
         confirming
-          ? html`<div>Cancel this dispatch? Its agent stops. <button class="btn" onClick=${cancel}>Cancel dispatch</button> <button class="btn" onClick=${() => setConfirming(false)}>Keep dispatch</button></div>`
-          : html`<button class="btn" onClick=${() => setConfirming(true)}>Cancel dispatch…</button>`
+          ? html`<div>Cancel this dispatch? Its agent stops. <${Button} onClick=${cancel}>Cancel dispatch<//> <${Button} onClick=${() => setConfirming(false)}>Keep dispatch<//></div>`
+          : html`<${Button} onClick=${() => setConfirming(true)}>Cancel dispatch…<//>`
       }`,
     result && html`<div class=${result.ok ? 'ok' : 'bad'} role=${result.ok ? 'status' : 'alert'}>${result.text}</div>`,
   ];
@@ -318,7 +324,8 @@ export function Modal({
       html`<div class=${detail.error ? 'bad' : 'dim'}>${detail.error ?? 'loading…'}</div>`,
     ];
   if (!item) return null;
-  if (modal.type === 'settings') return settingsModal(item as SettingsItem, prefs);
+  // Settings open in a Dialog of their own (app.ts).
+  if (modal.type === 'settings') return null;
   if (modal.type === 'pr') return prModal(snapshot, modal.key);
   if (modal.type === 'review') return [close, reviewModal(item as GlassReview)];
   if (modal.type === 'helm') return helmModal(item as GlassHelm);

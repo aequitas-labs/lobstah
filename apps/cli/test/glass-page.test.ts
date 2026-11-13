@@ -46,6 +46,10 @@ async function page(d: GlassSnapshot, opts: Partial<GlassDomOptions> = {}): Prom
   return g;
 }
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** An Open control as a person reads it: its words in a table or modal, its ↗ icon alone on a card. */
+const openLabel = (el: Element | null | undefined): string => (el?.querySelector('svg.openicon') && !text(el) ? '↗ Open' : text(el));
+/** Whether a section shows an Open control, in words or as a card's icon. */
+const hasOpen = (el: Element | null | undefined): boolean => text(el).includes('↗ Open') || !!el?.querySelector('.btn.open svg.openicon');
 /** A stack heading without its Ack stack control (glass-pr-ack.test.ts tests that). */
 const heading = (el: Element): Element => {
   const copy = el.cloneNode(true) as Element;
@@ -300,7 +304,7 @@ describe('glass page: tabs and hash routing', () => {
       const card = async (selector: string) => {
         const open = g.$$(selector + ' a.btn.open').filter((a) => a.getAttribute('href') === trap.link);
         expect(open).toHaveLength(1);
-        expect(text(open[0])).toBe('↗ Open');
+        expect(openLabel(open[0])).toBe('↗ Open');
         expect(text(g.$(selector))).not.toContain(trap.link!);
         expect(text(g.$(selector))).not.toContain('desktop thread');
         expect(g.$$(selector + ' .cmd')).toHaveLength(0);
@@ -332,8 +336,8 @@ describe('glass page: tabs and hash routing', () => {
     Object.assign(d.traps[0]!, { harness: 'codex', link: 'codex://threads/live-session' });
     const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((el) => text(el).includes('wt:t1'))!;
-    // ↗ Open sits at the right of the card's bottom bar.
-    expect(text(card.querySelector('.gactions .gopenbtn'))).toBe('↗ Open');
+    // Open, its icon alone, sits at the right of the boat's line.
+    expect(openLabel(card.querySelector('.gfoot .gopenbtn .btn'))).toBe('↗ Open');
     expect(text(card)).not.toContain('codex://threads/live-session');
     expect(card.querySelectorAll('.cmd')).toHaveLength(0);
     await click(g, card);
@@ -605,7 +609,7 @@ describe('glass page: tabs and hash routing', () => {
       ] as const) {
         const g = await page(d, { hash: '#traps', prefs: { view } });
         const row = trapRow(g, selector);
-        expect(opens(row).map(text), view).toEqual(['↗ Open']);
+        expect(opens(row).map(openLabel), view).toEqual(['↗ Open']);
         expect(opens(row)[0]!.tagName, view).toBe('BUTTON');
         expect(text(row), view).not.toContain('Open live');
         expect(text(row), view).not.toContain('Session link');
@@ -624,7 +628,7 @@ describe('glass page: tabs and hash routing', () => {
       const d = fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' });
       const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
       const card = trapRow(g, '#traps .card');
-      expect(opens(card).map(text)).toEqual(['↗ Open']);
+      expect(opens(card).map(openLabel)).toEqual(['↗ Open']);
       expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
       expect(text(card.querySelector('.gfoot'))).toContain('⛵ studio');
       const modal = await page(d, { hash: '#traps' });
@@ -637,7 +641,7 @@ describe('glass page: tabs and hash routing', () => {
       Object.assign(d.traps[0]!, { link: undefined });
       const g = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
       const card = trapRow(g, '#traps .card');
-      expect(opens(card).map(text)).toEqual(['↗ Open']);
+      expect(opens(card).map(openLabel)).toEqual(['↗ Open']);
       expect(opens(card)[0]!.getAttribute('href')).toBe(LIVE);
     });
   });
@@ -666,10 +670,10 @@ describe('glass page: tabs and hash routing', () => {
     expect(text(g.$('#modalbox'))).toContain('Raise window on this Mac');
     await escape(g);
     await g.go('#deck');
-    expect(text(g.$('#deck'))).toContain('↗ Open');
+    expect(hasOpen(g.$('#deck'))).toBe(true);
     await g.go('#traps');
     const cardPage = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
-    expect(text(cardPage.$('#traps'))).toContain('↗ Open');
+    expect(hasOpen(cardPage.$('#traps'))).toBe(true);
   });
   it('opens On deck by default and follows the hash to each tab', async () => {
     const g = await page(acceptanceFleet());
@@ -922,11 +926,16 @@ describe('glass page: modals', () => {
     expect(text(g.$('#modalbox h3'))).toBe('aaaaaaaa done');
   });
 
-  it('⚙ edits browser display preferences while helm settings stay read-only', async () => {
+  it('the gear opens Settings, this device and this view only; Configuration has the helm chat', async () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches', prefs: { view: 'table', lobs: false } });
     await click(g, g.$('#gearbtn'));
-    expect(text(g.$('#modalbox h3'))).toBe('⚙ settings');
-    expect(text(g.$('#modalbox .settings .row:last-child'))).toContain('question · landed · pr:draft');
+    const dialog = g.$('.settings-dialog')!;
+    expect(text(dialog.querySelector('h3'))).toBe('Settings');
+    expect(g.$('#overlay')!.className).not.toBe('open');
+    // Attention kinds and helm chat are lobstah's settings: Configuration's, nowhere else.
+    expect(text(dialog)).not.toContain('question · landed · pr:draft');
+    expect(dialog.querySelector('[data-helm-chat]')).toBeNull();
+    expect(text(dialog.querySelector('.settings-config a'))).toBe('Configuration');
     const choose = async (setting: string, value: string) =>
       click(g, g.$$(`.settings [aria-label="${setting}"] button`).find((button) => text(button) === value) ?? null);
     await choose('view', 'cards');
@@ -938,8 +947,15 @@ describe('glass page: modals', () => {
     await choose('lobs', 'off');
     expect(g.$$('#dispatches tr.rowhead')).toHaveLength(4);
     expect(g.$$('#lobs .lob')).toHaveLength(0);
-    expect(g.$$('[data-helm-chat] button, [data-helm-chat] input, [data-helm-chat] select')).toEqual([]);
     expect(g.posts()).toEqual([]);
+    // Its link goes to Configuration, which shows each helm's chat as a value.
+    await click(g, g.$('.settings-config a'));
+    await g.go('#settings');
+    expect(g.$('.settings-dialog')).toBeNull();
+    expect(text(g.$('#settings .pagetitle'))).toBe('Configuration');
+    expect(text(g.$('#settings [data-helm-chat="fleet"]'))).toContain('full');
+    expect(g.$$('[data-helm-chat] button, [data-helm-chat] input, [data-helm-chat] select')).toEqual([]);
+    expect(text(g.$('#tabs a[data-tab="settings"]'))).toBe('Configuration');
     const reloaded = await page(acceptanceFleet(), { hash: '#dispatches', prefs: JSON.parse(g.window.localStorage.getItem('spyglass')!) });
     expect(reloaded.$$('#dispatches tr.rowhead')).toHaveLength(4);
     expect(reloaded.$$('#lobs .lob')).toHaveLength(0);
@@ -967,7 +983,7 @@ describe('glass page: PRs', () => {
       const state = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' }[p.badge.state];
       const chips = [...c.querySelectorAll('.gstate .gchip')].map(text);
       expect(chips).toEqual(p.badge.state === 'open' && p.badge.tone !== 'ok' ? [state, p.badge.text.toLowerCase()] : [state]);
-      expect(text(c.querySelector('.gactions a.open'))).toBe('↗ Open');
+      expect(openLabel(c.querySelector('.gactions a.open'))).toBe('↗ Open');
       // Title, status, meta, buttons, nothing more: merge readiness, the watch and the gate are in the modal.
       expect(c.querySelectorAll(':scope > .gline')).toHaveLength(4);
     }
@@ -1035,7 +1051,8 @@ describe('glass page: PRs', () => {
   });
 
   it('titles: a PR card leads with its title and puts the number on line 2; no title shows the number alone', async () => {
-    for (const hash of ['#deck', '#prs']) {
+    // PR cards live on the PRs tab; the deck has none.
+    for (const hash of ['#prs']) {
       const g = await page(everyAttentionFleet(), { hash, prefs: { view: 'cards' } });
       if (hash === '#prs') await openStacks(g);
       const cards = g.$$(`${hash} .card:not(.stackcard)`).filter((c) => c.querySelector('.pricon'));
@@ -1059,9 +1076,6 @@ describe('glass page: PRs', () => {
     const head = heading(table.$$('#prs th[colspan]').find((h) => text(h).startsWith('#41'))!);
     expect(text(head)).toBe('#41 → #42 → #43 · floor main · open');
     expect(titled([...head.querySelectorAll('span')])).toEqual(want);
-    const deck = await page(everyAttentionFleet());
-    const line = deck.$$('#deck .deckline').find((l) => text(l).startsWith('#41 →'))!;
-    expect(titled([...line.querySelectorAll('b > span')])).toEqual(want);
     const modal = await page(acceptanceFleet());
     await openRow(modal, '#prs', '#42');
     const nums = [...modal.$('#modalbox')!.querySelectorAll('[title]')].filter((e) => /^#\d+$/.test(text(e)));
@@ -1091,20 +1105,20 @@ describe('glass page: PRs', () => {
 });
 
 describe('glass page: On deck', () => {
-  it('shows decisions (no pr:* kinds), in flight, landed, reports, traps, and PR stacks as six full-width sections', async () => {
+  it('shows decisions (no pr:* kinds), in flight, landed, reports and traps as five full-width sections, and no PRs', async () => {
     const g = await page(everyAttentionFleet());
     const sections = g.$$('#deck .deckgrid > section');
     // The decisions heading carries the unread count as a badge.
     const heading = (s: Element) => text(s.querySelector('h2')).replace(/\d+$/, '');
-    expect(sections.map(heading)).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →', 'PRs →']);
+    expect(sections.map(heading)).toEqual(['decisions', 'in flight →', 'Landed · 24h →', 'reports →', 'traps →']);
     // Only raw questions (and framed decisions) are rows; PR kinds stay with the PRs.
     const rows = [...sections[0]!.querySelectorAll('.drow')];
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.querySelector('.badge'))).toBe(true);
     expect(text(sections[0]!.querySelector('h2 .dbadge'))).toBe(String(rows.length));
-    // PR standing rides the stack line.
-    expect(text(sections[5]!)).toContain('#41 → #42 → #43 · next #41');
-    expect(text(sections[5]!.querySelector('.deckmore'))).toBe('+1 more →');
+    // PRs live on the PRs tab, as stack cards: the deck shows none.
+    expect(g.$$('#deck .prcard, #deck .stackcard')).toHaveLength(0);
+    expect(text(g.$('#deck'))).not.toContain('#41 → #42 → #43');
   });
 
   it('a queued in-flight row shows the queued badge, its queue time, and its trap address', async () => {
@@ -1112,7 +1126,7 @@ describe('glass page: On deck', () => {
     const flight = g.$$('#deck section')[1]!;
     // Two lines: the instruction and its status chip; the repo and trap, with the queue time at the right.
     const line = [...flight.querySelectorAll('.deckrow')].find((l) => text(l).includes('dddddddd'))!;
-    expect(text(line.querySelector('.gchip'))).toBe('queued');
+    expect(line.querySelector('.verb-queued')?.getAttribute('aria-label')).toContain('Queued');
     expect(text(line.querySelector('.gtext'))).toBe('api · 🪤 wt:t2');
     expect(text(line.querySelector('.gright'))).toBe('60s ago');
   });
@@ -1179,19 +1193,16 @@ describe('glass page: On deck', () => {
     expect(text(g.$$('#deck section')[2]!.querySelector('.empty'))).toBe('none');
   });
 
-  it('cards view: acked PR standing dims its card', async () => {
+  it('cards view: shows no PR cards; the PRs tab has them', async () => {
     const g = await page(everyAttentionFleet(), { prefs: { view: 'cards' } });
-    const prs = g.$$('#deck section')[5]!;
-    const cards = [...prs.querySelectorAll('.card')];
-    const acked = cards.filter((c) => c.className.includes('acked')).map(cardNumber);
-    expect(acked).toEqual(['#42']);
-    expect(cards.find((c) => cardNumber(c) === '#42')!.className).toContain('quiet');
-    expect(cards.flatMap((c) => [...c.querySelectorAll('.gstate .gchip')].map(text))).toContain('conflicts');
+    expect(g.$$('#deck .prcard, #deck .stackcard')).toHaveLength(0);
+    await g.go('#prs');
+    expect(g.$$('#prs .stackcard').length).toBeGreaterThan(0);
   });
 
   it('an empty fleet: every section says it is empty, the daemon is down', async () => {
     const g = await page(emptyFleet());
-    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'none', 'none']);
+    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'none']);
     expect(text(g.$('#chips'))).toBe('daemon down');
   });
 });
@@ -1202,7 +1213,8 @@ describe('glass page: header', () => {
     d.viewer = { onMachine: true, windowFocus: true, machine: 'studio', device: 'desktop' };
     const g = await page(d);
     const chip = g.$('#chips .chip.click')!;
-    expect(text(chip)).toBe('⛵ claude @ web helm fleet · chat full 30s ago');
+    // The helm's chat is Configuration's, not the chip's.
+    expect(text(chip)).toBe('⛵ claude @ web helm fleet 30s ago');
     expect(chip.querySelector('.ok')).toBeTruthy();
     await click(g, chip);
     expect(text(g.$('#modalbox h3'))).toBe('⛵ claude @ web');
