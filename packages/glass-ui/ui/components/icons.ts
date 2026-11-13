@@ -14,7 +14,7 @@ const svg = (body: string) =>
   html`<svg class="navicon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: body }}></svg>`;
 
 /** The dispatch kind: a small fish shared by navigation, cards, chips and notices. */
-export const DispatchIcon = html`<svg class="dispatch-icon navicon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12C11 4 17 4 22 12C17 20 11 20 7 12Z"/><path d="m7 12-5-4v8zM16 6.5c-3 3-3 8 0 11"/><circle cx="18" cy="11" r="1" fill="currentColor" stroke="none"/></svg>`;
+export const DispatchIcon = html`<svg class="dispatch-icon navicon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12-4-4v8z"/><ellipse cx="13" cy="12" rx="8" ry="5"/><circle cx="17" cy="11.5" r=".8" fill="currentColor" stroke="none"/></svg>`;
 
 /** Each view's icon. Configuration (the `settings` tab) is lobstah's own settings: sliders, apart from the glass's gear. */
 export const TAB_ICON: Record<GlassTab, Children> = {
