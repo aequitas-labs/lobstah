@@ -586,7 +586,10 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--inset);
+  background: var(--seg-on);
+}
+.todo-swipe-snooze {
+  flex-direction: column;
 }
 /* Read-only boxes drawn by hand: a done goal or Todo shows a green check,
    not the browser's greyed-out disabled checkbox. */
@@ -676,13 +679,11 @@ h2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2);
 }
-.todo-snooze-actions {
-  display: flex;
-  justify-content: flex-end;
+.todo-snooze-time {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-2);
-}
-.todo-snooze-actions .btn {
-  flex: 1;
+  align-items: start;
 }
 .todo-snooze-form input[type='text'] {
   background: var(--card);

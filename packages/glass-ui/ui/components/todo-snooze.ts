@@ -6,6 +6,7 @@ import type { Children } from '../html.js';
 import { html } from '../html.js';
 import { Button } from './button.js';
 import { Dialog } from './dialog.js';
+import { showToast } from './toast.js';
 
 /** Presets use the server's time parser, just like a typed time. */
 const SNOOZE_PRESETS: ReadonlyArray<{ label: string; until: string }> = [
@@ -13,11 +14,22 @@ const SNOOZE_PRESETS: ReadonlyArray<{ label: string; until: string }> = [
   { label: 'Tomorrow 09:00', until: 'tomorrow 09:00' },
 ];
 
+/** A resolved due time in the browser's zone, shared by the row and its save confirmation. */
+export function todoDueText(at: string): string {
+  const due = new Date(at);
+  const clock = due.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const near = due.getTime() - Date.now() < 6 * 86400_000;
+  const day = near
+    ? due.toLocaleDateString(undefined, { weekday: 'short' })
+    : due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${day} ${clock}`;
+}
+
 /** One snooze editor: anchored on desktop, a shared Dialog sheet below 700px. */
 export function TodoSnooze({ todo, anchor, onClose }: { todo: TodoView; anchor: HTMLElement | null; onClose: () => void }): Children {
   const [phone, setPhone] = useState(window.innerWidth < 700);
   const [until, setUntil] = useState('');
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const formBox = useRef<HTMLFormElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const title = `Snooze #${todo.id} until`;
   useEffect(() => {
@@ -60,17 +72,22 @@ export function TodoSnooze({ todo, anchor, onClose }: { todo: TodoView; anchor: 
       window.removeEventListener('resize', position);
     };
   }, [phone, anchor]);
-  const save = async (event: Event): Promise<void> => {
-    event.preventDefault();
-    const reason = await scheduleTodo(todo.groundsKey, todo.id, until);
-    setRefusal(reason ?? null);
+  const save = async (): Promise<string | undefined> => {
+    const reason = await scheduleTodo(todo.groundsKey, todo.id, until, (dueAt) =>
+      showToast(`Snoozed #${todo.id} until ${todoDueText(dueAt)}`),
+    );
     if (!reason) onClose();
+    return reason;
   };
-  const form = html`<form class="todo-snooze-form" onSubmit=${save}>
+  // Enter uses the same Button action as a click, including its pending and refusal state.
+  const submit = (event: Event): void => {
+    event.preventDefault();
+    formBox.current?.querySelector<HTMLButtonElement>('button[type="submit"]')?.click();
+  };
+  const form = html`<form class="todo-snooze-form" ref=${formBox} onSubmit=${submit}>
     <div class="todo-snooze-presets">${SNOOZE_PRESETS.map((preset) => html`<${Button} size=${phone ? 'lg' : 'md'} type="button" onClick=${() => setUntil(preset.until)}>${preset.label}<//>`)}</div>
-    <input type="text" name="until" placeholder="thu 14:00" aria-label=${title} value=${until} onInput=${(event: Event) => setUntil((event.target as HTMLInputElement).value)} />
-    <div class="todo-snooze-actions"><${Button} type="button" onClick=${onClose}>Cancel<//><${Button} variant="primary" type="submit" disabled=${!until.trim()}>Snooze<//></div>
-    ${refusal && html`<div class="bad" role="alert">${refusal}</div>`}
+    <div class="todo-snooze-time"><input type="text" name="until" placeholder="thu 14:00" aria-label=${title} value=${until} onInput=${(event: Event) => setUntil((event.target as HTMLInputElement).value)} />
+    <${Button} variant="primary" size=${phone ? 'lg' : 'md'} type="submit" action=${save} sending="Snoozing…" disabled=${!until.trim()}>Snooze<//></div>
   </form>`;
   return createPortal(
     phone

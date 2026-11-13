@@ -145,6 +145,47 @@ describe('snoozing a todo', () => {
     expect(post.headers['x-lobstah-token']).toBe('page-token');
   });
 
+  it('keeps one save pending, then closes the editor and announces the resolved time', async () => {
+    let finish!: (answer: { status: number; body: unknown }) => void;
+    const g = await open([todo({ id: 4 })], '#todos', {
+      post: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await snooze(g, 4);
+    await clickIn(g, editor(g), '+2h');
+    const save = [...editor(g).querySelectorAll('button')].find((button) => button.textContent === 'Snooze') as HTMLButtonElement;
+    save.click();
+    await g.settle();
+    expect(save.disabled).toBe(true);
+    expect(save.getAttribute('aria-busy')).toBe('true');
+    save.click();
+    expect(g.posts()).toHaveLength(1);
+    const dueAt = new Date(NOW + 2 * HOUR).toISOString();
+    finish({ status: 201, body: { ok: true, dueAt } });
+    await g.settle();
+    expect(editor(g)).toBeNull();
+    expect(g.$('[role="status"]')?.textContent).toMatch(/^Snoozed #4 until \w{3} \d{2}:\d{2}$/);
+  });
+
+  it('keeps a refused time editable and allows another attempt', async () => {
+    let attempts = 0;
+    const g = await open([todo({ id: 4 })], '#todos', {
+      post: () =>
+        ++attempts === 1
+          ? { status: 400, body: { ok: false, reason: "couldn't read 'mon 9'" } }
+          : { status: 201, body: { ok: true, dueAt: new Date(NOW + HOUR).toISOString() } },
+    });
+    await snooze(g, 4);
+    await clickIn(g, editor(g), '+2h');
+    await clickIn(g, editor(g), 'Snooze');
+    expect(editor(g).querySelector('[role="alert"]')?.textContent).toBe("couldn't read 'mon 9'");
+    await clickIn(g, editor(g), 'Snooze');
+    expect(editor(g)).toBeNull();
+    expect(attempts).toBe(2);
+  });
+
   it('the +2h preset sends a duration', async () => {
     const g = await open([todo({ id: 4 })]);
     await snooze(g, 4);
@@ -152,12 +193,13 @@ describe('snoozing a todo', () => {
     expect((editor(g).querySelector('input[name=until]') as HTMLInputElement).value).toBe('2h');
   });
 
-  it('Snooze is disabled until there is a time, and Cancel closes the editor', async () => {
+  it('Snooze is disabled until there is a time, and clicking outside closes the editor', async () => {
     const g = await open([todo({ id: 4 })]);
     await snooze(g, 4);
     const save = [...editor(g).querySelectorAll('button')].find((b) => b.textContent === 'Snooze') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    await clickIn(g, editor(g), 'Cancel');
+    g.document.body.dispatchEvent(new g.window.Event('pointerdown', { bubbles: true }) as unknown as Event);
+    await g.settle();
     expect(editor(g)).toBeNull();
   });
 
