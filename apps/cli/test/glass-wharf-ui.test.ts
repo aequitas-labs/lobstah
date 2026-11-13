@@ -41,14 +41,20 @@ async function open(hash = '#deck') {
     url: 'https://glass.test/' + hash,
     width: 1280,
     height: 800,
-    settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true },
+    settings: {
+      enableJavaScriptEvaluation: true,
+      suppressInsecureJavaScriptEnvironmentWarning: true,
+      disableJavaScriptFileLoading: true,
+      disableCSSFileLoading: true,
+    },
   } as ConstructorParameters<typeof Window>[0]);
   windows.push(window);
   const calls: Array<{ path: string; method: string; body?: string; credentials?: string }> = [];
   const w = window as unknown as Record<string, unknown>;
   w.fetch = async (path: string, init: RequestInit = {}) => {
     calls.push({ path, method: init.method ?? 'GET', body: init.body as string | undefined, credentials: init.credentials });
-    const answer = (status: number, body: unknown) => new window.Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
+    const answer = (status: number, body: unknown) =>
+      new window.Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
     if (path === '/api/glass') return answer(200, snapshot);
     if (path === '/api/glass/dispatches') return answer(200, jobs);
     if (path.includes('/files/')) return answer(200, markdown);
