@@ -64,12 +64,11 @@ export function SettingsBody({ prefs }: { prefs: GlassPrefs }) {
   }`;
 }
 
-function helmModal(h: GlassHelm) {
+export function HelmBody({ helm: h }: { helm: GlassHelm }) {
   const sessionRow = h.sessionId ? resumeRow(h) : null;
   const stale = Date.now() - Date.parse(h.heartbeatAt) > 1800000;
   return [
-    close,
-    html`<h3>⛵ ${h.man}</h3><div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
+    html`<div class="sub">helm of <b>${h.grounds}</b> (${(h.repos || []).join(', ')})</div><div class="sub">${h.cwd ?? '?'}${h.host && ' · ' + h.host}</div><div class="sub">session ${h.sessionId ?? ''} · signed on ${Age(h.signedOnAt)} ago · heartbeat <span class=${stale ? 'warn' : 'ok'}>${Age(h.heartbeatAt)} ago</span></div>`,
     html`<${WorkerDetails} worker=${h} />`,
     sessionRow && [html`<div class="sec">open this session</div>`, sessionRow],
     h.transcript && [html`<div class="sec">transcript</div>`, cmdRow(h.transcript)],
@@ -281,7 +280,7 @@ export function Modal({
   if (modal.type === 'settings') return null;
   if (modal.type === 'pr') return html`<${PrView} snapshot=${snapshot} prKey=${modal.key} />`;
   if (modal.type === 'review') return html`<${PrView} snapshot=${snapshot} prKey=${modal.key.replace('review:', 'pr:')} />`;
-  if (modal.type === 'helm') return helmModal(item as GlassHelm);
+  if (modal.type === 'helm') return null;
   if (modal.type === 'dispatch') {
     const report = dispatchReport(snapshot, item as GlassDispatchSummary);
     return dispatchModal(item as GlassDispatchSummary, report, detail);

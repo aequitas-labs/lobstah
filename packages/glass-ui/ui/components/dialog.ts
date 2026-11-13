@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 import type { Children } from '../html.js';
 import { html } from '../html.js';
+import { usePhoneBack } from '../overlay-history.js';
 import { Button } from './button.js';
 
 /**
@@ -15,15 +16,19 @@ export function Dialog({
   icon,
   onClose,
   cls,
+  id: elementId,
   children,
 }: {
   title: string;
   icon?: Children;
   onClose: () => void;
   cls?: string;
+  id?: string;
   children: Children;
 }): Children {
   const box = useRef<HTMLDivElement>(null);
+  const touch = useRef<{ x: number; y: number } | null>(null);
+  usePhoneBack(onClose);
   useEffect(() => {
     const back = document.activeElement as HTMLElement | null;
     const overflow = document.body.style.overflow;
@@ -64,8 +69,16 @@ export function Dialog({
   }, []);
   const id = 'dialog-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return html`<div class="dialog-scrim" onClick=${(e: Event) => e.target === e.currentTarget && onClose()}>
-    <div class=${['dialog', cls].filter(Boolean).join(' ')} role="dialog" aria-modal="true" aria-labelledby=${id} tabindex="-1" ref=${box} onClick=${(e: Event) => e.stopPropagation()}>
-      <div class="dialog-head"><h3 id=${id}>${icon}${title}</h3><${Button} variant="icon" class="dialog-close" label="close" onClick=${onClose}>×<//></div>
+    <div id=${elementId} class=${['dialog', cls].filter(Boolean).join(' ')} role="dialog" aria-modal="true" aria-labelledby=${id} tabindex="-1" ref=${box} onClick=${(e: Event) => e.stopPropagation()}>
+      <div class="dialog-head" onTouchStart=${(event: TouchEvent) => {
+        const point = event.touches[0];
+        touch.current = innerWidth < 700 && point ? { x: point.clientX, y: point.clientY } : null;
+      }} onTouchEnd=${(event: TouchEvent) => {
+        const start = touch.current,
+          end = event.changedTouches[0];
+        touch.current = null;
+        if (start && end && end.clientY - start.y > 60 && end.clientY - start.y > Math.abs(end.clientX - start.x) * 1.5) onClose();
+      }}><h3 id=${id}>${icon}${title}</h3><${Button} variant="icon" class="dialog-close" label="close" onClick=${onClose}>×<//></div>
       <div class="dialog-body">${children}</div>
     </div>
   </div>`;

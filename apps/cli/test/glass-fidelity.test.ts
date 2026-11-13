@@ -271,6 +271,7 @@ function capture(g: GlassDom): Record<string, string> {
   if (g.$('#overlay')!.className !== 'open') out.modalbox = '(closed)';
   // Settings left the overlay for a dialog (components/dialog.ts); glass-page tests it.
   if (g.$('.settings-dialog') || (out.modalbox !== '(closed)' && g.$('#modalbox .settings'))) out.modalbox = '(settings in a dialog)';
+  if (g.$('.helm-dialog') || text(g.$('#modalbox h3')).startsWith('⛵')) out.modalbox = '(helm in a dialog)';
   const tab = activeTab(g);
   out.tab = tab;
   // The glass intentionally grew a trap-window action in these two views.
@@ -288,7 +289,7 @@ function capture(g: GlassDom): Record<string, string> {
     const el = g.$('#' + id) as HTMLElement | null;
     out[`${id}.display`] = el ? `${el.style.display}|${el.className}` : '<missing>';
   }
-  if (out.modalbox === '(settings in a dialog)') out['overlay.display'] = '(settings in a dialog)';
+  if (out.modalbox === '(settings in a dialog)' || out.modalbox === '(helm in a dialog)') out['overlay.display'] = out.modalbox;
   for (const id of ['f-lane', 'f-repo', 'f-verb', 'f-kind', 'f-q']) out[`${id}.value`] = (g.$('#' + id) as HTMLInputElement).value;
   out.chain = String((g.$('#f-chain') as HTMLInputElement).checked);
   out.tabs = g.$$('#tabs a, .tabpage').map((a) => `${a.getAttribute('href') ?? a.id}:${a.className}`).join(' ');

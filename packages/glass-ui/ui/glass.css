@@ -3595,3 +3595,63 @@ footer .glass-brand {
     font-size: 20px;
   }
 }
+
+#overlay.dialog-overlay {
+  padding: 0;
+  background: none;
+  overflow: visible;
+}
+.helm-dialog {
+  width: min(var(--modal-width), 100%);
+}
+.phone-menu-dialog .phonemenu {
+  padding: 0;
+  border: 0;
+  max-height: none;
+}
+.lbcontrols {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lightbox .lbcontrols .lbclose {
+  position: static;
+}
+.lbcount {
+  color: var(--fg);
+  font-size: 12px;
+}
+.lightbox .lbprev,
+.lightbox .lbnext {
+  position: absolute;
+  top: 50%;
+}
+.lightbox .lbprev {
+  left: 12px;
+}
+.lightbox .lbnext {
+  right: 12px;
+}
+@media (max-width: 699px) {
+  .dialog-head {
+    touch-action: pan-x;
+  }
+}
+
+.bottombar:has(.phone-menu-dialog) {
+  z-index: var(--layer-modal);
+}
+@media (max-width: 699px) {
+  .dialog::before {
+    content: '';
+    display: block;
+    width: 32px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--line);
+    margin: 0 auto 10px;
+  }
+}

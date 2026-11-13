@@ -11,6 +11,7 @@ import { capabilities, visibleTabs } from '../backend.js';
 import { host } from '../host.js';
 import { getState } from '../store.js';
 import { prsNeedingYou } from './prs.js';
+import { Dialog } from './dialog.js';
 import { Button } from './button.js';
 import { ITEM_ICON, TAB_ICON } from './icons.js';
 
@@ -185,12 +186,10 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
     const resize = () => {
       if (window.matchMedia(ALL_TABS_FIT).matches) setOpen(false);
     };
-    document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', key, true);
     window.addEventListener('hashchange', close);
     window.addEventListener('resize', resize);
     return () => {
-      document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', key, true);
       window.removeEventListener('hashchange', close);
       window.removeEventListener('resize', resize);
@@ -256,9 +255,6 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
   useLayoutEffect(() => {
     if (mode === 'search') search.current?.focus();
     if (mode !== 'menu') return;
-    const outside = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setMode('bar');
-    };
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
@@ -266,11 +262,9 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
       setMode('bar');
     };
     const away = () => setMode('bar');
-    document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', key, true);
     window.addEventListener('hashchange', away);
     return () => {
-      document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', key, true);
       window.removeEventListener('hashchange', away);
     };
@@ -297,7 +291,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
   return html`<div class="bottombar" ref=${root}>
     ${
       mode === 'menu' &&
-      html`<div class="phonemenu" id="phone-menu" role="menu" aria-label="Spyglass menu">
+      html`<${Dialog} title="Menu" cls="phone-menu-dialog" onClose=${() => setMode('bar')}><div class="phonemenu" id="phone-menu" role="menu" aria-label="Spyglass menu">
         <div class="pmsec">views</div>
         <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${() => setMode('bar')}>${TAB_ICON[t]}${TAB_LABEL[t]}</a>`)}</nav>
         ${fleet && html`<div class="pmsec">fleet</div><div class="pmchips">${fleet}</div>`}
@@ -306,7 +300,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
           setMode('bar');
           showModal('settings', 'browser');
         }}>${ITEM_ICON.settings}Settings<//>${host().signOut && html`<${Button} role="menuitem" onClick=${() => host().signOut!()}>${ITEM_ICON.signOut}Sign out<//>`}</div>
-      </div>`
+      </div><//>`
     }
     <nav class="bbrow" aria-label="Spyglass">
       ${link('deck', TAB_ICON.deck, count(unread, badgeLabel('deck', unread)))}

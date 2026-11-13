@@ -477,7 +477,28 @@ export async function sendAnswer(key: string): Promise<string | undefined> {
 export const markStale = (): void => setState({ stale: true });
 
 /** Show an image in the in-page overlay. */
-export const openLightbox = (src: string, name: string): void => setState({ lightbox: { src, name } });
+export const openLightbox = (src: string, name: string, origin?: Element): void => {
+  const selector = '.mdimg img, .thumb img, .dimg img';
+  const thumbnails = [...document.querySelectorAll<HTMLImageElement>(selector)];
+  const image = origin?.querySelector<HTMLImageElement>('img') ?? thumbnails.find((image) => image.getAttribute('src') === src);
+  const container =
+    image?.closest('.github-description, .reportview, .rsheet, .dmodal, .drow, .card, .detail-scroll, #modalbox') ?? image?.closest('.md');
+  const images = container
+    ? [...container.querySelectorAll<HTMLImageElement>(selector)].map((image) => ({
+        src: image.getAttribute('src')!,
+        name: image.alt || image.getAttribute('src')!,
+      }))
+    : [{ src, name }];
+  const index = images.findIndex((image) => image.src === src);
+  setState({ lightbox: index >= 0 ? { src, name, images, index } : { src, name } });
+};
+/** Step only within the images of the card, report or description that opened the overlay. */
+export const stepLightbox = (direction: -1 | 1): void => {
+  const box = getState().lightbox;
+  if (!box?.images || box.images.length < 2) return;
+  const index = ((box.index ?? 0) + direction + box.images.length) % box.images.length;
+  setState({ lightbox: { ...box, ...box.images[index]!, index } });
+};
 export const closeLightbox = (): void => setState({ lightbox: null });
 
 let prPushed = false;

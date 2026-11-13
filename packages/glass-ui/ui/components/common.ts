@@ -370,7 +370,7 @@ export const ImageThumb = (src: string, name: string, cls = 'thumb') =>
     title=${'view ' + name}
     onClick=${(e: Event) => {
       stop(e);
-      openLightbox(src, name);
+      openLightbox(src, name, e.currentTarget as Element);
     }}
   >
     <img src=${src} alt=${name} loading="lazy" />
