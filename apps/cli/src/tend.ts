@@ -48,6 +48,9 @@ import {
   prStandingKinds,
   queuedDescriptor,
   storedDescriptor,
+  storageGrounds,
+  groundsList,
+  standingDecisions,
   readEvidence,
   readPr,
   readPrs,
@@ -93,6 +96,7 @@ import type {
   TendAttentionKind,
   PoolView,
   HeavyView,
+  DecisionMeta,
 } from '@lobstah/core';
 import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
@@ -109,6 +113,8 @@ import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import type { RepairChore } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
+import { decisionHash } from '@lobstah/glass-ui';
+import { glassPort, glassUrl } from './glass-lifecycle.js';
 import { todoOverdueLine, todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
 
 /** Heartbeats are written every daemon tick; well past that means down. */
@@ -644,6 +650,77 @@ export interface TendReport {
   todos?: TodoView[];
   /** A short note when to-dos sit past `[helm].todoStaleDays`; the helm decides what to do. */
   todoNote?: string;
+  /** Every unanswered helm card and run card, oldest first: never paced, never acked away. */
+  openCards?: TendOpenCard[];
+}
+
+/** One unanswered card in tend's "Open cards" section. */
+export interface TendOpenCard {
+  /** `run` for a run card the glass runs once confirmed; `card` for any other card. */
+  kind: 'card' | 'run';
+  /** `decision:<rid>`. */
+  key: string;
+  title: string;
+  /** The grounds the card belongs to, as people name it; absent when no rule places it. */
+  grounds?: string;
+  askedAt: string;
+  ageSecs: number;
+  /** The card in the local glass. */
+  link: string;
+  /** Changes with every ask; the Stop hook re-lists a card when it changes. */
+  stateHash: string;
+}
+
+/**
+ * The storage grounds a card belongs to. Explicit card ownership wins; older
+ * cards fall back to their dispatch's grounds, then their repo's grounds,
+ * then the only grounds there is. Undefined when none of those places it.
+ */
+export function cardGrounds(card: DecisionMeta, cfg: Config): string | undefined {
+  const descriptor = card.dispatch ? storedDescriptor(card.dispatch, card.lane ?? 'work') : undefined;
+  const grounds = card.grounds ?? descriptor?.target?.grounds;
+  if (grounds) return storageGrounds(grounds, cfg);
+  const scopes = groundsList(cfg);
+  const repo = card.repo ?? descriptor?.repo;
+  if (repo) return scopes.find((scope) => scope.repos.includes(repo))?.name;
+  return scopes.length === 1 ? scopes[0]!.name : undefined;
+}
+
+/** Every standing card on this machine, oldest first, as tend lists it. */
+export function openCardRows(cfg: Config, now: number = Date.now()): TendOpenCard[] {
+  const base = glassUrl(glassPort());
+  return standingDecisions(now)
+    .map((card): TendOpenCard => {
+      const grounds = cardGrounds(card, cfg);
+      return {
+        kind: card.run ? 'run' : 'card',
+        key: card.key,
+        title: card.title.replace(/\s+/g, ' '),
+        ...(grounds ? { grounds: displayGrounds(grounds, cfg) } : {}),
+        askedAt: card.askedAt,
+        ageSecs: Math.max(0, Math.round((now - Date.parse(card.askedAt)) / 1000)),
+        link: `${base}/${decisionHash(card.key)}`,
+        stateHash: card.stateHash,
+      };
+    })
+    .sort((a, b) => a.askedAt.localeCompare(b.askedAt));
+}
+
+/** The "Open cards" section: tend prints it, and the Stop hook prints the same section for its own cards. */
+export function renderOpenCards(cards: readonly TendOpenCard[]): string {
+  const withGrounds = new Set(cards.map((card) => card.grounds)).size > 1;
+  return toonTable(
+    'open-cards',
+    cards.map((card) => ({
+      kind: card.kind,
+      key: card.key,
+      ...(withGrounds ? { grounds: card.grounds ?? '' } : {}),
+      title: card.title,
+      age: ageLabel(card.ageSecs * 1000),
+      link: card.link,
+    })),
+    ['kind', 'key', ...(withGrounds ? ['grounds'] : []), 'title', 'age', 'link'],
+  );
 }
 
 function readJson<T>(file: string): T | undefined {
@@ -1078,6 +1155,12 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     // an unreadable to-do file never fails tend
   }
   const todoNote = [todoOverdueLine(todos), todoStaleLine(todos)].filter(Boolean).join('\n') || undefined;
+  let openCards: TendOpenCard[] = [];
+  try {
+    openCards = openCardRows(cfg, now);
+  } catch {
+    // an unreadable card never fails tend
+  }
   const helms = listHelms().map((h) => ({
     chat: helmChat(h, cfg),
     grounds: displayGrounds(h.grounds, cfg),
@@ -1146,6 +1229,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     ...(pools.length > 0 ? { pools } : {}),
     ...(todos.length > 0 ? { todos } : {}),
     ...(todoNote ? { todoNote } : {}),
+    ...(openCards.length > 0 ? { openCards } : {}),
   };
 }
 
@@ -1333,6 +1417,10 @@ export function renderTend(r: TendReport): string {
         ['kind', 'ageMins', 'text'],
       ),
     );
+  }
+  if (r.openCards?.length) {
+    lines.push('');
+    lines.push(renderOpenCards(r.openCards));
   }
   if (r.todos?.length) {
     lines.push('');

@@ -1,19 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import {
-  ageLabel,
-  atomicRenameSync,
-  groundsList,
-  lobstahHome,
-  standingDecisions,
-  storageGrounds,
-  storedDescriptor,
-  uniqueTempPath,
-} from '@lobstah/core';
-import type { Config, DecisionMeta, HelmRegistration } from '@lobstah/core';
-import { decisionHash } from '@lobstah/glass-ui';
-import { glassPort, glassUrl } from './glass-lifecycle.js';
+import { atomicRenameSync, displayGrounds, lobstahHome, storageGrounds, uniqueTempPath } from '@lobstah/core';
+import type { Config, HelmRegistration } from '@lobstah/core';
+import { openCardRows, renderOpenCards } from './tend.js';
+import type { TendOpenCard } from './tend.js';
 
 /** The last Stop listing of a particular version of a card. */
 interface CardListing {
@@ -21,39 +12,42 @@ interface CardListing {
   listedAt: number;
 }
 
-/** Explicit card ownership wins; older cards fall back to their dispatch or the only grounds. */
-function cardBelongsToHelm(card: DecisionMeta, helm: HelmRegistration, config: Config): boolean {
-  const descriptor = card.dispatch ? storedDescriptor(card.dispatch, card.lane ?? 'work') : undefined;
-  const grounds = card.grounds ?? descriptor?.target?.grounds;
-  if (grounds) return storageGrounds(grounds, config) === storageGrounds(helm.grounds, config);
-  const repo = card.repo ?? descriptor?.repo;
-  if (repo) return helm.repos.includes(repo);
-  const scopes = groundsList(config);
-  return scopes.length === 1 && scopes[0]!.name === storageGrounds(helm.grounds, config);
+/** Where a grounds' Stop listings are kept, so pacing holds across Stop processes. */
+function listingsFile(grounds: string): string {
+  return path.join(lobstahHome(), 'helm', '.cards', `${createHash('sha256').update(grounds).digest('hex')}.json`);
 }
 
-/** List due open cards as data only; consume records delivery, while peeks leave pacing untouched. */
-export function openCardsAtStop(helm: HelmRegistration, config: Config, consume: boolean, now: number = Date.now()): string {
-  const grounds = storageGrounds(helm.grounds, config);
-  const file = path.join(lobstahHome(), 'helm', '.cards', `${createHash('sha256').update(grounds).digest('hex')}.json`);
-  let listings: Record<string, CardListing> = {};
+function readListings(file: string): Record<string, CardListing> {
   try {
     const stored = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, CardListing>;
-    if (stored && typeof stored === 'object' && !Array.isArray(stored)) listings = stored;
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) return stored;
   } catch {
     /* A first listing, or damaged pacing state, must not hide a card. */
   }
-  const cards = standingDecisions(now).filter((card) => cardBelongsToHelm(card, helm, config));
+  return {};
+}
+
+/** A card is due at Stop when it is new, changed, or not listed within `remindSecs`. */
+function isDue(card: TendOpenCard, listed: CardListing | undefined, remindMs: number, now: number): boolean {
+  return (
+    !listed ||
+    listed.stateHash !== card.stateHash ||
+    !Number.isFinite(listed.listedAt) ||
+    (remindMs > 0 && now - listed.listedAt >= remindMs)
+  );
+}
+
+/**
+ * Tend's open-cards section for the helm's grounds, paced: only the cards due
+ * at this Stop. Consume records delivery; a peek leaves pacing untouched.
+ */
+export function openCardsAtStop(helm: HelmRegistration, config: Config, consume: boolean, now: number = Date.now()): string {
+  const grounds = storageGrounds(helm.grounds, config);
+  const file = listingsFile(grounds);
+  const listings = readListings(file);
+  const cards = openCardRows(config, now).filter((card) => card.grounds === displayGrounds(grounds, config));
   const remindMs = (config.remindSecs ?? 900) * 1000;
-  const due = cards.filter((card) => {
-    const listed = listings[card.key];
-    return (
-      !listed ||
-      listed.stateHash !== card.stateHash ||
-      !Number.isFinite(listed.listedAt) ||
-      (remindMs > 0 && now - listed.listedAt >= remindMs)
-    );
-  });
+  const due = cards.filter((card) => isDue(card, listings[card.key], remindMs, now));
   if (due.length === 0) return '';
   if (consume) {
     const next = Object.fromEntries(cards.flatMap((card) => (listings[card.key] ? [[card.key, listings[card.key]]] : [])));
@@ -63,12 +57,5 @@ export function openCardsAtStop(helm: HelmRegistration, config: Config, consume:
     fs.writeFileSync(temporary, JSON.stringify(next));
     atomicRenameSync(temporary, file);
   }
-  const base = glassUrl(glassPort());
-  return [
-    'Open cards:',
-    ...due.map(
-      (card) =>
-        `- ${card.run ? 'run' : 'card'} ${card.key.replace(/^decision:/, '')} · ${card.title.replace(/\s+/g, ' ')} · ${ageLabel(Math.max(0, now - Date.parse(card.askedAt)))} · ${base}/${decisionHash(card.key)}`,
-    ),
-  ].join('\n');
+  return renderOpenCards(due);
 }
