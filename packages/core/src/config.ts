@@ -309,6 +309,8 @@ export interface HeavyRepoConfig {
 }
 
 export interface SoakConfig {
+  /** Minutes without a catch or activity before normal sign-off and harness shutdown; 0 disables. */
+  idleStowMins: number;
   /** Move limited CLI catches to the other available harness; never enabled implicitly. */
   swapOnLimit: boolean;
   /** Sign-on and first-park window for Codex throws; --timeout overrides it. */
@@ -580,6 +582,7 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
 
 function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
+  if (!Number.isInteger(soak.idleStowMins) || soak.idleStowMins < 0) throw new Error('soak.idleStowMins must be a nonnegative whole number');
   if (!Number.isInteger(soak.codexStartSecs) || soak.codexStartSecs < 1) throw new Error('soak.codexStartSecs must be a positive whole number');
   for (const key of ['codexClaimWakeSecs', 'codexClaimReleaseSecs'] as const) {
     if (!Number.isInteger(soak[key]) || soak[key] < 1) throw new Error(`soak.${key} must be a positive whole number`);
@@ -627,6 +630,7 @@ function parseMergeMethod(value: unknown, key: string): 'merge' | 'squash' | 're
 }
 
 export const DEFAULT_SOAK: SoakConfig = {
+  idleStowMins: 60,
   swapOnLimit: false,
   codexStartSecs: 600,
   acceptWharfStarts: false,

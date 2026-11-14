@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicRenameSync, uniqueTempPath, lobstahHome } from './paths.js';
-import { hasOpenCatch, readSessionClaim, type TrapRegistration } from './soak.js';
+import { heartbeatTrap, hasOpenCatch, readSessionClaim, type TrapRegistration } from './soak.js';
 import { laneOf } from './worktrees.js';
 import { readStatusLog } from './status.js';
 import { readSessionWatcher } from './session-watcher.js';
@@ -60,6 +60,7 @@ export function trapWorkingStop(reg: TrapRegistration, stopHookActive = false, n
 
 /** Tool activity clears idleness even when the normal activity beat is throttled. */
 export function resumeTrapTurn(reg: TrapRegistration, newUserTurn = false): void {
+  if (reg.idleSince) heartbeatTrap(reg.trapId, { active: true });
   const state = read(reg);
   if (state?.sessionId === reg.sessionId && (state.idleSince || newUserTurn)) {
     delete state.idleSince;

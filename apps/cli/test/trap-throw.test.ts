@@ -91,7 +91,7 @@ const only = (): TrapRegistration => {
 function stowedTrap(): TrapRegistration {
   expect(lobstah(primary, 'soak', '--session', SESSION, '--harness', 'claude', '--name', 'amber-gull').status).toBe(0);
   const reg = only();
-  lobstah(reg.worktree, 'soak', '--session', SESSION, '--wait', '--timeout', '1');
+  lobstah(reg.worktree, 'soak', '--session', SESSION, '--wait', '--timeout', '0');
   return reg;
 }
 function stow(reg: TrapRegistration, keep: boolean): void {
@@ -115,7 +115,7 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
       const ticket = /--ticket (\S+)/.exec(launch.argv.at(-1)!)![1]!;
       const on = lobstah(launch.cwd, 'soak', '--ticket', ticket, '--session', session, '--harness', launch.argv[0]!);
       expect(on.status, on.stderr || on.stdout).toBe(0);
-      const park = lobstah(launch.cwd, 'soak', '--session', session, '--wait', '--timeout', '2');
+      const park = lobstah(launch.cwd, 'soak', '--session', session, '--wait', '--timeout', '0');
       waitOut.push(park.stdout);
     },
   });
@@ -123,6 +123,18 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
 const idle = (seen: TerminalLaunch[]) => (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => void seen.push(l) });
 
 describe('man throw <name>', () => {
+  processTest('a fresh throw skips saved history even on the same harness', async () => {
+    const reg = stowedTrap(); stow(reg, true);
+    claudeTranscript(reg.worktree, SESSION);
+    expect(planThrow(loadConfig(), { names: ['amber-gull'] })[0]?.action).toBe('resume');
+    const seen: TerminalLaunch[] = [];
+    const result = await throwTrap({ address: 'amber-gull', cfg: loadConfig(), fresh: true,
+      adapter: fakeTerminal(OTHER, seen), timeoutSecs: 30 });
+    expect(result.action).toBe('cold');
+    expect(seen[0]!.argv).not.toContain('--resume');
+    expect(result.registration.sessionId).toBe(OTHER);
+  });
+
   processTest('a Codex return supplies session folder trust for its soak-created checkout and reports it at launch', async () => {
     const reg = stowedTrap(); stow(reg, true);
     setRosterProfile(reg.trapId, { harness: 'codex' });
@@ -355,7 +367,7 @@ describe('man throw <name>', () => {
     const ticket = /--ticket (\S+)/.exec(seen[0]!.argv.at(-1)!)![1]!;
     const on = lobstah(reg.worktree, 'soak', '--ticket', ticket, '--session', OTHER, '--harness', 'codex');
     expect(on.status, on.stderr || on.stdout).toBe(0);
-    lobstah(reg.worktree, 'soak', '--session', OTHER, '--wait', '--timeout', '1');
+    lobstah(reg.worktree, 'soak', '--session', OTHER, '--wait', '--timeout', '0');
     expect(readTrap(reg.trapId)).toMatchObject({ sessionId: OTHER, harness: 'codex', firstParkedAt: expect.any(String) });
     expect(readReservation(reg.trapId)).toBeUndefined();
     expect(listNotices().some((n) => n.kind === 'trap-available' && n.refId === reg.trapId && !n.quiet)).toBe(true);

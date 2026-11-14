@@ -266,17 +266,20 @@ export function listNotices(limit = 20): Notice[] {
  * `wakes` narrows what is returned among the owned notices: an owned notice
  * it rejects (e.g. one older than the helm's sign-on) is consumed without
  * waking anyone. A quiet kind (QUIET_NOTICE_KINDS) is consumed the same way:
- * it shows in tend and the glass, and it never wakes.
+ * it shows in tend and the glass, and it never wakes. `includeQuietKinds`
+ * lets a caller include selected quiet state changes in its own summary.
  */
 export function unseenNotices(
   consume: boolean,
   filter?: (n: Notice) => boolean,
   wakes?: (n: Notice) => boolean,
+  /** Quiet notices to return for a non-waking summary, such as a Stop block. */
+  includeQuietKinds: readonly NoticeKind[] = [],
 ): Notice[] {
   const owned = consumeNotices(filter, consume);
   const progress = owned.some((n) => n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') ? dispatchProgress() : [];
   const waking = owned.filter((n) => {
-    if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return false;
+    if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return includeQuietKinds.includes(n.kind);
     if (n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') return progress.some((p) => p.id === n.refId && p.stateHash === n.stateHash);
     if (n.kind !== 'stack-ready') return true;
     const epoch = n.refId ? readStackEpochs()[n.refId] : undefined;

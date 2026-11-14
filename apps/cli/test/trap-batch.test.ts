@@ -58,7 +58,7 @@ function trap(n: number, name: string, live = false): TrapRegistration {
   const res = lobstah(primary, 'soak', '--session', session(n), '--harness', 'claude', '--name', name);
   expect(res.status, res.stderr).toBe(0);
   const reg = listTraps().find((t) => t.name === name)!;
-  lobstah(reg.worktree, 'soak', '--session', session(n), '--wait', '--timeout', '1');
+  lobstah(reg.worktree, 'soak', '--session', session(n), '--wait', '--timeout', '0');
   if (!live) expect(lobstah(reg.worktree, 'stow', '--session', session(n)).status).toBe(0);
   return reg;
 }
@@ -76,7 +76,7 @@ function fakeTerminal(seen: TerminalLaunch[], refuse: (l: TerminalLaunch) => boo
       const on = lobstah(launch.cwd, 'soak', '--ticket', ticket, '--session', s, '--harness', 'claude');
       expect(on.status, on.stderr || on.stdout).toBe(0);
       const reg = listTraps().find((t) => t.sessionId === s)!;
-      lobstah(reg.worktree, 'soak', '--session', s, '--wait', '--timeout', '1');
+      lobstah(reg.worktree, 'soak', '--session', s, '--wait', '--timeout', '0');
     },
   });
 }

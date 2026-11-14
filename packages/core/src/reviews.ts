@@ -522,7 +522,6 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
   } catch {
     return { error: `no review.md in ${dir}` };
   }
-  if (!body.trim()) return { error: 'review.md is empty' };
   let comments: ReviewComment[] | string = [];
   const file = path.join(dir, 'comments.json');
   if (fs.existsSync(file)) {
@@ -552,6 +551,7 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
       return { error: err instanceof Error ? err.message : 'invalid verdict.json' };
     }
   }
+  if (!body.trim() && verdict !== 'approve') return { error: 'review.md is empty' };
   return { body, comments, verdict, blocking };
 }
 
@@ -566,8 +566,8 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
     `2. For context beyond the diff, make a throwaway checkout of the PR head at exactly ${opts.checkout}: \`git fetch origin pull/${number}/head\`, then \`git worktree add --detach ${opts.checkout} FETCH_HEAD\`. Use no other path; lobstah removes it when the job ends. Never switch, commit to, or push this checkout's own branch.`,
     "3. Follow the repo's own rules: read any review guidance at the PR head (REVIEW.md, CONTRIBUTING.md, AGENTS.md, CLAUDE.md, .github/pull_request_template.md) and hold the change to it.",
     '4. Review it the way the reviewer would: correctness first, then risk, then clarity. No style nits unless they hide a bug. Follow any review rules appended below this brief too.',
-    "5. Judge the code alone. A merge gate, required check, submit or approval label, or CI status that is red, pending or older than the head isn't about the code: it never changes the verdict, and the review never mentions it or asks anyone to rerun it. A test that fails because of this change is a code finding: give its file and line.",
-    `6. Write three files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none); and \`verdict.json\` as \`{"verdict":"approve|comment|request_changes","blocking":[{"path":"<file>","line":<positive line>,"body":"<blocking finding>"}]}\`. Every blocking finding needs a file and line. Use request_changes for blockers in the code, approve when the code is sound with no blockers, otherwise comment. Approve must have no blockers; request_changes must have at least one.`,
+    "5. Judge the code alone. A merge gate, required check, submit or approval label, or CI status that is red, pending or older than the head isn't about the code: it never changes the verdict, and the review never mentions it or asks anyone to rerun it. Process items outside the diff—issue checklists, manual or real-world verification still to do, and whether you ran tests—never change the verdict or go in the body. A test that fails because of this change is a code finding: give its file and line.",
+    `6. Write three files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none); and \`verdict.json\` as \`{"verdict":"approve|comment|request_changes","blocking":[{"path":"<file>","line":<positive line>,"body":"<blocking finding>"}]}\`. Every blocking finding needs a file and line. Use request_changes for blockers in the code, comment only for real non-blocking findings in the diff, and approve when there are no blockers or inline comments worth posting. For approve, leave review.md empty or use at most one short line. Approve must have no blockers; request_changes must have at least one.`,
     '7. Do not post, approve, request changes, comment on, push to, or edit the PR. If you cannot review it (too large, missing context), say so in review.md.',
     `8. Report done: \`lobstah report ${opts.id} done "<one line>"\`.`,
   ].join('\n');

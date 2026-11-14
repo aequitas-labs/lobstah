@@ -45,6 +45,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--repo': { value: '<key>' },
       '--pool': { value: '<name>' },
       '--trap-any': {},
+      '--fresh': {},
+      '--continue': {},
       '--brief': { value: '<file>' },
       '--bait': { value: '<file>' },
       '--brief-text': { value: '<text>' },
@@ -70,7 +72,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
   heavy: { flags: { '--bg': {}, '--json': {} }, positionals: '[-- <command>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
+  send: { flags: { '--compact': {}, '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -323,8 +325,8 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 export const PROSE: Record<string, string> = {
   setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
 enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
-  dispatch: `Queue work; prints id. --session names the helm. --attach copies files; --for is sticky. --trap-any: queues immediately; daemon prefers free listeners, then starts stowed/new traps within the repo's cap. Never headless.
---pool: warm headless worktree, exclusive with --for/--trap-any. --pr: push to that open PR, open none. Alias: set --bait.`,
+  dispatch: `Queue work; prints id. --for is sticky; --trap-any waits for a free suitable trap, then starts a stowed/new trap within the repo cap. Never headless. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait.
+Local repo work: --fresh starts without prior conversation, with the brief and git progress; --continue keeps the session. Default: continue for --for and follow-ups, fresh for unaddressed work.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster record. Alias: buoy.`,
@@ -348,7 +350,7 @@ macOS it prints the command to run.`,
 as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
 choose the follow-up's worker, harness, or model, use dispatch --follow-up with
 --for, --harness, or --model. --attach copies files. A claimed helm requires
---session <helm-id>. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR.`,
+--session <helm-id>. --compact queues /compact in Claude or the Codex TUI; shared Codex threads use thread/compact/start. Codex traps without an input route swap to a fresh session with git progress. Requires a live local trap. Other sends keep the session. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -400,9 +402,9 @@ installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.
 \`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
-  soak: `Volunteer as worker; --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
+  soak: `Volunteer as worker. End your turn: Stop waits without waking on quiet deadlines. --wait does the same for hookless sessions; --timeout 0 probes once. Idle traps auto-stow after [soak].idleStowMins (60 by default), keeping the worktree. --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; --remote-link: the https://claude.ai/code/… URL Claude printed.
---wait listens (quiet exit 3: re-run); \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
+--wait renews quiet deadlines; \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,
   trap: `\`trap title-set\` = \`soak title-set\`. Traps start with \`man throw\`.
 \`trap bypass <trap> on|off\` (a person; --yes skips confirmation): the trap's next start runs with no permission checks
 (Claude Code --dangerously-skip-permissions; Codex --dangerously-bypass-approvals-and-sandbox). For isolated machines only.

@@ -26,6 +26,7 @@ export function enqueue(d: Descriptor, lane: Lane = 'work'): void {
     : undefined;
   const descriptor: Descriptor = {
     ...d,
+    sessionMode: d.sessionMode ?? (d.for || d.followUp || d.systemRepair || d.target ? 'continue' : 'fresh'),
     ...(inherited?.length ? { attachments: inherited } : {}),
     queuedAt: d.queuedAt ?? new Date().toISOString(),
   };

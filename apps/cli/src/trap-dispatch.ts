@@ -1,18 +1,43 @@
 import {
-  listNotices, listReservations, lobstahHome, pendingIds, postNotice, queuedAt, queuedDescriptor,
+  listTraps, unreportedTrapBait, needsFreshTrapSession, cancelRequested, listNotices, listReservations, lobstahHome, pendingIds, postNotice, queuedAt, queuedDescriptor,
   selectRepoTrap, trapRepoLabel, withTrapRepo,
 } from '@lobstah/core';
 import type { Config, Descriptor, Lane } from '@lobstah/core';
+import { swapTrapCatch } from './trap-swap.js';
 import { throwNew, throwTrap } from './throw.js';
 import type { ThrowOptions } from './throw.js';
+
+/** Launch and handover operations used by the daemon's dispatch pass. */
+export interface TrapDispatchOptions extends Pick<ThrowOptions, 'adapter' | 'timeoutSecs' | 'pollMs' | 'listHooks'> {
+  /** Tests replace the handover without stopping a real session. */
+  swap?: typeof swapTrapCatch;
+}
 
 /**
  * The daemon owns starts; trap-only work stays unaddressed until a real
  * claimant takes it. A slow or failed start cannot reserve that work.
  */
-export function createTrapDispatchScheduler(options: Pick<ThrowOptions, 'adapter' | 'timeoutSecs' | 'pollMs' | 'listHooks'> = {}) {
+export function createTrapDispatchScheduler(options: TrapDispatchOptions = {}) {
   const running = new Set<string>();
   return (cfg: Config, now: number, log: (message: string) => void): void => {
+    // A separate daemon owns the swap: ending the writer must not kill the handover itself.
+    for (const trap of listTraps()) {
+      const bait = unreportedTrapBait(trap);
+      if (!bait || !needsFreshTrapSession(bait.descriptor) || cancelRequested(bait.id, bait.lane)) continue;
+      const key = `fresh-${bait.id}`;
+      if (running.has(key) || listNotices(Number.MAX_SAFE_INTEGER).some(n => n.kind === 'trap-start-failed' && n.refId === bait.id && n.text.startsWith('Fresh session for '))) continue;
+      running.add(key);
+      void (options.swap ?? swapTrapCatch)(bait.id, bait.lane, {
+        cfg, harness: trap.harness, model: bait.descriptor.model ?? trap.model ?? undefined,
+        effort: bait.descriptor.effort, newDispatch: true,
+        launch: launch => throwTrap({ ...options, ...launch }),
+      }).then(() => log(`dispatch ${bait.id}: started a fresh ${trap.harness} session`)).catch(error => {
+        const reason = error instanceof Error ? error.message : String(error);
+        postNotice({ kind: 'trap-start-failed', repo: trap.repo, refId: bait.id,
+          text: `Fresh session for ${bait.id} could not start: ${reason}. Retry with lobstah swap ${bait.id} --harness ${trap.harness}.`, dedupeKey: key });
+        log(`dispatch ${bait.id}: fresh session failed (${reason})`);
+      }).finally(() => running.delete(key));
+    }
     const groups = new Map<string, { descriptor: Descriptor; lane: Lane; since: string }>();
     for (const lane of ['chore', 'work'] as const) {
       for (const id of pendingIds(lane)) {

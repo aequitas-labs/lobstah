@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.11 — 2026-11-13
+
+### Glass actions and views
+
+- Glass actions now share sending, refusal and success feedback, including a
+  toast that keeps resolved results visible after an editor closes. Drafted
+  review verdicts post on the first click. (#486)
+- Snooze todos from a clock on every open todo, including On deck; on phones,
+  swipe to reveal the same action. Request an immediate todo and goals pass
+  with **Recheck all**. (#493, #489)
+- Group traps by repo, harness or status, with collapsed history and a repo
+  overview of capacity and available workers. On deck shows traps that need
+  attention. (#495, #496)
+- Glass section and page headings use a shared scale, sentence case, counts,
+  links and `+N more`. PR cards open to detailed PR views; phone dialogs use
+  sheets, and jobs open to their own detail views. (#497, #498, #499, #500)
+- Card menus put Mute and Skip beside the action they affect. (#501)
+- Fine-pointer controls are compact while touch controls keep their larger
+  targets. (#490)
+
+### Dispatch and trap sessions
+
+- Unaddressed dispatches start fresh sessions; addressed work and follow-ups
+  keep their session. `dispatch --fresh` and `--continue` override the choice;
+  `send --compact` queues compaction for supported sessions. (#485)
+- Hooked traps keep waiting in the shell through quiet timeouts. The daemon
+  auto-stows idle, free traps while retaining their worktrees and roster. (#487)
+- Open cards now live in `man tend`; the Stop hook shows a paced section of
+  those same rows. (#484)
+
+### Helm and reviews
+
+- Helm Stop output focuses on lifecycle notices and paced paused-dispatch
+  reminders; `man tend` keeps the full roster and card lists. (#488)
+- Clean review drafts approve without process commentary when there are no
+  blockers or useful inline comments. (#492)
+
 ## 0.8.10 — 2026-11-13
 
 **Upgrade every Mac to 0.8.10 before the wharf is redeployed.** The wharf, the

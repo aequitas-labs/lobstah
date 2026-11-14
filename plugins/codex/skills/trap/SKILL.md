@@ -23,7 +23,7 @@ lobstah soak                  # sign on; prints your wt:<trap> address and workt
 lobstah soak --repo <key>     # outside any repo: create a worktree for that repo
 lobstah soak --link <url>     # record this task's link for the glass's ↗ open button
 lobstah soak --one            # sign off after the first finished catch
-lobstah soak --wait           # hookless: listen now; exit 3 = quiet, run again
+lobstah soak --wait           # hookless: listen until work or sign-off; quiet deadlines renew
 lobstah soak stop-listener    # end this session's own --wait listener, by its pid
 lobstah soak --ticket <t>     # sign on as a trap `lobstah man throw` reserved
 lobstah stow                  # sign off; keeps the worktree
@@ -117,15 +117,16 @@ naming a dispatch id. Then:
   as a tracked background task. End the turn while it runs.
 - Don't block on long-running processes: run servers and watchers in the
   background with a timeout. `lobstah soak --wait` is the exception.
-- After sign-on and after every completion or report, run one foreground
-  `lobstah soak --wait --timeout 600` if no waiter is already active, never
-  with a shell `&`. Give the command a yield time longer than its timeout
-  (`yield_time_ms` of at least 610000), and don't end the turn while it runs.
-  Codex moves a command that outlasts its yield time to the background, and
-  a background command that finishes after your turn ends starts no new
-  turn: the brief it prints is lost and the work sits claimed. The Stop hook
-  blocks in park mode with standing work; there is no watcher to arm. A
-  quiet exit 3 means re-run the wait, never stow.
+- After sign-on and after every completion or report, end your turn. Codex's
+  Stop hook waits for work in the shell; quiet deadlines renew there without
+  another model turn. Do not start a foreground polling loop or re-arm on a
+  timeout. An existing listener stays in place until work, a message or sign-off.
+  Use `lobstah soak --wait` only when the session has no Stop hook; it also
+  renews quiet deadlines in its process. `--timeout 0` is an explicit one-shot
+  probe, not a way to keep listening.
+- After `[soak] idleStowMins` (default 60) with no work, the daemon signs the
+  trap off, keeps its worktree, and ends its harness session. A later dispatch
+  can bring it back.
 
 ## Heavy commands
 
@@ -144,9 +145,9 @@ it. A person's own pushes never wait.
 - Push with `lobstah heavy --bg -- git push origin <branch>`. It returns at
   once, and a detached holder waits its turn, runs the push, and posts the exit
   code, log path and last lines to your dispatch's inbox. Report
-  `paused "Push in line" --waiting-on heavy`, then run `lobstah soak --wait`,
-  which delivers that message. The helm isn't woken for this. Report `working`
-  when it arrives and carry on.
+  `paused "Push in line" --waiting-on heavy`, then end your turn. The Stop
+  hook delivers that message; hookless sessions use `lobstah soak --wait`. The helm isn't
+  woken for this. Report `working` when it arrives and carry on.
 - A plain `git push` still queues, but ending your turn gives you no word of
   when it finished. Poll it to its end, or use `--bg`.
 - `lobstah heavy` shows the line. Over the time limit a command loses its slot

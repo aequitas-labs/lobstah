@@ -454,6 +454,8 @@ export interface DaemonHooks {
   codexHookWatch?: (now: number, log: (message: string) => void) => void;
   /** Runs the waits other tools registered with a trap's turn end (see turn-waits). */
   turnWaits?: (now: number, log: (message: string) => void) => void;
+  /** Stows continuously idle traps and stops their own harness; provided by the CLI daemon entry. */
+  idleTraps?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned asynchronous trap startup; never waits for sign-on in the tick. */
   trapStarts?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
@@ -632,6 +634,9 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   } catch (err) {
     log(`turn waits: ${err instanceof Error ? err.message : String(err)}`);
   }
+
+  try { hooks.idleTraps?.(cfg, now, log); }
+  catch (err) { log(`idle traps: ${err instanceof Error ? err.message : String(err)}`); }
 
   for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {
     const label = trapLabel({ trapId: action.trapId, name: trapNameForId(action.trapId) });

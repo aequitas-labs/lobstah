@@ -58,6 +58,7 @@ import {
   baitBrief,
   cancelRequested,
   claimBait,
+  needsFreshTrapSession,
   unreportedTrapBait,
   codexInvocation,
   hasOpenCatch,
@@ -232,7 +233,7 @@ import {
   decisionDir,
   telemetryCliRun,
 } from '@lobstah/core';
-import type { Descriptor, HarnessEnding, Lane, Notice, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, TodoDueEvent, Watch, WatchAttention } from '@lobstah/core';
+import type { Descriptor, HarnessEnding, Lane, Notice, NoticeKind, ReplyEvent, RepoConfig, ReportMeta, SentExpectation, TodoDueEvent, Watch, WatchAttention } from '@lobstah/core';
 import { removeIfSafe } from '@lobstah/worktree';
 import { attentionNow, captureWaitBaseline, daemon, freshWakeEvents, killGroup, pidAlive } from '@lobstah/supervisor';
 import { dismissReviewRound, postReview, redraftReviewRound, runPickup } from '@lobstah/pick';
@@ -242,7 +243,9 @@ import { advanceCursor, buildDigest, dueHelmDigest, renderDigest, repoOf } from 
 import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
+import { createIdleTrapWatch } from './idle-traps.js';
 import { createUsageLimitWatch } from './usage-limit-watch.js';
+import { compactDispatchSession, compactTrapSession } from './trap-compact.js';
 import { swapTrapCatch } from './trap-swap.js';
 import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
 import { createTurnWaits } from './turn-waits.js';
@@ -279,7 +282,6 @@ import {
 } from './glass-lifecycle.js';
 import { installPet, refreshStalePet, uninstallPet } from './pet.js';
 import { installService, restartService, serviceInstalled, uninstallService } from './service.js';
-import { clearParkRenewal, parkRenewal } from './park-renewal.js';
 import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
 import { appendRepoBlock, configuredRepoKeys, configuredRepoPaths, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
@@ -332,11 +334,15 @@ work (humans and agents):
   dispatch (--repo <key> | --pool <name>) (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
            [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any] [--chore] [--id <uuid>]
-           [--pr <url|number>]
+           [--pr <url|number>] [--fresh | --continue]
                                   queue a supervised dispatch; prints the id.
                                   --pr works on that open PR: the runner
                                   pushes no lobstah/<id> branch and opens no
                                   PR; the worker pushes to the PR's branch.
+                                  --fresh starts without prior conversation;
+                                  --continue keeps the session. Default: fresh
+                                  for unaddressed work, continue for --for
+                                  and follow-ups.
                                   --for addresses the work to a signed-on
                                   worktree (sticky: waits for that trap,
                                   never falls back headless; session:<id>
@@ -361,7 +367,7 @@ work (humans and agents):
   tmux [repo]                     open a new Terminal view of the tmux trap session
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--] <message>
+  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--compact] [--] [<message>]
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
                                   (arrives at its next park; undeliverable
@@ -558,7 +564,7 @@ soaking (interactive sessions volunteering as workers):
                                   session that mans a trap re-uses it.
                                   --wait listens in the foreground now (for
                                   sessions without Stop hooks): work prints
-                                  plain, a quiet timeout exits 3 — re-run it.
+                                  plain; quiet deadlines renew in that process.
                                   prints this session's trap title.
                                   --ticket (or LOBSTAH_TRAP_TICKET) signs on
                                   as a reserved trap. Sign-on names a
@@ -646,15 +652,6 @@ function hookParkMode(configured: 'arm' | 'block' | undefined, harness?: string)
 // [pickup].pollSecs, the same as pick's (pollSecs()). Whoever polls first
 // stamps lastCheckedAt, so the two never double-poll a watch inside one window.
 
-/**
- * The trap side of the park: heartbeat, then wait for something to act on.
- * Messages deliver first (cheap context, no catch lifecycle), then bait; a
- * trap with an open catch waits for a cancel or a `lobstah send` message
- * about it. Driven by the Stop hook (wakes are hook-decision JSON; on a
- * timeout the hook renews the park while the trap is signed on) or run
- * as `soak --wait` in a hookless session (wakes print plain; a timeout
- * exits 3 so re-running the same command re-arms).
- */
 /** Record that this session applied its sign-on title; sign-on is complete. */
 function confirmTitle(sessionFlag: string | undefined): void {
   const who = callerSession(sessionFlag);
@@ -664,22 +661,34 @@ function confirmTitle(sessionFlag: string | undefined): void {
   console.log(toonKV({ trap: trapLabel(reg), title: reg.titleSet, signOn: 'complete' }));
 }
 
-/** How a park ended: something to act on, the registration gone, or the timeout. */
+/** How a park ended: an event, sign-off, or an explicit zero-time probe. */
 type ParkEnd = 'woke' | 'gone' | 'timeout';
 
+/**
+ * The trap side of the park: heartbeat, then wait for something to act on.
+ * Messages deliver first (cheap context, no catch lifecycle), then bait; a
+ * trap with an open catch waits for a cancel or a `lobstah send` message
+ * about it. Driven by the Stop hook (wakes are hook-decision JSON; quiet
+ * deadlines renew in the shell) or run as `soak --wait` in a hookless
+ * session (wakes print plain; --timeout 0 is an explicit one-shot probe).
+ */
 async function soakPark(trapId: string, timeout: string | undefined, plain = false): Promise<ParkEnd> {
-  const idle = new IdleWait(readTrap(trapId)?.sessionId, loadConfig().wait, timeout);
+  const sessionId = readTrap(trapId)?.sessionId;
+  let idle = new IdleWait(sessionId, loadConfig().wait, timeout);
   const rearm = `lobstah soak --wait${timeout === undefined ? '' : ` --timeout ${timeout}`}`;
   // Self-instructive in plain mode (axi.md P9): every exit tells the session
   // its own next command — a foreground park has no hook to re-arm it.
   const block = plain
     ? (reason: string) => {
         idle.woke();
+        const trap = readTrap(trapId);
+        if (trap) resumeTrapTurn(trap);
         console.log(reason);
         console.log(toonHelp([`${rearm}   (when you finish handling this, run this here to keep listening)`]));
       }
-    : (reason: string) => { idle.woke(); console.log(JSON.stringify({ decision: 'block', reason })); };
+    : (reason: string) => { idle.woke(); const trap = readTrap(trapId); if (trap) resumeTrapTurn(trap); console.log(JSON.stringify({ decision: 'block', reason })); };
   while (true) {
+    if (readTrap(trapId)?.sessionId !== sessionId) return 'gone';
     const reg = heartbeatTrap(trapId, { parked: true });
     if (!reg) {
       if (plain) {
@@ -719,7 +728,9 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
       const instruction = unhandled(id, lane).length > 0
         ? `New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`
         : undefined;
-      if (pending || instruction) {
+      // The daemon swaps outside this process; the old conversation never receives fresh work.
+      const awaitingFreshSession = pending && needsFreshTrapSession(pending.descriptor);
+      if (!awaitingFreshSession && (pending || instruction)) {
         // Another waiter may have claimed while this Stop hook was parked,
         // or exited after claiming without waking the session. An initial
         // brief is not consumed until the worker's first report, so recover
@@ -733,7 +744,7 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
         return 'gone'; // one catch was the deal — the trap comes out of the water
       }
       const caught = claimBait(reg);
-      if (caught) {
+      if (caught && !needsFreshTrapSession(caught.descriptor)) {
         if (plain) {
           const title = trapSessionTitle({ sessionId: reg.sessionId, cwd: reg.worktree })?.title;
           if (title) console.log(toonKV({ title }));
@@ -744,6 +755,11 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
     }
     if (idle.expired()) {
       idle.timedOut();
+      if (!idle.probe) {
+        // Renew inside the shell process: a quiet deadline never requests another model turn.
+        idle = new IdleWait(sessionId, loadConfig().wait, timeout);
+        continue;
+      }
       if (plain) {
         console.log(toonKV({ timeout: true, waitedSecs: idle.timeoutSecs, stillSignedOn: true }));
         console.log(toonHelp([`${rearm}   (no work yet — run this again to keep listening)`, `lobstah stow   (sign off instead)`]));
@@ -751,7 +767,7 @@ async function soakPark(trapId: string, timeout: string | undefined, plain = fal
       }
       return 'timeout';
     }
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, idle.pollMs(1500)));
   }
 }
 
@@ -794,6 +810,20 @@ function noticeLine(n: Notice, prefix = 'notice '): string {
   if (answer) return decisionLine(answer);
   const r = trapRequestFields(n);
   return r ? `- trap-request ${r.id} — repo ${r.repo}, harness ${r.harness}: start it with \`lobstah man throw --new --request ${r.id}\`` : `- ${prefix}${n.kind}${n.refId ? ` ${n.refId}` : ''} — ${n.text}${n.url ? ` ${n.url}` : ''}`;
+}
+
+const STOP_TRAP_CHANGES: readonly NoticeKind[] = [
+  'trap-signed-on', 'trap-listening', 'trap-available', 'trap-starting', 'trap-start-failed',
+  'trap-claim-idle', 'trap-claim-released', 'trap-not-receiving', 'trap-stowed', 'trap-defective', 'trap-ghosted',
+];
+
+type StopAttention = ReturnType<typeof attentionNow>[number];
+function stopAttentionLine(event: StopAttention, now = Date.now()): string {
+  const { id, entry } = event;
+  if (entry.verb === 'paused') {
+    return `- paused ${id} · waiting on ${entry.waitingOn ?? 'unspecified'} for ${ageLabel(now - Date.parse(entry.at))} — ${entry.note ?? '(no note)'}${entry.link ? ` ${entry.link}` : ''}`;
+  }
+  return `- ${entry.verb} ${id}${entry.note ? ` — ${entry.note}` : ''}`;
 }
 
 /** A haul line for a send's answer. */
@@ -936,6 +966,7 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
       lane,
       bucket,
       state,
+      sessionMode: storedDescriptor(id, lane)?.sessionMode ?? 'continue',
       updated,
       waiting: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : waiting ? waitingText(waiting) : '',
       activity: activity ? activityLine(activity) : '',
@@ -1295,6 +1326,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'dispatch': {
+      if (has('--fresh') && has('--continue')) throw new UsageError('Choose --fresh or --continue');
       if (opt('--request') !== undefined) throw new UsageError('--request names a person\'s work request on a wharf: dispatch it on that wharf\'s grounds');
       const configuredAddress = opt('--for');
       if (configuredAddress?.startsWith('trap:')) {
@@ -1304,7 +1336,7 @@ async function mainCli(): Promise<void> {
         if (!caller || helmOf(caller.id)?.grounds !== profile.grounds) throw new UsageError('only the helm of the configured profile grounds may dispatch to it');
         gateHelm(caller, profile.grounds);
         if (opt('--grounds') !== undefined && storageGrounds(opt('--grounds')!, cfg) !== profile.grounds) throw new UsageError(`trap:${name} serves grounds ${profile.grounds}`);
-        for (const flag of ['--repo', '--pool', '--trap-any', '--pr', '--follow-up', '--harness', '--model', '--effort']) if (has(flag)) throw new UsageError(`${flag} does not apply to a configured trap dispatch`);
+        for (const flag of ['--repo', '--pool', '--trap-any', '--pr', '--follow-up', '--harness', '--model', '--effort', '--fresh', '--continue']) if (has(flag)) throw new UsageError(`${flag} does not apply to a configured trap dispatch`);
         const briefFile = opt('--brief') ?? opt('--bait'), briefText = opt('--brief-text');
         if (!briefFile && !briefText) throw new UsageError('dispatch requires --brief <file> or --brief-text');
         const descriptor: Descriptor = { id: opt('--id') ?? randomUUID(), brief: briefText ?? fs.readFileSync(briefFile!, 'utf8'), for: configuredAddress,
@@ -1339,6 +1371,7 @@ async function mainCli(): Promise<void> {
         harness: opt('--harness'),
         model: opt('--model'),
         effort: opt('--effort'),
+        sessionMode: has('--fresh') ? 'fresh' : has('--continue') ? 'continue' : undefined,
         followUp: opt('--follow-up'),
         for: opt('--for'),
         ...(poolName !== undefined ? { pool: poolName } : {}),
@@ -1384,7 +1417,7 @@ async function mainCli(): Promise<void> {
       const id = pos[0];
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
-        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'updated', 'waiting', 'activity']));
+        console.log(toonTable('active', rows, ['id', 'lane', 'state', 'sessionMode', 'updated', 'waiting', 'activity']));
         for (const p of dispatchProgress()) console.log(p.text);
         console.log(trapSummary(loadConfig()));
         const pools = poolViews(loadConfig());
@@ -1432,6 +1465,7 @@ async function mainCli(): Promise<void> {
         toonKV({
           id,
           lane,
+          sessionMode: descriptor?.sessionMode ?? 'continue',
           state,
           ...(limited ? { usageLimit: limited.reason, resetAt: limited.resetAt } : {}),
           ...(progress ? { attention: progress.state, reason: progress.text } : {}),
@@ -1507,7 +1541,7 @@ async function mainCli(): Promise<void> {
       // --session (anywhere) identifies the sender; the positionals after the
       // target are the message.
       const [target, ...rest] = pos;
-      if (!target || (rest.length === 0 && !has('--attach')))
+      if (!target || (rest.length === 0 && !has('--attach') && !has('--compact')))
         throw new Error('send requires a target (dispatch id, wt:<trap>, or session:<id>) and a message or --attach <file>');
       // Sending is steering: with a helm claimed, only the helm steers — a
       // worker processing untrusted content must not be able to instruct a
@@ -1517,7 +1551,7 @@ async function mainCli(): Promise<void> {
       const sid = sender?.id;
       gateHelm(sender);
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
-      const text = rest.join(' ');
+      const text = rest.join(' ') || (has('--compact') ? 'Compact your context before continuing the dispatch.' : '');
       const prOnlyForFollowUp = '--pr applies only when send starts a follow-up of a finished dispatch; to work on a PR, dispatch with --pr';
       if (target.startsWith('wt:') || target.startsWith('session:') || trapByAddress(target) || /^[a-z]+-[a-z]+$/.test(target)) {
         if (opt('--pr') !== undefined) throw new UsageError(prOnlyForFollowUp);
@@ -1541,6 +1575,7 @@ async function mainCli(): Promise<void> {
         const reg = readTrap(trapId);
         const off = reg ? undefined : recentlySignedOff(trapId, graceMs);
         if (!reg && off) {
+          if (has('--compact')) throw new UsageError('--compact needs a live trap session');
           const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
           const name = sendTrapMessage(trapId, from, [text, attachmentBlock(attachments)].filter(Boolean).join('\n\n'), attachments);
           const leftSecs = Math.max(0, Math.round((Date.parse(off.at) + graceMs - Date.now()) / 1000));
@@ -1553,6 +1588,7 @@ async function mainCli(): Promise<void> {
           break;
         }
         if (!reg) throw new Error(`${unknownTrapMessage(target)} — \`lobstah man tend\` lists live traps`);
+        if (has('--compact')) console.log(toonKV({ compact: await compactTrapSession(reg, reg.claimed ? { id: reg.claimed, lane: laneOf(reg.claimed) ?? 'work' } : undefined) }));
         const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
         const block = attachmentBlock(attachments);
         const name = sendTrapMessage(trapId, from, [text, block].filter(Boolean).join('\n\n'), attachments);
@@ -1574,6 +1610,7 @@ async function mainCli(): Promise<void> {
       if (recipient) {
         if (opt('--pr') !== undefined) throw new UsageError(prOnlyForFollowUp);
         const member = recipient;
+        if (has('--compact')) console.log(toonKV({ compact: await compactDispatchSession(member.id, member.lane) }));
         const attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(member.id, member.lane)) ?? [];
         const block = attachmentBlock(attachments);
         const name = sendMessage(
@@ -1612,12 +1649,17 @@ async function mainCli(): Promise<void> {
       const trap = claimedBy?.startsWith('wt:') ? readTrap(claimedBy.slice('wt:'.length)) : undefined;
       if (trap && Date.now() - (Date.parse(trap.heartbeatAt) || 0) < loadConfig().soak.ttlSecs * 1000) address = claimedBy;
       else headless = true;
+      if (has('--compact')) {
+        if (!trap) throw new UsageError('--compact needs a live trap session');
+        console.log(toonKV({ compact: await compactTrapSession(trap) }));
+      }
       if (origin.descriptor.target && opt('--pr')) throw new UsageError('configured trap results do not accept PR evidence');
       const followUp: Descriptor = {
         id: randomUUID(),
         repo: origin.descriptor.repo,
         ...(origin.descriptor.target ? { target: origin.descriptor.target } : {}),
         brief: `Follow-up instruction from ${from} on dispatch ${origin.id}:\n${text}`,
+        sessionMode: 'continue',
         followUp: origin.descriptor.target ? undefined : origin.id,
         for: origin.descriptor.target ? `trap:${origin.descriptor.target.profile}` : address,
         ...(!address && origin.descriptor.pool ? { pool: origin.descriptor.pool } : {}),
@@ -1835,10 +1877,10 @@ async function mainCli(): Promise<void> {
             : [`lobstah inbox ${id}   (the answer arrives here — check at checkpoints)`]
           : verb === 'done' || verb === 'failed'
             ? soaked
-              ? [`lobstah soak --wait   (next assignment, or a quiet timeout)`, `lobstah stow   (sign off instead)`]
+              ? [`lobstah soak --wait   (hookless only; otherwise end your turn for the Stop hook)`, `lobstah stow   (sign off instead)`]
               : []
             : soaked
-              ? [`lobstah soak --wait   (re-park after reporting so answers and messages reach you)`]
+              ? [`lobstah soak --wait   (hookless only; otherwise end your turn to wait in the Stop hook)`]
               : [];
       if (next.length > 0) console.log(toonHelp(next));
       break;
@@ -3103,34 +3145,8 @@ async function mainCli(): Promise<void> {
           }
         }
         if (trapReg) {
-          const cfg = loadConfig();
-          if (!has('--park') && hookParkMode(cfg.helm.park, trapReg.harness) === 'arm') {
-            // The hook checks once for standing messages/bait, then lets the
-            // background soak own the wait and its completion notification.
-            if ((await soakPark(trapReg.trapId, '0')) === 'woke') break;
-            if (!anythingInFlight()) break;
-            // A soak --wait backgrounded just before the turn ended may still be starting.
-            const graceSecs = cfg.helm.armGraceSecs;
-            if (await awaitWatcher(trapReg.sessionId, 'trap', graceSecs * 1000, trapReg.trapId)) break;
-            console.log(
-              JSON.stringify({
-                decision: 'block',
-                reason:
-                  `Arm the watcher: run \`lobstah soak --wait --timeout 900\` as a background task ` +
-                  `(it wakes this session when the fleet needs you), then end your turn. ` +
-                  armGraceNote(graceSecs),
-              }),
-            );
-            break;
-          }
-          // A park that times out while the trap is still signed on renews
-          // itself: the hook blocks with "park again", and the next Stop parks.
-          const parkedAt = Date.now();
-          const end = await soakPark(trapReg.trapId, opt('--timeout'));
-          if (end === 'timeout') {
-            const renewal = parkRenewal(trapReg.trapId, Date.now() - parkedAt);
-            if (renewal.output) console.log(JSON.stringify(renewal.output));
-          } else clearParkRenewal(trapReg.trapId);
+          // Both harnesses can wait in their Stop hook without starting a model turn on quiet deadlines.
+          await soakPark(trapReg.trapId, opt('--timeout'));
           break;
         }
         /** Peek before blocking; record card reminders only when Stop emits them. */
@@ -3191,21 +3207,11 @@ async function mainCli(): Promise<void> {
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
         const dueDigest = () => (helm ? dueHelmDigest(helm, cfgHaul.helm.reportSecs) : undefined);
-        const trapsAtStop = () => {
-          const pauses = (['work', 'chore'] as Lane[]).flatMap((lane) => activeIds(lane).flatMap((id) => {
-            const entry = readStatusLog(id, lane).at(-1);
-            const repo = repoOf(id, lane);
-            if (entry?.verb !== 'paused' || (helm && repo !== undefined && !helm.repos.includes(repo))) return [];
-            return [`- paused ${id} · waiting on ${entry.waitingOn ?? 'unspecified'} for ${ageLabel(Date.now() - Date.parse(entry.at))} — ${entry.note ?? '(no note)'}${entry.link ? ` ${entry.link}` : ''}`];
-          }));
-          // Informational only: an already delivered pause never blocks a stop.
-          return [trapSummary(cfgHaul, helm?.repos), ...pauses].filter(Boolean).join('\n');
-        };
         const blockDigest = (d: NonNullable<ReturnType<typeof dueDigest>>) => {
           if (helm) new IdleWait(helm.sessionId, cfgHaul.wait).woke(digestWakeKeys(d));
           advanceCursor(helm!.grounds, d.now);
           emit(
-            `Fleet report for grounds "${displayGrounds(helm!.grounds, cfgHaul)}":\n${renderDigest(d)}\n${trapsAtStop()}\n` +
+            `Fleet report for grounds "${displayGrounds(helm!.grounds, cfgHaul)}":\n${renderDigest({ ...d, traps: [] })}\n` +
               'Handle anything actionable; the Stop hook checks again at turn end.',
           );
         };
@@ -3217,6 +3223,7 @@ async function mainCli(): Promise<void> {
             true,
             helm ? noticeFilterForGrounds(helm.grounds, cfgHaul) : undefined,
             noticeWakes(helm),
+            STOP_TRAP_CHANGES,
           ).filter((n) => n.by === undefined || n.by !== hook?.session_id);
           if (idleNotices.length > 0) {
             if (helm) new IdleWait(helm.sessionId, cfgHaul.wait).woke(helmWakeKeys({ notices: idleNotices }));
@@ -3224,7 +3231,6 @@ async function mainCli(): Promise<void> {
               [
                 'Fleet notices need a decision:',
                 ...idleNotices.map((n) => noticeLine(n, '')),
-                trapsAtStop(),
                 'Each notice names its own remedy. The Stop hook checks again at turn end.',
               ].join('\n'),
             );
@@ -3256,7 +3262,7 @@ async function mainCli(): Promise<void> {
           // block this stop even if a registration is still heartbeating.
           const evs = attentionNow(false, remindMs, Date.now(), matchHelm);
           const watched = pendingWatchEvents(false, 'man', Date.now(), helmFloorMs);
-          const notices = unseenNotices(false, helmNoticeFilter, helmWakes).filter((n) => n.by === undefined || n.by !== hook.session_id);
+          const notices = unseenNotices(false, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES).filter((n) => n.by === undefined || n.by !== hook.session_id);
           const replies = takeReplies(false, matchHelm);
           // A sent line waits on the worker, not the helm: the worker's next
           // note wakes man wait. Alone it never blocks a stop that has a live
@@ -3270,17 +3276,20 @@ async function mainCli(): Promise<void> {
             emit(
               [
                 'A lobstah dispatch, watched source, or fleet notice needs attention:',
-                ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
+                ...evs.map(stopAttentionLine),
                 ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ''}`)),
                 ...notices.filter((n) => n.kind !== 'dispatch-progress' && n.kind !== 'trap-idle-working').map((n) => noticeLine(n)),
                 ...progress,
-                trapsAtStop(),
                 ...replies.map(replyLine),
                 ...unanswered.map(sentLine),
                 ...(replies.length || unanswered.length ? [SENT_HINT] : []),
                 'Handle the standing item. The Stop hook will enforce a watcher at the next turn end.',
               ].join('\n'),
             );
+            // The blocking Stop output delivered these events to the helm;
+            // advance their cursors so the next turn does not repeat them.
+            attentionNow(true, remindMs, Date.now(), matchHelm);
+            unseenNotices(true, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES);
             break;
           }
           // A wait backgrounded just before the turn ended may still be starting.
@@ -3291,7 +3300,6 @@ async function mainCli(): Promise<void> {
             [
               ...(sent.length ? ['A send still waits on its reply:', ...sent.map(sentLine), SENT_HINT] : []),
               ...progressLines(),
-              trapsAtStop(),
               `Arm the watcher: run \`lobstah man wait --session ${hook.session_id} --timeout 900\` as a background task ` +
                 '(it wakes this session when the fleet needs you), then end your turn. ' +
                 armGraceNote(graceSecs),
@@ -3304,7 +3312,7 @@ async function mainCli(): Promise<void> {
         let evs = attentionNow(true, remindMs, Date.now(), matchHelm);
         let watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
         const notEcho = (n: Notice) => n.by === undefined || n.by !== hook?.session_id;
-        let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
+        let fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES).filter(notEcho);
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
         const quiet = () =>
@@ -3326,7 +3334,7 @@ async function mainCli(): Promise<void> {
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
             runDueManWatches();
             watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
-            fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes).filter(notEcho);
+            fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES).filter(notEcho);
             replies = takeReplies(true, matchHelm);
             unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
             if (!quiet()) break;
@@ -3341,7 +3349,7 @@ async function mainCli(): Promise<void> {
         }
         idle.woke(helmWakeKeys({ events: evs, watches: watched, notices: fleetNotices, replies }));
         const lines = [
-          ...evs.map((ev) => `- ${ev.entry.verb} ${ev.id}${ev.entry.note ? ` — ${ev.entry.note}` : ''}`),
+          ...evs.map(stopAttentionLine),
           ...watched.flatMap((a) => a.events.map((e) => `- watch ${a.watch.key}${e.summary ? ` — ${e.summary}` : ` (seq ${e.seq})`}`)),
           ...fleetNotices.filter((n) => n.kind !== 'dispatch-progress' && n.kind !== 'trap-idle-working').map((n) => noticeLine(n)),
           ...progressLines(),
@@ -3353,7 +3361,6 @@ async function mainCli(): Promise<void> {
           [
             'A lobstah dispatch, watched source, or fleet notice needs attention:',
             ...lines,
-            trapsAtStop(),
             'Check a dispatch with `lobstah status <id>`. For a needs-decision or blocked, send an answer with `lobstah send <id> "<answer>"` when you can decide, or frame it with `lobstah man ask <id>` when it needs the human.',
             'A watch line means an external source updated (e.g. a review round) — handle it directly.',
             'A notice line names its own decision or remedy.',
@@ -3416,7 +3423,7 @@ async function mainCli(): Promise<void> {
           toonKV({
             session: sid,
             listener: `stopped (pid ${res.watcher.pid})`,
-            note: 'only this session\'s listener was stopped. Listen again with `lobstah soak --wait --timeout 900` as a background task.',
+            note: 'only this session\'s listener was stopped. End your turn to wait in the Stop hook; hookless sessions run `lobstah soak --wait`.',
           }),
         );
         break;
@@ -3726,26 +3733,19 @@ async function mainCli(): Promise<void> {
                 step: `Apply this title: ${reg.titlePending} (skip this if you have no tool that sets the session title). Then run \`lobstah soak title-set${sessionFlag}\`. Sign-on is complete after that.`,
               }
             : {}),
-          note:
-            (reg.harness === 'codex'
-              ? 'this session now takes assigned work: run `lobstah soak --wait --timeout 600` in the foreground, ' +
-                'and keep the turn open until it returns. On Codex, a background listener that finishes after your turn ends starts no new turn, so its brief is lost. '
-              : 'this session now takes assigned work: run `lobstah soak --wait --timeout 900` ' +
-                'as a background task when the Stop hook asks for an arm, or in the foreground to listen. ') +
-            "Never `man wait` (that is the orchestrator's command, not yours).",
+          note: 'End your turn after reporting. The Stop hook waits for work and renews quiet deadlines without waking the model. Never man wait; that is the helm command.',
         }),
       );
       console.log(
         toonHelp([
           ...(inside ? [] : [`cd ${reg.worktree}   (do this first: every task runs in the trap's worktree)`]),
-          `lobstah soak --wait --timeout 600${sessionFlag}   (no Stop hook: listen now; work prints here, exit 3 = run it again)`,
+          `lobstah soak --wait --timeout 600${sessionFlag}   (hookless: listen until work or sign-off; quiet deadlines renew without a model turn)`,
           `lobstah stow${sessionFlag}   (sign off; keeps this worktree${reg.createdWorktree ? ', --remove removes it when it holds no unpushed work' : ''})`,
         ]),
       );
       // The hookless park: same soakPark as the Stop hook drives, as a plain
       // foreground command — the trap waits in the water right here. Wakes
-      // print plain; a quiet timeout exits 3 so the session re-arms by
-      // re-running the same soak --wait command.
+      // print plain; quiet deadlines renew inside this process. --timeout 0 is a one-shot probe.
       if (has('--wait')) {
         const waiter = armWatcher(reg.sessionId, 'trap', reg.trapId);
         try {
@@ -4012,6 +4012,7 @@ async function mainCli(): Promise<void> {
             // This boat's own glass cards, for the grounds bound to a wharf.
             await (await import('./wharf-cards.js')).publishBoatCards(Date.now(), console.log);
           },
+          idleTraps: createIdleTrapWatch(),
           trapStarts: createTrapDispatchScheduler(),
           culler: cliCuller,
           prWatches: (now, log) => {

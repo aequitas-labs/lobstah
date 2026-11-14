@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { enqueue, ensureLayout, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm,
+import { enqueue, ensureLayout, postNotice, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm,
   noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop, baitBrief } from '@lobstah/core';
 import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
@@ -233,21 +233,34 @@ describe('lobstah hook user-prompt-submit', () => {
 });
 
 describe('lobstah hook stop (alias: man haul)', () => {
-  it('lists current pauses with note and age after delivery, scoped to the helm', () => {
+  it('lists a pause once, scopes it to the helm, and leaves the full roster in tend', () => {
     takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
     for (const [id, repo] of [['pause', 'web'], ['foreign', 'other']]) {
       enqueue({ id, repo, brief: 'b' }); claimNext('work');
       appendStatus(id, 'work', 'paused', `${id} note`, '2026-10-01T00:00:00Z', { waitingOn: 'external' });
     }
-    attentionNow(true);
     const stopped = hook(['hook', 'stop'], { session_id: HELM });
     expect(stopped.status, stopped.stderr).toBe(0);
     const reason = JSON.parse(stopped.stdout).reason;
     expect(reason).toMatch(/paused pause · waiting on external for \S+ — pause note/);
     expect(reason).not.toContain('foreign note');
+    expect(reason).not.toContain('repo-traps[');
+    expect(reason).not.toContain('traps[');
+    expect(JSON.parse(hook(['hook', 'stop'], { session_id: HELM }).stdout).reason ?? '').not.toContain('pause note');
     expect(renderTend(buildTendReport())).toContain('pause note');
     appendStatus('pause', 'work', 'working', 'resumed');
     expect(hook(['hook', 'stop'], { session_id: HELM }).stdout).not.toContain('pause note');
+  });
+
+  it('prints one line for a trap state change, including a quiet sign-off, then stays quiet', () => {
+    takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+    postNotice({ kind: 'trap-stowed', text: 'trap web · amber-gull signed off' });
+    const first = JSON.parse(hook(['hook', 'stop'], { session_id: HELM }).stdout).reason as string;
+    const changeLines = first.split('\n').filter((line) => line.includes('trap-stowed'));
+    expect(changeLines).toHaveLength(1);
+    expect(changeLines[0]).toContain('amber-gull');
+    const second = JSON.parse(hook(['hook', 'stop'], { session_id: HELM }).stdout).reason ?? '';
+    expect(second).not.toContain('trap-stowed');
   });
 
   it('keeps the human-wait rule in bait and both plugins, and pause triage in the charter', () => {

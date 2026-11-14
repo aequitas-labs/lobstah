@@ -12,9 +12,8 @@ import { showToast } from './toast.js';
  * - `danger`: filled red, for what can't be undone (Stop, Revoke).
  * - `icon`: an icon alone, a square, named by its label for screen readers and on hover.
  *
- * Every size is set here and nowhere else: `md` is 32px tall with 12px words
- * (the default, everywhere), and `lg` is 40px with 14px words, kept for the
- * decision dock and a run card's row, where a thumb does the work.
+ * Touch pointers keep `md` at 32px and `lg` at 40px. Fine pointers use 26px
+ * and 32px. The pointer, not viewport width, selects the size.
  * Molecules (the split button, the copy button, an option card, a segmented
  * control) are built from it and add only layout.
  */

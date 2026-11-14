@@ -69,6 +69,7 @@ it.each([false, true])('preserves the branch, brief, git note and inbox when swa
     launch: async (options) => {
       order.push('launch');
       const descriptor = queuedDescriptor('swap-work', 'work')!;
+      expect(options.fresh).toBe(true);
       expect(descriptor.harness).toBe('codex');
       expect(descriptor.brief).toBe('Finish this change');
       expect(descriptor.handoff).toContain('progress.txt');

@@ -28,6 +28,8 @@ export interface TrapSwapOptions {
   model?: string;
   effort?: string;
   by?: string;
+  /** Claim-time handovers have not started the task branch yet. */
+  newDispatch?: boolean;
   endProcess?: typeof endHarnessProcess;
   launch?: (options: ThrowOptions & { address: string }) => Promise<ThrowResult>;
 }
@@ -73,6 +75,7 @@ export async function swapTrapCatch(id: string, lane: Lane, options: TrapSwapOpt
   descriptor.harness = options.harness;
   descriptor.harnessExplicit = true;
   descriptor.for = `wt:${trapId}`;
+  descriptor.handoffFreshBranch = options.newDispatch === true && !descriptor.followUp && !descriptor.pr;
   descriptor.handoff = handoffNote(claim.harness, `${earlier}\n\n${worktreeProgress(roster.worktree)}`);
   if (options.model) {
     descriptor.model = options.model;
@@ -91,5 +94,5 @@ export async function swapTrapCatch(id: string, lane: Lane, options: TrapSwapOpt
     model: options.model ?? null,
     ...(options.effort ? { config: { effort: options.effort } } : {}),
   });
-  return (options.launch ?? throwTrap)({ cfg: options.cfg, address: `wt:${trapId}`, harness: options.harness, by: options.by });
+  return (options.launch ?? throwTrap)({ cfg: options.cfg, address: `wt:${trapId}`, fresh: true, harness: options.harness, by: options.by });
 }

@@ -375,3 +375,12 @@ describe('planStart — swap respawns, daemon restarts, and pickup rounds share 
     ).toMatchObject({ harness: 'codex', resume: { sessionId: CODEX_SID, own: true } });
   });
 });
+
+it('an explicitly fresh headless follow-up keeps progress without resuming the origin', () => {
+  enqueue({ id: 'origin', repo: 'r', brief: 'work' });
+  mergeEvidence('origin', 'work', { sessionId: CLAUDE_SID, harness: 'claude' });
+  const descriptor: Descriptor = { id: 'follow', repo: 'r', brief: 'next', followUp: 'origin', sessionMode: 'fresh' };
+  const plan = planStart({ id: 'follow', lane: 'work', descriptor, cfg: loadConfig(), resolvedHarness: 'claude' });
+  expect(plan.resume).toBeUndefined();
+  expect(plan.cold).toMatchObject({ why: 'fresh session requested', origin: { id: 'origin', lane: 'work' } });
+});

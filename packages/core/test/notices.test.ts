@@ -64,6 +64,13 @@ describe('helm notices', () => {
     expect(listNotices().map((n) => n.text)).toEqual(['quiet', 'normal']);
   });
 
+  it('can include selected quiet lifecycle notices in a summary without making other quiet notices visible', () => {
+    postNotice({ kind: 'trap-stowed', text: 'stowed' });
+    postNotice({ kind: 'pool-returned', text: 'pool returned' });
+    expect(unseenNotices(true, undefined, undefined, ['trap-stowed']).map((n) => n.text)).toEqual(['stowed']);
+    expect(unseenNotices(true)).toEqual([]);
+  });
+
   it("a trap's start wakes once, as trap-available; starting, sign-on, listening, and stow are quiet but listed", () => {
     postNotice({ kind: 'trap-starting', text: 'starting' });
     postNotice({ kind: 'trap-signed-on', text: 'signed on' });

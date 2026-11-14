@@ -128,8 +128,9 @@ function readAttnCursor(file: string): AttnCursor {
  * even read it; a newer needs-decision stands again. Acks never matter here.
  * remindMs of 0 disables reminders (pure at-most-once).
  * Pass consume=false to peek without touching cursors.
- * Pauses use the same delivery cursor, but wake once only: no reminders or
- * acknowledgement state. The helm reads the pause and judges what to do.
+ * Pauses use the same delivery cursor and remind on the configured cadence;
+ * they have no acknowledgement state. The helm reads the pause and judges
+ * what to do.
  */
 export function attentionNow(
   consume = true,
@@ -154,7 +155,7 @@ export function attentionNow(
       const file = attnCursorPath(id, lane);
       const cursor = readAttnCursor(file);
       const fresh = index >= cursor.seen;
-      const remind = state !== 'paused' && !fresh && remindMs > 0 && now - cursor.at > remindMs;
+      const remind = !fresh && remindMs > 0 && now - cursor.at >= remindMs;
       if (!fresh && !remind) continue;
       out.push({ id, lane, entry });
       if (consume) fs.writeFileSync(file, JSON.stringify({ seen: Math.max(cursor.seen, index + 1), at: now }));

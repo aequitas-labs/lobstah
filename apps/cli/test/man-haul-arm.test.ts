@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, signOnTrap, takeHelm } from '@lobstah/core';
+import { appendStatus, claimNext, complete, enqueue, ensureLayout, loadConfig, signOnTrap, takeHelm, unseenNotices } from '@lobstah/core';
 import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { readCursor } from '../src/reported.js';
 import { landedCatches } from '../src/tend.js';
@@ -72,7 +72,7 @@ describe('the card reminder at a helm turn end', () => {
     fs.mkdirSync(worktree);
     const signed = signOnTrap({ sessionId: 'trap-session', harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000 });
     expect('ok' in signed).toBe(true);
-    const res = spawnSync(process.execPath, [cli, 'man', 'haul'], {
+    const res = spawnSync(process.execPath, [cli, 'man', 'haul', '--timeout', '0'], {
       encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, timeout: 10_000, input: JSON.stringify({ session_id: 'trap-session' }),
     });
     expect(res.stdout).not.toContain(HELM_STOP_REMINDER);
@@ -102,11 +102,12 @@ describe('man haul arm mode', () => {
     const worktree = path.join(home, 'backed-off-trap'); fs.mkdirSync(worktree);
     const signed = signOnTrap({ worktree, cwd: worktree, repo: 'web', harness: 'claude', sessionId: 'backed-off-trap', ttlMs: 60_000 });
     if (!('ok' in signed)) throw new Error('unexpected hold');
+    unseenNotices(true);
     for (const [sid, kind, trapId] of [[sessionId, 'man', undefined], ['backed-off-trap', 'trap', signed.ok.trapId]] as const) {
       for (let i = 0; i < 7; i++) new IdleWait(sid, DEFAULT_WAIT, undefined, 0).timedOut(14_400_000);
       expect(new IdleWait(sid, DEFAULT_WAIT).timeoutSecs).toBe(14400);
       fs.writeFileSync(path.join(home, 'watchers', `${sid}.json`), JSON.stringify({ sessionId: sid, kind, trapId, pid: process.pid, heartbeatAt: new Date().toISOString() }));
-      const result = spawnSync(process.execPath, [cli, 'hook', 'stop'], {
+      const result = spawnSync(process.execPath, [cli, 'hook', 'stop', ...(kind === 'trap' ? ['--timeout', '0'] : [])], {
         encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home }, input: JSON.stringify({ session_id: sid }), timeout: 10_000,
       });
       expect(result.status, result.stderr).toBe(0);
@@ -122,6 +123,13 @@ describe('man haul arm mode', () => {
   });
 
   it('allows a stop with nothing in flight', () => {
+    expect(JSON.parse(haul().stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
+  });
+
+  it('keeps a quiet fleet Stop to the arm line without pasting the trap roster', () => {
+    const worktree = path.join(home, 'wt-open'); fs.mkdirSync(worktree);
+    signOnTrap({ sessionId: 'open-trap', harness: 'claude', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000 });
+    unseenNotices(true);
     expect(JSON.parse(haul().stdout)).toEqual({ systemMessage: HELM_STOP_REMINDER });
   });
 
@@ -150,22 +158,18 @@ describe('man haul arm mode', () => {
     expect(landedCatches(loadConfig()).find((c) => c.id === landedId)?.unreported).toBe(true);
   });
 
-  it('asks a Claude trap to arm soak --wait, then allows its live watcher', () => {
+  it('a Claude trap probes quietly instead of asking the model to arm a watcher', () => {
     const worktree = path.join(home, 'trap-worktree');
     fs.mkdirSync(worktree);
     const signed = signOnTrap({ worktree, cwd: worktree, repo: 'web', harness: 'claude', sessionId: 'armed-trap', ttlMs: 60_000 });
-    expect('ok' in signed).toBe(true);
-    if (!('ok' in signed)) return;
+    if (!('ok' in signed)) throw new Error('unexpected hold');
     enqueue({ id: dispatchId, repo: 'other', brief: 'not for this trap' });
-    const trapHaul = () => spawnSync(process.execPath, [cli, 'man', 'haul'], {
+    const result = spawnSync(process.execPath, [cli, 'man', 'haul', '--timeout', '0'], {
       encoding: 'utf8', env: { ...process.env, LOBSTAH_HOME: home },
       input: JSON.stringify({ session_id: 'armed-trap' }), timeout: 10_000,
     });
-    expect(trapHaul().stdout).toContain('lobstah soak --wait --timeout 900');
-    fs.writeFileSync(path.join(home, 'watchers', 'armed-trap.json'), JSON.stringify({
-      sessionId: 'armed-trap', kind: 'trap', trapId: signed.ok.trapId, pid: process.pid, heartbeatAt: new Date().toISOString(),
-    }));
-    expect(trapHaul().stdout).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
   });
 });
 

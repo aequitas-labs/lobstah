@@ -28,6 +28,7 @@ import { readRoster, recordRosterDeparture, recordRosterSignOn } from './roster.
 import { readReservation } from './trap-start.js';
 import { loadConfig, DEFAULT_SOAK } from './config.js';
 import { clearFinishedTrapCaches, repoCachesConfigured } from './cache-cleanup.js';
+import { withDirLock } from './dir-lock.js';
 import { withTrapCacheLock } from './cache-paths.js';
 import { sessionWorker } from './session-workers.js';
 import { workerLabel, workerMetadata } from './worker-metadata.js';
@@ -76,6 +77,8 @@ export interface TrapRegistration {
   startDeadline?: string;
   /** The last heartbeat of a park (the Stop hook or `soak --wait`): fresh while the trap listens. */
   parkedAt?: string;
+  /** Continuous empty park time; routine liveness heartbeats do not reset it. */
+  idleSince?: string;
   /** Title reminders given while titlePending stands; they stop at TITLE_REMINDERS. */
   titleReminders?: number;
   /** The title sign-on asked the session to apply, until the session confirms it (`soak title-set`). */
@@ -408,6 +411,7 @@ export function signOnTrap(opts: {
     signedOnAt: sameSession ? prior.signedOnAt : iso,
     heartbeatAt: iso,
     firstParkedAt: sameSession ? prior.firstParkedAt : undefined,
+    idleSince: sameSession ? prior.idleSince : undefined,
     window,
     ...(harnessProcess ? { harnessProcess } : {}),
     link: link !== undefined && linkMismatch(link, window) === undefined ? link : undefined,
@@ -501,7 +505,28 @@ export function recentlySignedOff(trapId: string, graceMs: number, now = Date.no
   return s && now - (Date.parse(s.at) || 0) < graceMs ? s : undefined;
 }
 
+/** Serialize idle sign-off with claiming and park heartbeats so a claimed trap cannot be auto-stowed. */
+function withTrapLifecycleLock<T>(trapId: string, action: () => T): T {
+  return withDirLock(path.join(soakingDir(), `.${trapId}.lifecycle-lock`), action,
+    { staleMs: 30_000, waitMs: 1000, busy: () => new Error(`trap ${trapId} is updating; retry`) });
+}
+
+/** Recheck idle eligibility under the same lock that protects a new claim. */
+export function stowIdleTrap(trapId: string, sessionId: string, idle: (trap: TrapRegistration) => boolean, reason: string): TrapRegistration | undefined {
+  return withTrapLifecycleLock(trapId, () => {
+    const trap = readTrap(trapId);
+    if (!trap || trap.sessionId !== sessionId || hasOpenCatch(trap) || trap.hostedCatch || !idle(trap)) return undefined;
+    return stowRegisteredTrap(trapId, reason);
+  });
+}
+
+/** Sign off normally while preserving the roster entry and worktree. */
 export function stowTrap(trapId: string, reason = 'signed off', by?: string): TrapRegistration | undefined {
+  return withTrapLifecycleLock(trapId, () => stowRegisteredTrap(trapId, reason, by));
+}
+
+/** Normal sign-off while the caller owns the lifecycle lock. */
+function stowRegisteredTrap(trapId: string, reason: string, by?: string): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
   // The roster keeps the trap, and a protected ref its revision, before the
@@ -576,8 +601,13 @@ export function confirmTrapTitle(trapId: string, now = Date.now()): TrapRegistra
  */
 export function heartbeatTrap(
   trapId: string,
-  opts: { parked?: boolean; claimed?: string | null; hostedCatch?: string | null } = {},
+  opts: { parked?: boolean; claimed?: string | null; hostedCatch?: string | null; active?: boolean } = {},
 ): TrapRegistration | undefined {
+  return withTrapLifecycleLock(trapId, () => writeTrapHeartbeat(trapId, opts));
+}
+
+/** A heartbeat made while the caller owns the lifecycle lock. */
+function writeTrapHeartbeat(trapId: string, opts: { parked?: boolean; claimed?: string | null; hostedCatch?: string | null; active?: boolean }): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
   const firstPark = opts.parked && reg.firstParkedAt === undefined;
@@ -589,6 +619,8 @@ export function heartbeatTrap(
     claimed: opts.claimed === null ? undefined : (opts.claimed ?? reg.claimed),
     hostedCatch: opts.hostedCatch === null ? undefined : (opts.hostedCatch ?? reg.hostedCatch),
   };
+  if (opts.active || hasOpenCatch(next) || next.hostedCatch) delete next.idleSince;
+  else if (opts.parked) next.idleSince ??= new Date().toISOString();
   atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
   if (hasOpenCatch(next)) renewDesktopLease(next);
   if (firstPark && reg.configured) closeDesktopStartCards(trapId);
@@ -711,6 +743,11 @@ export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued
   return { requeued: id };
 }
 
+/** A newly claimed dispatch must reach its replacement session before the brief is delivered. */
+export function needsFreshTrapSession(descriptor: Descriptor): boolean {
+  return descriptor.sessionMode === 'fresh' && !descriptor.handoff && !descriptor.target;
+}
+
 /**
  * One cast of the line for a parked trap: claim the best matching bait, or
  * nothing. Addressed bait (`wt:<this trap>`) outranks the general queue;
@@ -718,13 +755,15 @@ export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued
  * nothing more. Claiming stamps the delivery receipt into evidence.
  */
 export function claimBait(reg: TrapRegistration): { id: string; lane: Lane; descriptor: Descriptor } | null {
-  // Opted-in traps cannot claim new work while their caches are being removed.
-  if (repoCachesConfigured(reg.repo))
-    return withTrapCacheLock(reg.trapId, () => {
-      const current = readTrap(reg.trapId);
-      return current ? claimTrapBait(current) : null;
-    });
-  return claimTrapBait(reg);
+  return withTrapLifecycleLock(reg.trapId, () => {
+    const current = readTrap(reg.trapId);
+    if (!current || current.sessionId !== reg.sessionId || current.harness !== reg.harness || current.repo !== reg.repo ||
+      JSON.stringify(current.configured) !== JSON.stringify(reg.configured)) return null;
+    // Cache cleanup and idle sign-off use the same lock order.
+    return repoCachesConfigured(current.repo)
+      ? withTrapCacheLock(current.trapId, () => claimTrapBait(current))
+      : claimTrapBait(current);
+  });
 }
 
 /** Missing or changed profile configuration leaves existing catches alone and prevents new claims. */
@@ -776,7 +815,7 @@ function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descrip
     // a dead trap out of the ghost sweep past the TTL.
     appendStatus(id, lane, 'working', `claimed by ${mine}`, claim.at);
     mergeEvidence(id, lane, { sessionId: reg.sessionId, harness: reg.harness, deliveredTo: mine, deliveredAt: claim.at });
-    heartbeatTrap(reg.trapId, { claimed: id, parked: true });
+    writeTrapHeartbeat(reg.trapId, { claimed: id, parked: true });
     return { id, lane, descriptor };
   }
   if (reg.configured?.surface === 'claude-desktop') releaseDesktopLease(reg.trapId);
@@ -958,7 +997,7 @@ export function baitBrief(id: string, d: Descriptor): string {
   return [
     `You are a lobstah worker session and have been assigned dispatch ${id}.`,
     '',
-    d.target ? CONFIGURED_TRAP_INSTRUCTION : d.handoff ? 'Continue in THIS worktree on its existing task branch; read the handover before changing it.' : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
+    d.target ? CONFIGURED_TRAP_INSTRUCTION : d.handoff && !d.handoffFreshBranch ? 'Continue in THIS worktree on its existing task branch; read the handover before changing it.' : 'Do the work in THIS worktree on a fresh branch (branch first, never on the checked-out state directly).',
     `Acknowledge this assignment now with \`lobstah report ${id} working "<note>"\`, then report at milestones, check \`lobstah inbox ${id}\` at natural checkpoints, and finish with \`lobstah report ${id} done "<note>" ${d.target ? '[--report <file>] [--attach <file>]' : '[--pr <url>]'}\` (or \`failed\`).`,
     'A needs-decision or blocked report queues your question to the human; the answer arrives in this dispatch\'s inbox.',
     '`working` means you are still executing and will report again. If the next move belongs to a person or to the helm, report `needs-decision` with the question. If you are waiting on an external await, report `paused` and name it. Never end a turn on `working`.',
@@ -967,7 +1006,7 @@ export function baitBrief(id: string, d: Descriptor): string {
     `Before you wait on something else external (a deploy), report \`lobstah report ${id} paused "<note>" --waiting-on deploy|external --link <url>\`.`,
     'Run full test suites, full builds and Playwright as `lobstah heavy -- <command>`: one line per machine keeps them from overloading it. A focused test file or single-package build doesn\'t need it. Your pushes queue on their own.',
     'A full run\'s output is long. To keep it out of your own context, you can hand the run to a subagent (Claude Code\'s Agent tool, Codex\'s `spawn_agent`) that runs it, or reads its log, and returns only the failures: each failing test or step with its first error lines.',
-    'After EVERY report, run `lobstah soak --wait` again — it delivers inbox answers and your next assignment. Never end your turn without it unless you are signing off (`lobstah stow`).',
+    'After every report, end your turn. The Stop hook waits for inbox answers and your next assignment without waking on quiet deadlines. Hookless sessions use `lobstah soak --wait`; leave that listener in place until work or sign-off.',
     TRAP_INSTRUCTION_RULE,
     'The task:',
     '',

@@ -409,8 +409,8 @@ describe('a soak-created trap works by session id from the primary checkout', ()
   processTest('soak --wait, send, and report', () => {
     expect(soak(primary).status).toBe(0);
     const reg = only();
-    // --wait by session id: parks the same trap, a quiet timeout exits 3.
-    const quiet = soak(primary, '--wait', '--timeout', '1');
+    // --wait by session id: a one-shot probe parks the same trap and exits 3.
+    const quiet = soak(primary, '--wait', '--timeout', '0');
     expect(quiet.status, quiet.stderr).toBe(3);
     expect(kv(quiet.stdout, 'trap')).toBe(`wt:${reg.trapId}`);
     expect(readTrap(reg.trapId)?.firstParkedAt).toBeDefined();

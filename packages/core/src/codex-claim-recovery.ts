@@ -3,7 +3,7 @@ import { trapUsageLimit } from './usage-limits.js';
 import path from 'node:path';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 import { cancelRequested } from './queue.js';
-import { listTraps, releaseCatch, trapRepoLabel, unreportedTrapBait, type TrapRegistration } from './soak.js';
+import { listTraps, needsFreshTrapSession, releaseCatch, trapRepoLabel, unreportedTrapBait, type TrapRegistration } from './soak.js';
 import { postNotice } from './notices.js';
 
 /**
@@ -62,7 +62,7 @@ export function unacknowledgedCodexClaims(now: number, opts: { wakeAfterMs: numb
       steps.push({ kind: 'cancel', trap, dispatchId: bait.id });
       continue;
     }
-    if (trapUsageLimit(trap)) continue; // Keep limited claims sticky until reset or an explicit swap.
+    if (needsFreshTrapSession(bait.descriptor) || trapUsageLimit(trap)) continue; // Keep limited claims sticky until reset or an explicit swap.
     const claimedAt = Date.parse(bait.claim.at);
     if (!Number.isFinite(claimedAt)) continue;
     const wake = readWake(trap.trapId);
