@@ -4,7 +4,7 @@ import type { SectionInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import { openReportSheet } from '../actions.js';
 import { Age, RepoName, TRAP_MARK, Table, ageText } from './common.js';
-import { Card } from './card.js';
+import { Card, OpenArrow } from './card.js';
 
 /**
  * The Reports tab: every report, newest first regardless of acknowledgment.
@@ -46,7 +46,7 @@ export function reportCard(r: GlassReport) {
     titleAttr=${r.title}
     context=${[r.repo && [RepoName(r.repo), ' · '], from && [r.trap ? `${TRAP_MARK} ${from}` : from, ' · '], Age(r.filedAt), ' ago']}
     contextTitle=${[lead, `${ageText(r.filedAt)} ago`].filter(Boolean).join(' · ')}
-    open=${{ href: reportPageUrl(r.key), label: 'Open the report', here: openReport(r) }}
+    open=${{ href: reportPageUrl(r.key), label: 'Open the report' }}
     quiet=${!!r.acked}
     cls=${r.acked ? 'acked' : undefined}
     onClick=${openReport(r)}
@@ -59,11 +59,11 @@ function row(r: GlassReport) {
   ) => {
     e.stopPropagation();
     openReport(r)(e);
-  }}>${r.title}</a></td><td>${reportFrom(r)}</td><td>${Age(r.filedAt)}</td><td>${r.acked ? 'acked' : ''}</td></tr>`;
+  }}>${r.title}</a></td><td>${reportFrom(r)}</td><td>${Age(r.filedAt)}</td><td>${r.acked ? 'acked' : ''}</td><td><${OpenArrow} open=${{ href: reportPageUrl(r.key), label: 'Open the report' }} /></td></tr>`;
 }
 
 export function Reports({ inp }: { inp: SectionInputs['reports'] }) {
   if (inp.view === 'cards')
     return inp.list.length ? html`<div class="cards">${inp.list.map(reportCard)}</div>` : html`<div class="empty">no reports match</div>`;
-  return Table(['title', 'from', 'filed', 'acked'], inp.list.map(row), 'no reports match');
+  return Table(['title', 'from', 'filed', 'acked', ''], inp.list.map(row), 'no reports match');
 }

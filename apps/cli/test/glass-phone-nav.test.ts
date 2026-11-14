@@ -130,6 +130,26 @@ describe('the bottom bar', () => {
     expect(g.$('#phone-menu')).toBeNull();
   });
 
+  it('reaches every page from the phone menu without the sheet undoing navigation', async () => {
+    const d = fleet();
+    const g = await loadGlass(GLASS_PAGE, d, {
+      now: NOW,
+      get: url => url === '/data/stats' ? { status: 200, body: { today: '2026-09-24', catchesToday: 0, catchesThisWeek: 0, totalCatches: 0, weeks: [], months: [], perTrap: [], max: 0, undated: 0 } } : undefined,
+      prepare: window => Object.defineProperty(window, 'innerWidth', { value: 375 }),
+    });
+    open.push(g);
+    const tabs = g.$$('#tabs a').map(a => a.getAttribute('href')!);
+    for (const tab of tabs) {
+      item(g, 'Menu').click();
+      await g.settle();
+      (g.$(`#phone-menu a[href="${tab}"]`) as HTMLElement).click();
+      await g.settle();
+      expect(g.window.location.hash).toBe(tab);
+      expect(g.$(`#page-${tab.slice(1)}.on`)).not.toBeNull();
+      expect(g.$('#phone-menu')).toBeNull();
+    }
+  });
+
   it('hides while a decision card is open: the card takes the bottom edge', async () => {
     const g = await page();
     expect(bar(g)).toBeTruthy();

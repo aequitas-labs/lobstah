@@ -574,13 +574,20 @@ h2 {
   gap: 0.6em;
   background: var(--bg);
 }
-.todo-check.snooze-revealed .todo-row-body {
-  transform: translateX(-7rem);
+.todo-row-body {
+  transition: transform 160ms ease-out;
+}
+.todo-check.swiping .todo-row-body {
+  transition: none;
 }
 .todo-swipe-action {
   position: absolute;
   inset: 0 0 0 auto;
-  width: 7rem;
+  width: 112px;
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -588,6 +595,12 @@ h2 {
 }
 .todo-swipe-snooze {
   flex-direction: column;
+  gap: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .todo-row-body {
+    transition: none;
+  }
 }
 /* Read-only boxes drawn by hand: a done goal or Todo shows a green check,
    not the browser's greyed-out disabled checkbox. */
@@ -3478,6 +3491,9 @@ footer .glass-brand {
 /* A report card's way out: a small arrow at the far right of its top line. */
 .gopen {
   flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
   display: inline-flex;
   align-items: center;
   margin-left: var(--space-2);
@@ -3918,4 +3934,38 @@ footer .glass-brand {
 
 .section-action .deckmore {
   margin: 0;
+}
+
+/* A report row's way out remains at the right in either list view. */
+.deckline:has(> .gopen) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.deckline > .gopen {
+  margin-left: auto;
+}
+@media (max-width: 699px) {
+  /* Keep the report title, age and way out inside the phone's gutter. */
+  #reports table {
+    table-layout: fixed;
+  }
+  #reports th:nth-child(2),
+  #reports td:nth-child(2),
+  #reports th:nth-child(4),
+  #reports td:nth-child(4) {
+    display: none;
+  }
+  #reports th:nth-child(3),
+  #reports td:nth-child(3) {
+    width: 6ch;
+  }
+  #reports th:last-child,
+  #reports td:last-child {
+    width: 44px;
+    padding: 0;
+  }
+  #reports td.grow {
+    min-width: 0;
+  }
 }

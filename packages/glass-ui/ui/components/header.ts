@@ -290,12 +290,24 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
     tabs.includes(t) &&
     html`<a href=${'#' + t} class=${'bbitem' + (t === tab ? ' on' : '')} aria-current=${t === tab ? 'page' : undefined}><span class="bbicon">${icon}${badge}</span><span class="bblabel">${TAB_LABEL[t]}</span></a>`;
   const fleet = d && inp && [capabilities().daemon && chips(d, inp.chips)[0], host().fleet?.()];
+  const navigate = (event: MouseEvent, target: GlassTab): void => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
+    event.preventDefault();
+    // Replace the menu's Back entry with the chosen page before closing it.
+    // Otherwise the sheet's cleanup can undo the link's hash navigation.
+    if (history.state?.glassOverlay) {
+      const { glassOverlay: _overlay, ...state } = history.state;
+      history.replaceState(state, '', '#' + target);
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    } else location.hash = target;
+    setMode('bar');
+  };
   return html`<div class="bottombar" ref=${root}>
     ${
       mode === 'menu' &&
       html`<${Dialog} title="Menu" cls="phone-menu-dialog" onClose=${() => setMode('bar')}><div class="phonemenu" id="phone-menu" role="menu" aria-label="Spyglass menu">
         <div class="pmsec">views</div>
-        <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${() => setMode('bar')}>${TAB_ICON[t]}${TAB_LABEL[t]}</a>`)}</nav>
+        <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${(event: MouseEvent) => navigate(event, t)}>${TAB_ICON[t]}${TAB_LABEL[t]}</a>`)}</nav>
         ${fleet && html`<div class="pmsec">fleet</div><div class="pmchips">${fleet}</div>`}
         <div class="pmsec">you</div>
         <div class="pmyou"><${Button} role="menuitem" onClick=${() => {

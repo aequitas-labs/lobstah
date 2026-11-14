@@ -21,7 +21,7 @@ async function page(d: GlassFullSnapshot, hash = '#deck') {
 }
 
 describe('shared section headings', () => {
-  it('links every deck section to its list and caps decisions at the three newest', async () => {
+  it('keeps every decision on On deck and links the other sections to their lists', async () => {
     const snapshot = repoFilterFleet();
     snapshot.todos = [
       {
@@ -38,14 +38,13 @@ describe('shared section headings', () => {
     const glass = await page(snapshot);
     const decisions = glass.$('#deck .decisions')!;
     expect(text(decisions.querySelector('.section-head h2'))).toContain('Decisions');
-    expect(decisions.querySelector('.section-head a')?.getAttribute('href')).toBe('#decisions');
-    expect(decisions.querySelectorAll(':scope > .dlist > li')).toHaveLength(3);
-    expect(text(decisions.querySelector(':scope > .deckmore'))).toBe('+2 more →');
+    expect(decisions.querySelector('.section-head a')).toBeNull();
+    expect(decisions.querySelectorAll(':scope > .dlist > li')).toHaveLength(5);
+    expect(decisions.querySelector(':scope > .deckmore')).toBeNull();
 
     const heads = glass.$$('#deck .deckgrid > section .section-head a');
-    expect(heads.map((a) => a.getAttribute('href'))).toEqual(['#decisions', '#dispatches', '#dispatches', '#reports', '#todos', '#traps']);
+    expect(heads.map((a) => a.getAttribute('href'))).toEqual(['#dispatches', '#dispatches', '#reports', '#todos', '#traps']);
     expect(heads.map(text)).toEqual([
-      expect.stringContaining('Decisions'),
       expect.stringContaining('In flight'),
       expect.stringContaining('Landed · 24h'),
       expect.stringContaining('Reports'),
@@ -56,7 +55,8 @@ describe('shared section headings', () => {
     await glass.go('#decisions');
     expect(glass.$('#page-deck')?.className).toContain('on');
     expect(glass.$$('#deck .decisions > .dlist > li')).toHaveLength(5);
-    expect(text(glass.$('#deck .decisions .page-head h1'))).toContain('Decisions');
+    expect(glass.$('#deck .decisions .page-head')).toBeNull();
+    expect(glass.$('#deck .deckgrid')).not.toBeNull();
   });
 
   it.each([

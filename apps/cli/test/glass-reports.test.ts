@@ -311,9 +311,10 @@ describe('glass: a report page', () => {
 
   it("the deck's reports block links each report to its page in a new tab", async () => {
     const g = await page(everyAttentionFleet());
-    const lines = [...reportsSection(g).querySelectorAll('a.deckline')];
+    const lines = [...reportsSection(g).querySelectorAll('.deckline')];
     const tray = lines.find((l) => text(l).includes('Tray findings'))!;
-    expect([tray.getAttribute('href'), tray.getAttribute('target'), tray.getAttribute('rel')]).toEqual([
+    const arrow = tray.querySelector('.gopen')!;
+    expect([arrow.getAttribute('href'), arrow.getAttribute('target'), arrow.getAttribute('rel')]).toEqual([
       pagePath(TRAP_KEY),
       '_blank',
       'noopener',
@@ -329,12 +330,12 @@ describe('glass: the Reports tab', () => {
   it('lists every report, newest first regardless of acknowledgment, in the table and cards; no author badge', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#reports' });
     const rows = g.$$('#reports tr.rowhead');
-    expect(g.$$('#reports th').map(text)).toEqual(['title', 'from', 'filed', 'acked']);
+    expect(g.$$('#reports th').map(text)).toEqual(['title', 'from', 'filed', 'acked', '']);
     expect(rows.map((r) => [...r.querySelectorAll('td')].map(text))).toEqual([
-      ['Old fleet notes', '', '60s', 'acked'],
-      ['Fleet notes', '', '5m', ''],
-      ['Tray findings', 'kind-crab', '20m', ''],
-      ['Build timings', 'aaaaaaaa', '40m', ''],
+      ['Old fleet notes', '', '60s', 'acked', ''],
+      ['Fleet notes', '', '5m', '', ''],
+      ['Tray findings', 'kind-crab', '20m', '', ''],
+      ['Build timings', 'aaaaaaaa', '40m', '', ''],
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
@@ -357,7 +358,7 @@ describe('glass: the Reports tab', () => {
     expect(byRepo.$$('#reports tr.rowhead').map((r) => text(r.querySelector('td')))).toEqual(['Tray findings', 'Build timings']);
   });
 
-  it('a row, a card, its arrow, or the title opens the report in the sheet, never a new tab', async () => {
+  it('a row, card or title opens the sheet while its arrow opens a separate tab', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#reports' });
     await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Tray findings')) ?? null);
     expect(g.opened()).toEqual([]);
@@ -378,7 +379,7 @@ describe('glass: the Reports tab', () => {
     await click(cards, card);
     expect(text(cards.$('.rsheet .rbartitle'))).toBe('Tray findings');
     expect(cards.opened()).toEqual([]);
-    // The arrow opens the same sheet (Chris: nothing special for the arrow).
+    // The arrow keeps its native new-tab action at every width.
     const arrows = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     const arrow = arrows
       .$$('#reports .card')
@@ -387,12 +388,29 @@ describe('glass: the Reports tab', () => {
     const plain = new arrows.window.MouseEvent('click', { bubbles: true, cancelable: true });
     arrow.dispatchEvent(plain as never);
     await arrows.settle();
-    expect(plain.defaultPrevented).toBe(true);
-    expect(text(arrows.$('.rsheet .rbartitle'))).toBe('Fleet notes');
+    expect(plain.defaultPrevented).toBe(false);
+    expect(arrows.$('.rsheet')).toBeNull();
+    expect(arrow.getAttribute('target')).toBe('_blank');
     // A ⌘-click still follows the link to a new tab.
     const meta = new arrows.window.MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
     arrow.dispatchEvent(meta as never);
     expect(meta.defaultPrevented).toBe(false);
+  });
+
+  it.each(['cards', 'table'])('keeps a named report arrow in phone %s view with native new-tab navigation', async (view) => {
+    const g = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view }, prepare: window => Object.defineProperty(window, 'innerWidth', { value: 375 }) });
+    const arrows = g.$$('#reports .gopen');
+    expect(arrows).toHaveLength(4);
+    for (const arrow of arrows) {
+      expect(arrow.getAttribute('aria-label')).toBe('Open the report');
+      expect(arrow.querySelector('svg')).not.toBeNull();
+      expect(arrow.getAttribute('target')).toBe('_blank');
+      const event = new g.window.MouseEvent('click', { bubbles: true, cancelable: true });
+      arrow.dispatchEvent(event as never);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    await g.settle();
+    expect(g.$('.rsheet')).toBeNull();
   });
 
   it('acks the report once its text shows in the sheet, as its own page does', async () => {
@@ -468,10 +486,7 @@ describe('glass: cards keep their text inside', () => {
     const rule = css.slice(css.indexOf('.gtitle,\n.gtext {'), css.indexOf('}', css.indexOf('.gtitle,\n.gtext {')));
     expect(rule).toMatch(/-webkit-line-clamp: 2;/);
     expect(rule).toMatch(/overflow: hidden;/);
-    // A short status word carries no title.
-    const short = g.$$('#deck .card .gchip').find((b) => text(b) === 'ghosted');
-    expect(short).toBeTruthy();
-    expect(short!.getAttribute('title')).toBeNull();
+
   });
 });
 
@@ -508,7 +523,8 @@ describe('glass: short card badges stay whole', () => {
     expect(style(done).getPropertyValue('flex')).toBe('0 0 auto');
     const title = landed.querySelector('.gtitle')!;
     expect(style(title).getPropertyValue('flex-shrink')).toBe('1000000');
-    const trap = g.$$('#deck .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
+    const traps = await page(d, { hash: '#traps', prefs: { view: 'cards' } });
+    const trap = traps.$$('#traps .card').find((c) => text(c.querySelector('b')).includes('wt:t1'))!;
     // A trap card's harness is the icon after its name (components/card.ts); it never shrinks either.
     const claude = trap.querySelector('.gicon')!;
     expect(claude.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Claude');
@@ -543,10 +559,7 @@ describe('glass: the open-window button', () => {
       expect(g.$('#overlay')!.className).toBe('');
     }
     const deck = await page(d, { prefs: { view: 'cards' } });
-    const button = deck.$('#deck .card .gfoot .gopenbtn button')!;
-    expect(button.querySelector('svg.openicon')).toBeTruthy();
-    await click(deck, button);
-    expect(deck.$('#overlay')!.className).toBe('');
+    expect(deck.$('#deck .deck-traps .gopenbtn')).toBeNull();
   });
 });
 
