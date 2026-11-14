@@ -51,7 +51,7 @@ export function App({ state }: { state: GlassState }) {
     if (!inp || t !== tab) return null;
     if (t === 'deck')
       return [
-        html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} grants=${d?.sessionGrants ?? []} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
+        html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
         host().deck?.(),
       ];
     if (t === 'boats') return host().boats?.() ?? null;

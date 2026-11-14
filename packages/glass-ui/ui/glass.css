@@ -3998,3 +3998,16 @@ footer .glass-brand {
     min-width: 0;
   }
 }
+.trap-overview-row,
+.trap-harness-count {
+  flex-wrap: nowrap;
+}
+.trap-overview-row > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trap-overview-row > span {
+  flex-shrink: 0;
+}

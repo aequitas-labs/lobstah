@@ -1,5 +1,5 @@
-import type { GlassSnapshot, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
-import { catchCount, INFLIGHT_MAX, LANDED_MAX, REPORTS_MAX, goalLine, reportPageUrl } from '../../src/glass-diff.js';
+import type { GlassSnapshot, LandedCatch, WorkerMetadata } from '@lobstah/core';
+import { INFLIGHT_MAX, LANDED_MAX, REPORTS_MAX, goalLine, reportPageUrl } from '../../src/glass-diff.js';
 import type { DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -13,19 +13,12 @@ import {
   ageText,
   badgeLong,
   badgeTitle,
-  NewTrap,
   opener,
-  trapWork,
-  trapWorkText,
-  trapScope,
-  windowAction,
   dispatchContext,
   verbState,
   VerbChip,
   verbTone,
 } from './common.js';
-import { GrantChip } from './session-grants.js';
-import { trapCard, trapTitleLink } from './traps.js';
 import { TrapOverview } from './trap-overview.js';
 import { dispatchCard } from './dispatches.js';
 import { Card, OpenArrow } from './card.js';
@@ -113,7 +106,12 @@ function deckItem(it: DeckItem, view: View) {
     const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
     return view === 'cards'
       ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
-      : html`<div key=${it.key} class=${cls} onClick=${it.here}><b>${it.title}</b>${it.meta && html`<span class="dim"> · ${it.meta}</span>`}<${OpenArrow} open=${{ href: it.href, label: 'Open the report' }} /></div>`;
+      : html`<div key=${it.key} class=${cls} onClick=${it.here}><a class="gtitle" href=${it.href} target="_blank" rel="noopener" onClick=${(
+          event: Event,
+        ) => {
+          event.stopPropagation();
+          it.here?.(event);
+        }}><b>${it.title}</b></a>${it.meta && html`<span class="dim"> · ${it.meta}</span>`}<${OpenArrow} open=${{ href: it.href, label: 'Open the report' }} /></div>`;
   }
   if (view !== 'cards' && it.row) return it.row;
   if (view === 'cards')
@@ -152,7 +150,6 @@ export function Deck({
   inp,
   goals = [],
   passes = [],
-  grants = [],
   drafts,
   focus,
   viewedHere,
@@ -161,7 +158,6 @@ export function Deck({
   inp: DeckInputs;
   goals?: GlassSnapshot['goals'];
   passes?: GlassSnapshot['helmPasses'];
-  grants?: Grant[];
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
   viewedHere: Record<string, true>;
