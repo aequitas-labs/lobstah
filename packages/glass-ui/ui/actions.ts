@@ -805,6 +805,12 @@ async function ackAttention(kind: 'pr-ack' | 'attention-ack', items: Array<{ key
           const ack = result.acked?.find((i) => i.key === a.key && i.stateHash === a.stateHash);
           return ack ? { ...a, acked: { at: ack.at, by: ack.by } } : a;
         }),
+        reviews: snapshot.reviews?.map((r) => {
+          const ack = result.acked?.find(
+            (i) => i.key === r.key && snapshot.attention.some((a) => a.key === i.key && a.stateHash === i.stateHash),
+          );
+          return ack ? { ...r, seenAt: ack.at, acknowledgedAt: ack.at, stands: false, notification: undefined, needsYou: undefined } : r;
+        }),
       },
     });
 }

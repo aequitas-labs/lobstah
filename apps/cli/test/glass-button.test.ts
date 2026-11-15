@@ -92,7 +92,7 @@ describe('the atom', () => {
     await pending;
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(approve!.disabled).toBe(false);
-    expect(host.querySelector('[role="status"]')?.textContent).toBe('Approved #91');
+    expect(host.querySelector('[role="status"] .toast-content')?.textContent).toBe('Approved #91');
     (send as unknown as HTMLElement).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(host.querySelector('[role="alert"]')?.textContent).toBe('The request was refused.');

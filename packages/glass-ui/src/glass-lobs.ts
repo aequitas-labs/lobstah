@@ -87,7 +87,7 @@ export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
       // A review request opens the PR in its review tool, where the staged draft is sent.
       if ((x.kind === 'review' || x.kind === 'pr:draft') && x.key && x.prUrl) {
         const key = x.key.replace(/^review:/, 'pr:');
-        return { key: x.kind + ':' + x.key, text: x.note || x.verb, label, hash: prHash(key) };
+        return { key: x.kind + ':' + x.key, text: x.note || x.verb, label, hash: prHash(key), ...(x.kind === 'review' ? hide : {}) };
       }
       // A report opens its own page in a new tab.
       if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };

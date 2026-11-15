@@ -124,7 +124,6 @@ export function App({ state }: { state: GlassState }) {
     html`<div id="overlay" class=${state.modal && d && !settingsOpen ? 'open' + (helm ? ' dialog-overlay' : '') : d ? '' : undefined} onClick=${onOverlay}>${helm ? html`<${Dialog} id="modalbox" title=${helm.man} icon="⛵ " cls="helm-dialog" onClose=${closeModal}><${HelmBody} helm=${helm} /><//>` : html`<div class=${'modal' + (['pr', 'review', 'dispatch', 'trap'].includes(state.modal?.type ?? '') ? ' view-modal' : '')} id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div>`}</div>`,
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
-    d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`,
-    html`<${ToastHost} />`,
+    html`<${ToastHost}>${d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`}<//>`,
   ];
 }

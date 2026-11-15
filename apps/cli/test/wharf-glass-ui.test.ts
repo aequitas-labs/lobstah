@@ -1,3 +1,4 @@
+import { detachFeedbackTimers } from './glass-dom.js';
 import { Window } from 'happy-dom';
 import * as fs from 'node:fs';
 import { afterEach, expect, it } from 'vitest';
@@ -14,7 +15,9 @@ import { attachCommand, resume } from '../../../services/wharf/glass/src/model.j
  */
 
 let windows: Window[] = [];
+const stopFeedbackTimers: Array<() => void> = [];
 afterEach(async () => {
+  for (const stop of stopFeedbackTimers.splice(0)) stop();
   await Promise.all(windows.map((w) => w.happyDOM.close()));
   windows = [];
 });
@@ -44,6 +47,7 @@ async function page(path = '/', signedOut = false, data: Data = {}) {
     },
   } as ConstructorParameters<typeof Window>[0]);
   windows.push(window);
+  stopFeedbackTimers.push(detachFeedbackTimers(window));
   if (data.prefs) window.localStorage.setItem('spyglass', JSON.stringify(data.prefs));
   const w = window as unknown as Record<string, unknown>;
   const writes: { path: string; method: string; body: Record<string, unknown>; headers: Record<string, string>; credentials?: string }[] =
@@ -581,13 +585,13 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   (reviewCards[0]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
   await g.settle();
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
-  expect(g.doc.querySelector('.glass-toast[role="status"]')?.textContent).toContain('Sent to the boat that drafted it');
+  expect(g.doc.querySelector('.glass-toasts')?.textContent).toContain('Sent to the boat that drafted it');
   (reviewCards[1]!.querySelector('.gactions button[aria-label="More actions"]') as unknown as HTMLElement).click();
   await g.settle();
   (reviewCards[1]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
   await g.settle();
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-mute', document: '8' } });
-  expect(g.doc.querySelector('.glass-toast[role="status"]')?.textContent).toContain('Muted');
+  expect(g.doc.querySelector('.glass-toasts')?.textContent).toContain('Muted');
   await g.go('#review/7');
   expect(g.activeTab()).toBe('reviews');
 });

@@ -622,11 +622,18 @@ describe('glass: the new-decision alert', () => {
     expect(g.$('.dalert')).toBeNull();
   });
 
-  it('dismissing hides it and marks nothing read; a new decision shows it again with the new count', async () => {
+  it.each(['close', 'swipe'])('%s hides it and marks nothing read; a new decision shows it again with the new count', async (method) => {
     const d = fleet();
     const g = await page(d, { hash: '#traps', post: ok });
     expect(text(g.$('.dalert .dalert-open'))).toBe('2 2 new decisions');
-    await click(g, g.$('.dalert .dx'));
+    if (method === 'close') await click(g, g.$('.dalert .dx'));
+    else {
+      const alert = g.$('.dalert')!;
+      for (const [type, x] of [['pointerdown', 200], ['pointermove', 100], ['pointerup', 100]] as const) {
+        alert.dispatchEvent(new g.window.PointerEvent(type, { bubbles: true, pointerType: 'touch', pointerId: 1, clientX: x, clientY: 10 }) as unknown as Event);
+      }
+      await g.settle();
+    }
     expect(g.$('.dalert')).toBeNull();
     expect(views(g)).toEqual([]);
     expect(text(g.$('#tabs a[data-tab="deck"] .dbadge'))).toBe('2');
@@ -678,7 +685,7 @@ describe('glass: the new-decision alert', () => {
       expect(at).toBeGreaterThanOrEqual(0);
       return /z-index: ([^;]+);/.exec(css.slice(at, css.indexOf('}', at)))?.[1]?.trim();
     };
-    expect(zOf('.dalert-live')).toBe('var(--layer-alert)');
+    expect(zOf('.glass-toasts')).toBe('var(--layer-alert)');
     expect(zOf('#overlay')).toBe('var(--layer-modal)');
     expect(zOf('#doverlay')).toBe('var(--layer-decision-modal)');
     const root = css.slice(css.indexOf(':root {'), css.indexOf('}', css.indexOf(':root {')));

@@ -136,6 +136,7 @@ export const ActionIcon = {
     '<circle cx="3" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1" fill="currentColor" stroke="none"/>',
   ),
   mute: actionIcon('<path d="M5 6a3 3 0 0 1 6 0c0 4 1.3 4.8 2 5.5H3C3.7 10.8 5 10 5 6Z"/><path d="m2 2 12 12M6.5 13a1.5 1.5 0 0 0 3 0"/>'),
+  unmute: actionIcon('<path d="M5 6a3 3 0 0 1 6 0c0 4 1.3 4.8 2 5.5H3C3.7 10.8 5 10 5 6ZM6.5 13a1.5 1.5 0 0 0 3 0"/>'),
 };
 
 /** One of a card's other actions, in its ▾ menu. */

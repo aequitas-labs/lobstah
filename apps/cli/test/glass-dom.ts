@@ -205,6 +205,7 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
   w.clearInterval = (id: number) => {
     intervals.delete(id);
   };
+  const stopFeedbackTimers = detachFeedbackTimers(window);
   if (opts.hidden) Object.defineProperty(window.document, 'hidden', { value: true, configurable: true });
   if (opts.prefs) window.localStorage.setItem('spyglass', JSON.stringify(opts.prefs));
   const settle = async () => {
@@ -264,8 +265,35 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
     $: (sel) => window.document.querySelector(sel) as unknown as Element | null,
     $$: (sel) => [...window.document.querySelectorAll(sel)] as unknown as Element[],
     close: async () => {
+      stopFeedbackTimers();
       await window.happyDOM.abort();
       await window.happyDOM.close();
     },
+  };
+}
+
+/** Keep feedback expiry out of the queue that page tests wait on to settle renders. */
+export function detachFeedbackTimers(window: Window): () => void {
+  // Feedback expiry must not make settle() wait for the feedback to disappear.
+  // Run long timers outside happy-dom's pending-work queue, and cancel on close.
+  const delayed = new Set<ReturnType<typeof setTimeout>>();
+  const timeout = window.setTimeout.bind(window);
+  const clear = window.clearTimeout.bind(window);
+  const w = window as unknown as Record<string, unknown>;
+  w.setTimeout = (fn: () => void, ms = 0) => {
+    if (ms < 2500) return timeout(fn, ms);
+    const id = setTimeout(() => {
+      delayed.delete(id);
+      fn();
+    }, ms);
+    delayed.add(id);
+    return id;
+  };
+  w.clearTimeout = (id: ReturnType<typeof setTimeout>) => {
+    if (delayed.delete(id)) clearTimeout(id);
+    else clear(id);
+  };
+  return () => {
+    for (const id of delayed) clearTimeout(id);
   };
 }

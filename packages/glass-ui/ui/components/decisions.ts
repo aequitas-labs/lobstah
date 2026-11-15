@@ -32,6 +32,7 @@ import type { RunStatus } from './run-status.js';
 import { can, fileUrl } from '../backend.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 import { Button, buttonClass } from './button.js';
+import { Toast } from './toast.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -455,11 +456,10 @@ export function DecisionAlert({ unread, dismissed }: { unread: DecisionCard[]; d
   const show = unread.length > 0 && fresh;
   const n = unread.length;
   const words = `${n} new decision${n === 1 ? '' : 's'}`;
-  return html`<div class="dalert-live" role="status" aria-live="polite">${
+  return (
     show &&
-    html`<div class="dalert">
+    html`<${Toast} class="dalert dalert-live" duration=${null} onDismiss=${dismissAlert}>
       <button type="button" class="dalert-open" aria-keyshortcuts="d" onClick=${() => openDecision()}><span class="dcount" aria-hidden="true">${n}</span> <span>${words}</span></button>
-      <${Button} variant="icon" class="dx" label="dismiss" onClick=${dismissAlert}>×<//>
-    </div>`
-  }</div>`;
+    <//>`
+  );
 }
