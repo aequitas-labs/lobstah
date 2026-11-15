@@ -83,10 +83,10 @@ export function Toast({
         event.stopPropagation();
       }
     }}
-  ><div class="toast-content">${children}</div><${Button} variant="icon" class="dx" label="Dismiss notification" onClick=${onDismiss}>×<//></div>`;
+  ><div class="toast-content">${children}</div><span class="toast-close"><${Button} variant="icon" class="dx" label="Dismiss notification" onClick=${onDismiss}>×<//></span></div>`;
 }
 
-/** One stack keeps notices and action feedback clear of the phone's bottom bar. */
+/** Shared dismissal behavior preserves the notice and feedback's original positions. */
 export function ToastHost({ children }: { children?: Children }): Children {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   useLayoutEffect(() => {
@@ -99,8 +99,8 @@ export function ToastHost({ children }: { children?: Children }): Children {
       listeners.delete(receive);
     };
   }, []);
-  return html`<div class="glass-toasts">${children}${toasts.map(
+  return html`<div class="glass-toasts">${children}<div class="toast-feedback">${toasts.map(
     (toast) =>
       html`<${Toast} key=${toast.id} onDismiss=${() => setToasts((current) => current.filter((item) => item.id !== toast.id))}>${toast.message}<//>`,
-  )}</div>`;
+  )}</div></div>`;
 }
