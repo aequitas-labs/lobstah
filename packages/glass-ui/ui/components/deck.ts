@@ -21,9 +21,9 @@ import {
 } from './common.js';
 import { TrapOverview } from './trap-overview.js';
 import { dispatchCard } from './dispatches.js';
-import { Card, OpenArrow } from './card.js';
+import { Card } from './card.js';
 import { getState } from '../store.js';
-import { openReport, reportCard, reportMeta } from './reports.js';
+import { openReport, reportCard, reportMeta, ReportChevron } from './reports.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
 import { SectionHead } from './section-head.js';
@@ -106,12 +106,7 @@ function deckItem(it: DeckItem, view: View) {
     const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
     return view === 'cards'
       ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
-      : html`<div key=${it.key} class=${cls} onClick=${it.here}><a class="gtitle" href=${it.href} target="_blank" rel="noopener" onClick=${(
-          event: Event,
-        ) => {
-          event.stopPropagation();
-          it.here?.(event);
-        }}><b>${it.title}</b></a>${it.meta && html`<span class="dim"> · ${it.meta}</span>`}<${OpenArrow} open=${{ href: it.href, label: 'Open the report' }} /></div>`;
+      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}><b>${it.title}</b>${it.meta && html`<span class="dim"> · ${it.meta}</span>`}<${ReportChevron} /></a>`;
   }
   if (view !== 'cards' && it.row) return it.row;
   if (view === 'cards')

@@ -3489,9 +3489,6 @@ footer .glass-brand {
 /* A report card's way out: a small arrow at the far right of its top line. */
 .gopen {
   flex: 0 0 auto;
-  min-width: 44px;
-  min-height: 44px;
-  justify-content: center;
   display: inline-flex;
   align-items: center;
   margin-left: var(--space-2);
@@ -3966,16 +3963,31 @@ footer .glass-brand {
 }
 
 /* A report row's way out remains at the right in either list view. */
-.deckline:has(> .gopen) {
+.deckline:has(> .report-chevron) {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.deckline > .gopen {
+.report-chevron {
+  font-size: 22px;
+  line-height: 1;
+}
+.deckline > .report-chevron {
+  flex: 0 0 auto;
   margin-left: auto;
+  padding: 8px 12px;
 }
 @media (max-width: 699px) {
-  /* Keep the report title, age and way out inside the phone's gutter. */
+  .report-card .gopen,
+  #reports .gopen {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  #reports td:last-child .gopen {
+    margin-left: 0;
+  }
+  /* Keep the report title, age and disclosure inside the phone's gutter. */
   #reports table {
     table-layout: fixed;
   }

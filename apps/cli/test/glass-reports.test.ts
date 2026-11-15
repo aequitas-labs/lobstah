@@ -313,8 +313,8 @@ describe('glass: a report page', () => {
     const g = await page(everyAttentionFleet());
     const lines = [...reportsSection(g).querySelectorAll('.deckline')];
     const tray = lines.find((l) => text(l).includes('Tray findings'))!;
-    const arrow = tray.querySelector('.gopen')!;
-    expect([arrow.getAttribute('href'), arrow.getAttribute('target'), arrow.getAttribute('rel')]).toEqual([
+    expect(tray.querySelector('.gopen, .report-chevron')).toBeNull();
+    expect([tray.getAttribute('href'), tray.getAttribute('target'), tray.getAttribute('rel')]).toEqual([
       pagePath(TRAP_KEY),
       '_blank',
       'noopener',
@@ -330,12 +330,12 @@ describe('glass: the Reports tab', () => {
   it('lists every report, newest first regardless of acknowledgment, in the table and cards; no author badge', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#reports' });
     const rows = g.$$('#reports tr.rowhead');
-    expect(g.$$('#reports th').map(text)).toEqual(['title', 'from', 'filed', 'acked', '']);
+    expect(g.$$('#reports th').map(text)).toEqual(['title', 'from', 'filed', 'acked']);
     expect(rows.map((r) => [...r.querySelectorAll('td')].map(text))).toEqual([
-      ['Old fleet notes', '', '60s', 'acked', ''],
-      ['Fleet notes', '', '5m', '', ''],
-      ['Tray findings', 'kind-crab', '20m', '', ''],
-      ['Build timings', 'aaaaaaaa', '40m', '', ''],
+      ['Old fleet notes', '', '60s', 'acked'],
+      ['Fleet notes', '', '5m', ''],
+      ['Tray findings', 'kind-crab', '20m', ''],
+      ['Build timings', 'aaaaaaaa', '40m', ''],
     ]);
     const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     expect(cards.$$('#reports .card b').map(text)).toEqual(['Old fleet notes', 'Fleet notes', 'Tray findings', 'Build timings']);
@@ -358,7 +358,7 @@ describe('glass: the Reports tab', () => {
     expect(byRepo.$$('#reports tr.rowhead').map((r) => text(r.querySelector('td')))).toEqual(['Tray findings', 'Build timings']);
   });
 
-  it('a row, card or title opens the sheet while its arrow opens a separate tab', async () => {
+  it('a row, card, title or desktop card arrow opens the report sheet', async () => {
     const g = await page(everyAttentionFleet(), { hash: '#reports' });
     await click(g, g.$$('#reports tr.rowhead').find((r) => text(r).includes('Tray findings')) ?? null);
     expect(g.opened()).toEqual([]);
@@ -379,7 +379,7 @@ describe('glass: the Reports tab', () => {
     await click(cards, card);
     expect(text(cards.$('.rsheet .rbartitle'))).toBe('Tray findings');
     expect(cards.opened()).toEqual([]);
-    // The arrow keeps its native new-tab action at every width.
+    // The desktop card retains its external-link glyph, but opens the sheet.
     const arrows = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' } });
     const arrow = arrows
       .$$('#reports .card')
@@ -388,8 +388,10 @@ describe('glass: the Reports tab', () => {
     const plain = new arrows.window.MouseEvent('click', { bubbles: true, cancelable: true });
     arrow.dispatchEvent(plain as never);
     await arrows.settle();
-    expect(plain.defaultPrevented).toBe(false);
-    expect(arrows.$('.rsheet')).toBeNull();
+    expect(plain.defaultPrevented).toBe(true);
+    expect(text(arrows.$('.rsheet .rbartitle'))).toBe('Fleet notes');
+    expect(arrow.querySelector('svg.openicon')).not.toBeNull();
+    expect(arrow.querySelector('.report-chevron')).toBeNull();
     expect(arrow.getAttribute('target')).toBe('_blank');
     // A ⌘-click still follows the link to a new tab.
     const meta = new arrows.window.MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
@@ -397,20 +399,48 @@ describe('glass: the Reports tab', () => {
     expect(meta.defaultPrevented).toBe(false);
   });
 
-  it.each(['cards', 'table'])('keeps a named report arrow in phone %s view with native new-tab navigation', async (view) => {
-    const g = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view }, prepare: window => Object.defineProperty(window, 'innerWidth', { value: 375 }) });
-    const arrows = g.$$('#reports .gopen');
-    expect(arrows).toHaveLength(4);
-    for (const arrow of arrows) {
-      expect(arrow.getAttribute('aria-label')).toBe('Open the report');
-      expect(arrow.querySelector('svg')).not.toBeNull();
-      expect(arrow.getAttribute('target')).toBe('_blank');
-      const event = new g.window.MouseEvent('click', { bubbles: true, cancelable: true });
-      arrow.dispatchEvent(event as never);
-      expect(event.defaultPrevented).toBe(false);
-    }
+  it.each([
+    ['#reports', 'cards'], ['#reports', 'table'], ['#deck', 'cards'], ['#deck', 'table'],
+  ])('%s phone %s chevrons open the report inside the glass and Back restores the list', async (hash, view) => {
+    const g = await page(everyAttentionFleet(), { hash, prefs: { view }, prepare: window => Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true }) });
+    const root = hash === '#reports' ? '#reports' : '#deck';
+    const chevrons = g.$$(`${root} .report-chevron`);
+    expect(chevrons).toHaveLength(4);
+    expect(chevrons.map(text)).toEqual(['›', '›', '›', '›']);
+    const link = chevrons.map(c => c.closest('a')!).find(a => a.getAttribute('href') === `/report/${encodeURIComponent(TRAP_KEY)}`)!;
+    expect(link.querySelector('svg.openicon')).toBeNull();
+    g.setScroll(280);
+    const event = new g.window.MouseEvent('click', { bubbles: true, cancelable: true });
+    link.querySelector('.report-chevron')!.dispatchEvent(event as never);
+    await g.settle();
+    expect(event.defaultPrevented).toBe(true);
+    expect(g.opened()).toEqual([]);
+    expect(g.window.location.hash).toBe('#report/' + encodeURIComponent(TRAP_KEY));
+    expect(text(g.$('.rsheet .rbartitle'))).toBe('Tray findings');
+    expect(text(g.$('.rsheet .mdpage'))).toContain('Tray findings');
+    await click(g, g.$('.rsheet .rback'));
     await g.settle();
     expect(g.$('.rsheet')).toBeNull();
+    expect(g.window.location.hash).toBe(hash);
+    expect(g.window.scrollY).toBe(280);
+  });
+
+  it('returns to the desktop table and card glyph after resizing from a phone', async () => {
+    const g = await page(everyAttentionFleet(), { hash: '#reports', prepare: window => Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true }) });
+    expect(g.$$('#reports th')).toHaveLength(5);
+    expect(g.$$('#reports .report-chevron')).toHaveLength(4);
+    Object.defineProperty(g.window, 'innerWidth', { value: 1280, configurable: true });
+    g.window.dispatchEvent(new g.window.Event('resize'));
+    await g.settle();
+    expect(g.$$('#reports th').map(text)).toEqual(['title', 'from', 'filed', 'acked']);
+    expect(g.$$('#reports .gopen, #reports .report-chevron')).toHaveLength(0);
+    const cards = await page(everyAttentionFleet(), { hash: '#reports', prefs: { view: 'cards' }, prepare: window => Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true }) });
+    expect(cards.$$('#reports .report-chevron')).toHaveLength(4);
+    Object.defineProperty(cards.window, 'innerWidth', { value: 1280, configurable: true });
+    cards.window.dispatchEvent(new cards.window.Event('resize'));
+    await cards.settle();
+    expect(cards.$$('#reports .report-chevron')).toHaveLength(0);
+    expect(cards.$$('#reports .gopen svg.openicon')).toHaveLength(4);
   });
 
   it('acks the report once its text shows in the sheet, as its own page does', async () => {
