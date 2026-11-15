@@ -1,5 +1,5 @@
 import type { HelmPassView, TodoView } from '@lobstah/core';
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Children } from '../html.js';
 import { html } from '../html.js';
 import { Age, lastPassText } from './common.js';
@@ -33,35 +33,73 @@ function TodoRow({ todo, preview, grounds }: { todo: TodoView; preview: boolean;
   const [snoozing, setSnoozing] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
-  const swipe = useRef<{ x: number; y: number } | null>(null);
+  const row = useRef<HTMLLIElement>(null);
+  const [phone, setPhone] = useState(innerWidth < 700);
+  const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const swipe = useRef<{ x: number; y: number; offset: number; axis?: 'x' | 'y' } | null>(null);
+  const width = 112;
+  useEffect(() => {
+    const resize = () => {
+      setPhone(innerWidth < 700);
+      setOffset(0);
+      setRevealed(false);
+    };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
   const available = !todo.done && can('todo-schedule');
   const open = (): void => {
     setRevealed(false);
+    setOffset(0);
     setSnoozing(true);
   };
   const close = (): void => {
     setSnoozing(false);
-    anchor.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    if (phone) row.current?.focus();
+    else anchor.current?.querySelector<HTMLButtonElement>('button')?.focus();
   };
   const swipeStart = (event: TouchEvent): void => {
     const touch = event.touches[0];
     const target = event.target as Element | null;
-    swipe.current = available && touch && !target?.closest('button, input, a') ? { x: touch.clientX, y: touch.clientY } : null;
+    swipe.current =
+      available && phone && touch && !target?.closest('button, input, a')
+        ? { x: touch.clientX, y: touch.clientY, offset: revealed ? -width : 0 }
+        : null;
+  };
+  const swipeMove = (event: TouchEvent): void => {
+    const start = swipe.current,
+      touch = event.touches[0];
+    if (!start || !touch) return;
+    const dx = touch.clientX - start.x,
+      dy = touch.clientY - start.y;
+    if (!start.axis && Math.max(Math.abs(dx), Math.abs(dy)) > 8) start.axis = Math.abs(dx) > Math.abs(dy) * 1.5 ? 'x' : 'y';
+    if (start.axis !== 'x') return;
+    event.preventDefault();
+    setDragging(true);
+    setOffset(Math.max(-width, Math.min(0, start.offset + dx)));
   };
   const swipeEnd = (event: TouchEvent): void => {
     const start = swipe.current,
       touch = event.changedTouches[0];
     swipe.current = null;
+    setDragging(false);
     if (!start || !touch) return;
-    const horizontal = touch.clientX - start.x,
-      vertical = touch.clientY - start.y;
-    if (Math.abs(horizontal) < 60 || Math.abs(horizontal) <= Math.abs(vertical) * 1.5) return;
-    event.preventDefault();
-    setRevealed(horizontal < 0);
+    const dx = touch.clientX - start.x,
+      dy = touch.clientY - start.y;
+    const horizontal = start.axis === 'x' || (!start.axis && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.5);
+    const reveal = horizontal ? start.offset + dx <= -width / 2 : revealed;
+    setRevealed(reveal);
+    setOffset(reveal ? -width : 0);
   };
-  return html`<li class=${'todo-check' + (todo.done ? ' done' : '') + (revealed ? ' snooze-revealed' : '')} onTouchStart=${swipeStart} onTouchEnd=${swipeEnd}>
-    ${revealed && html`<div class="todo-swipe-action"><${Button} class="todo-swipe-snooze" onClick=${open}>${ITEM_ICON.snooze}Snooze<//></div>`}
-    <div class="todo-row-body"><input type="checkbox" checked=${!!todo.done} disabled aria-label=${`Todo ${todo.id}: ${todo.text}`} title=${todo.done ? 'Done today; it drops off when the day rolls over (04:00)' : `Read-only; use lobstah todo done ${todo.id} --grounds ${todo.grounds}`} /><div class="todo-content"><span class="todo-text">${todo.done ? html`<s>${LinkedText(todo.text)}</s>` : LinkedText(todo.text)}</span><span class="dim">${grounds ? todo.grounds + ' · ' : ''}#${todo.id} · added ${preview ? [Age(todo.createdAt), ' ago'] : html`<time datetime=${todo.createdAt} title=${todo.createdAt}>${new Date(todo.createdAt).toLocaleString()}</time>`}</span>${!todo.done && html`<${TodoChips} todo=${todo} />`}</div>${available && html`<div class="todo-actions" ref=${anchor}><${Button} variant="icon" class="todo-schedule-open" label="Snooze" pressed=${snoozing} aria-expanded=${snoozing ? 'true' : 'false'} onClick=${open}>${ITEM_ICON.snooze}<//></div>`}</div>
+  const swipeCancel = (): void => {
+    swipe.current = null;
+    setDragging(false);
+    setOffset(revealed ? -width : 0);
+  };
+  return html`<li class=${'todo-check' + (todo.done ? ' done' : '') + (revealed ? ' snooze-revealed' : '') + (dragging ? ' swiping' : '')} ref=${row} tabindex=${phone && available ? '-1' : undefined} onTouchStart=${swipeStart} onTouchMove=${swipeMove} onTouchEnd=${swipeEnd} onTouchCancel=${swipeCancel}>
+    ${phone && available && (offset < 0 || revealed) && html`<button type="button" class="todo-swipe-action todo-swipe-snooze" disabled=${!revealed || dragging} onClick=${open}>${ITEM_ICON.snooze}Snooze</button>`}
+    <div class="todo-row-body" style=${`transform:translateX(${offset}px)`}><input type="checkbox" checked=${!!todo.done} disabled aria-label=${`Todo ${todo.id}: ${todo.text}`} title=${todo.done ? 'Done today; it drops off when the day rolls over (04:00)' : `Read-only; use lobstah todo done ${todo.id} --grounds ${todo.grounds}`} /><div class="todo-content"><span class="todo-text">${todo.done ? html`<s>${LinkedText(todo.text)}</s>` : LinkedText(todo.text)}</span><span class="dim">${grounds ? todo.grounds + ' · ' : ''}#${todo.id} · added ${preview ? [Age(todo.createdAt), ' ago'] : html`<time datetime=${todo.createdAt} title=${todo.createdAt}>${new Date(todo.createdAt).toLocaleString()}</time>`}</span>${!todo.done && html`<${TodoChips} todo=${todo} />`}</div>${available && !phone && html`<div class="todo-actions" ref=${anchor}><${Button} variant="icon" class="todo-schedule-open" label="Snooze" pressed=${snoozing} aria-expanded=${snoozing ? 'true' : 'false'} onClick=${open}>${ITEM_ICON.snooze}<//></div>`}</div>
     ${snoozing && html`<${TodoSnooze} todo=${todo} anchor=${anchor.current} onClose=${close} />`}
   </li>`;
 }

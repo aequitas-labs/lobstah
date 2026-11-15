@@ -9,7 +9,7 @@ import { viewOf } from '../store.js';
 import type { GlassState } from '../store.js';
 import type { OlderControl } from './common.js';
 import { Deck } from './deck.js';
-import { DeckDecisions, DecisionAlert, DecisionModal } from './decisions.js';
+import { DecisionAlert, DecisionModal } from './decisions.js';
 import { Dispatches } from './dispatches.js';
 import { Footer, Header } from './header.js';
 import { Lobs } from './lobs.js';
@@ -49,11 +49,9 @@ export function App({ state }: { state: GlassState }) {
   });
   const page = (t: GlassTab): Children => {
     if (!inp || t !== tab) return null;
-    if (t === 'deck' && state.route === 'decisions')
-      return html`<${DeckDecisions} page cards=${inp.deck.decisions} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} recentRuns=${inp.deck.recentRuns} />`;
     if (t === 'deck')
       return [
-        html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} grants=${d?.sessionGrants ?? []} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
+        html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
         host().deck?.(),
       ];
     if (t === 'boats') return host().boats?.() ?? null;

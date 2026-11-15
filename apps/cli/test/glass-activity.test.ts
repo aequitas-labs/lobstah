@@ -127,13 +127,13 @@ describe('glass: a reserved trap shows as starting, then as failed', () => {
       expect(el?.className).not.toContain('dim');
     });
   }
-  it('failed: says why, on the traps tab and the deck', async () => {
+  it('failed: says why on the Traps page and stays out of the deck', async () => {
     const g = await page(reserved(true), { hash: '#traps', prefs: { view: 'cards' } });
     const card = g.$$('#traps .card').find((c) => text(c).includes('amber-gull'));
     expect(text(card?.querySelector('.gnow'))).toBe('no session signed on by 12:03');
     expect(text(card?.querySelector('.gchip'))).toBe('start failed');
     await g.go('#deck');
-    expect(g.$$('#deck *').some((e) => text(e).includes('amber-gull'))).toBe(true);
+    expect(g.$$('#deck *').some((e) => text(e).includes('amber-gull'))).toBe(false);
   });
 });
 
@@ -195,7 +195,7 @@ describe('glass: a requested trap, and the start command on a starting card only
       expect(g.$$('#traps .newtrap button').map((button) => button.getAttribute('aria-label'))).toEqual(['New trap']);
     });
   }
-  it('with no helm signed on, the requested card says so; the deck has the New trap button', async () => {
+  it('with no helm signed on, the requested card says so; the deck stays an overview', async () => {
     const g = await page(fleetWith(false), { hash: '#traps', prefs: { view: 'cards' } });
     expect(
       g
@@ -203,6 +203,6 @@ describe('glass: a requested trap, and the start command on a starting card only
         .some((c) => text(c.querySelector('.gchip')) === 'requested' && text(c.querySelector('.gnow')) === 'waiting for a helm'),
     ).toBe(true);
     await g.go('#deck');
-    expect(g.$$('#deck .newtrap button').map((button) => button.getAttribute('aria-label'))).toEqual(['New trap']);
+    expect(g.$$('#deck .newtrap button')).toHaveLength(0);
   });
 });

@@ -46,10 +46,9 @@ describe('the trap card', () => {
     expect(text(c.querySelector('.gfoot'))).toBe('⛵ studio');
   });
 
-  it('shows the same card on the deck', async () => {
-    const { card: c } = await card(fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }), '#deck');
-    expect(text(c.querySelector('.gchip'))).toBe('needs decision');
-    expect(text(c.querySelector('.gfoot'))).toContain('⛵ studio');
+  it('keeps individual trap cards off the deck', async () => {
+    const { g } = await card(fleet({ onMachine: false, windowFocus: false, machine: 'studio', device: 'phone' }), '#deck');
+    expect(g.$$('#deck .deck-traps .card')).toHaveLength(0);
   });
 
   it('shows no Open and no "only reachable" note when this page has no route to the trap', async () => {

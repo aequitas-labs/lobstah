@@ -41,6 +41,8 @@ describe('glass snapshot', () => {
     reserveTrap({ repo: 'web', name: 'new-crab', harness: 'codex', startSecs: 60 });
     fs.mkdirSync(path.join(home, 'roster'), { recursive: true });
     fs.writeFileSync(path.join(home, 'roster', 'departed.json'), JSON.stringify({ trapId: 'departed', name: 'old-crab', repo: 'web', harness: 'claude', state: 'stowed', worktree: home }));
+    fs.writeFileSync(path.join(home, 'roster', 'ghost.json'), JSON.stringify({ trapId: 'ghost', name: 'ghost-crab', repo: 'web', harness: 'codex', state: 'ghosted', worktree: home }));
+    fs.writeFileSync(path.join(home, 'roster', 'unconfigured.json'), JSON.stringify({ trapId: 'unconfigured', repo: 'old', harness: 'codex', state: 'ghosted', worktree: home }));
     expect(buildGlassSnapshot().repoTraps).toEqual([
       { repo: 'web', used: 3, limit: 5, free: 1, harnesses: [{ harness: 'claude', count: 1 }, { harness: 'codex', count: 2 }] },
       { repo: 'empty', used: 0, limit: 2, free: 0, harnesses: [] },

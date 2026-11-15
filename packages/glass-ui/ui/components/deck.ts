@@ -1,14 +1,5 @@
-import type { GlassSnapshot, LandedCatch, WorkerMetadata, Grant } from '@lobstah/core';
-import {
-  catchCount,
-  DECK_TRAPS_MAX,
-  deckTrapAttention,
-  INFLIGHT_MAX,
-  LANDED_MAX,
-  REPORTS_MAX,
-  goalLine,
-  reportPageUrl,
-} from '../../src/glass-diff.js';
+import type { GlassSnapshot, LandedCatch, WorkerMetadata } from '@lobstah/core';
+import { INFLIGHT_MAX, LANDED_MAX, REPORTS_MAX, goalLine, reportPageUrl } from '../../src/glass-diff.js';
 import type { DeckInputs, GlassPrefs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import type { Children } from '../html.js';
@@ -22,24 +13,17 @@ import {
   ageText,
   badgeLong,
   badgeTitle,
-  NewTrap,
   opener,
-  trapWork,
-  trapWorkText,
-  trapScope,
-  windowAction,
   dispatchContext,
   verbState,
   VerbChip,
   verbTone,
 } from './common.js';
-import { GrantChip } from './session-grants.js';
-import { trapCard, trapTitleLink } from './traps.js';
 import { TrapOverview } from './trap-overview.js';
 import { dispatchCard } from './dispatches.js';
 import { Card } from './card.js';
 import { getState } from '../store.js';
-import { openReport, reportCard, reportMeta } from './reports.js';
+import { openReport, reportCard, reportMeta, ReportChevron } from './reports.js';
 import { DeckDecisions } from './decisions.js';
 import { LinkedText } from './links.js';
 import { SectionHead } from './section-head.js';
@@ -122,7 +106,7 @@ function deckItem(it: DeckItem, view: View) {
     const cls = (view === 'cards' ? 'card' : 'deckline click') + (it.acked ? ' acked' : '');
     return view === 'cards'
       ? html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}><div class="top"><b>${it.title}</b>${badge}</div>${it.meta && html`<div class="meta" title=${it.metaText}>${it.meta}</div>`}</a>`
-      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}>${badge && [badge, ' ']}<b>${it.title}</b>${it.meta && [' ', html`<span class="dim">· ${it.meta}</span>`]}</a>`;
+      : html`<a key=${it.key} class=${cls} href=${it.href} target="_blank" rel="noopener" onClick=${it.here}><b>${it.title}</b>${it.meta && html`<span class="dim"> · ${it.meta}</span>`}<${ReportChevron} /></a>`;
   }
   if (view !== 'cards' && it.row) return it.row;
   if (view === 'cards')
@@ -151,19 +135,16 @@ function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number,
   return html`<section><${SectionHead} title=${headTitle} count=${items.length} href=${'#' + tab} action=${headAction} />${body}${more(items.length - shown.length, tab)}</section>`;
 }
 
-/** Only attention cases get rows; the fleet overview remains useful even when every trap is healthy. */
-function trapBlock(items: DeckItem[], repos: DeckInputs['repoTraps'], view: View): Children {
+/** On deck keeps only the configured repos' capacity and harness counts. */
+function trapBlock(repos: DeckInputs['repoTraps']): Children {
   if (!visibleTabs().includes('traps')) return null;
-  const shown = items.slice(0, DECK_TRAPS_MAX);
-  const lines = shown.map((item) => deckItem(item, view));
-  return html`<section class="deck-traps"><${SectionHead} title="Traps" count=${items.length} href="#traps" action=${html`${more(items.length - shown.length, 'traps')}<${NewTrap} />`} /><${TrapOverview} repos=${repos} />${shown.length ? (view === 'cards' ? html`<div class="cards">${lines}</div>` : lines) : html`<div class="empty">No traps need attention</div>`}</section>`;
+  return html`<section class="deck-traps"><${SectionHead} title="Traps" href="#traps" /><${TrapOverview} repos=${repos} /></section>`;
 }
 
 export function Deck({
   inp,
   goals = [],
   passes = [],
-  grants = [],
   drafts,
   focus,
   viewedHere,
@@ -172,7 +153,6 @@ export function Deck({
   inp: DeckInputs;
   goals?: GlassSnapshot['goals'];
   passes?: GlassSnapshot['helmPasses'];
-  grants?: Grant[];
   drafts: Record<string, DecisionDraft>;
   focus: string | null;
   viewedHere: Record<string, true>;
@@ -246,25 +226,6 @@ export function Deck({
       acked: !!r.acked,
     };
   });
-  const traps = inp.traps.map(({ x: trap }): DeckItem => {
-    const attention = deckTrapAttention(trap, getState().snapshot!);
-    return {
-      key: trap.trapId,
-      title: [trapTitleLink(trap), ' ', html`<${Harness} worker=${trap} cls="" compact />`],
-      trap: { address: `wt:${trap.trapId}`, scope: trapScope(trap) },
-      badge: { text: attention ?? '', tone: 'warn' },
-      meta: [
-        html`<${GrantChip} session=${trap.sessionId} grants=${grants} />`,
-        html`<span class="catchn" title="catches">🦞 ${catchCount(trap.totalCatches ?? 0)}</span>`,
-        ' · ',
-        trapWork(trap),
-      ],
-      metaText: trapWorkText(trap),
-      action: windowAction(trap),
-      card: trapCard(trap, attention),
-      open: opener('trap', trap.trapId),
-    };
-  });
   return [
     shownGoals.length > 0 &&
       html`<div id="daily-goals" aria-label="Today's goals">${shownGoals.map(
@@ -276,6 +237,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('In flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('Reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${trapBlock(traps, inp.repoTraps, view)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('In flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('Reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${trapBlock(inp.repoTraps)}</div>`,
   ];
 }

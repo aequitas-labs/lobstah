@@ -174,9 +174,9 @@ it('falls back for an invalid stored choice and still works when storage is unav
 it('shows repo capacity, available workers and the accessible harness mix, including an empty repo', async () => {
   const page = await open({ hash: '#deck' });
   const rows = page.$$('#deck .trap-overview-row');
-  expect(rows[0]?.textContent).toContain('web3/10 in use · 1 free');
-  expect(rows[1]?.textContent).toContain('api2 in use · 1 free');
-  expect(rows[2]?.textContent).toContain('empty0/4 in use · 0 free');
+  expect(rows[0]?.textContent).toContain('web3/10');
+  expect(rows[1]?.textContent).toContain('api2/∞');
+  expect(rows[2]?.textContent).toContain('empty0/4');
   expect(rows[0]?.querySelector('[aria-label="Codex"]')?.parentElement?.textContent).toContain('2');
   expect(rows[0]?.querySelector('[aria-label="Claude"]')?.parentElement?.textContent).toContain('1');
 });
