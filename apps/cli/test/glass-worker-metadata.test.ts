@@ -74,7 +74,7 @@ describe('worker metadata in the glass', () => {
       await g.go('#deck');
       expect(g.$('#deck')?.textContent).not.toContain('my-model');
       expect(g.$('#deck')?.textContent).not.toContain('gpt-5.4');
-      expect(g.$$('#deck .worker-harness').map(n => n.getAttribute('aria-label'))).toContain('Codex · my-model · high');
+      expect(g.$$('#deck .deck-traps .worker-harness')).toHaveLength(0);
     });
   }
   it('null model says model unknown; null effort is omitted and absent observation stays unknown', async () => {

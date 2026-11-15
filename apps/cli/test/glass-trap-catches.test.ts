@@ -43,7 +43,7 @@ describe('trap catches by id', () => {
       expect(text(chip)).toBe('🦞 7');
       expect(text(g.$('#traps'))).not.toMatch(/keeper|\d+ catch/);
       await g.go('#deck');
-      expect(text(g.$('#deck'))).toContain('🦞 12');
+      expect(text(g.$('#deck .deck-traps'))).not.toContain('🦞 12');
       expect(text(g.$('#deck .deck-traps'))).not.toContain('🦞 999+');
     });
   }

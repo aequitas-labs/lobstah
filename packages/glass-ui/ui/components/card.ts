@@ -93,6 +93,8 @@ export type CardOpen =
       onOpen?: () => void;
       /** Opens it in the glass instead (a report's sheet); it decides whether a click wanted a new tab after all. */
       here?: (e: Event) => void;
+      /** A custom mark for this destination, otherwise the external-link icon. */
+      icon?: Children;
     }
   | { control: Children };
 
@@ -208,7 +210,7 @@ export function OpenArrow({ open }: { open: CardOpen }) {
     e.stopPropagation();
     open.onOpen?.();
     open.here?.(e);
-  }}>${OpenIcon}</a>`;
+  }}>${open.icon ?? OpenIcon}</a>`;
 }
 
 /** A repo, as a small line icon in the text's color: GitHub's Octicon "repo" (repo-16, @primer/octicons, MIT), sized to a 12px subtitle. */

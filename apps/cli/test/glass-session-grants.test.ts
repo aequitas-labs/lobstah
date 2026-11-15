@@ -82,8 +82,8 @@ it.each(['table', 'cards'])(
     dom = await loadGlass(GLASS_PAGE, d, { now: NOW, prefs: { view } });
     expect(dom.$('.session-grants')).toBeNull();
     expect(dom.$$('.chips .grant-chip').map((x) => x.textContent)).toEqual(['grant · 12m left']);
-    // A trap card leaves its grant to the trap's modal; a table row keeps it.
-    expect(dom.$$('main .grant-chip').map((x) => x.textContent)).toEqual(view === 'cards' ? [] : ['grant · 12m left']);
+    // On deck has no individual trap details.
+    expect(dom.$$('main .grant-chip')).toHaveLength(0);
     await dom.go('#traps');
     if (view === 'cards') {
       (dom.$('main .card') as unknown as HTMLElement).click();

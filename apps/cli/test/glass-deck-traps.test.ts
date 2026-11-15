@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import type { GlassDispatch, GlassFullSnapshot, GlassTrap, TendAttention } from '@lobstah/core';
-import { DECK_TRAPS_MAX, sectionInputs } from '../../../packages/glass-ui/src/glass-diff.js';
+import { sectionInputs } from '../../../packages/glass-ui/src/glass-diff.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass, type GlassDom } from './glass-dom.js';
 import { emptyFleet, NOW } from './fixtures/glass-snapshots.js';
@@ -114,12 +114,14 @@ it('moves the overview to On deck while the Traps page retains grouping and clos
   ];
   const page = await open(snapshot);
   const section = page.$('#deck .deck-traps')!;
-  expect(section.querySelector('.trap-overview')?.textContent).toContain('10/12 in use · 1 free');
+  expect(section.querySelector('.trap-overview')?.textContent).toContain('10/12');
   expect(section.querySelector('.section-head a')?.getAttribute('href')).toBe('#traps');
-  expect(section.querySelectorAll('.card')).toHaveLength(DECK_TRAPS_MAX);
+  expect(section.querySelectorAll('.card, .trap-deckline, button')).toHaveLength(0);
+  expect(section.textContent).not.toMatch(/ghost|failed|free|in use/);
+  expect(section.querySelector('[role=img]')?.getAttribute('aria-label')).toBe('Codex');
+  expect(section.textContent).toContain('×10');
   expect(section.querySelector('.startcmds')).toBeNull();
-  expect(section.querySelector('.deckmore')?.textContent).toBe('+1 more →');
-  expect(section.querySelector('.deckmore')?.getAttribute('href')).toBe('#traps');
+  expect(section.querySelector('.deckmore')).toBeNull();
   await page.go('#traps');
   expect(page.$('#traps .trap-overview')).toBeNull();
   expect(page.$('#traps .startcmds')?.textContent).toContain('fixture-start-command');
@@ -128,24 +130,14 @@ it('moves the overview to On deck while the Traps page retains grouping and clos
 });
 
 for (const view of ['cards', 'table'])
-  it(`${view}: a trap link opens its details, including from a fresh deep link`, async () => {
+  it(`${view}: the overview leads to the full Traps page`, async () => {
     const page = await open(fleet(), '#deck', view);
-    const link = page.$('#deck .deck-traps a[href="#trap/blocked"]') as HTMLAnchorElement;
-    expect(link).not.toBeNull();
+    const link = page.$('#deck .deck-traps .section-head a')!;
     await page.go(link.getAttribute('href')!);
-    expect(page.$('#overlay')?.classList.contains('open')).toBe(true);
-    expect(page.$('#modalbox')?.textContent).toContain('blocked-crab');
+    expect(page.$('#page-traps.on')).not.toBeNull();
+    expect(page.$('#traps')?.textContent).toContain('blocked-crab');
     const fresh = await open(fleet(), '#trap/blocked', view);
     expect(fresh.$('#modalbox')?.textContent).toContain('blocked-crab');
-    (fresh.$('#overlay button[aria-label="Close"]') as HTMLButtonElement).click();
-    await fresh.settle();
-    expect(fresh.$('#overlay')?.classList.contains('open')).toBe(false);
-    (fresh.$('#deck .deck-traps a[href="#trap/blocked"]') as HTMLAnchorElement).click();
-    await fresh.settle();
-    expect(fresh.$('#overlay')?.classList.contains('open')).toBe(true);
-    (fresh.$('#overlay button[aria-label="Close"]') as HTMLButtonElement).click();
-    await fresh.settle();
-    expect(fresh.$('#overlay')?.classList.contains('open')).toBe(false);
   });
 
 it('removes recovered attention cases on a live update and keeps the fleet overview', async () => {
@@ -157,7 +149,7 @@ it('removes recovered attention cases on a live update and keeps the fleet overv
   snapshot.attention = [];
   page.serve(snapshot);
   await page.poll();
-  expect(page.$('#deck .deck-traps')?.textContent).toContain('No traps need attention');
+  expect(page.$('#deck .deck-traps')?.textContent).toContain('10/12');
   expect(page.$('#deck .deck-traps .trap-overview')).not.toBeNull();
   expect(page.$$('#deck .deck-traps .card')).toHaveLength(0);
 });

@@ -574,13 +574,20 @@ h2 {
   gap: 0.6em;
   background: var(--bg);
 }
-.todo-check.snooze-revealed .todo-row-body {
-  transform: translateX(-7rem);
+.todo-row-body {
+  transition: transform 160ms ease-out;
+}
+.todo-check.swiping .todo-row-body {
+  transition: none;
 }
 .todo-swipe-action {
   position: absolute;
   inset: 0 0 0 auto;
-  width: 7rem;
+  width: 112px;
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -588,6 +595,12 @@ h2 {
 }
 .todo-swipe-snooze {
   flex-direction: column;
+  gap: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .todo-row-body {
+    transition: none;
+  }
 }
 /* Read-only boxes drawn by hand: a done goal or Todo shows a green check,
    not the browser's greyed-out disabled checkbox. */
@@ -3945,4 +3958,66 @@ footer .glass-brand {
 
 .section-action .deckmore {
   margin: 0;
+}
+
+/* A report row's way out remains at the right in either list view. */
+.deckline:has(> .report-chevron) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.report-chevron {
+  font-size: 22px;
+  line-height: 1;
+}
+.deckline > .report-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 8px 12px;
+}
+@media (max-width: 699px) {
+  .report-card .gopen,
+  #reports .gopen {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  #reports td:last-child .gopen {
+    margin-left: 0;
+  }
+  /* Keep the report title, age and disclosure inside the phone's gutter. */
+  #reports table {
+    table-layout: fixed;
+  }
+  #reports th:nth-child(2),
+  #reports td:nth-child(2),
+  #reports th:nth-child(4),
+  #reports td:nth-child(4) {
+    display: none;
+  }
+  #reports th:nth-child(3),
+  #reports td:nth-child(3) {
+    width: 6ch;
+  }
+  #reports th:last-child,
+  #reports td:last-child {
+    width: 44px;
+    padding: 0;
+  }
+  #reports td.grow {
+    min-width: 0;
+  }
+}
+.trap-overview-row,
+.trap-harness-count {
+  flex-wrap: nowrap;
+}
+.trap-overview-row > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trap-overview-row > span {
+  flex-shrink: 0;
 }

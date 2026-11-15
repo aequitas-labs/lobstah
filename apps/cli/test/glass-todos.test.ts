@@ -45,6 +45,7 @@ const snooze = async (g: GlassDom, id: number) => {
 const swipe = async (g: GlassDom, root: Element, from: [number, number], to: [number, number]) => {
   for (const [type, point, property] of [
     ['touchstart', from, 'touches'],
+    ['touchmove', to, 'touches'],
     ['touchend', to, 'changedTouches'],
   ] as const) {
     const event = new g.window.Event(type, { bubbles: true, cancelable: true });
@@ -205,13 +206,39 @@ describe('snoozing a todo', () => {
 
   it('a horizontal phone swipe reveals Snooze and opens the shared sheet; vertical scrolling does not', async () => {
     const g = await open([todo({ id: 4 })], '#todos', { prepare: (window) => Object.defineProperty(window, 'innerWidth', { value: 375 }) });
+    expect(row(g, 4).querySelector('.todo-schedule-open')).toBeNull();
     await swipe(g, row(g, 4), [220, 30], [180, 180]);
     expect(row(g, 4).querySelector('.todo-swipe-snooze')).toBeNull();
     await swipe(g, row(g, 4), [220, 30], [100, 35]);
-    (row(g, 4).querySelector('.todo-swipe-snooze') as HTMLButtonElement).click();
+    const action = row(g, 4).querySelector('.todo-swipe-action') as HTMLButtonElement;
+    expect(action.tagName).toBe('BUTTON');
+    expect(action.querySelector('button')).toBeNull();
+    expect(action.disabled).toBe(false);
+    action.click();
     await g.settle();
     expect(editor(g).getAttribute('aria-modal')).toBe('true');
     expect(editor(g).querySelector('h3')!.textContent).toBe('Snooze #4 until');
+  });
+
+  it('snaps a short swipe back, closes with a right swipe and cancels an interrupted gesture', async () => {
+    const g = await open([todo({ id: 4 })], '#todos', { prepare: window => Object.defineProperty(window, 'innerWidth', { value: 375 }) });
+    await swipe(g, row(g, 4), [220, 30], [185, 30]);
+    expect(row(g, 4).querySelector('.todo-swipe-action')).toBeNull();
+    await swipe(g, row(g, 4), [220, 30], [100, 30]);
+    expect(row(g, 4).querySelector('.todo-swipe-action')).not.toBeNull();
+    await swipe(g, row(g, 4), [100, 30], [220, 30]);
+    expect(row(g, 4).querySelector('.todo-swipe-action')).toBeNull();
+    for (const [type, x] of [['touchstart', 220], ['touchmove', 100]] as const) {
+      const event = new g.window.Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: 30 }] });
+      row(g, 4).dispatchEvent(event as unknown as Event);
+    }
+    await g.settle();
+    expect((row(g, 4).querySelector('.todo-swipe-action') as HTMLButtonElement).disabled).toBe(true);
+    row(g, 4).dispatchEvent(new g.window.Event('touchcancel', { bubbles: true }) as unknown as Event);
+    await g.settle();
+    expect(row(g, 4).querySelector('.todo-swipe-action')).toBeNull();
+    expect(editor(g)).toBeNull();
   });
 
   it('Escape closes the desktop popover and returns focus to the clock', async () => {
