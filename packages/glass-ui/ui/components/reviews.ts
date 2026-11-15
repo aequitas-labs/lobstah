@@ -1,6 +1,6 @@
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
-import { dismissReview, muteReviewPr, reviewRequest, showModal, unmuteReviewPr } from '../actions.js';
+import { dismissReview, hideLob, muteReviewPr, reviewRequest, showModal, unmuteReviewPr } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
 import { Age, Table, ageText } from './common.js';
@@ -62,7 +62,7 @@ function MuteAction({ r }: { r: GlassReview }) {
     e.stopPropagation();
     return r.mutedAt ? unmuteReviewPr(r.key) : muteReviewPr(r.key);
   };
-  return html`<${Button} action=${change} done=${r.mutedAt ? 'Unmuted' : 'Muted'}>${r.mutedAt ? 'Unmute' : 'Mute this PR'}<//>`;
+  return html`<${Button} action=${change} done=${r.mutedAt ? 'Unmuted' : 'Muted'}>${r.mutedAt && ActionIcon.unmute}${r.mutedAt ? 'Unmute' : 'Mute this PR'}<//>`;
 }
 
 /** Mute belongs in the card's menu; Unmute stays on the bar. */
@@ -112,7 +112,7 @@ export function ReviewActions({
 }) {
   // A source without review actions may still dismiss or mute through its boat.
   if (!can('review-request')) {
-    if (r.mutedAt) return html`<span class="rv-actions"><span class="badge dim">Muted</span><${MuteAction} r=${r} /></span>`;
+    if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /></span>`;
     if (!split) return html`<${MuteAction} r=${r} />${can('review-dismiss') && html`<${Dismiss} r=${r} />`}`;
     const more: MenuAction[] = [];
     if (can('review-dismiss') && DISMISSABLE.includes(r.state)) {
@@ -159,7 +159,7 @@ export function ReviewActions({
           : kind === 'review-skip'
             ? 'Skipping…'
             : 'Sending…';
-  if (r.mutedAt) return html`<span class="rv-actions"><span class="badge dim">Muted</span><${MuteAction} r=${r} /></span>`;
+  if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /></span>`;
   const sendButton =
     r.state === 'drafted' &&
     html`<${Button} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${send.label}<//>`;
@@ -229,10 +229,10 @@ const staged = (r: GlassReview) =>
   }}>Open pending review</a>`;
 
 function row(r: GlassReview, canDraft: boolean, publish: boolean) {
-  return html`<tr key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'rowhead' + (r.seenAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} onClick=${() => showModal('pr', r.key.replace('review:', 'pr:'))}>
+  return html`<tr key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'rowhead' + (r.seenAt || r.acknowledgedAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} onClick=${showReview(r)}>
     <td><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => {
       e.stopPropagation();
-      showModal('pr', r.key.replace('review:', 'pr:'));
+      showReview(r)();
       e.preventDefault();
     }}>${r.repo}#${r.number}</a></td>
     <td class="grow">${r.title}${findings(r)}</td>
@@ -272,8 +272,15 @@ function reviewTone(r: GlassReview): CardTone {
   return 'warn';
 }
 
-/** Open the PR view without acknowledging its draft. */
+/** Acknowledge the notification state shown, keeping the pending review intact. */
+function ackReviewLob(r: GlassReview): void {
+  const attention = getState().snapshot?.attention.find((a) => a.kind === 'review' && a.key === r.key);
+  if (attention && !attention.acked) hideLob(attention.key, attention.stateHash);
+}
+
+/** Opening a review clears its notification and opens the PR view. */
 const showReview = (r: GlassReview) => () => {
+  ackReviewLob(r);
   showModal('review', r.key);
 };
 
@@ -307,10 +314,13 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
     person: reviewPerson(r),
     actions: [
       html`<${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} split />`,
-      html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : 'Open'} onOpen=${() => void reviewRequest('review-seen', { key: r.key })} />`,
+      html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : 'Open'} onOpen=${() => {
+        ackReviewLob(r);
+        void reviewRequest('review-seen', { key: r.key });
+      }} />`,
     ],
     quiet: !OPEN.has(r.state),
-    cls: 'rv-card' + (r.seenAt ? ' seen' : ''),
+    cls: 'rv-card' + (r.seenAt || r.acknowledgedAt ? ' seen' : ''),
     attrs: {
       id: 'review-' + encodeURIComponent(r.key),
       'data-review': r.key,

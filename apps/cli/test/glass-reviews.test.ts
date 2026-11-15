@@ -66,6 +66,42 @@ async function openCard(g: GlassDom, n: number) {
 }
 
 describe('the Reviews tab', () => {
+  it.each(['card', 'keyboard', 'row'])('opening a review by %s acknowledges its lob and decrements only its badge', async (entry) => {
+    const d = {
+      ...fleet(),
+      attention: [7, 8].map(n => ({
+        kind: 'review' as const, key: `review:acme/web#${n}`, id: `review:acme/web#${n}`,
+        lane: 'chore' as const, verb: 'ready', stateHash: `round-${n}`, ageSecs: 60,
+        note: `Review ${n} is ready`, prUrl: `https://github.com/acme/web/pull/${n}`,
+      })),
+      reviews: [review(7, { state: 'drafted', staged: true }), review(8)],
+    };
+    const g = await loadGlass(GLASS_PAGE, d, {
+      now: NOW, hash: '#reviews', prefs: { view: entry === 'row' ? 'table' : 'cards', lobs: true },
+      post: (_url, init) => {
+        const request = JSON.parse(init.body);
+        return { status: 200, body: { ok: true, acked: request.payload.items?.map((item: { key: string; stateHash: string }) => ({ ...item, at: new Date(NOW).toISOString(), by: 'glass' })) } };
+      },
+    });
+    open.push(g);
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
+    expect(g.$$('#lobs .lob')).toHaveLength(2);
+    const card = g.$('[data-review="review:acme/web#7"]')!;
+    if (entry === 'keyboard') card.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event);
+    else (card as unknown as HTMLElement).click();
+    await g.settle();
+    const [ack] = g.posts();
+    expect(ack!.headers['x-lobstah-token']).toBe('tok');
+    expect(JSON.parse(ack!.body)).toEqual({ kind: 'attention-ack', payload: { items: [{ key: 'review:acme/web#7', stateHash: 'round-7' }] } });
+    expect(g.posts()).toHaveLength(1);
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
+    expect(g.$('[data-review="review:acme/web#7"]')?.classList.contains('seen')).toBe(true);
+    expect(g.$$('#lobs .lob')).toHaveLength(1);
+    expect(g.$('#lobs')?.textContent).toContain('Review 8 is ready');
+    expect(g.window.location.hash).toBe('#pr/pr%3Aacme%2Fweb%237');
+    expect(g.$('.detail-frame')?.textContent).toContain('Open draft');
+  });
+
   it.each([['approve', 'Approve', 'review-approve'], ['request_changes', 'Request changes', 'review-request-changes'], ['comment', 'Publish comment', 'review-comment']] as const)('shows the %s action and sends only that explicit action', async (verdict, label, kind) => {
     const r = review(7, { state: 'drafted', verdict, needsYou: verdict === 'approve', summary: 'Reviewed summary', blocking: verdict === 'request_changes' ? [{ path: 'src/a.ts', line: 12, body: 'Race condition' }] : [] });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards' }, post: () => ({ status: 200, body: { ok: true } }) });
@@ -98,7 +134,7 @@ describe('the Reviews tab', () => {
     action.click();
     await g.settle();
     expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'review-approve', payload: { key: r.key } });
-    expect(g.$$('[role="status"]').map((status) => status.textContent)).toContain('Approved #7');
+    expect(g.$$('.toast-content').map((status) => status.textContent)).toContain('Approved #7');
   });
 
   it('legacy deep links open Reviews despite stored filters and leave the draft pending', async () => {
@@ -122,12 +158,12 @@ describe('the Reviews tab', () => {
     const mute = [...openCard.querySelectorAll('.cmenulist [role="menuitem"]')].find(button => button.textContent === 'Mute PR') as unknown as HTMLElement;
     mute.click(); await g.settle();
     expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-mute', payload: { key: 'review:acme/web#7' } });
-    expect(g.$$('[role="status"]').map(status => status.textContent)).toContain('Muted');
+    expect(g.$$('.toast-content').map(status => status.textContent)).toContain('Muted');
     (openCard.querySelector('.splitcaret') as unknown as HTMLElement).click(); await g.settle();
     const skip = [...openCard.querySelectorAll('.cmenulist [role="menuitem"]')].find(button => button.textContent === 'Skip') as unknown as HTMLElement;
     skip.click(); await g.settle();
     expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-skip', payload: { key: 'review:acme/web#7' } });
-    expect(g.$$('[role="status"]').map(status => status.textContent)).toContain('Dismissed');
+    expect(g.$$('.toast-content').map(status => status.textContent)).toContain('Dismissed');
     const closedCard = g.$('#reviews [data-review="review:acme/web#8"]')!;
     expect(closedCard.querySelector('.split-menu-only')).toBeTruthy();
     (closedCard.querySelector('.splitmore') as unknown as HTMLElement).click(); await g.settle();
@@ -139,6 +175,8 @@ describe('the Reviews tab', () => {
     open.push(muted); await muted.go('#reviews');
     const unmute = muted.$$('#reviews button').find(button => button.textContent === 'Unmute') as unknown as HTMLElement;
     expect(unmute).toBeTruthy();
+    expect(unmute.querySelector('svg.acticon[aria-hidden="true"]')).toBeTruthy();
+    expect(muted.$('#reviews .gactions .badge')).toBeNull();
     unmute.click(); await muted.settle();
     expect(muted.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-unmute', payload: { key: 'review:acme/web#7' } });
   });
@@ -238,7 +276,7 @@ describe('the Reviews tab', () => {
     expect(g.$$('#reviews .rv-controls input, #reviews .rv-controls select, #reviews .rv-controls button')).toEqual([]);
     expect(g.posts().some(p => JSON.parse(p.body).kind === 'review-mode')).toBe(false);
   });
-  it('rows open the PR view without acknowledgement; explicit actions send guarded requests', async () => {
+  it('rows open the PR view; explicit actions send guarded requests', async () => {
     const g = await loadGlass(GLASS_PAGE, fleet(), { now: NOW, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g);
     await g.go('#reviews');

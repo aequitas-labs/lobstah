@@ -1,3 +1,4 @@
+import { detachFeedbackTimers } from './glass-dom.js';
 import { Window } from 'happy-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GlassFullSnapshot, GlassSnapshot } from '@lobstah/core';
@@ -56,7 +57,9 @@ interface Hosted {
 }
 
 const windows: Window[] = [];
+const stopFeedbackTimers: Array<() => void> = [];
 afterEach(async () => {
+  for (const stop of stopFeedbackTimers.splice(0)) stop();
   await Promise.all(windows.map((w) => w.happyDOM.close()));
   windows.length = 0;
 });
@@ -70,6 +73,7 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
     settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, navigator: { userAgent: DESKTOP } },
   } as ConstructorParameters<typeof Window>[0]);
   windows.push(window);
+  stopFeedbackTimers.push(detachFeedbackTimers(window));
   const w = window as unknown as Record<string, unknown> & { Date: DateConstructor };
   w.Date.now = () => NOW;
   w.WebSocket = class { close() {} };

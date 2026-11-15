@@ -30,7 +30,7 @@ function Findings({ review }: { review: GlassReview }) {
   </section>`;
 }
 
-/** One PR destination for cards, review drafts, lobs and the pet; opening it never sends a review acknowledgement. */
+/** One PR destination for cards, review drafts, lobs and the pet; callers acknowledge notifications when opening. */
 export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: string }) {
   const p = snapshot.prs?.find((pr) => pr.key === prKey);
   const review = snapshot.reviews?.find((round) => round.key.replace('review:', 'pr:') === prKey);

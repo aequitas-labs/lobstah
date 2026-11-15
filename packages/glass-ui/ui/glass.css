@@ -2025,22 +2025,23 @@ a.lob {
   font-size: 15px;
   margin-bottom: var(--space-2);
 }
-/* The new-decision alert: a corner toast on every tab, never taking focus, always below any open modal and its backdrop. */
-.dalert-live {
+/* All toasts share one stack below open modals and above the phone navigation. */
+.glass-toasts {
   position: fixed;
   right: var(--space-4);
   bottom: var(--space-4);
   z-index: var(--layer-alert);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
 }
-/* Shared action feedback stays visible after the action's editor closes. */
 .glass-toast {
-  position: fixed;
-  left: 50%;
-  bottom: var(--space-4);
-  transform: translateX(-50%);
-  z-index: var(--layer-alert);
-  max-width: calc(100vw - 2 * var(--space-4));
-  width: max-content;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2048,16 +2049,23 @@ a.lob {
   color: var(--fg);
   box-shadow: 0 8px 24px var(--scrim);
   overflow-wrap: anywhere;
+  pointer-events: auto;
+  touch-action: pan-y;
+  transition: transform 160ms ease-out;
 }
-@media (max-width: 699px) {
-  /* Leave the bottom navigation and the footer's wrapped links readable. */
-  .glass-toast {
-    bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + 5 * var(--space-4));
-  }
+.glass-toast.dragging {
+  transition: none;
+}
+.toast-content {
+  flex: 1;
+  min-width: 0;
+}
+.glass-toast .dx {
+  flex: 0 0 auto;
 }
 /* On a phone the bottom bar is pinned: the alert and the lobsters run just above it, never behind it. After their own rules, so this wins. */
 @media (max-width: 699px) {
-  .dalert-live {
+  .glass-toasts {
     bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + var(--space-4));
   }
   .lob {
@@ -2065,14 +2073,7 @@ a.lob {
   }
 }
 .dalert {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--card);
-  border: 1px solid var(--bad);
-  border-radius: var(--card-radius);
-  padding: 8px 10px;
-  box-shadow: 0 6px 24px var(--scrim);
+  border-color: var(--bad);
 }
 .dalert .dalert-open {
   display: flex;
@@ -2083,9 +2084,6 @@ a.lob {
   color: var(--fg);
   font: inherit;
   cursor: pointer;
-}
-.dalert .dx {
-  flex: 0 0 auto;
 }
 .dcount {
   display: inline-block;
