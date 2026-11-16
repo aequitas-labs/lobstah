@@ -237,7 +237,7 @@ describe('a review card', () => {
     expect(card(9).querySelector('.split-menu-only')).toBeTruthy();
     expect([...card(9).querySelectorAll('.gactions button')].map((b) => text(b) || b.getAttribute('aria-label'))).toEqual(['More actions']);
     await click(g, card(9).querySelector('.gactions .splitmore'));
-    expect([...card(9).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Mute PR']);
+    expect([...card(9).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Approve anyway', 'Mute PR']);
     // The requester is absent from the card.
     expect(text(card(7))).not.toContain('maya');
     // Sending a review verdict is one click; the card never opens.
