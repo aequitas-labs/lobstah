@@ -257,7 +257,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
 
   // A model never crosses harnesses: one that belongs to another harness is
   // dropped for the adapter's default rather than failing the dispatch.
-  const firstModel = modelForHarness(plan.harness, resolved.model);
+  const firstModel = modelForHarness(plan.harness, resolveDispatch({ ...descriptor, harness: plan.harness }, cfg).model);
   const firstNote = [
     wake ? `woke from pause: ${wake}` : attempts > 1 ? `attempt ${attempts}` : undefined,
     plan.note,
@@ -433,20 +433,22 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
   }
 
   const runOnce = async (harness: string, prompt: string, resumeSession: string | undefined) => {
+    const launch = resolveDispatch({ ...descriptor, harness }, cfg);
     // Arbitrary flags can override launch options: do not claim to know their
     // model/config. The Claude init event can still supply its actual model.
     const explicit = resolved.flags.length === 0;
     mergeEvidence(id, lane, { worker: workerMetadata({ harness,
       observedAt: new Date().toISOString(),
-      model: explicit ? modelForHarness(harness, resolved.model).model : undefined,
+      model: explicit ? modelForHarness(harness, launch.model).model : undefined,
       config: { effort: explicit ? resolved.effort : null, permissionMode: explicit && harness === 'claude' ? 'bypassPermissions' : null },
     }) });
     const run = await deps.loadAdapter(harness).start({
       id,
       cwd,
       prompt,
-      model: modelForHarness(harness, resolved.model).model,
+      model: modelForHarness(harness, launch.model).model,
       effort: resolved.effort,
+      codexSandbox: launch.codexSandbox,
       limits: resolved.limits,
       env: {
         ...resolved.env,

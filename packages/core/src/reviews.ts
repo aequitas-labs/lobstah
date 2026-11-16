@@ -77,6 +77,7 @@ export const DEFAULT_REVIEWS: ReviewsConfig = {
   repos: 'configured',
   work: 'off',
   post: 'draft',
+  harness: 'codex',
   limits: { wallClockSecs: 900, maxTurns: 40 },
   trapWaitSecs: 600,
   maxPerDay: 20,
@@ -146,7 +147,7 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
     ...base,
     mode,
     publish,
-    work: mode.startsWith('auto-') ? (base.work && base.work !== 'off' ? base.work : 'trap') : 'off',
+    work: base.work && base.work !== 'off' ? base.work : mode.startsWith('auto-') ? 'headless' : 'off',
     post: publish ? 'auto' : 'draft',
     ...Object.fromEntries(['identity', 'tokenCommand', 'tokenEnv', 'tokenFile'].filter((k) => r[k] !== undefined).map((k) => [k, String(r[k])])),
     limits: { ...DEFAULT_REVIEWS.limits, ...base.limits },
@@ -158,13 +159,13 @@ export function parseReviews(raw: unknown, reposRaw: Record<string, Record<strin
 }
 
 /** The settings for one repo: its overrides over `[reviews]`. */
-export function reviewSettings(cfg: ReviewsConfig, repoKey?: string): ReviewSettings {
+export function reviewSettings(cfg: ReviewsConfig, repoKey?: string, onDemand = false): ReviewSettings {
   const o = (repoKey && cfg.perRepo[repoKey]) || {};
   const { enabled: _e, mode: _mode, identity: _i, tokenCommand: _c, tokenEnv: _v, tokenFile: _f, repos: _r, maxPerDay: _m, perRepo: _p, ...base } = cfg;
   const requestedMode = o.mode ?? cfg.mode;
   const publish = o.publish ?? (o.mode === 'auto-draft' ? false : o.mode === 'auto-review' ? true : cfg.publish);
   const mode = requestedMode.startsWith('auto-') ? (publish ? 'auto-review' : 'auto-draft') : requestedMode;
-  const work = mode.startsWith('auto-') ? (o.work && o.work !== 'off' ? o.work : base.work !== 'off' ? base.work : 'trap') : 'off';
+  const work = mode.startsWith('auto-') || onDemand ? (o.work && o.work !== 'off' ? o.work : base.work !== 'off' ? base.work : 'headless') : 'off';
   return { ...base, ...o, mode, publish, work, post: publish ? 'auto' : 'draft', limits: { ...base.limits, ...o.limits } };
 }
 

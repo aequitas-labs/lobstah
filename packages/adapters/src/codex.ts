@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { codexInvocation, gitPushTargets, lobstahHome, toolTarget } from '@lobstah/core';
-import type { NormalizedEvent } from '@lobstah/core';
+import type { CodexHeadlessSandbox, NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
 
@@ -45,7 +45,7 @@ export function codexWritableDirectories(opts: AdapterStartOpts): string[] {
 export interface CodexThreadOptions {
   workingDirectory: string;
   skipGitRepoCheck: boolean;
-  sandboxMode: 'workspace-write';
+  sandboxMode: CodexHeadlessSandbox;
   additionalDirectories: string[];
   approvalPolicy: 'never';
   model?: string;
@@ -57,7 +57,7 @@ export function codexThreadOptions(opts: AdapterStartOpts): CodexThreadOptions {
   return {
     workingDirectory: opts.cwd,
     skipGitRepoCheck: true,
-    sandboxMode: 'workspace-write',
+    sandboxMode: opts.codexSandbox ?? 'workspace-write',
     additionalDirectories: codexWritableDirectories(opts),
     approvalPolicy: 'never',
     ...(opts.model ? { model: opts.model } : {}),
@@ -120,10 +120,13 @@ export function pumpCodexEvent(
 /** One headless turn's argv: `codex exec [resume <thread>] --json ... <prompt>`. */
 export function codexExecArgs(opts: AdapterStartOpts, prompt: string, resumeThread?: string): string[] {
   const args = ['exec'];
-  if (resumeThread) args.push('resume', resumeThread);
-  args.push('--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', ...codexWritableDirectories(opts).flatMap((dir) => ['--add-dir', dir]), '--cd', opts.cwd);
+  args.push('--json', '--skip-git-repo-check');
+  if (opts.codexSandbox === 'danger-full-access') args.push('--dangerously-bypass-approvals-and-sandbox');
+  else args.push('--sandbox', 'workspace-write', ...codexWritableDirectories(opts).flatMap((dir) => ['--add-dir', dir]));
+  args.push('-c', 'approval_policy="never"', '--cd', opts.cwd);
   if (opts.model) args.push('-m', opts.model);
   if (opts.effort) args.push('-c', `model_reasoning_effort=${JSON.stringify(opts.effort)}`);
+  if (resumeThread) args.push('resume', resumeThread);
   args.push(prompt);
   return args;
 }
