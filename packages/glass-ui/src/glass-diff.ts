@@ -1,3 +1,4 @@
+import { reviewUnreadReason } from './review-attention.js';
 export { goalLine } from '@lobstah/core/dist/goal-line.js';
 import type {
   Attachment,
@@ -385,9 +386,14 @@ export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>)
   return r.author;
 }
 
-/** Reviews in list order: the ones waiting on the person first, then the newest request first. */
+/** Only actionable rounds on open PRs contribute to the Reviews badge. */
+export function reviewNeedsAttention(review: GlassReview): boolean {
+  return reviewUnreadReason(review) !== undefined;
+}
+
+/** Reviews in list order: badged rows first, then the newest request first. */
 export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
-  Number(b.stands) - Number(a.stands) || b.requestedAt.localeCompare(a.requestedAt);
+  Number(reviewNeedsAttention(b)) - Number(reviewNeedsAttention(a)) || b.requestedAt.localeCompare(a.requestedAt);
 
 /** Reports in list order: newest first, regardless of acknowledgment. */
 export const reportOrder = (a: GlassReport, b: GlassReport): number => b.filedAt.localeCompare(a.filedAt);

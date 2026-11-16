@@ -158,6 +158,33 @@ describe('the Reviews tab', () => {
     expect(g.opened()).toHaveLength(0);
   });
 
+  it('counts and marks only visible open rounds, ahead of other rows', async () => {
+    const notification = { kind: 'draft-ready' as const, at: ago(30), text: 'Ready' };
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviews: [
+      review(1, { state: 'withdrawn', prState: 'CLOSED', stands: false, notification }),
+      review(2, { state: 'posted', stands: false, requestedAt: ago(1) }),
+      review(3, { state: 'drafted', stands: false, notification }),
+    ] }, { now: NOW, hash: '#reviews', prefs: { view: 'table' } });
+    open.push(g);
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
+    expect(g.$$('#reviews [data-review]')[0]?.getAttribute('data-review')).toBe('review:acme/web#3');
+    expect(g.$('[data-review="review:acme/web#3"] [aria-label="Needs attention"]')).not.toBeNull();
+    expect(g.$('[data-review="review:acme/web#1"] [aria-label="Needs attention"]')).toBeNull();
+  });
+
+  it.each(['drafted', 'dismissed', 'posted'] as const)('Approve anyway confirms in the page before approving a %s round', async state => {
+    const r = review(7, { state, verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 1, body: 'Race' }] });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' }, post: () => ({ status: 200, body: { ok: true } }) });
+    open.push(g);
+    (g.$('#reviews [aria-label="More actions"]') as unknown as HTMLElement).click(); await g.settle();
+    ([...g.$$('#reviews [role="menuitem"]')].find(button => button.textContent?.includes('Approve anyway')) as unknown as HTMLElement).click(); await g.settle();
+    expect(g.posts()).toEqual([]);
+    const dialog = g.$('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('without the draft’s comments or findings');
+    ([...dialog.querySelectorAll('button')].find(button => button.textContent === 'Approve anyway') as unknown as HTMLElement).click(); await g.settle();
+    expect(g.posts().map(post => JSON.parse(post.body))).toContainEqual({ kind: 'review-approve-anyway', payload: { key: r.key } });
+  });
+
   it('posts a drafted verdict from the card in one click and shows its success message', async () => {
     const r = review(7, { state: 'drafted', staged: true, verdict: 'approve' });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
@@ -207,7 +234,7 @@ describe('the Reviews tab', () => {
     const closedCard = g.$('#reviews [data-review="review:acme/web#8"]')!;
     expect(closedCard.querySelector('.split-menu-only')).toBeTruthy();
     (closedCard.querySelector('.splitmore') as unknown as HTMLElement).click(); await g.settle();
-    expect([...closedCard.querySelectorAll('.cmenulist [role="menuitem"]')].map(button => button.textContent)).toEqual(['Mute PR']);
+    expect([...closedCard.querySelectorAll('.cmenulist [role="menuitem"]')].map(button => button.textContent)).toEqual(['Approve anyway', 'Mute PR']);
     const posted = g.$('#reviews a[href="https://github.com/acme/web/pull/8#pullrequestreview-88"]');
     expect(posted?.textContent).toContain('Posted');
 
@@ -324,9 +351,9 @@ describe('the Reviews tab', () => {
     const rows = g.$$('#reviews tr.rowhead');
     expect(rows.map((r) => r.querySelector('td')?.textContent?.trim())).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
     expect(rows[1]!.textContent).toContain('drafted');
-    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Publish comment', 'Mute this PR', 'Dismiss']);
-    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Redraft', 'Mute this PR', 'Dismiss']);
-    expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Mute this PR']);
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Publish comment', 'More actions', 'Mute this PR', 'Dismiss']);
+    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Redraft', 'More actions', 'Mute this PR', 'Dismiss']);
+    expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['More actions', 'Mute this PR']);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
     expect(g.window.location.hash).toBe('#pr/pr%3Aacme%2Fweb%237');
@@ -377,7 +404,7 @@ describe('review requests on /requests', () => {
 
   it('refuses the review kinds without the page token, and has no post or edit', async () => {
     const { base, token } = await start();
-    for (const kind of ['review-dismiss', 'review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment', 'review-decision-answer', 'review-new', 'review-redraft', 'review-draft', 'review-mode']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
+    for (const kind of ['review-dismiss', 'review-skip', 'review-seen', 'review-approve', 'review-approve-anyway', 'review-request-changes', 'review-comment', 'review-decision-answer', 'review-new', 'review-redraft', 'review-draft', 'review-mode']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
     for (const kind of ['review-post', 'review-edit']) expect((await send(base, token, kind, { key: 'review:acme/web#7' })).status).toBe(400);
   });
 

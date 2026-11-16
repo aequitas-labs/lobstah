@@ -599,6 +599,7 @@ export type ReviewRequestKind =
   | 'review-seen'
   | 'review-skip'
   | 'review-approve'
+  | 'review-approve-anyway'
   | 'review-request-changes'
   | 'review-comment'
   | 'review-decision-answer'

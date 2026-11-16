@@ -179,6 +179,61 @@ function postRefusal(key: string, round: ReviewRound, by: PostBy): string | unde
   return undefined;
 }
 
+/** A person's explicit override discards the pending draft and approves the live PR head. */
+async function approveWithoutDraft(key: string, opts: Opts & { by: PostBy }): Promise<PostResult> {
+  if (opts.by !== 'glass') return { posted: false, why: 'Approve anyway requires your click in the glass' };
+  const c = context(key, opts);
+  if (typeof c === 'string') return { posted: false, why: c };
+  const { r, token, f, at, base } = c;
+  const item = readReview(key)!;
+  if (['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) return { posted: false, why: 'This PR is closed or merged.' };
+  const lock = receipt(key, r.id, 'approved.json', 'glass', at);
+  if (!lock) return { posted: false, why: 'An approval of this round is already in flight or done.' };
+  const marker = reviewMarker(`${r.id}-approve`);
+  const finish = (reviewId: string, head: string): PostResult => {
+    const fresh = readReview(key)!;
+    const round = fresh.rounds.find(round => round.id === r.id)!;
+    if (fresh.pr.headSha !== head) { delete fresh.pr.diffId; delete fresh.pr.baseSha; }
+    fresh.pr.headSha = head;
+    Object.assign(round, { headSha: head, verdict: 'approve', blocking: [] });
+    round.diffId = fresh.pr.diffId;
+    round.baseSha = fresh.pr.baseSha;
+    writeReview(fresh);
+    fs.writeFileSync(lock, JSON.stringify({ reviewId, by: 'glass', at }));
+    markReviewPosted(key, r.id, { reviewId, by: 'glass', at, verdict: 'approve', event: 'APPROVE' });
+    return { posted: true, reviewId, by: 'glass' };
+  };
+  try {
+    const existing = await github<Array<{ id: number; state: string; body?: string; commit_id?: string }>>(f, token(), 'GET', `${base}?per_page=100`);
+    const approved = existing.find(review => review.state === 'APPROVED' && review.body?.includes(marker));
+    if (approved) return finish(String(approved.id), approved.commit_id ?? r.headSha);
+    let current = await github<{ state: string; head: { sha: string } }>(f, token(), 'GET', base.replace(/\/reviews$/, ''));
+    if (current.state !== 'open' || !current.head?.sha) throw new Error('This PR is closed or merged.');
+    const pendingIds = new Set([
+      ...(r.staged ? [r.staged.reviewId] : []),
+      ...existing.filter(review => review.state === 'PENDING' && review.body?.includes(reviewMarker(r.id))).map(review => String(review.id)),
+    ]);
+    for (const reviewId of pendingIds) {
+      try {
+        const pending = await github<{ state: string }>(f, token(), 'GET', `${base}/${reviewId}`);
+        if (pending.state === 'PENDING') await github(f, token(), 'DELETE', `${base}/${reviewId}`);
+      } catch (error) {
+        if (!(error instanceof GitHubError && error.status === 404)) throw error;
+      }
+    }
+    if (pendingIds.size) {
+      current = await github<{ state: string; head: { sha: string } }>(f, token(), 'GET', base.replace(/\/reviews$/, ''));
+      if (current.state !== 'open' || !current.head?.sha) throw new Error('This PR is closed or merged.');
+    }
+    if (latestRound(readReview(key)!)?.id !== r.id) throw new Error('A new review round opened. Approve it from the updated row.');
+    const posted = await github<{ id: number }>(f, token(), 'POST', base, { commit_id: current.head.sha, event: 'APPROVE', body: marker });
+    return finish(String(posted.id), current.head.sha);
+  } catch (error) {
+    fs.rmSync(lock, { force: true });
+    return { posted: false, why: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /**
  * Post the newest round with its selected verdict, as the configured
  * identity: submit its staged pending review, or create the review when it
@@ -187,7 +242,8 @@ function postRefusal(key: string, round: ReviewRound, by: PostBy): string | unde
  * the round's marker (another boat posted it) is recorded instead. A stale
  * draft is always refused; re-draft against the current head before publishing.
  */
-export async function postReview(key: string, opts: Opts & { by: PostBy; stale?: boolean; event?: ReviewEvent }): Promise<PostResult> {
+export async function postReview(key: string, opts: Opts & { by: PostBy; stale?: boolean; event?: ReviewEvent; approveAnyway?: boolean }): Promise<PostResult> {
+  if (opts.approveAnyway) return approveWithoutDraft(key, opts);
   const c = context(key, opts);
   if (typeof c === 'string') return { posted: false, why: c };
   const { r, token, f, at, base } = c;
@@ -248,7 +304,7 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
           comments: inlineComments(draftComments(draft), r),
         });
     fs.writeFileSync(lock, JSON.stringify({ reviewId: String(posted.id), by: opts.by, at }));
-    markReviewPosted(key, r.id, { reviewId: String(posted.id), by: opts.by, at });
+    markReviewPosted(key, r.id, { reviewId: String(posted.id), by: opts.by, at, event });
     if (opts.by !== 'auto') acknowledgeReview(key, opts.now);
     return { posted: true, reviewId: String(posted.id), by: opts.by };
   } catch (err) {

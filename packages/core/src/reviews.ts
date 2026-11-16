@@ -242,6 +242,8 @@ export interface ReviewRound {
   draftedAt?: string;
   postedAt?: string;
   postedReviewId?: string;
+  /** The GitHub event submitted for this round. */
+  postedEvent?: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
   /** Who posted or dismissed it (`cli`, `auto`, `glass`, `review tool`). */
   by?: string;
   /**
@@ -327,6 +329,7 @@ export function readReview(key: string): ReviewItem | undefined {
 }
 
 export function writeReview(item: ReviewItem): ReviewItem {
+  clearFinishedReviewNotifications(item);
   const dir = reviewDir(item.key);
   if (!dir) throw new Error(`malformed review key ${item.key}`);
   fs.mkdirSync(dir, { recursive: true });
@@ -335,6 +338,18 @@ export function writeReview(item: ReviewItem): ReviewItem {
   fs.writeFileSync(tmp, `${JSON.stringify(item, null, 2)}\n`);
   atomicRenameSync(tmp, file);
   return item;
+}
+
+/** Notifications belong only to a ready draft on an open PR. Also repairs older cached rounds. */
+function clearFinishedReviewNotifications(item: ReviewItem): boolean {
+  let changed = false;
+  for (const round of item.rounds) {
+    if (round.state === 'drafted' && !['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
+    if (round.notification || round.needsYou !== undefined) changed = true;
+    delete round.notification;
+    delete round.needsYou;
+  }
+  return changed;
 }
 
 /** Every review item, newest change first. */
@@ -690,12 +705,13 @@ export function dismissReview(key: string, by: string, now = Date.now()): Review
 }
 
 /** Record a posted round (`posted.json` is the post's write-once receipt; this is the item's view). */
-export function markReviewPosted(key: string, roundId: string, post: { reviewId: string; by: string; at: string; verdict?: ReviewVerdict }): ReviewItem | undefined {
+export function markReviewPosted(key: string, roundId: string, post: { reviewId: string; by: string; at: string; verdict?: ReviewVerdict; event?: ReviewRound['postedEvent'] }): ReviewItem | undefined {
   const item = readReview(key);
   const r = item?.rounds.find((x) => x.id === roundId);
   if (!item || !r) return undefined;
   Object.assign(r, { state: 'posted', postedAt: post.at, postedReviewId: post.reviewId, by: post.by });
   if (post.verdict) r.verdict = post.verdict;
+  if (post.event) r.postedEvent = post.event;
   delete r.reason;
   delete r.staged;
   delete r.needsYou;
@@ -752,14 +768,14 @@ export function reviewAttention(now: number, items: ReviewItem[] = listReviews()
   });
 }
 
-/** Create one notification per completed draft/publish generation; no request notifications. */
+/** Create one notification per completed draft generation; finished rounds have none. */
 export function refreshReviewNotifications(now = Date.now()): Array<{ key: string; notification: ReviewNotification; hash: string }> {
   const reviews = loadConfig().reviews;
   const events: Array<{ key: string; notification: ReviewNotification; hash: string }> = [];
   for (const item of listReviews()) {
+    if (clearFinishedReviewNotifications(item)) writeReview(item);
     const r = latestRound(item);
-    if (!r || r.wharf || !['drafted', 'posted'].includes(r.state)) continue;
-    if (r.state === 'posted' && r.by !== 'auto') continue;
+    if (!r || r.wharf || r.state !== 'drafted' || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
     const generation = `${r.id}:${r.dispatch ?? ''}:${r.state}:${r.postedAt ?? r.draftedAt ?? r.headSha}`;
     if (r.notificationGeneration === generation) continue;
     r.notificationGeneration = generation;
@@ -771,8 +787,8 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
     r.needsYou = needsYou;
     delete r.seenAt;
     const verdict = (r.verdict ?? 'comment').replace('_', ' ');
-    const kind = r.state === 'posted' ? 'published' : needsYou ? 'needs-you' : 'draft-ready';
-    const label = kind === 'published' ? 'Published' : needsYou ? 'Draft ready (needs you)' : 'Draft ready';
+    const kind = needsYou ? 'needs-you' : 'draft-ready';
+    const label = needsYou ? 'Draft ready (needs you)' : 'Draft ready';
     r.notification = { kind, at: new Date(now).toISOString(), text: `${label}: ${prLabel(item.pr)} · ${verdict} · ${r.blocking?.length ?? 0} blocking` };
     writeReview({ ...item, updatedAt: r.notification.at });
     events.push({ key: item.key, notification: r.notification, hash: reviewHash(item.key) });

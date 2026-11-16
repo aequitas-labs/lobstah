@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import logo from '../../../../docs/assets/favicon.png';
 import type { GlassSnapshot } from '@lobstah/core';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../src/glass-diff.js';
+import { reviewNeedsAttention } from '../../src/glass-diff.js';
 import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { GrantChip } from './session-grants.js';
@@ -14,7 +15,6 @@ import { prsNeedingYou } from './prs.js';
 import { Dialog } from './dialog.js';
 import { Button } from './button.js';
 import { ITEM_ICON, TAB_ICON } from './icons.js';
-import { reviewUnreadReason } from '../review-attention.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -154,7 +154,7 @@ function useAllTabsFit(): boolean {
 }
 
 /** The tab bar, and More: a disclosure with ordinary navigation links, so Tab works without menu-specific keys. */
-function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unread: number }) {
+function Navigation({ d, tab, unread, reviewCount }: { d?: GlassSnapshot; tab: GlassTab; unread: number; reviewCount: number }) {
   const [open, setOpen] = useState(false);
   const tabs = visibleTabs();
   const moreTabs = tabs.filter((t) => !PINNED.includes(t));
@@ -203,7 +203,7 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
       t === 'deck'
         ? unread
         : t === 'reviews'
-          ? (d?.reviews ?? []).filter(reviewUnreadReason).length
+          ? reviewCount
           : t === 'prs'
             ? prsNeedingYou(d?.prs ?? [])
             : 0;
@@ -274,7 +274,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
   }, [mode]);
   // A decision or run card takes the bottom edge with its own dock.
   if (getState().decisionModal) return null;
-  const reviews = (d?.reviews ?? []).filter(reviewUnreadReason).length;
+  const reviews = (inp?.reviews.list ?? []).filter(reviewNeedsAttention).length;
   const prsWaiting = prsNeedingYou(d?.prs ?? []);
   const count = (n: number, label: string) => n > 0 && html`<span class="dbadge" aria-label=${label}>${n}</span>`;
   if (mode === 'search') {
@@ -351,7 +351,7 @@ export function Header({
     ),
     d && inp && html`<${Strip} d=${d} inp=${inp.chips} />`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
-    html`<${Navigation} d=${d} tab=${tab} unread=${unread} />`,
+    html`<${Navigation} d=${d} tab=${tab} unread=${unread} reviewCount=${(inp?.reviews.list ?? []).filter(reviewNeedsAttention).length} />`,
     controls(d, tab, st),
     html`<${BottomBar} d=${d} inp=${inp} tab=${tab} st=${st} unread=${unread} />`,
   ];

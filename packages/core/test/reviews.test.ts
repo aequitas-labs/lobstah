@@ -266,14 +266,27 @@ describe('review notifications', () => {
     expect(refreshReviewNotifications(T0 + 4)).toEqual([]);
   });
 
-  it('auto published reviews notify published, while human publishing is already acknowledged', () => {
+  it.each(['posted', 'withdrawn', 'dismissed', 'stale', 'closed', 'merged'] as const)('clears a ready notification when its round becomes %s', (state) => {
     const item = observeReviewRequest(seen(), T0).item;
-    Object.assign(item.rounds[0]!, { state: 'posted', by: 'auto', postedAt: new Date(T0).toISOString(), verdict: 'comment' });
-    writeReview(item);
-    expect(refreshReviewNotifications(T0 + 1)[0]?.notification).toMatchObject({ kind: 'published', text: 'Published: #7 Add the thing · comment · 0 blocking' });
-    item.rounds[0]!.by = 'glass'; writeReview(item);
+    Object.assign(item.rounds[0]!, { state: 'drafted', draftedAt: new Date(T0).toISOString() });
+    writeReview(item); refreshReviewNotifications(T0 + 1);
+    const fresh = readReview(key)!;
+    fresh.rounds[0]!.state = state;
+    writeReview(fresh);
+    expect(latestRound(readReview(key)!)?.notification).toBeUndefined();
     expect(refreshReviewNotifications(T0 + 2)).toEqual([]);
   });
+
+  it('repairs a cached withdrawn notification on a closed PR', () => {
+    const item = observeReviewRequest(seen(), T0).item;
+    item.pr.state = 'CLOSED';
+    Object.assign(item.rounds[0]!, { state: 'withdrawn', notification: { kind: 'draft-ready', at: new Date(T0).toISOString(), text: 'Draft ready' } });
+    const file = path.join(home, 'reviews', 'acme-web-7', 'review.json');
+    fs.writeFileSync(file, JSON.stringify(item));
+    expect(refreshReviewNotifications(T0 + 1)).toEqual([]);
+    expect(latestRound(readReview(key)!)?.notification).toBeUndefined();
+  });
+
 });
 
 describe('drafts', () => {
