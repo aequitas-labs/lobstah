@@ -8,7 +8,7 @@ import { can } from '../backend.js';
 import { getState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone, MenuAction } from './card.js';
-import { StatusChip, dispatchTrap, prShapedCard } from './prs.js';
+import { MergeIntent, MergeWhenGreen, StatusChip, dispatchTrap, prShapedCard } from './prs.js';
 import { Button } from './button.js';
 
 /**
@@ -229,6 +229,9 @@ const staged = (r: GlassReview) =>
     void reviewRequest('review-seen', { key: r.key });
   }}>Open pending review</a>`;
 
+/** Read the same PR authorization that the PRs page renders. */
+const mergePr = (r: GlassReview) => getState().snapshot?.prs.find((p) => p.key === r.key.replace(/^review:/, 'pr:'));
+
 function row(r: GlassReview, canDraft: boolean, publish: boolean) {
   return html`<tr key=${r.key} id=${'review-' + encodeURIComponent(r.key)} data-review=${r.key} class=${'rowhead' + (r.seenAt || r.acknowledgedAt ? ' seen' : !OPEN.has(r.state) ? ' acked' : '')} onClick=${showReview(r)}>
     <td><a href=${r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => {
@@ -240,7 +243,7 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
     <td>${r.author}</td>
     <td>${asker(r)}</td>
     <td>${Age(r.requestedAt)}</td>
-    <td>${badge(r)} ${staged(r)} ${posted(r)}</td>
+    <td>${badge(r)} ${staged(r)} ${posted(r)}<${MergeIntent} p=${mergePr(r)} />${mergePr(r)?.mergeRequest && html`<${MergeWhenGreen} p=${mergePr(r)} />`}</td>
     <td><${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></td>
   </tr>`;
 }
@@ -307,6 +310,7 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
       r.mutedAt && StatusChip('muted', 'dim'),
       posted(r),
     ],
+    tail: html`<${MergeIntent} p=${mergePr(r)} />`,
     tone: reviewTone(r),
     repo: r.repo,
     number: r.number,
@@ -314,6 +318,7 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
     trap: dispatchTrap([r.dispatch]),
     person: reviewPerson(r),
     actions: [
+      mergePr(r)?.mergeRequest && html`<${MergeWhenGreen} p=${mergePr(r)} />`,
       html`<${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} split />`,
       html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : 'Open'} onOpen=${() => {
         ackReviewLob(r);

@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, listNotices, loadConfig, pendingIds, prMergeStep, queuedDescriptor, readPr, readWatch, upsertPr, writePr } from '@lobstah/core';
+import { ensureLayout, listNotices, loadConfig, pendingIds, prMergeStatus, prMergeStep, queuedDescriptor, readPr, readWatch, upsertPr, writePr } from '@lobstah/core';
 import type { PrEvidence, PrMergeMethod, PrRecord } from '@lobstah/core';
 import { PrMergeRefused, cancelPrMerge, mergeRequestedPrs, openPrBelow, prMergeMethod, repoKeyForForge, requestPrMerge } from '../src/pr-merge.js';
+import { deriveGlassPrs } from '../src/glass-prs.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -74,6 +75,7 @@ describe('merge method', () => {
     expect(prMergeMethod({ repos }, 'acme/web', () => 'rebase')).toBe('merge');
     expect(prMergeMethod({ repos }, 'acme/other', () => 'rebase')).toBe('rebase');
     expect(prMergeMethod({ repos }, 'acme/other', () => undefined)).toBe('squash');
+    expect(prMergeMethod({ repos: {} }, 'aequitas-labs/lobstah', () => 'squash')).toBe('merge');
   });
 
   it('reads a repo’s mergeMethod and refuses anything else', () => {
@@ -130,7 +132,7 @@ describe('mergeRequestedPrs', () => {
   const merges: Array<[string, PrMergeMethod]> = [];
   const merge = (pr: PrRecord, method: PrMergeMethod) => {
     merges.push([pr.key, method]);
-    return { ok: true as const };
+    return { ok: true as const, sha: `merged-${pr.headSha}` };
   };
   beforeEach(() => {
     merges.length = 0;
@@ -138,11 +140,19 @@ describe('mergeRequestedPrs', () => {
   const logs: string[] = [];
   const log = (m: string) => logs.push(m);
 
-  it('merges a green PR with its method and clears the request', () => {
+  it('merges a green PR once and retains its authorization and merge SHA', () => {
     ask(1);
     mergeRequestedPrs(log, { merge });
     expect(merges).toEqual([[key(1), 'squash']]);
-    expect(readPr(key(1))!.mergeRequest).toBeUndefined();
+    expect(readPr(key(1))!.mergeRequest).toMatchObject({ status: 'merged', mergeSha: 'merged-sha1' });
+    mergeRequestedPrs(log, { merge });
+    expect(merges).toHaveLength(1);
+    // A stale poll batch must not submit the merge again or discard its SHA.
+    upsertPr(obs(1));
+    mergeRequestedPrs(log, { merge });
+    expect(merges).toHaveLength(1);
+    expect(readPr(key(1))!.mergeRequest!.mergeSha).toBe('merged-sha1');
+    expect(listNotices(50).filter((n) => n.kind === 'pr-merged')).toHaveLength(1);
   });
 
   it('keeps the request when gh refuses, to try again next tick', () => {
@@ -155,10 +165,18 @@ describe('mergeRequestedPrs', () => {
   it('merges a stack from the bottom', () => {
     ask(1);
     ask(2, { baseRefName: 'branch-1' });
-    mergeRequestedPrs(log, { merge });
+    const retargets: string[] = [];
+    mergeRequestedPrs(log, { merge, retarget: (pr, base) => { retargets.push(`${pr.key}:${base}`); return { ok: true }; } });
+    expect(retargets).toEqual([`${key(2)}:main`]);
     expect(merges.map(([k]) => k)).toEqual([key(1)]);
     expect(readPr(key(2))!.mergeRequest).toBeDefined();
-    expect(openPrBelow(readPr(key(2))!, [readPr(key(1))!, readPr(key(2))!])).toBe(true);
+    expect(openPrBelow(readPr(key(2))!, [readPr(key(1))!, readPr(key(2))!])).toBe(false);
+    expect(readPr(key(2))!.checks.unknown).toBe('latest run');
+    mergeRequestedPrs(log, { merge });
+    expect(merges).toHaveLength(1);
+    upsertPr(obs(2, { baseRefName: 'main' }));
+    mergeRequestedPrs(log, { merge });
+    expect(merges.map(([k]) => k)).toEqual([key(1), key(2)]);
   });
 
   it('files one repair dispatch per head for a PR no dispatch owns, on its branch', () => {
@@ -197,11 +215,95 @@ describe('mergeRequestedPrs', () => {
     expect(stuck[0]!.text).toContain('three rounds without progress');
   });
 
-  it('drops the request once the PR merged or closed', () => {
+  it('retains the intent when an observation confirms a merge', () => {
     ask(1);
     upsertPr(obs(1, { state: 'MERGED' }));
     mergeRequestedPrs(log, { merge });
     expect(merges).toEqual([]);
-    expect(readPr(key(1))!.mergeRequest).toBeUndefined();
+    expect(readPr(key(1))!.mergeRequest).toMatchObject({ status: 'merged' });
   });
+});
+
+
+describe('merge authorization holds and failure notices', () => {
+  it('waits through a hold, persists it across observations, and merges after explicit release', () => {
+    upsertPr(obs(1));
+    requestPrMerge(key(1), 'chat', { authorized: true, method: 'merge', hold: 'Run the production DB step', note: 'standing go' });
+    upsertPr(obs(1));
+    let calls = 0;
+    const merge = () => { calls++; return { ok: true as const, sha: 'merge-sha' }; };
+    mergeRequestedPrs(() => {}, { merge });
+    expect(calls).toBe(0);
+    expect(readPr(key(1))!.mergeRequest).toMatchObject({ by: 'chat', hold: 'Run the production DB step', note: 'standing go' });
+    requestPrMerge(key(1), 'chat', { authorized: true, releaseHold: true });
+    mergeRequestedPrs(() => {}, { merge });
+    expect(calls).toBe(1);
+    expect(readPr(key(1))!.mergeRequest).toMatchObject({ method: 'merge', mergeSha: 'merge-sha' });
+  });
+
+  it.each(['checks', 'conflict'] as const)('notifies once for %s and does not merge', (kind) => {
+    upsertPr(obs(1, kind === 'conflict' ? { mergeStateStatus: 'DIRTY' } : { checks: { total: 1, passed: 0, pending: 0, failed: 1 } }), 'dispatch');
+    requestPrMerge(key(1), 'decision:merge-card', { authorized: true });
+    const merge = () => { throw new Error('must not merge'); };
+    mergeRequestedPrs(() => {}, { merge });
+    mergeRequestedPrs(() => {}, { merge });
+    expect(listNotices(50).filter((n) => n.kind === 'stack-stopped' && n.refId === key(1))).toHaveLength(1);
+  });
+
+  it('waits when checks are unknown even if GitHub reports CLEAN', () => {
+    expect(prMergeStep(record({ checks: { total: 0, passed: 0, pending: 0, failed: 0, unknown: 'no permission' } }), false)).toMatchObject({ kind: 'wait' });
+  });
+
+  it('retries a failed stack retarget without merging either PR twice', () => {
+    upsertPr(obs(1)); upsertPr(obs(2, { baseRefName: 'branch-1' }));
+    requestPrMerge(key(1), 'chat', { authorized: true });
+    requestPrMerge(key(2), 'chat', { authorized: true });
+    let calls = 0;
+    const merge = () => { calls++; return { ok: true as const, sha: 'done' }; };
+    mergeRequestedPrs(() => {}, { merge, retarget: () => ({ ok: false, why: 'network down' }) });
+    expect(readPr(key(1))!.mergeRequest!.retargetPending).toBe(true);
+    mergeRequestedPrs(() => {}, { merge, retarget: () => ({ ok: true }) });
+    expect(calls).toBe(1);
+    expect(readPr(key(1))!.mergeRequest!.retargetPending).toBe(false);
+    expect(readPr(key(2))!.baseRefName).toBe('main');
+    expect(readPr(key(2))!.checks.unknown).toBe('latest run');
+  });
+});
+
+
+it('projects the same provenance, hold, and live check status to Glass and tend', () => {
+  upsertPr(obs(1, { checks: { total: 1, passed: 0, failed: 1, pending: 0 } }));
+  const request = requestPrMerge(key(1), 'chat', { authorized: true, hold: 'DB steps', note: 'Both environments' });
+  const pr = readPr(key(1))!;
+  expect(prMergeStatus(pr)).toBe('CI failed');
+  expect(deriveGlassPrs([], [], [pr]).prs[0]!.mergeRequest).toEqual({ ...request, summary: 'CI failed' });
+});
+
+
+it('submits only an immediate merge of the checked head and retains the confirmed SHA', () => {
+  upsertPr(obs(1));
+  requestPrMerge(key(1), 'chat', { authorized: true, method: 'merge' });
+  const calls: unknown[] = [];
+  mergeRequestedPrs(() => {}, { api: (method, path, body) => {
+    calls.push([method, path, body]);
+    return { ok: true, json: { merged: true, sha: 'confirmed-sha' } };
+  } });
+  expect(calls).toEqual([['PUT', 'repos/acme/web/pulls/1/merge', { sha: 'sha1', merge_method: 'merge' }]]);
+  expect(readPr(key(1))!.mergeRequest!.mergeSha).toBe('confirmed-sha');
+});
+
+it('does not record a merge if GitHub refuses or does not confirm it', () => {
+  upsertPr(obs(1));
+  requestPrMerge(key(1), 'chat', { authorized: true });
+  mergeRequestedPrs(() => {}, { api: () => ({ ok: true, json: { merged: false, message: 'Required checks are pending' } }) });
+  expect(readPr(key(1))!.state).toBe('OPEN');
+  expect(readPr(key(1))!.mergeRequest).toMatchObject({ status: 'failed', error: 'Required checks are pending' });
+  expect(listNotices(50).some((n) => n.text.includes('Required checks are pending'))).toBe(true);
+});
+
+it('notifies about failed checks while a non-CI hold still prevents merging', () => {
+  upsertPr(obs(1, { checks: { total: 1, passed: 0, failed: 1, pending: 0 } }));
+  requestPrMerge(key(1), 'chat', { authorized: true, hold: 'DB steps' });
+  mergeRequestedPrs(() => {}, { merge: () => { throw new Error('held'); } });
+  expect(listNotices(50).some((n) => n.text.includes('waiting on checks'))).toBe(true);
 });

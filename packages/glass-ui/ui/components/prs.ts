@@ -116,7 +116,7 @@ const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', r
  */
 export function MergeWhenGreen({ p, size = 'md' }: { p: GlassPr; size?: ButtonSize }) {
   // Constant for the page's life, so the hooks below always run in the same order.
-  if (!can('pr-merge') || !p.mine || p.state !== 'OPEN') return null;
+  if (!can('pr-merge') || (!p.mine && !p.mergeRequest) || p.state !== 'OPEN') return null;
   const send = (cancel: boolean) => async (e: Event) => {
     e.stopPropagation();
     await requestPrMerge(p.key, cancel);
@@ -160,9 +160,18 @@ export function MergeStackWhenGreen({ s, prs }: { s: GlassStack; prs: GlassPr[] 
   return html`<span class="prmerge stackmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}</span>`;
 }
 
-/** What a standing merge request says on the row's status line. */
-const mergeNote = (p: GlassPr) =>
-  p.mergeRequest && html`<span class="mergenote" title=${`merges as ${METHOD_WORDS[p.mergeRequest.method]}`}>merges when green</span>`;
+/** One visible authorization on PR cards, PR details, and matching review rows. */
+export function MergeIntent({ p }: { p?: GlassPr }) {
+  const request = p?.mergeRequest;
+  if (!request) return null;
+  return html`<div class="merge-intent"><span class="mergenote">Merge when green</span> · ${request.summary ?? (p.state === 'MERGED' ? 'Merged' : 'Waiting on CI')}
+    <div class="dim">${request.by} · <time datetime=${request.at}>${request.at}</time> · ${METHOD_WORDS[request.method]}</div>
+    ${request.hold && html`<div>Hold: ${request.hold}</div>`}${request.note && html`<div>${request.note}</div>`}
+    ${request.mergeSha && html`<div>Merge commit: <code>${request.mergeSha}</code></div>`}
+  </div>`;
+}
+
+const mergeNote = (p: GlassPr) => html`<${MergeIntent} p=${p} />`;
 
 /** The trap that has one of these dispatches (addressed to it, else claimed by it), as `wt:<id>`; none for headless work. */
 export function dispatchTrap(ids: readonly (string | undefined)[]): string | undefined {
@@ -285,6 +294,7 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
         p.badge.tone !== 'ok' &&
         StatusChip(p.badge.text.toLowerCase(), p.badge.tone, /^checks\b/.test(p.badge.text) ? prChecks(p) : undefined),
     ],
+    tail: mergeNote(p),
     tone: p.badge.tone,
     repo: p.repo,
     number: p.number,

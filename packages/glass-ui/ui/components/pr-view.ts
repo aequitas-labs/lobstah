@@ -8,7 +8,7 @@ import { Avatar, githubAvatarUrl } from './card.js';
 import { DetailFrame } from './detail-frame.js';
 import { Age, TrapName, reviewLink, stackNumbers } from './common.js';
 import { GitHubDescription, MarkdownElements } from './markdown.js';
-import { MergeWhenGreen, StatusChip } from './prs.js';
+import { MergeIntent, MergeWhenGreen, StatusChip } from './prs.js';
 import { ReviewActions, reviewStatus } from './reviews.js';
 import { LinkedText } from './links.js';
 
@@ -73,8 +73,8 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
   const draft = data?.draft ?? p?.draft;
   const status = review ? reviewStatus(review) : null;
   const footer = review
-    ? html`<${ReviewActions} r=${review} canDraft=${review.mode !== 'notify'} publish=${review.publish ?? false} split inView />`
-    : p?.mine && p.state === 'OPEN'
+    ? html`<${ReviewActions} r=${review} canDraft=${review.mode !== 'notify'} publish=${review.publish ?? false} split inView />${p?.mergeRequest && html`<${MergeWhenGreen} p=${p} size="lg" />`}`
+    : p && (p.mine || p.mergeRequest) && p.state === 'OPEN'
       ? html`<${MergeWhenGreen} p=${p} size="lg" />`
       : null;
   const decision =
@@ -89,6 +89,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
     <header class="pr-view-head"><h2>${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${state && StatusChip(draft ? 'Draft' : state === 'OPEN' ? 'Open' : state === 'MERGED' ? 'Merged' : 'Closed', state === 'OPEN' ? 'ok' : 'dim')}${p && StatusChip(p.badge.text, p.badge.tone ?? 'dim')}${p?.mine && StatusChip('yours', 'dim')}${p?.gate && StatusChip(p.gate, 'warn')}${status && StatusChip(status.word, status.tone)}${review?.needsYou && StatusChip('needs you', 'bad')}</div>
     ${author && html`<div class=${'pr-view-person' + (asker === author ? ' rv-person' : '')}><${Avatar} url=${avatar} name=${authorName ?? author} size=${20} /><b>${authorName}</b></div>`}
     ${(data?.headRefName ?? p?.headRefName) && html`<div class="sub">${data?.headRefName ?? p?.headRefName} → ${data?.baseRefName ?? p?.baseRefName}${(data?.updatedAt ?? p?.updatedAt) && html` · updated ${Age(data?.updatedAt ?? p?.updatedAt)} ago`}</div>`}</header>
+    ${p?.mergeRequest && html`<section><${MergeIntent} p=${p} /></section>`}
     ${review?.reason && html`<p class="dim">${review.reason}</p>`}
     ${review && html`<${Findings} review=${review} />`}
     <section><h4>Description</h4><div class="pr-description">${data ? (data.bodyHtml ? html`<${GitHubDescription} source=${data.bodyHtml} openImage=${openLightbox} />` : html`<span class="dim">No description.</span>`) : html`<span class="dim">${loaded.key === prKey && loaded.error ? loaded.error : 'Loading description…'}</span>`}</div></section>
