@@ -208,7 +208,7 @@ describe('a review card', () => {
     // The PR card's four parts.
     expect(card(7).querySelector('.gtop')!.firstElementChild?.querySelector('.pricon')).toBeTruthy();
     expect(card(7).querySelector('.gtop .gword, .gtop .gchip')).toBeNull();
-    expect(chips(7)).toEqual(['draft ready', 'needs you']);
+    expect(chips(7)).toEqual(['● draft ready', 'needs you']);
     expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #7 · 🪤 wt:t1');
     expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
@@ -248,12 +248,12 @@ describe('a review card', () => {
     expect(sends().map((p) => JSON.parse(p.body))).toEqual([{ kind: 'review-approve', payload: { key: 'review:acme/web#7' } }]);
   });
 
-  it('opens the PR view without acknowledgement, with the reason, the pending review and the actions', async () => {
+  it('opens the PR view and marks it seen, with the reason, the pending review and the actions', async () => {
     const r = review(9, { state: 'stale', reason: 'the head moved', staged: true });
     const g = await page({ ...emptyFleet(), focusToken: 'tok', reviews: [r] }, '#reviews', () => ({ status: 200, body: { ok: true } }));
     await click(g, g.$('#reviews .card'));
     expect(g.opened()).toEqual([]);
-    expect(g.posts()).toEqual([]);
+    expect(g.posts().map(post => JSON.parse(post.body))).toEqual([{ kind: 'review-seen', payload: { key: 'review:acme/web#9' } }]);
     const box = g.$('#modalbox')!;
     expect(text(box.querySelector('h2'))).toBe('pr 9');
     expect(text(box)).toContain('acme/web#9');

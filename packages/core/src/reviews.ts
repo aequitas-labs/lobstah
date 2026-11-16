@@ -1,11 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { loadConfig } from './config.js';
 import { prLabel } from './pr.js';
 import type { DispatchLimits } from './types.js';
 import type { TendAttention } from './glass.js';
+import { carryReviewDecisionAnswers, isReviewDecisionAnswer, parseReviewDecisions, unansweredReviewDecisions } from './review-decisions.js';
+import type { ReviewDecision, ReviewDecisionAnswer, ReviewDecisionAnswers } from './review-decisions.js';
+export * from './review-decisions.js';
 
 /**
  * Review requests: a PR on which someone asked the configured identity
@@ -190,6 +193,8 @@ export interface ReviewRound {
   id: string;
   /** The latest GitHub request event this round answers; same-head re-requests share a round. */
   requestEventId?: string;
+  /** Chris opened this round locally; a missing GitHub review request does not withdraw it. */
+  localRequest?: boolean;
   requestedAt: string;
   requestedBy?: string;
   requestedByName?: string;
@@ -215,6 +220,9 @@ export interface ReviewRound {
   byHand?: boolean;
   verdict?: ReviewVerdict;
   blocking?: BlockingFinding[];
+  /** Product and ownership calls, with Chris's answers kept for this round. */
+  decisions?: ReviewDecision[];
+  decisionAnswers?: ReviewDecisionAnswers;
   needsYou?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;
@@ -409,7 +417,7 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     const humanRequester = human?.humanRequester ?? (human?.requestedBy
       ? { login: human.requestedBy, name: human.requestedByName, avatarUrl: human.requestedByAvatarUrl }
       : undefined);
-    Object.assign(latest, seen.round, { id: latest.id, requestEventId: seen.round.id }, humanRequester ? { humanRequester } : {});
+    if (!latest.localRequest) Object.assign(latest, seen.round, { id: latest.id, requestEventId: seen.round.id }, humanRequester ? { humanRequester } : {});
     delete item.unseenAt;
     const changed = JSON.stringify(prior) !== JSON.stringify({ ...item, updatedAt: prior!.updatedAt });
     return { item: changed ? writeReview({ ...item, updatedAt: at }) : prior!, opened: false };
@@ -487,7 +495,7 @@ export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item:
       writeReview({ ...item, updatedAt: at });
       continue;
     }
-    if (!OPEN_STATES.includes(latest.state)) continue;
+    if (latest.localRequest || !OPEN_STATES.includes(latest.state)) continue;
     latest.state = 'withdrawn';
     latest.reason = 'the review request was removed';
     writeReview({ ...item, updatedAt: at });
@@ -536,8 +544,17 @@ export function reviewCheckoutDir(key: string, roundId: string): string | undefi
   return dir && path.join(dir, 'checkout');
 }
 
-/** A round's draft as its job wrote it, or why it cannot be read. A missing comments.json is no inline comments. */
-export function readRoundDraft(key: string, roundId: string): { body: string; comments: ReviewComment[]; verdict: ReviewVerdict; blocking: BlockingFinding[] } | { error: string } {
+/** The files a review job writes, with product decisions separate from code findings. */
+export interface ReviewDraft {
+  body: string;
+  comments: ReviewComment[];
+  verdict: ReviewVerdict;
+  blocking: BlockingFinding[];
+  decisions: ReviewDecision[];
+}
+
+/** A round's draft as its job wrote it, or why it cannot be read. Missing comments.json means no inline comments. */
+export function readRoundDraft(key: string, roundId: string): ReviewDraft | { error: string } {
   const dir = reviewRoundDir(key, roundId);
   if (!dir) return { error: 'malformed review key or round id' };
   let body: string;
@@ -560,10 +577,14 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
   // comment drafts; no missing metadata can ever imply approval.
   let verdict: ReviewVerdict = 'comment';
   let blocking: BlockingFinding[] = [];
+  let decisions: ReviewDecision[] = [];
   const meta = path.join(dir, 'verdict.json');
   if (fs.existsSync(meta)) {
     try {
       const raw = JSON.parse(fs.readFileSync(meta, 'utf8'));
+      const calls = parseReviewDecisions(raw.decisions);
+      if (typeof calls === 'string') return { error: `verdict.json ${calls}` };
+      decisions = calls;
       verdict = oneOf(raw.verdict, REVIEW_VERDICTS, 'verdict.json verdict');
       const findings = parseReviewComments(raw.blocking);
       if (typeof findings === 'string') return { error: `verdict.json blocking: ${findings}` };
@@ -575,8 +596,29 @@ export function readRoundDraft(key: string, roundId: string): { body: string; co
       return { error: err instanceof Error ? err.message : 'invalid verdict.json' };
     }
   }
-  if (!body.trim() && verdict !== 'approve') return { error: 'review.md is empty' };
-  return { body, comments, verdict, blocking };
+  if (!body.trim() && verdict !== 'approve' && !decisions.length) return { error: 'review.md is empty' };
+  return { body, comments, verdict, blocking, decisions };
+}
+
+/** Save one call against the exact draft shown, refusing stale pages and in-flight posts. */
+export function answerReviewDecision(key: string, draft: { roundId: string; headSha: string; draftedAt: string }, decisionId: string, answer: ReviewDecisionAnswer | null, now = Date.now()): string | undefined {
+  const item = readReview(key);
+  const round = item && latestRound(item);
+  if (!item || !round) return 'This review is no longer available.';
+  if (round.id !== draft.roundId || round.headSha !== draft.headSha || round.draftedAt !== draft.draftedAt || round.state !== 'drafted' || round.headSha !== item.pr.headSha)
+    return 'This draft has changed. Reload it before answering.';
+  if (fs.existsSync(path.join(reviewRoundDir(key, round.id)!, 'posted.json'))) return 'This review is already being posted.';
+  const current = readRoundDraft(key, round.id);
+  if ('error' in current) return 'This draft could not be read. Redraft the review.';
+  const decision = current.decisions.find(decision => decision.id === decisionId);
+  if (!decision) return 'This question is no longer in the draft. Reload it before answering.';
+  if (answer !== null && !isReviewDecisionAnswer(decision, answer)) return 'Choose an option or write an answer.';
+  round.decisions = current.decisions;
+  round.decisionAnswers = carryReviewDecisionAnswers(current.decisions, round.decisionAnswers);
+  if (answer === null) delete round.decisionAnswers[decisionId];
+  else round.decisionAnswers[decisionId] = 'text' in answer ? { text: answer.text!.trim() } : { optionId: answer.optionId };
+  writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+  return undefined;
 }
 
 /** The `prReview` brief: draft, never post. */
@@ -592,6 +634,8 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
     '4. Review it the way the reviewer would: correctness first, then risk, then clarity. No style nits unless they hide a bug. Follow any review rules appended below this brief too.',
     "5. Judge the code alone. A merge gate, required check, submit or approval label, or CI status that is red, pending or older than the head isn't about the code: it never changes the verdict, and the review never mentions it or asks anyone to rerun it. Process items outside the diff—issue checklists, manual or real-world verification still to do, and whether you ran tests—never change the verdict or go in the body. A test that fails because of this change is a code finding: give its file and line.",
     `6. Write three files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none); and \`verdict.json\` as \`{"verdict":"approve|comment|request_changes","blocking":[{"path":"<file>","line":<positive line>,"body":"<blocking finding>"}]}\`. Every blocking finding needs a file and line. Use request_changes for blockers in the code, comment only for real non-blocking findings in the diff, and approve when there are no blockers or inline comments worth posting. For approve, leave review.md empty or use at most one short line. Approve must have no blockers; request_changes must have at least one.`,
+    'In verdict.json, also write "decisions": [] when no calls are needed, or [{"id":"stable-question-id","question":"<one-line question for Chris>","options":[{"id":"option-a","label":"<short option>","consequence":"<one-line consequence>"},{"id":"option-b","label":"<short option>","consequence":"<one-line consequence>"}],"recommendation":"option-a"}]. Only real product or ownership calls that Chris must make belong here. Code findings stay in the body, comments, and blocking findings. Never bury these questions or option lists in the review body. Free-text answers are always allowed. Use stable question and option ids across redrafts; change an id if its meaning changes. A recommendation is not an answer. Decisions alone may use a comment verdict with an empty review.md.',
+    ...(round.decisions?.length ? [`Previous calls (preserve ids for the same question and option meanings): ${JSON.stringify(round.decisions)}`] : []),
     '7. Do not post, approve, request changes, comment on, push to, or edit the PR. If you cannot review it (too large, missing context), say so in review.md.',
     `8. Report done: \`lobstah report ${opts.id} done "<one line>"\`.`,
   ].join('\n');
@@ -610,6 +654,23 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, verdict: _v, blocking: _b, notification: _n, needsYou: _y, seenAt: _seen, acknowledgedAt: _ack, ...rest } = r;
   item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha, baseSha: item.pr.baseSha, diffId: item.pr.diffId, byHand: true };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+}
+
+/** Open a fresh request after Skip/Dismiss, preserving the old round and normal automatic limits. */
+export function newReviewRound(key: string, now = Date.now()): ReviewItem | string {
+  const item = readReview(key);
+  const previous = item && latestRound(item);
+  if (!item || !previous) return 'This review is no longer available.';
+  if (item.pr.state === 'MERGED' || item.pr.state === 'CLOSED') return 'This PR is closed. Reopen it before requesting a new review.';
+  if (previous.state !== 'dismissed') return 'Only a skipped or dismissed review can start a new round.';
+  const at = new Date(now).toISOString();
+  item.rounds.push({
+    id: `local-${randomUUID()}`, requestEventId: previous.requestEventId ?? previous.id, localRequest: true,
+    requestedAt: at, requestedBy: loadConfig().reviews.identity,
+    state: 'requested', headSha: item.pr.headSha,
+  });
+  delete item.unseenAt;
+  return writeReview({ ...item, updatedAt: at });
 }
 
 /** The hidden marker a posted review ends with: one per round, so a second post of it can be found. */
@@ -721,6 +782,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
 
 /** Current repo policy can lower a round's publishing permission; it cannot upgrade a draft-only receipt. */
 export function reviewCanPublish(config: ReviewsConfig, repoKey: string | undefined, round: ReviewRound, verdict?: ReviewVerdict): boolean {
+  if (unansweredReviewDecisions(round).length) return false;
   const settings = reviewSettings(config, repoKey);
   const selected = verdict ?? round.verdict;
   const configured = selected === 'approve' ? settings.autoPostApprove : selected === 'request_changes' ? settings.autoPostRequestChanges : 'ask';

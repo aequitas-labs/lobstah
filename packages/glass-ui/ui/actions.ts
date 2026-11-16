@@ -601,6 +601,8 @@ export type ReviewRequestKind =
   | 'review-approve'
   | 'review-request-changes'
   | 'review-comment'
+  | 'review-decision-answer'
+  | 'review-new'
   | 'review-dismiss'
   | 'review-mute'
   | 'review-unmute'
