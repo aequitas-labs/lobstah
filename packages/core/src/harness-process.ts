@@ -122,7 +122,7 @@ export function captureHarnessProcess(): HarnessProcess | undefined {
  * same session ending says nothing about the trap's own, which may still run.
  */
 export function endingProcessOwnsTrap(recorded: HarnessProcess | undefined, ending: number | undefined): boolean {
-  return recorded === undefined || ending === undefined || recorded.pid === ending;
+  return recorded === undefined || recorded.pid === ending;
 }
 
 /** True while the recorded process runs: the same pid, started at the same time. */

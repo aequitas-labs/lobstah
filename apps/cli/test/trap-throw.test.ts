@@ -14,6 +14,9 @@ import {
   loadConfig,
   lobstahHome,
   planThrow,
+  harnessProcessAlive,
+  processStartedAt,
+  signOnTrap,
   readReservation,
   recordRosterDeparture,
   readRoster,
@@ -482,6 +485,59 @@ describe('the start command', () => {
       child.kill('SIGKILL');
       if (child.exitCode === null && child.signalCode === null) await new Promise((resolve) => child.once('exit', resolve));
     };
+
+    processTest('re-throws a ghost with exactly one live session and a redeemable replacement ticket', async () => {
+      const first = stowedTrap();
+      stow(first, true);
+      const sessions: ChildProcess[] = [];
+      const seen: TerminalLaunch[] = [];
+      try {
+        let child = await running(); sessions.push(child);
+        const signed = signOnTrap({ ...first, harness: 'codex', harnessProcess: { pid: child.pid!, startedAt: processStartedAt(child.pid!)! }, ttlMs: 60_000 });
+        if (!('ok' in signed)) throw new Error('held');
+        let reg = signed.ok;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          ghost(reg);
+          const old = reg;
+          const adapter = (app: 'terminal' | 'iterm'): TerminalAdapter => ({
+            app,
+            async launch(launch) {
+              expect(harnessProcessAlive(old.harnessProcess!)).toBe(false);
+              // A delayed SessionEnd from the departed pane must leave the
+              // newly reserved ticket for the replacement to redeem.
+              const ending = spawnSync(process.execPath, [cli, 'hook', 'session-end'], {
+                cwd: old.worktree, env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8', timeout: 20_000,
+                input: JSON.stringify({ session_id: old.sessionId, hook_event_name: 'SessionEnd' }),
+              });
+              expect(ending.status, ending.stderr).toBe(0);
+              expect(readReservation(old.trapId)).toBeDefined();
+              child = await running(); sessions.push(child);
+              await fakeTerminal(OTHER, seen)(app).launch(launch);
+              const current = only();
+              const on = signOnTrap({ ...current, harnessProcess: { pid: child.pid!, startedAt: processStartedAt(child.pid!)! }, ttlMs: 60_000 });
+              expect(on).toHaveProperty('ok');
+              // Nor can that detached hook sign off a replacement after
+              // redemption, including a resume of the same session id.
+              const late = spawnSync(process.execPath, [cli, 'hook', 'session-end'], {
+                cwd: old.worktree, env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8', timeout: 20_000,
+                input: JSON.stringify({ session_id: old.sessionId, hook_event_name: 'SessionEnd' }),
+              });
+              expect(late.status, late.stderr).toBe(0);
+              expect(only().harnessProcess?.pid).toBe(child.pid);
+            },
+          });
+          const result = await throwTrap({ address: reg.name!, cfg: loadConfig(), adapter, timeoutSecs: 30 });
+          reg = result.registration;
+          expect(only().trapId).toBe(first.trapId);
+          expect(readReservation(reg.trapId)).toBeUndefined();
+          expect(sessions.filter(session => session.exitCode === null && session.signalCode === null)).toHaveLength(1);
+        }
+        const tickets = seen.map(launch => /--ticket (\S+)/.exec(launch.argv.at(-1)!)![1]);
+        expect(new Set(tickets).size).toBe(2);
+      } finally {
+        await Promise.all(sessions.map(ended));
+      }
+    });
 
     processTest('a ghosted thrown trap comes back under its own name when its session re-soaks, with no new worktree', async () => {
       const reg = await thrown();

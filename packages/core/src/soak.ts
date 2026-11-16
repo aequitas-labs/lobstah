@@ -16,7 +16,7 @@ import { mergeEvidence } from './evidence.js';
 import { gitPushTargets, recordPush, resolvePushTargets } from './pushes.js';
 import { postNotice } from './notices.js';
 import type { WindowRef } from './window.js';
-import type { HarnessProcess } from './harness-process.js';
+import { harnessProcessAlive, type HarnessProcess } from './harness-process.js';
 import { TERMINAL_VERBS } from './types.js';
 import { attachmentBlock } from './attachments.js';
 import { toolSummary, toolTarget, writeActivity } from './activity.js';
@@ -374,7 +374,7 @@ export function signOnTrap(opts: {
   const prior = readTrap(trapId);
   if (prior && prior.sessionId !== opts.sessionId) {
     const fresh = now - trapLastSeen(prior) <= opts.ttlMs;
-    if (fresh) return { held: prior };
+    if (fresh || (prior.harnessProcess && harnessProcessAlive(prior.harnessProcess))) return { held: prior };
   }
   // One session mans one trap: its messages, listener and stow all go by session.
   const other = listTraps().find((r) => r.sessionId === opts.sessionId && r.trapId !== trapId);
@@ -886,7 +886,8 @@ export function pauseExpiry(entry: StatusEntry, pausedTtlMs: number): number {
  * with the diagnosis instead of a silent sweep, and the registration stays
  * so the address keeps protecting its bait. A session mid-catch proves
  * liveness through its status reports, so a fresh report keeps a trap out
- * of the sweep even when the park heartbeat lapsed. So does a fresh beat
+ * of the sweep even when the park heartbeat lapsed. A recorded harness
+ * process that is still alive also protects a trap that has parked. A fresh beat
  * (`lobstah soak beat`, run by the post-tool hook): a session busy with tools
  * for longer than the TTL is working, not gone. A catch whose last report is
  * `paused` is waiting on something outside lobstah: its trap is kept until
@@ -900,6 +901,9 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     if (trapUsageLimit(reg)) continue;
     // A fresh park heartbeat or a fresh tool beat: the session is alive.
     if (now - trapLastSeen(reg) <= ttlMs) continue;
+    // A timed-out or interrupted park hook can stop beating while its
+    // harness stays open. Silence alone must not evict that session.
+    if (reg.firstParkedAt && reg.harnessProcess && harnessProcessAlive(reg.harnessProcess)) continue;
     // Waiting for a slot or running in one, whatever the pause's expiry says.
     if (liveHeavyTickets({ trap: reg.trapId }, now).length > 0) continue;
     if (reg.firstParkedAt === undefined) {

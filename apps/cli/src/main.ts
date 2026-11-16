@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { soakPark } from './trap-park.js';
 import { checklistSummary } from './checklists.js';
 import { validateAssistanceParent, configuredTrapViews, withConfiguredTrapSlot, backendScopes, refreshHostedViews } from '@lobstah/core';
 import * as fs from 'node:fs';
@@ -55,11 +56,7 @@ import {
   addWatch,
   appendStatus,
   activeIds,
-  baitBrief,
   cancelRequested,
-  claimBait,
-  needsFreshTrapSession,
-  unreportedTrapBait,
   codexInvocation,
   hasOpenCatch,
   heartbeatTrap,
@@ -137,7 +134,6 @@ import {
   storageGrounds,
   captureWindow,
   captureHarnessProcess,
-  TRAP_INSTRUCTION_RULE,
   rememberReservationWindow,
   endingProcessOwnsTrap,
   harnessAncestorPid,
@@ -660,117 +656,6 @@ function confirmTitle(sessionFlag: string | undefined): void {
   if (!reg) throw new Error("no trap here — run from the trap's worktree, or pass --session <id>");
   console.log(toonKV({ trap: trapLabel(reg), title: reg.titleSet, signOn: 'complete' }));
 }
-
-/** How a park ended: an event, sign-off, or an explicit zero-time probe. */
-type ParkEnd = 'woke' | 'gone' | 'timeout';
-
-/**
- * The trap side of the park: heartbeat, then wait for something to act on.
- * Messages deliver first (cheap context, no catch lifecycle), then bait; a
- * trap with an open catch waits for a cancel or a `lobstah send` message
- * about it. Driven by the Stop hook (wakes are hook-decision JSON; quiet
- * deadlines renew in the shell) or run as `soak --wait` in a hookless
- * session (wakes print plain; --timeout 0 is an explicit one-shot probe).
- */
-async function soakPark(trapId: string, timeout: string | undefined, plain = false): Promise<ParkEnd> {
-  const sessionId = readTrap(trapId)?.sessionId;
-  let idle = new IdleWait(sessionId, loadConfig().wait, timeout);
-  const rearm = `lobstah soak --wait${timeout === undefined ? '' : ` --timeout ${timeout}`}`;
-  // Self-instructive in plain mode (axi.md P9): every exit tells the session
-  // its own next command — a foreground park has no hook to re-arm it.
-  const block = plain
-    ? (reason: string) => {
-        idle.woke();
-        const trap = readTrap(trapId);
-        if (trap) resumeTrapTurn(trap);
-        console.log(reason);
-        console.log(toonHelp([`${rearm}   (when you finish handling this, run this here to keep listening)`]));
-      }
-    : (reason: string) => { idle.woke(); const trap = readTrap(trapId); if (trap) resumeTrapTurn(trap); console.log(JSON.stringify({ decision: 'block', reason })); };
-  while (true) {
-    if (readTrap(trapId)?.sessionId !== sessionId) return 'gone';
-    const reg = heartbeatTrap(trapId, { parked: true });
-    if (!reg) {
-      if (plain) {
-        console.log(
-          toonKV({ trap: `wt:${trapId}`, soaking: false, note: 'registration gone (stowed or swept) — sign on again with `lobstah soak`' }),
-        );
-      }
-      return 'gone'; // stowed while parked
-    }
-    // Messages before bait: steering should never queue behind a work claim.
-    const msgs = unhandledTrapMessages(trapId);
-    if (msgs.length > 0) {
-      const lines = msgs.map((m) => {
-        acknowledgeTrapMessage(trapId, m.file);
-        return `[from ${m.from}] ${m.text}`;
-      });
-      block(
-        [
-          `Message${msgs.length > 1 ? 's' : ''} for this session:`,
-          ...lines,
-          TRAP_INSTRUCTION_RULE,
-        ].join('\n'),
-      );
-      return 'woke';
-    }
-    if (hasOpenCatch(reg)) {
-      const id = reg.claimed!;
-      const lane = laneOf(id) ?? 'work';
-      if (cancelRequested(id, lane)) {
-        block(
-          `Your assigned dispatch ${id} was cancelled. Stop working on it, leave the worktree as it is, ` +
-            `and run \`lobstah report ${id} failed "cancelled by request"\`.`,
-        );
-        return 'woke';
-      }
-      const pending = unreportedTrapBait(reg);
-      const instruction = unhandled(id, lane).length > 0
-        ? `New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`
-        : undefined;
-      // The daemon swaps outside this process; the old conversation never receives fresh work.
-      const awaitingFreshSession = pending && needsFreshTrapSession(pending.descriptor);
-      if (!awaitingFreshSession && (pending || instruction)) {
-        // Another waiter may have claimed while this Stop hook was parked,
-        // or exited after claiming without waking the session. An initial
-        // brief is not consumed until the worker's first report, so recover
-        // it here instead of waiting forever for an inbox nudge.
-        block([instruction, pending ? baitBrief(id, pending.descriptor) : undefined].filter(Boolean).join('\n\n'));
-        return 'woke';
-      }
-    } else {
-      if (reg.one && reg.claimed) {
-        stowTrap(trapId, 'signed off after its one catch', reg.sessionId);
-        return 'gone'; // one catch was the deal — the trap comes out of the water
-      }
-      const caught = claimBait(reg);
-      if (caught && !needsFreshTrapSession(caught.descriptor)) {
-        if (plain) {
-          const title = trapSessionTitle({ sessionId: reg.sessionId, cwd: reg.worktree })?.title;
-          if (title) console.log(toonKV({ title }));
-        }
-        block(baitBrief(caught.id, caught.descriptor));
-        return 'woke';
-      }
-    }
-    if (idle.expired()) {
-      idle.timedOut();
-      if (!idle.probe) {
-        // Renew inside the shell process: a quiet deadline never requests another model turn.
-        idle = new IdleWait(sessionId, loadConfig().wait, timeout);
-        continue;
-      }
-      if (plain) {
-        console.log(toonKV({ timeout: true, waitedSecs: idle.timeoutSecs, stillSignedOn: true }));
-        console.log(toonHelp([`${rearm}   (no work yet — run this again to keep listening)`, `lobstah stow   (sign off instead)`]));
-        process.exitCode = 3;
-      }
-      return 'timeout';
-    }
-    await new Promise((r) => setTimeout(r, idle.pollMs(1500)));
-  }
-}
-
 
 /** A trap request as a man wait event: its id, repo, and harness. */
 function trapRequestFields(n: Notice): Record<string, string> | undefined {
@@ -3791,6 +3676,9 @@ async function mainCli(): Promise<void> {
         if (wtFlag) throw new Error(unknownTrapMessage(wtFlag));
         throw new Error("nothing to stow here — run from the trap's worktree, or pass --wt <trap-id> / --session <id>");
       }
+      // An ending session owns only its current registration. It cannot
+      // withdraw the replacement's ticket after a ghost sweep or re-throw.
+      if (sessionEnd && readTrap(trapId)?.sessionId !== sessionId) break;
       // A reserved trap no session has signed on as: withdraw the
       // reservation. No session owns it, so this is steering.
       if (!readTrap(trapId) && reservationByAddress(trapId)) {
