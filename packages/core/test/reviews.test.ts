@@ -281,6 +281,7 @@ describe('drafts', () => {
     observeReviewRequest(seen(), T0);
     const dir = reviewRoundDir('review:acme/web#7', 'RRE_1')!; fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'review.md'), 'Summary');
+    fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([{ path: 'a.ts', line: 1, body: 'Consider a retry here.' }]));
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ verdict: 'comment', blocking: [] });
     const meta = (verdict: string, blocking: unknown[]) => fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict, blocking }));
     meta('request_changes', [{ path: 'a.ts', line: 9, body: 'Race' }]);
@@ -292,6 +293,8 @@ describe('drafts', () => {
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
     meta('request_changes', []);
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
+    meta('comment', [{ path: 'a.ts', line: 9, body: 'Race' }]);
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ error: expect.stringContaining('Fix verdict.json') });
     meta('comment', [{ path: 'a.ts', line: 0, body: 'Race' }]);
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toHaveProperty('error');
   });
@@ -301,11 +304,21 @@ describe('drafts', () => {
     const dir = reviewRoundDir('review:acme/web#7', 'RRE_1')!; fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'review.md'), '');
     fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
-    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ error: 'review.md is empty' });
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ error: expect.stringContaining('comment verdict needs an inline comment') });
     fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ body: '', comments: [], verdict: 'approve', blocking: [] });
     fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [] }));
-    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ error: 'review.md is empty' });
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ error: expect.stringContaining('comment verdict needs an inline comment') });
+  });
+
+  it('rejects a comment verdict with no inline findings and leaves the verdict for the drafter to fix', () => {
+    observeReviewRequest(seen(), T0);
+    const dir = reviewRoundDir('review:acme/web#7', 'RRE_1')!; fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), 'The Submit and Approval gates are pending.');
+    fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [] }));
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ error: expect.stringContaining('Fix verdict.json') });
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'verdict.json'), 'utf8')).verdict).toBe('comment');
   });
 
   it('the brief drafts into the round directory and forbids every write to the PR', () => {

@@ -349,6 +349,7 @@ describe('the review checkout', () => {
   it('is removed when the round is drafted', () => {
     const id = drafting();
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'Fine.');
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
     appendStatus(id, 'chore', 'done', 'drafted');
     draftReviews('chris', () => {}, NOW);
     expect(round().state).toBe('drafted');

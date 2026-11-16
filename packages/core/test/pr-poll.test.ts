@@ -279,6 +279,45 @@ describe('shared GitHub budget', () => {
     expect(githubBlockedUntil(T + 90_000)).toBe(T + 120_000);
   });
 
+  it('a secondary limit with healthy primary budgets waits one minute, not until the hourly reset', () => {
+    recordGitHubResponse({ 'x-ratelimit-resource': 'core', 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4985', 'x-ratelimit-reset': String((T + 47 * 60_000) / 1000) }, { now: T });
+    recordGitHubResponse(splitGitHubResponse(response({}, 4378).stdout).headers, { now: T });
+    recordGitHubRateLimit(T);
+    expect(githubBlockedUntil(T)).toBe(T + 60_000);
+    expect(listNotices()[0]?.text).toContain('secondary rate limit');
+  });
+
+  it('doubles secondary retry delays up to fifteen minutes, without multiplying one batch across watches', () => {
+    let now = T;
+    for (const seconds of [60, 120, 240, 480, 900, 900]) {
+      recordGitHubRateLimit(now);
+      const until = now + seconds * 1000;
+      expect(githubBlockedUntil(now)).toBe(until);
+      for (let watch = 0; watch < 40; watch++) recordGitHubRateLimit(now + 1000);
+      expect(githubBlockedUntil(now + 1000)).toBe(until);
+      now = until;
+    }
+    expect(listNotices().filter(notice => notice.kind === 'rate-limited')).toHaveLength(1);
+  });
+
+  it('uses only an exhausted resource reset, not a healthy resource with a later reset', () => {
+    recordGitHubResponse({ 'x-ratelimit-resource': 'core', 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4985', 'x-ratelimit-reset': String((T + 47 * 60_000) / 1000) }, { now: T });
+    recordGitHubResponse({ 'x-ratelimit-resource': 'graphql', 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String((T + 10 * 60_000) / 1000) }, { now: T });
+    recordGitHubRateLimit(T);
+    expect(githubBlockedUntil(T)).toBe(T + 10 * 60_000);
+    expect(listNotices()[0]?.text).toContain('primary rate limit (graphql)');
+  });
+
+  it('a healthy in-flight response cannot cancel secondary backoff; a successful retry resets its exponent', () => {
+    recordGitHubRateLimit(T);
+    recordGitHubResponse(splitGitHubResponse(response({}, 4000).stdout).headers, { now: T + 1000, success: true });
+    expect(githubBlockedUntil(T + 1000)).toBe(T + 60_000);
+    recordGitHubResponse(splitGitHubResponse(response({}, 3999).stdout).headers, { now: T + 60_000, success: true });
+    expect(githubBlockedUntil(T + 60_000)).toBeUndefined();
+    recordGitHubRateLimit(T + 120_000);
+    expect(githubBlockedUntil(T + 120_000)).toBe(T + 180_000);
+  });
+
   it('legacy per-watch rate-limit failures recover silently; other failure streaks remain intact', () => {
     const w = register(1);
     Object.assign(w, { failures: 3, errorKind: 'rate-limit', failingNoticed: true });

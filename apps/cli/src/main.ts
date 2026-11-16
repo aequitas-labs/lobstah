@@ -14,6 +14,9 @@ import type { GrantIntent, RunCard } from '@lobstah/core';
 import {
   IdleWait,
   reviewAttention,
+  listReviews,
+  latestRound,
+  readRoundDraft,
   markReviewSeen,
   acknowledgeReview,
   resetWaitBackoff,
@@ -1602,6 +1605,14 @@ async function mainCli(): Promise<void> {
             `not reported done: ${unread.length} unread message(s) for ${id} arrived while you worked. ` +
               'They are printed above and now marked read. Act on them, then report done again.',
           );
+        }
+        const review = listReviews().find(item => {
+          const round = latestRound(item);
+          return round?.dispatch === id && round.state === 'drafting';
+        });
+        if (review) {
+          const draft = readRoundDraft(review.key, latestRound(review)!.id);
+          if ('error' in draft) throw new Error(`not reported done: ${draft.error} Fix the review draft and report done again.`);
         }
       }
       // A report page files before the status: a refused file changes nothing.

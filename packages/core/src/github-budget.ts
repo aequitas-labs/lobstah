@@ -14,6 +14,7 @@ interface BudgetState {
   resources: Record<string, Budget>;
   limitedSince?: number;
   retryAt?: number;
+  secondaryBackoffSecs?: number;
 }
 const file = () => path.join(lobstahHome(), 'github-budget.json');
 function read(): BudgetState {
@@ -72,22 +73,32 @@ export function githubBlockedUntil(now = Date.now()): number | undefined {
   return until > now ? until : undefined;
 }
 
-/** One shared incident, not one streak/recovery for every watch. */
+/** One shared incident: exhausted resources wait for reset; secondary limits back off exponentially. */
 export function recordGitHubRateLimit(now = Date.now(), retryAt?: number): void {
   withBudgetLock(() => {
     const s = read();
-    const known = Math.max(s.retryAt ?? 0, ...Object.values(s.resources).map((b) => b.reset));
-    const reset = retryAt ?? (known > now ? known : now + 60_000);
-    if (!s.limitedSince) {
+    const exhausted = Object.entries(s.resources).filter(([, budget]) => budget.remaining === 0 && budget.reset > now);
+    const primaryReset = Math.max(0, ...exhausted.map(([, budget]) => budget.reset));
+    const directedRetry = retryAt !== undefined && Number.isFinite(retryAt) && retryAt > now ? retryAt : 0;
+    // Several watches can report the same failed batch. They share its wait;
+    // only a failed retry after the wait has elapsed doubles the delay.
+    const waiting = (s.retryAt ?? 0) > now;
+    let reset = Math.max(primaryReset, directedRetry, waiting ? s.retryAt! : 0);
+    if (!reset) {
+      s.secondaryBackoffSecs = Math.min(900, s.secondaryBackoffSecs ? s.secondaryBackoffSecs * 2 : 60);
+      reset = now + s.secondaryBackoffSecs * 1000;
+    }
+    if (s.limitedSince === undefined) {
       s.limitedSince = now;
+      const kind = exhausted.length ? `primary rate limit (${exhausted.map(([resource]) => resource).join(', ')})` : 'secondary rate limit';
       postNotice({
         kind: 'rate-limited',
         refId: 'github',
-        text: `GitHub rate limited; PR polling waits until ${new Date(reset).toISOString()} (shared budget; worker calls need room)`,
+        text: `GitHub ${kind}; PR polling waits until ${new Date(reset).toISOString()}`,
         dedupeKey: `github-rate-limited-${now}`,
       });
     }
-    s.retryAt = Math.max(s.retryAt ?? 0, reset);
+    s.retryAt = reset;
     write(s);
   });
 }
@@ -109,7 +120,8 @@ export function recordGitHubResponse(headers: Record<string, string>, opts: { no
         cost: Math.max(1, opts.cost ?? 1, before?.reset === reset ? before.cost : 1),
       };
     }
-    if (opts.success && s.limitedSince && remaining !== 0) {
+    const exhausted = Object.values(s.resources).some(budget => budget.remaining === 0 && budget.reset > now);
+    if (opts.success && s.limitedSince !== undefined && now >= (s.retryAt ?? 0) && !exhausted) {
       postNotice({
         kind: 'rate-limit-recovered',
         refId: 'github',
@@ -118,6 +130,7 @@ export function recordGitHubResponse(headers: Record<string, string>, opts: { no
       });
       s.limitedSince = undefined;
       s.retryAt = undefined;
+      s.secondaryBackoffSecs = undefined;
     }
     write(s);
   });
