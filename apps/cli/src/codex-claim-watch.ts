@@ -65,6 +65,21 @@ export interface CodexClaimWatchDeps {
   tmux?: TmuxRunner;
 }
 
+const waking = new Set<string>();
+
+/** Shared delivery for claim recovery, idle recovery, and sends; serialize one trap's prompt. */
+export async function wakeCodexTrap(trap: TrapRegistration, text: string, deps: CodexClaimWatchDeps = {}): Promise<'started' | 'busy' | { blocked: string }> {
+  const key = trap.sessionId;
+  if (waking.has(key)) return 'busy';
+  waking.add(key);
+  try {
+    const route = codexWakeRoute(trap);
+    if (route.kind === 'server') return await (deps.startTurn ?? startCodexTurn)(route.threadId, text);
+    if (route.kind === 'pane') return await typeIntoPane(route.pane, text, deps.tmux ?? tmuxRunner());
+    return { blocked: route.why };
+  } finally { waking.delete(key); }
+}
+
 /**
  * The daemon's `codexClaimWatch` hook (see unacknowledgedCodexClaims). Each
  * tick it wakes a Codex trap that claimed work and hasn't reported, once per
@@ -92,19 +107,13 @@ export function createCodexClaimWatch(deps: CodexClaimWatchDeps = {}): (now: num
         }
         const claimAt = unreportedTrapBait(step.trap)?.claim.at;
         if (!claimAt) continue;
-        const route = codexWakeRoute(step.trap);
         try {
           const text = codexClaimWakeMessage(step.dispatchId);
-          const result =
-            route.kind === 'server'
-              ? await (deps.startTurn ?? startCodexTurn)(route.threadId, text)
-              : route.kind === 'pane'
-                ? await typeIntoPane(route.pane, text, deps.tmux ?? tmuxRunner())
-                : undefined;
+          const result = await wakeCodexTrap(step.trap, text, deps);
           if (result === 'busy') continue;
           // A wake that can't be delivered still counts as the one wake: the release follows on schedule.
           recordClaimWake(step.trap, step.dispatchId, claimAt, now);
-          const why = route.kind === 'none' ? route.why : typeof result === 'object' ? result.blocked : undefined;
+          const why = typeof result === 'object' ? result.blocked : undefined;
           log(why ? `cannot wake Codex trap ${name} for ${step.dispatchId}: ${why}` : `woke Codex trap ${name} for its unread ${step.dispatchId}`);
         } catch (error) {
           log(`could not wake Codex trap ${name} for ${step.dispatchId}, will retry: ${error instanceof Error ? error.message : String(error)}`);

@@ -448,6 +448,8 @@ export interface DaemonHooks {
   runCleanup?: (now: number, log: (message: string) => void) => void;
   /** Wakes traps on Codex's shared app-server after it restarts; provided by the CLI daemon entry. */
   codexServerWatch?: (now: number, log: (message: string) => void) => void;
+  /** Delivers unread sends and attempts one recovery before idle-working attention. */
+  codexTrapWatch?: (now: number, log: (message: string) => void) => void;
   /** Wakes a Codex trap that claimed work and never read it, then releases the claim (see codex-claim-watch). */
   codexClaimWatch?: (now: number, log: (message: string) => void) => void;
   /** Refreshes Codex hook trust when lobstah's Codex plugin changes (see codex-hook-watch). */
@@ -733,6 +735,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     }
   }
 
+  try { hooks.codexTrapWatch?.(now, log); }
+  catch (error) { log(`codex trap watch: ${error instanceof Error ? error.message : String(error)}`); }
   noticeDispatchProgress(now, cfg);
 
   const notify = cfg.hooks.notify;

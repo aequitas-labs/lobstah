@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { claimBait, enqueue, ensureLayout, readStatusLog, readTrap, signOnTrap, type TrapRegistration } from '@lobstah/core';
-import { codexClaimWakeMessage, codexPaneReady, codexWakeRoute, createCodexClaimWatch } from '../src/codex-claim-watch.js';
+import { codexClaimWakeMessage, codexPaneReady, codexWakeRoute, createCodexClaimWatch, wakeCodexTrap } from '../src/codex-claim-watch.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const ID = '44444444-4444-4444-8444-444444444444';
@@ -50,6 +50,16 @@ describe('the Codex claim watch', () => {
     tmux.mockClear();
     await watch(at + WAKE_MS + 1000, () => {});
     expect(tmux).not.toHaveBeenCalled();
+  });
+
+  it('serializes competing claim and send wakes into one prompt', async () => {
+    const { trap } = claimedCodexTrap({ window: LOBSTAH_PANE });
+    const tmux = vi.fn(async (args: string[]) => args[0] === 'capture-pane' ? IDLE : '');
+    const first = wakeCodexTrap(trap, 'claim wake', { tmux });
+    expect(await wakeCodexTrap(trap, 'send wake', { tmux })).toBe('busy');
+    expect(await first).toBe('started');
+    expect(tmux.mock.calls.filter(c => c[0][0] === 'send-keys')).toHaveLength(2);
+    expect(tmux.mock.calls[1][0][4]).toBe('claim wake');
   });
 
   it('never types into a pane at a dialog, where Enter would choose an option', () => {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createCodexTrapWatch } from './codex-trap-watch.js';
 import { soakPark } from './trap-park.js';
 import { checklistSummary } from './checklists.js';
 import { validateAssistanceParent, configuredTrapViews, withConfiguredTrapSlot, backendScopes, refreshHostedViews } from '@lobstah/core';
@@ -1765,9 +1766,11 @@ async function mainCli(): Promise<void> {
             ? soaked
               ? [`lobstah soak --wait   (hookless only; otherwise end your turn for the Stop hook)`, `lobstah stow   (sign off instead)`]
               : []
-            : soaked
-              ? [`lobstah soak --wait   (hookless only; otherwise end your turn to wait in the Stop hook)`]
-              : [];
+            : verb === 'working'
+              ? [`Continue the task now in this same turn; do not park after an acknowledgement or takeover note.`, `lobstah inbox ${id}   (check at natural checkpoints)`]
+              : soaked
+                ? [`lobstah soak --wait   (hookless only; otherwise end your turn to wait in the Stop hook)`]
+                : [];
       if (next.length > 0) console.log(toonHelp(next));
       break;
     }
@@ -3921,6 +3924,7 @@ async function mainCli(): Promise<void> {
           runCleanup: createRunCleanup(),
           codexServerWatch: createCodexServerWatch(),
           codexClaimWatch: createCodexClaimWatch(),
+          codexTrapWatch: createCodexTrapWatch(),
           usageLimits: createUsageLimitWatch(),
           turnWaits: createTurnWaits().pass,
           codexHookWatch: createCodexHookWatch(),

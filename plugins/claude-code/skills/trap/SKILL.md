@@ -122,7 +122,10 @@ naming a dispatch id. Then:
   cannot run the await as a tracked background task.
 - Don't block on long-running processes: run servers and watchers in the
   background with a timeout.
-- After sign-on and after every completion or report, end your turn. The
+- After sign-on without an assignment, or after reporting done, failed,
+  needs-decision, blocked, or paused, end your turn. After a working report,
+  continue the task in the same turn; an acknowledgement or takeover note
+  is not a stopping point. The
   Stop hook waits for work in the shell; quiet deadlines renew there without
   another model turn. Do not poll or re-arm on a timeout. An existing
   listener stays in place until work, a message or sign-off.

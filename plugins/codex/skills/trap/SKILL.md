@@ -117,7 +117,10 @@ naming a dispatch id. Then:
   as a tracked background task. End the turn while it runs.
 - Don't block on long-running processes: run servers and watchers in the
   background with a timeout. `lobstah soak --wait` is the exception.
-- After sign-on and after every completion or report, end your turn. Codex's
+- After sign-on without an assignment, or after reporting done, failed,
+  needs-decision, blocked, or paused, end your turn. After a working report,
+  continue the task in the same turn; an acknowledgement or takeover note
+  is not a stopping point. Codex's
   Stop hook waits for work in the shell; quiet deadlines renew there without
   another model turn. Do not start a foreground polling loop or re-arm on a
   timeout. An existing listener stays in place until work, a message or sign-off.
