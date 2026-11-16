@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { claudeCliArgs, claudeSdkOptions, pumpClaudeMessage, startClaudeCli } from '../src/claude.js';
-import { codexExecArgs, startCodexCli } from '../src/codex.js';
+import { codexExecArgs, codexThreadOptions, startCodexCli } from '../src/codex.js';
 import type { AdapterStartOpts } from '../src/types.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -145,12 +145,21 @@ describe('codexExecArgs', () => {
     const first = codexExecArgs(opts({ model: 'gpt-5-codex', effort: 'high' }), 'go');
     expect(first.slice(0, 2)).toEqual(['exec', '--json']);
     expect(first.join(' ')).toContain('--sandbox workspace-write');
-    expect(first[first.indexOf('--add-dir') + 1]).toMatch(/heavy$/);
+    expect(first[first.indexOf('--add-dir') + 1]).toBe(process.env.LOBSTAH_HOME);
     expect(first.join(' ')).toContain('-m gpt-5-codex');
     expect(first.at(-1)).toBe('go');
     const resumed = codexExecArgs(opts(), 'more', 't-42');
     expect(resumed.slice(0, 3)).toEqual(['exec', 'resume', 't-42']);
   });
+});
+
+it('both Codex launch paths allow reports without creating a tool-specific sandbox directory', () => {
+  const state = path.join(dir, 'dispatch-home');
+  const options = opts({ env: { LOBSTAH_HOME: state } });
+  const argv = codexExecArgs(options, 'go');
+  const roots = argv.flatMap((value, index) => value === '--add-dir' ? [argv[index + 1]] : []);
+  expect(roots).toEqual([state]);
+  expect(codexThreadOptions(options)).toMatchObject({ sandboxMode: 'workspace-write', additionalDirectories: roots, approvalPolicy: 'never' });
 });
 
 describe('startCodexCli against a fake CLI', () => {

@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { heavyDir, codexInvocation, gitPushTargets, lobstahHome, toolTarget } from '@lobstah/core';
+import { codexInvocation, gitPushTargets, lobstahHome, toolTarget } from '@lobstah/core';
 import type { NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
@@ -34,11 +34,35 @@ function isolatedCodexHome(): string {
   return dir;
 }
 
-/** The sandbox lets a worker write here and no further, so its heavy commands can queue. */
-function heavyLineDir(): string {
-  const dir = heavyDir();
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+/** Worker reports live outside the checkout. */
+export function codexWritableDirectories(opts: AdapterStartOpts): string[] {
+  const dirs = [opts.env.LOBSTAH_HOME ?? lobstahHome()];
+  for (const dir of dirs) fs.mkdirSync(dir, { recursive: true });
+  return dirs;
+}
+
+/** Sandbox and model settings used by a headless Codex SDK thread. */
+export interface CodexThreadOptions {
+  workingDirectory: string;
+  skipGitRepoCheck: boolean;
+  sandboxMode: 'workspace-write';
+  additionalDirectories: string[];
+  approvalPolicy: 'never';
+  model?: string;
+  modelReasoningEffort?: string;
+}
+
+/** Build SDK thread options with the same writable reporting roots as the CLI fallback. */
+export function codexThreadOptions(opts: AdapterStartOpts): CodexThreadOptions {
+  return {
+    workingDirectory: opts.cwd,
+    skipGitRepoCheck: true,
+    sandboxMode: 'workspace-write',
+    additionalDirectories: codexWritableDirectories(opts),
+    approvalPolicy: 'never',
+    ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.effort ? { modelReasoningEffort: opts.effort } : {}),
+  };
 }
 
 interface CodexEvent {
@@ -97,7 +121,7 @@ export function pumpCodexEvent(
 export function codexExecArgs(opts: AdapterStartOpts, prompt: string, resumeThread?: string): string[] {
   const args = ['exec'];
   if (resumeThread) args.push('resume', resumeThread);
-  args.push('--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', '--add-dir', heavyLineDir(), '--cd', opts.cwd);
+  args.push('--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', ...codexWritableDirectories(opts).flatMap((dir) => ['--add-dir', dir]), '--cd', opts.cwd);
   if (opts.model) args.push('-m', opts.model);
   if (opts.effort) args.push('-c', `model_reasoning_effort=${JSON.stringify(opts.effort)}`);
   args.push(prompt);
@@ -220,15 +244,7 @@ export function createCodexAdapter(): Adapter {
         env: { ...process.env, ...opts.env, CODEX_HOME: isolatedCodexHome() },
       });
       // The SDK defaults to a read-only sandbox; a dispatch owns its worktree.
-      const threadOptions = {
-        workingDirectory: opts.cwd,
-        skipGitRepoCheck: true,
-        sandboxMode: 'workspace-write',
-        additionalDirectories: [heavyLineDir()],
-        approvalPolicy: 'never',
-        ...(opts.model ? { model: opts.model } : {}),
-        ...(opts.effort ? { modelReasoningEffort: opts.effort } : {}),
-      };
+      const threadOptions = codexThreadOptions(opts);
       const thread = opts.resumeSession
         ? codex.resumeThread(opts.resumeSession, threadOptions)
         : codex.startThread(threadOptions);

@@ -3711,6 +3711,12 @@ footer .glass-brand {
 .pr-view-person {
   font-size: 12px;
 }
+.pr-findings {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--inset);
+}
 .pr-finding {
   color: var(--fg);
   padding: 12px;
@@ -3734,6 +3740,13 @@ footer .glass-brand {
 .pr-description table {
   display: block;
   overflow-x: auto;
+}
+.github-description summary :is(h1, h2, h3, h4, h5, h6, p, div, blockquote) {
+  display: inline;
+  margin: 0;
+}
+.github-description details:not([open]) {
+  margin-bottom: var(--space-2);
 }
 .pr-check {
   margin: 8px 0;
