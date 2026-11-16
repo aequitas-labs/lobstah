@@ -50,7 +50,8 @@ it('blocks once, passes the second Stop even without stop_hook_active, then noti
   expect(dispatchProgress().map((p) => p.state)).toEqual(['idle-while-working']); // Not also stalled.
 });
 
-it('honors a continued Stop, a configured threshold, and disabling notices', () => {
+it('honors a continued Claude Stop, a configured threshold, and disabling notices', () => {
+  trap.harness = 'claude';
   expect(trapWorkingStop(trap, true)).toEqual({});
   const cfg = loadConfig(); cfg.helm.idleWorkingNoticeSecs = 10;
   advance(9); expect(dispatchProgress(Date.now(), cfg)).toHaveLength(0);
@@ -150,4 +151,13 @@ describe("a trap's heavy job counts as working", () => {
     expect(dispatchProgress()[0]?.state).toBe('idle-while-working');
     expect(dispatchProgress()[0]?.ageSecs).toBe(60);
   });
+});
+
+it('Codex nudges working after a park continuation even when stop_hook_active is already true', () => {
+  expect(trapWorkingStop(trap, true)?.reason).toContain('about to go idle');
+  expect(trapWorkingStop(trap, true)).toEqual({});
+  resumeTrapTurn(trap, true);
+  expect(trapWorkingStop(trap, true)?.reason).toContain('about to go idle');
+  appendStatus('job', 'work', 'paused', 'waiting for deploy', undefined, undefined, true);
+  expect(trapWorkingStop(trap, true)).toBeUndefined();
 });

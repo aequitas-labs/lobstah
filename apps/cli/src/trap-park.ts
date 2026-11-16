@@ -33,11 +33,11 @@ export async function soakPark(trapId: string, timeout: string | undefined, plai
     ? (reason: string) => {
         idle.woke();
         const trap = readTrap(trapId);
-        if (trap) resumeTrapTurn(trap);
+        if (trap) resumeTrapTurn(trap, true);
         console.log(reason);
         console.log(toonHelp([`${rearm}   (when you finish handling this, run this here to keep listening)`]));
       }
-    : (reason: string) => { idle.woke(); const trap = readTrap(trapId); if (trap) resumeTrapTurn(trap); console.log(JSON.stringify({ decision: 'block', reason })); };
+    : (reason: string) => { idle.woke(); const trap = readTrap(trapId); if (trap) resumeTrapTurn(trap, true); console.log(JSON.stringify({ decision: 'block', reason })); };
   while (true) {
     if (readTrap(trapId)?.sessionId !== sessionId) return 'gone';
     const reg = heartbeatTrap(trapId, { parked: true });
@@ -76,16 +76,18 @@ export async function soakPark(trapId: string, timeout: string | undefined, plai
         return 'woke';
       }
       const pending = unreportedTrapBait(reg);
-      const instruction = unhandled(id, lane).length > 0
-        ? `New instruction for your dispatch ${id} — read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`
-        : undefined;
+      const messages = unhandled(id, lane);
+      const instruction = messages.length > 0 ? [
+        `New instruction for your dispatch ${id}:`,
+        ...messages.map((m) => m.text),
+        `Read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`,
+        TRAP_INSTRUCTION_RULE,
+      ].join('\n\n') : undefined;
       // The daemon swaps outside this process; the old conversation never receives fresh work.
       const awaitingFreshSession = pending && needsFreshTrapSession(pending.descriptor);
       if (!awaitingFreshSession && (pending || instruction)) {
-        // Another waiter may have claimed while this Stop hook was parked,
-        // or exited after claiming without waking the session. An initial
-        // brief is not consumed until the worker's first report, so recover
-        // it here instead of waiting forever for an inbox nudge.
+        // Include steering and the unread brief in the continuation itself.
+        // The inbox stays unread until the worker consumes it through `inbox`.
         block([instruction, pending ? baitBrief(id, pending.descriptor) : undefined].filter(Boolean).join('\n\n'));
         return 'woke';
       }

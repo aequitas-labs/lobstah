@@ -16,6 +16,7 @@ import {
   readStatusLog,
   readTrap,
   readTurnOwner,
+  readSessionClaim,
   readTurnWaits,
   sendMessage,
   sendTrapMessage,
@@ -68,6 +69,8 @@ export interface TurnWaitRecord {
   cwd: string;
   cursor?: string;
   registeredAt: string;
+  /** Project context captured from the registering tool’s folder; never credentials. */
+  env?: Record<string, string>;
   /** Consecutive failed runs, and when the next run may start. */
   failures?: number;
   nextRunAt?: string;
@@ -138,10 +141,17 @@ function dispatchEnded(id: string): boolean {
   return last !== undefined && TERMINAL_VERBS.includes(last);
 }
 
-/** The live trap a record belongs to, when it still runs the same session. */
+/** The live owning trap, including a replacement session on the same catch. */
 function liveTrap(r: TurnWaitRecord): TrapRegistration | undefined {
+  const lane = r.dispatch ? laneOf(r.dispatch) : undefined;
+  const claim = r.dispatch && lane ? readSessionClaim(r.dispatch, lane) : undefined;
+  if (claim?.by.startsWith('wt:')) {
+    const owner = readTrap(claim.by.slice(3));
+    // The catch survives a re-throw or an explicit handover to another trap.
+    if (owner && owner.claimed === r.dispatch && hasOpenCatch(owner)) return owner;
+  }
   const t = readTrap(r.trapId);
-  return t && t.sessionId === r.session ? t : undefined;
+  return t?.sessionId === r.session ? t : undefined;
 }
 
 /**
@@ -160,7 +170,10 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     noteSeenTool(w.from);
     const existing = readRecord(key);
     const dispatch = hasOpenCatch(trap) ? trap.claimed : existing?.dispatch;
-    const changed = !existing || existing.wait !== w.wait || existing.read !== w.read || existing.dispatch !== dispatch;
+    const cwd = w.cwd ?? readTurnOwner(w.session)?.cwd ?? trap.cwd;
+    const env = waitEnvironment(w.from, cwd) ?? existing?.env;
+    const changed = !existing || existing.wait !== w.wait || existing.read !== w.read || existing.dispatch !== dispatch ||
+      existing.cwd !== cwd || JSON.stringify(existing.env) !== JSON.stringify(env);
     if (!changed) continue;
     writeRecord({
       ...(existing ?? {}),
@@ -171,20 +184,36 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
       from: w.from,
       wait: w.wait,
       read: w.read,
-      cwd: w.cwd ?? readTurnOwner(w.session)?.cwd ?? trap.cwd,
+      cwd,
       ...(existing?.cursor ?? w.cursor ? { cursor: existing?.cursor ?? w.cursor } : {}),
+      env,
       registeredAt: existing?.registeredAt ?? new Date(now).toISOString(),
     });
   }
-  for (const r of readTurnWaitRecords()) {
-    const withdrawn = !registered.has(r.key) && liveTrap(r) !== undefined;
+  const records = readTurnWaitRecords();
+  for (const r of records) {
+    // Once the new session registers the same wait, only its watcher runs.
+    const superseded = records.some((next) => next.key !== r.key && next.trapId === r.trapId &&
+      next.dispatch === r.dispatch && next.from === r.from && next.read === r.read &&
+      next.session === readTrap(r.trapId)?.sessionId && next.session !== r.session);
+    const withdrawn = !registered.has(r.key) && liveTrap(r)?.sessionId === r.session;
     const finished = r.dispatch ? dispatchEnded(r.dispatch) : liveTrap(r) === undefined;
-    if (withdrawn || finished) {
+    if (superseded || withdrawn || finished) {
       removeRecord(r.key);
       ended.push(r.key);
     }
   }
   return ended;
+}
+
+/** Ume's local pin follows its set, including a project move. Do not inherit a daemon's unrelated token. */
+function waitEnvironment(from: string, cwd: string): Record<string, string> | undefined {
+  if (from !== 'ume') return undefined;
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(cwd, '.ume', 'next.json'), 'utf8'));
+    const project = state.projectContext?.destination ?? state.project;
+    return typeof project === 'string' && project ? { UME_PROJECT: project, UME_TOKEN: '' } : undefined;
+  } catch { return undefined; }
 }
 
 /** The one-line pointer a wake carries. */
@@ -209,6 +238,7 @@ export function deliverTurnWaitLine(key: string, line: string, now = Date.now())
   }
   const summary = typeof parsed.summary === 'string' ? parsed.summary.slice(0, 200) : undefined;
   const next: TurnWaitRecord = { ...r, ...(typeof parsed.cursor === 'string' || typeof parsed.cursor === 'number' ? { cursor: String(parsed.cursor) } : {}) };
+  const env = waitEnvironment(r.from, r.cwd) ?? r.env;
   const text = pointerText(r, summary);
   const from = `wait:${r.from}`;
   const trap = liveTrap(r);
@@ -226,7 +256,7 @@ export function deliverTurnWaitLine(key: string, line: string, now = Date.now())
     } else {
       const descriptor = storedDescriptor(r.dispatch, lane);
       const id = randomUUID();
-      enqueue({ id, repo: descriptor?.repo ?? '', brief: text, followUp: r.dispatch }, 'work');
+      enqueue({ id, repo: descriptor?.repo ?? '', brief: text, followUp: r.dispatch, ...(env ? { env } : {}) }, 'work');
       next.followUp = id;
       outcome = 'continuation';
     }
@@ -262,8 +292,8 @@ export function noticeUnreadPointers(now = Date.now()): string[] {
 }
 
 /** What starts a wait: injectable for tests. */
-export type SpawnWait = (command: string, cwd: string) => ChildProcess;
-const spawnWait: SpawnWait = (command, cwd) => spawn(command, { shell: true, cwd: fs.existsSync(cwd) ? cwd : undefined, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+export type SpawnWait = (command: string, cwd: string, env?: Record<string, string>) => ChildProcess;
+const spawnWait: SpawnWait = (command, cwd, env) => spawn(command, { env: { ...process.env, ...env }, shell: true, cwd: fs.existsSync(cwd) ? cwd : undefined, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
 /**
  * The daemon's turn-waits pass: sync the records, start each due wait that
@@ -284,7 +314,7 @@ export function createTurnWaits(start: SpawnWait = spawnWait): { pass: (now: num
     }
     for (const r of readTurnWaitRecords()) {
       if (children.has(r.key) || (r.nextRunAt && Date.parse(r.nextRunAt) > now)) continue;
-      const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd);
+      const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd, waitEnvironment(r.from, r.cwd) ?? r.env);
       children.set(r.key, child);
       let buffered = '';
       let printed = false;

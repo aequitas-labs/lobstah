@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { appendStatus, claimBait, enqueue, ensureLayout, readTrap, resetWaitBackoff, signOnTrap, stowTrap, sweepGhostTraps } from '@lobstah/core';
+import { appendStatus, claimBait, enqueue, ensureLayout, readTrap, resetWaitBackoff, signOnTrap, stowTrap, sweepGhostTraps, sendMessage, unhandled, trapWorkingStop } from '@lobstah/core';
 import { HOOK_PARK_MS, PARK_RENEWAL_REASON, soakPark } from '../src/trap-park.js';
 import { stopChildren } from '../../../test/child-process.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -91,3 +91,47 @@ it('a plain listener stays in its process across quiet deadlines and exits on si
   await new Promise<void>(resolve => child.once('exit', () => resolve()));
   expect(output).not.toContain('timeout: true');
 }, 10_000);
+
+it.each(['paused', 'needs-decision'] as const)('a Codex trap parked on %s returns a send arriving after the hook started', async verb => {
+  const worktree = path.join(home, 'worktree'); fs.mkdirSync(worktree);
+  const signed = signOnTrap({ repo: 'r', worktree, cwd: worktree, harness: 'codex', sessionId: 'steered-session', ttlMs: 60_000 });
+  if (!('ok' in signed)) throw new Error('held');
+  enqueue({ id: 'steered', repo: 'r', brief: 'Do the work', for: `wt:${signed.ok.trapId}`, sessionMode: 'continue' });
+  claimBait(signed.ok);
+  appendStatus('steered', 'work', verb, 'waiting for feedback', undefined, undefined, true);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CLAUDE|CODEX|LOBSTAH_TRAP_TICKET)/.test(key)));
+  const parkedBefore = readTrap(signed.ok.trapId)?.parkedAt;
+  const child = spawn(process.execPath, [cli, 'hook', 'stop'], { cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  children.push(child);
+  let output = ''; child.stdout!.on('data', chunk => { output += String(chunk); });
+  let errors = ''; child.stderr!.on('data', chunk => { errors += String(chunk); });
+  const exited = new Promise<void>(resolve => child.once('close', () => resolve()));
+  child.stdin!.end(JSON.stringify({ session_id: 'steered-session', hook_event_name: 'Stop', turn_id: 'continued', stop_hook_active: true }));
+  for (let i = 0; i < 100 && readTrap(signed.ok.trapId)?.parkedAt === parkedBefore; i++) await sleep(20);
+  expect(readTrap(signed.ok.trapId)?.parkedAt).not.toBe(parkedBefore);
+  expect(child.exitCode).toBeNull();
+  const sent = spawnSync(process.execPath, [cli, 'send', 'steered', 'Use the approved option now', '--no-reply'], { cwd: home, env, encoding: 'utf8', timeout: 5000 });
+  expect(sent.status, sent.stderr).toBe(0);
+  expect(sent.stdout).toContain('delivered: inbox of steered');
+  await exited;
+  expect(output, errors + ' exit=' + child.exitCode).not.toBe('');
+  expect(JSON.parse(output)).toMatchObject({ decision: 'block', reason: expect.stringContaining('Use the approved option now') });
+  expect(unhandled('steered', 'work')).toHaveLength(1);
+}, 10_000);
+
+it('an inbox wake earns a new Codex working correction without another report', async () => {
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const worktree = path.join(home, 'working'); fs.mkdirSync(worktree);
+  const signed = signOnTrap({ repo: 'r', worktree, cwd: worktree, harness: 'codex', sessionId: 'working-session', ttlMs: 60_000 });
+  if (!('ok' in signed)) throw new Error('held');
+  enqueue({ id: 'working', repo: 'r', brief: 'Do the work', for: `wt:${signed.ok.trapId}` });
+  claimBait(signed.ok);
+  appendStatus('working', 'work', 'working', 'still executing', undefined, undefined, true);
+  const reg = readTrap(signed.ok.trapId)!;
+  expect(trapWorkingStop(reg, true)?.reason).toContain('about to go idle');
+  expect(trapWorkingStop(reg, true)).toEqual({});
+  sendMessage('working', 'work', 'Keep going', 'helm');
+  expect(await soakPark(reg.trapId, '0')).toBe('woke');
+  expect(JSON.parse(output.mock.calls.at(-1)![0]).reason).toContain('Keep going');
+  expect(trapWorkingStop(reg, true)?.reason).toContain('about to go idle');
+});

@@ -110,6 +110,39 @@ describe('waking the session', () => {
     expect(readTurnWaitRecords()[0]?.cursor).toBe('31');
   });
 
+  it('a re-thrown trap receives feedback registered by its previous session without a headless fork', () => {
+    const t = working();
+    register('ume.json', UME);
+    syncTurnWaitRecords();
+    const key = readTurnWaitRecords()[0]!.key;
+    const signed = signOnTrap({ repo: 'web', harness: 'codex', worktree: t.worktree, cwd: t.cwd, sessionId: 'replacement', ttlMs: 60_000, now: Date.now() + 61_000 });
+    if (!('ok' in signed)) throw new Error('held');
+    expect(signed.ok.claimed).toBe('plan');
+    expect(syncTurnWaitRecords()).toEqual([]);
+    expect(deliverTurnWaitLine(key, '{"cursor":"31"}')).toBe('inbox');
+    expect(unhandled('plan', 'work')[0]?.text).toContain('ume feedback a1');
+    expect(fs.readdirSync(path.join(process.env.LOBSTAH_HOME!, 'queue'))).toEqual([]);
+    register('ume.json', UME, 'replacement');
+    expect(syncTurnWaitRecords()).toEqual([key]);
+    expect(readTurnWaitRecords()).toHaveLength(1);
+    expect(readTurnWaitRecords()[0]?.session).toBe('replacement');
+  });
+
+  it('a headless continuation retains the set project after the original folder disappears', () => {
+    const t = working();
+    fs.mkdirSync(path.join(t.cwd, '.ume'));
+    fs.writeFileSync(path.join(t.cwd, '.ume', 'next.json'), JSON.stringify({ set: 'set-1', project: 'dr61xpsvqw' }));
+    register('ume.json', { ...UME, cwd: t.cwd });
+    syncTurnWaitRecords();
+    const key = readTurnWaitRecords()[0]!.key;
+    stowTrap(t.trapId);
+    fs.rmSync(path.join(t.cwd, '.ume'), { recursive: true });
+    expect(deliverTurnWaitLine(key, '{"cursor":"31"}')).toBe('continuation');
+    const queue = path.join(process.env.LOBSTAH_HOME!, 'queue');
+    const descriptor = JSON.parse(fs.readFileSync(path.join(queue, fs.readdirSync(queue)[0]!), 'utf8'));
+    expect(descriptor).toMatchObject({ followUp: 'plan', sessionMode: 'continue', env: { UME_PROJECT: 'dr61xpsvqw', UME_TOKEN: '' } });
+  });
+
   it('a trap that has gone gets one continuation of its dispatch at a time', () => {
     const t = working();
     register('ume.json', UME);
@@ -163,6 +196,27 @@ describe('the daemon pass', () => {
     expect(unhandled('plan', 'work').map((m) => m.text)).toEqual(['ume has something new: cursor was 30. Run `ume feedback a1` to see it.']);
     expect(readTurnWaitRecords()[0]?.cursor).toBe('31');
     expect(log.some((l) => l.endsWith(': inbox'))).toBe(true);
+  });
+
+  it('runs a registered ume wait with its set project rather than the daemon project token', async () => {
+    const t = working();
+    fs.mkdirSync(path.join(t.cwd, '.ume'));
+    fs.writeFileSync(path.join(t.cwd, '.ume', 'next.json'), JSON.stringify({ project: 'old-project', projectContext: { source: 'old-project', destination: 'dr61xpsvqw' } }));
+    const script = path.join(dir, 'project.js');
+    fs.writeFileSync(script, "console.log(JSON.stringify({ cursor: '31', summary: process.env.UME_PROJECT + ':' + process.env.UME_TOKEN }));");
+    register('ume.json', { ...UME, cwd: t.cwd, wait: `"${process.execPath}" "${script}"` });
+    const old = process.env.UME_TOKEN;
+    process.env.UME_TOKEN = 'wrong-project-token';
+    try {
+      const { pass, children } = createTurnWaits();
+      pass(Date.now(), () => {});
+      await new Promise<void>(resolve => children.values().next().value!.once('close', () => resolve()));
+      expect(unhandled('plan', 'work')[0]?.text).toContain('dr61xpsvqw:');
+      expect(unhandled('plan', 'work')[0]?.text).not.toContain('wrong-project-token');
+    } finally {
+      if (old === undefined) delete process.env.UME_TOKEN;
+      else process.env.UME_TOKEN = old;
+    }
   });
 
   it('a wait that exits with an error code backs off and records why, however long it ran', async () => {
