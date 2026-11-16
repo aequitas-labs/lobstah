@@ -101,7 +101,6 @@ describe('the Reviews tab', () => {
     expect(g.$('#reviews')?.textContent).toContain('needs your call');
     const button = g.$$('#reviews button').find(button => button.textContent?.includes('Approve'))!;
     expect(button.hasAttribute('disabled')).toBe(true);
-    expect(g.$('#reviews')?.textContent).toContain('Answer every decision before posting.');
     g.serve({ ...fleet(), reviews: [{ ...r, decisionAnswers: { 'rollout-owner': { optionId: 'product' }, 'existing-users': { text: 'Ask each user.' } } }] });
     await g.poll();
     expect(g.$('#reviews')?.textContent).not.toContain('needs your call');

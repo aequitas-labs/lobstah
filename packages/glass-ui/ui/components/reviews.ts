@@ -182,15 +182,10 @@ export function ReviewActions({
             ? 'Skipping…'
             : 'Sending…';
   if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /></span>`;
-  const postReason = decisionSaving
-    ? 'Save your answers before posting.'
-    : unansweredReviewDecisions(r).length
-      ? 'Answer every decision before posting.'
-      : undefined;
-  const postBlocked = r.state === 'drafted' && postReason;
+  const postBlocked = r.state === 'drafted' && (decisionSaving || unansweredReviewDecisions(r).length > 0);
   const sendButton =
     r.state === 'drafted' &&
-    html`<${Button} disabled=${!!postBlocked} title=${postReason} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${send.label}<//>`;
+    html`<${Button} disabled=${postBlocked} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${send.label}<//>`;
   if (split) {
     const drafts = (canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale';
     const skips = OPEN.has(r.state) || !!r.notification;
@@ -198,7 +193,7 @@ export function ReviewActions({
       "Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.";
     const main =
       r.state === 'drafted'
-        ? html`<${Button} size=${inView ? 'lg' : 'md'} variant="primary" disabled=${!!postBlocked} title=${postReason} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${SEND_ICON[r.verdict ?? 'comment']}${send.label}<//>`
+        ? html`<${Button} size=${inView ? 'lg' : 'md'} variant="primary" disabled=${postBlocked} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${SEND_ICON[r.verdict ?? 'comment']}${send.label}<//>`
         : drafts
           ? html`<${Button} size=${inView ? 'lg' : 'md'} variant="primary" action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`
           : null;
@@ -218,12 +213,11 @@ export function ReviewActions({
       more.push({ label: 'Redraft', icon: ActionIcon.draft, action: act('review-redraft'), done: 'Draft requested' });
     const mute = muteMenuAction(r);
     if (mute) more.push(mute);
-    return html`<span class=${'rv-actions' + (!main && more.length ? ' rv-menu-only' : '')}>${(main || more.length) && html`<${SplitButton} main=${main} more=${more} />`}${postBlocked && html`<span class="dim">${postReason}</span>`}</span>`;
+    return html`<span class=${'rv-actions' + (!main && more.length ? ' rv-menu-only' : '')}>${(main || more.length) && html`<${SplitButton} main=${main} more=${more} />`}</span>`;
   }
   return html`<span class="rv-actions">
     ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}
     ${sendButton}
-    ${postBlocked && html`<span class="dim">${postReason}</span>`}
     <${MuteAction} r=${r} />
     ${(OPEN.has(r.state) || r.notification) && html`<${Button} action=${act('review-skip')} done=${done('review-skip')} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.">Dismiss<//>`}
   </span>`;

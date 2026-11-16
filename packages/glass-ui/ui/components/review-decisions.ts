@@ -76,14 +76,14 @@ function DecisionAnswer({
     if (delay) timer.current = setTimeout(write, delay);
     else write();
   };
-  return html`<fieldset class="pr-findings" data-review-decision=${decision.id} disabled=${!editable}>
+  return html`<fieldset class="pr-findings" data-review-decision=${decision.id} disabled=${!editable} aria-busy=${saving}>
     <legend>${decision.question}</legend>
     ${decision.options.map((option) => html`<p key=${option.id}><label><input type="radio" name=${'review-decision-' + decision.id} checked=${answer?.optionId === option.id} onChange=${() => save({ optionId: option.id })} /> <b>${option.label}</b>${decision.recommendation === option.id && html` <span class="badge">Recommended</span>`}<br /><span class="dim">${option.consequence}</span></label></p>`)}
-    <label>Write your own answer<textarea class="danswer" rows="2" maxlength="8000" value=${answer?.text ?? ''} onInput=${(event: Event) => save({ text: (event.currentTarget as HTMLTextAreaElement).value }, 350)} onBlur=${() => {
+    <textarea class="danswer" placeholder="Write your own answer" aria-label="Write your own answer" rows="2" maxlength="8000" value=${answer?.text ?? ''} onInput=${(event: Event) => save({ text: (event.currentTarget as HTMLTextAreaElement).value }, 350)} onBlur=${() => {
       clearTimeout(timer.current);
       pendingWrite.current?.();
-    }} /></label>
-    <div role="status">${saving ? 'Saving…' : error ? html`<span class="bad">${error}</span> <${Button} onClick=${() => save(answer)}>Retry save<//>` : answer && (answer.optionId || answer.text?.trim()) ? 'Saved' : 'Choose an option or write an answer.'}</div>
+    }} />
+    ${error && html`<div role="alert"><span class="bad">${error}</span> <${Button} onClick=${() => save(answer)}>Retry save<//></div>`}
   </fieldset>`;
 }
 
