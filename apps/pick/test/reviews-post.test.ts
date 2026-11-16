@@ -108,11 +108,11 @@ describe('postReview', () => {
     if (verdict !== 'comment') enableAutoPost(verdict);
     const calls: Call[] = [];
     const result = await postReview(KEY, { by: 'auto', token: tok, fetch: github(calls) });
-    if (verdict === 'comment' || verdict === 'approve') {
+    if (verdict === 'comment') {
       expect(result).toMatchObject({ posted: false });
       expect(posts(calls)).toEqual([]);
-      expect(await postReview(KEY, { by: 'glass', event: verdict === 'approve' ? 'APPROVE' : 'COMMENT', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
-      expect(posts(calls)[0]?.body).toMatchObject({ event: verdict === 'approve' ? 'APPROVE' : 'COMMENT' });
+      expect(await postReview(KEY, { by: 'glass', event: 'COMMENT', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+      expect(posts(calls)[0]?.body).toMatchObject({ event: 'COMMENT' });
     } else {
       expect(result).toMatchObject({ posted: true });
       expect(posts(calls)[0]?.body?.event).toBe(verdict === 'approve' ? 'APPROVE' : 'REQUEST_CHANGES');
@@ -206,8 +206,8 @@ describe('posting from the reviews loop', () => {
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict, blocking }));
     const calls: Call[] = [];
     for (let i = 0; i < 2; i++) await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
-    expect(posts(calls).map((call) => call.body?.event)).toEqual([verdict === 'approve' ? undefined : event]);
-    expect(latestRound(readReview(KEY)!)).toMatchObject(verdict === 'approve' ? { state: 'drafted', needsYou: true } : { state: 'posted', by: 'auto', postedReviewId: '99' });
+    expect(posts(calls).map((call) => call.body?.event)).toEqual([event]);
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'posted', by: 'auto', postedReviewId: '99' });
   });
 
   it('refuses auto-post when the GitHub token is not the configured reviewer', async () => {

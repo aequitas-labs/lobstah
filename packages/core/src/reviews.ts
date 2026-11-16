@@ -739,8 +739,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
 export function reviewCanPublish(config: ReviewsConfig, repoKey: string | undefined, round: ReviewRound, verdict?: ReviewVerdict): boolean {
   const settings = reviewSettings(config, repoKey);
   const selected = verdict ?? round.verdict;
-  if (selected === 'approve') return false;
-  const configured = selected === 'request_changes' ? settings.autoPostRequestChanges : 'ask';
-  const captured = selected === 'request_changes' ? round.autoPostRequestChanges : 'ask';
+  const configured = selected === 'approve' ? settings.autoPostApprove : selected === 'request_changes' ? settings.autoPostRequestChanges : 'ask';
+  const captured = selected === 'approve' ? round.autoPostApprove : selected === 'request_changes' ? round.autoPostRequestChanges : 'ask';
   return config.enabled && configured === 'auto-post' && captured === 'auto-post' && (settings.mode.startsWith('auto-') || (settings.mode === 'on-demand' && round.onDemand === true));
 }

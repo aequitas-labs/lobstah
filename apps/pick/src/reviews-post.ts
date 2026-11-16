@@ -239,7 +239,6 @@ async function approveWithoutDraft(key: string, opts: Opts & { by: PostBy }): Pr
  */
 export async function postReview(key: string, opts: Opts & { by: PostBy; stale?: boolean; event?: ReviewEvent; approveAnyway?: boolean }): Promise<PostResult> {
   if (opts.approveAnyway) return approveWithoutDraft(key, opts);
-  if (opts.by === 'auto' && opts.event === 'APPROVE') return { posted: false, why: 'Approval requires your click in the glass.' };
   const c = context(key, opts);
   if (typeof c === 'string') return { posted: false, why: c };
   const { r, token, f, at, base } = c;
@@ -251,7 +250,6 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   const draft = readRoundDraft(key, r.id);
   if ('error' in draft) return { posted: false, why: `${key}: ${draft.error}` };
   const event = opts.event ?? (opts.by === 'auto' && draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
-  if (opts.by === 'auto' && event === 'APPROVE') return { posted: false, why: 'Approval requires your click in the glass.' };
   if (!['COMMENT', 'REQUEST_CHANGES', 'APPROVE'].includes(event)) return { posted: false, why: 'invalid review event' };
   const expected = draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT';
   if (opts.by === 'glass' && event !== expected) return { posted: false, why: 'the action does not match the draft verdict' };
