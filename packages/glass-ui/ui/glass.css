@@ -3745,6 +3745,9 @@ footer .glass-brand {
   display: inline;
   margin: 0;
 }
+.github-description details:not([open]) {
+  margin-bottom: var(--space-2);
+}
 .pr-check {
   margin: 8px 0;
 }
