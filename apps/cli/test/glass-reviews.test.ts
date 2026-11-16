@@ -412,13 +412,16 @@ describe('review requests on /requests', () => {
     expect((await send(base, token, 'review-decision-answer', { ...payload, answer: { optionId: 'bad' } })).status).toBe(409);
   });
 
-  it('New review refuses an unconfigured identity without changing the skipped history', async () => {
-    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "on-demand"\n');
+  it('New review reports unavailable credentials without changing the skipped history', async () => {
+    const missingToken = path.join(home, 'missing-review-token').replaceAll('\\', '/');
+    fs.writeFileSync(path.join(home, 'config.toml'), `[reviews]\nenabled = true\nmode = "on-demand"\nidentity = "chris"\ntokenFile = '${missingToken}'\n`);
     const key = 'review:acme/web#7';
     const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaa' }, round: { id: 'round1', requestedAt: ago(60) } }).item;
     item.rounds[0]!.state = 'dismissed'; writeReview(item);
     const { base, token } = await start();
-    expect((await send(base, token, 'review-new', { key })).status).toBe(409);
+    const response = await send(base, token, 'review-new', { key });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, reason: 'The review could not be changed.' });
     expect(readReview(key)!.rounds.map(round => round.state)).toEqual(['dismissed']);
   });
 

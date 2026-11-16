@@ -1246,7 +1246,7 @@ export function serveGlass(
             const act = event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
               : body.kind === 'review-mute' ? Promise.resolve(muteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : body.kind === 'review-unmute' ? Promise.resolve(unmuteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
-              : body.kind === 'review-new' ? Promise.resolve(requestNewReview(key))
+              : body.kind === 'review-new' ? Promise.resolve().then(() => requestNewReview(key))
               : ['review-dismiss', 'review-skip'].includes(body.kind) ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),
