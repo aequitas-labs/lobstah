@@ -39,6 +39,8 @@ export interface Descriptor {
   brief: string;
   /** Git progress and prior catch evidence carried into a cold trap handover. */
   handoff?: string;
+  /** Opaque park recovery instructions saved by the dispatch; replayed to a returning trap without tool-specific interpretation. */
+  parkContext?: string;
   /** Session choice made when queuing work; continuations default to continue. */
   sessionMode?: DispatchSessionMode;
   /** A claim-time handover starts a new task branch after inspecting the previous checkout. */

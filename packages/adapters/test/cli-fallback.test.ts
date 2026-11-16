@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 function opts(over: Partial<AdapterStartOpts> = {}): AdapterStartOpts {
-  return { id: 'd1', cwd: dir, prompt: 'do the thing', limits: {}, env: { UME_HOME: path.join(dir, 'ume') }, flags: [], ...over };
+  return { id: 'd1', cwd: dir, prompt: 'do the thing', limits: {}, env: {}, flags: [], ...over };
 }
 
 async function collect(events: AsyncIterable<{ type: string }>): Promise<string[]> {
@@ -153,13 +153,12 @@ describe('codexExecArgs', () => {
   });
 });
 
-it('both Codex launch paths allow reports and ume ledgers outside the worktree', () => {
+it('both Codex launch paths allow reports without creating a tool-specific sandbox directory', () => {
   const state = path.join(dir, 'dispatch-home');
-  const ume = path.join(dir, 'ume-home');
-  const options = opts({ env: { LOBSTAH_HOME: state, UME_HOME: ume } });
+  const options = opts({ env: { LOBSTAH_HOME: state } });
   const argv = codexExecArgs(options, 'go');
   const roots = argv.flatMap((value, index) => value === '--add-dir' ? [argv[index + 1]] : []);
-  expect(roots).toEqual([state, ume]);
+  expect(roots).toEqual([state]);
   expect(codexThreadOptions(options)).toMatchObject({ sandboxMode: 'workspace-write', additionalDirectories: roots, approvalPolicy: 'never' });
 });
 
