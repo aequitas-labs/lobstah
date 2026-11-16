@@ -23,8 +23,9 @@ export function SectionHead({
   const details = [
     title,
     badge,
-    count !== undefined && [' ', html`<span class="section-count">· ${count}</span>`],
-    href && html`<span aria-hidden="true"> →</span>`,
+    // Keep these gaps visible at inline and flex item boundaries.
+    count !== undefined && html`<span class="section-count">${'\u00a0· '}${count}</span>`,
+    href && html`<span aria-hidden="true">${'\u00a0→'}</span>`,
   ];
   return html`<div class=${'section-head' + (page ? ' page-head' : '')} id=${id}>
     <${tag}>${href ? html`<a href=${href}>${details}</a>` : details}</${tag}>
