@@ -1,5 +1,5 @@
 import type { GlassReview } from '@lobstah/core';
-import { unansweredReviewDecisions } from '@lobstah/core';
+import { unansweredReviewDecisions } from '@lobstah/core/dist/review-decisions.js';
 
 /** One rule for the Reviews badge and each row's unread marker; closed rounds never count. */
 export function reviewUnreadReason(review: GlassReview): string | undefined {
