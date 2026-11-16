@@ -264,10 +264,11 @@ identity is on files nothing.
 
 Each PR is one review item, `review:<owner>/<repo>#<n>`, in
 `~/.lobstah/reviews/<owner>-<repo>-<n>/review.json`. An item holds rounds,
-one per `ReviewRequestedEvent`: the same standing request never opens a
-second round, and a re-request opens a new one (an open earlier round is
-withdrawn as superseded). A new push with no new request moves a requested
-round's head; a drafted round becomes `stale` and starts nothing on its own.
+one per observed head while your review request stands on GitHub. A
+re-request at the same head keeps the existing round and its draft. A new
+push opens a fresh round even without another request event, including after
+Skip or a posted review; an open earlier round is withdrawn as superseded.
+The new round follows the repo's review mode and daily automatic limit.
 When the search stops returning a PR (the request was withdrawn, the
 person reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
 truncated search (more than 50 results) withdraws nothing.

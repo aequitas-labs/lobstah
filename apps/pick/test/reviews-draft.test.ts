@@ -250,13 +250,14 @@ describe('finishing a review job', () => {
     expect(round()).toMatchObject({ state: 'failed', reason: 'the review job failed: wall clock' });
   });
 
-  it('a head that moved while the job ran makes the draft stale', () => {
+  it('a head that moved while the job ran starts a fresh round', () => {
     const id = drafting();
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'fine');
     request({ head: 'bbbbbbb2' });
     appendStatus(id, 'chore', 'done', 'drafted');
     draftReviews('chris', () => {}, NOW);
-    expect(round()).toMatchObject({ state: 'stale', headSha: 'aaaaaaa1' });
+    expect(readReview(KEY)!.rounds[0]).toMatchObject({ state: 'withdrawn', headSha: 'aaaaaaa1' });
+    expect(round()).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
   });
 
   it('a trap job no trap took in time goes to the daemon', () => {
@@ -321,13 +322,14 @@ describe('the review checkout', () => {
     gone();
   });
 
-  it('is removed when the draft is stale', () => {
+  it('is removed when a new head supersedes the completed draft', () => {
     const id = drafting();
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'Fine.');
     request({ head: 'bbbbbbb2' });
     appendStatus(id, 'chore', 'done', 'drafted');
     draftReviews('chris', () => {}, NOW);
-    expect(round().state).toBe('stale');
+    expect(readReview(KEY)!.rounds[0]!.state).toBe('withdrawn');
+    expect(round()).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
     gone();
   });
 

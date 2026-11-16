@@ -12,8 +12,8 @@ import type { TendAttention } from './glass.js';
  * (`[pickup.github].identity`) for a review. `lobstah pick` finds them with
  * one search per poll and files a review item per PR here, in
  * `~/.lobstah/reviews/<owner>-<repo>-<n>/review.json`. An item holds
- * rounds: one per request event, so a re-request opens a new round and the
- * same standing request never opens two.
+ * rounds: one per observed head while the review request stands. A
+ * re-request at an unchanged head keeps the existing round.
  */
 
 export const REVIEW_WORK = ['off', 'trap', 'headless'] as const;
@@ -376,9 +376,8 @@ export interface ReviewRequestSeen {
 
 /**
  * Record one search result. Re-requests at the round's head update request
- * attribution without replacing the round or its draft. A new event at a new
- * head opens a round, superseding earlier work. A moved head on the same
- * event updates a requested round or makes a drafted one stale.
+ * attribution without replacing the round or its draft. A new head opens a
+ * round, superseding earlier work even when the request event is unchanged.
  */
 export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()): { item: ReviewItem; opened: boolean } {
   const key = reviewKey(seen.pr.owner, seen.pr.repo, seen.pr.number);
@@ -403,44 +402,24 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     const changed = JSON.stringify(prior) !== JSON.stringify({ ...item, updatedAt: prior!.updatedAt });
     return { item: changed ? writeReview({ ...item, updatedAt: at }) : prior!, opened: false };
   }
-  if (known) {
-    if (latest === known && known.state === 'dismissed' && (known.headSha !== seen.pr.headSha || item.unseenAt)) {
-      const id = `${seen.round.id}@${seen.pr.headSha}`;
-      item.rounds.push({ ...seen.round, id, requestEventId: seen.round.id, headSha: seen.pr.headSha, state: 'requested', ...(seen.skip ? { reason: seen.skip } : {}) });
-      delete item.unseenAt;
-      return { item: writeReview({ ...item, updatedAt: at }), opened: true };
-    }
-    if (latest === known && known.state === 'withdrawn') {
-      const id = `${seen.round.id}@${seen.pr.headSha}`;
-      item.rounds.push({ ...seen.round, id, requestEventId: seen.round.id, headSha: seen.pr.headSha, state: 'requested', ...(seen.skip ? { reason: seen.skip } : {}) });
-      return { item: writeReview({ ...item, updatedAt: at }), opened: true };
-    }
-    Object.assign(known, seen.round, { id: known.id });
-    if (latest === known && known.headSha !== seen.pr.headSha) {
-      if (known.state === 'requested') known.headSha = seen.pr.headSha;
-      else if (known.state === 'drafted') {
-        known.state = 'stale';
-        known.reason = `the head moved to ${seen.pr.headSha.slice(0, 7)} after the draft`;
-      }
-    }
-    const changed = JSON.stringify(prior) !== JSON.stringify({ ...item, updatedAt: prior!.updatedAt });
-    if (changed) writeReview({ ...item, updatedAt: at });
-    return { item: changed ? { ...item, updatedAt: at } : prior!, opened: false };
-  }
   // A drafting round is superseded too: pick cancels its job, then removes its checkout.
   for (const r of item.rounds) {
     if (OPEN_STATES.includes(r.state)) {
       r.state = 'withdrawn';
-      r.reason = 'superseded by a new request';
+      r.reason = known ? 'superseded by a new head' : 'superseded by a new request';
     }
   }
   item.rounds.push({
     ...seen.round,
+    // A standing request can cover several heads. Keep each round's draft
+    // path distinct and valid, including when a force-push revisits a head.
+    id: known ? `${seen.round.id}-${seen.pr.headSha}-${item.rounds.length + 1}` : seen.round.id,
     requestEventId: seen.round.id,
     headSha: seen.pr.headSha,
     state: 'requested',
     ...(seen.skip ? { reason: seen.skip } : {}),
   });
+  delete item.unseenAt;
   return { item: writeReview({ ...item, updatedAt: at }), opened: true };
 }
 
