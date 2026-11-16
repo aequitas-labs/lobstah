@@ -23,6 +23,7 @@ import {
   readReview,
   acknowledgeReview,
   markReviewSeen,
+  answerReviewDecision,
   displayGrounds,
   codexDesktopThread,
   activeIds,
@@ -103,7 +104,7 @@ import { helmPassViews } from './helm-pass.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
-import { dismissReviewRound, postReview, draftReviewOnDemand, readMergeView, redraftReviewRound } from '@lobstah/pick';
+import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, readMergeView, redraftReviewRound } from '@lobstah/pick';
 import { muteReview, unmuteReview } from '@lobstah/core';
 import { glassReviews } from './reviews.js';
 import { reviewSetupView } from './reviews-setup.js';
@@ -176,6 +177,8 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['grant-revoke', 1024],
   ['review-dismiss', 1024],
   ...['review-skip', 'review-seen', 'review-approve', 'review-approve-anyway', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
+  ['review-decision-answer', 12 * 1024],
+  ['review-new', 1024],
   ['review-redraft', 1024],
   ['review-draft', 1024],
   ['pr-ack', 256 * 1024],
@@ -1212,6 +1215,15 @@ export function serveGlass(
             try { revokeGrant(id, 'glass'); return reply(200, { ok: true }); }
             catch (err) { return reply(400, { ok: false, reason: err instanceof Error ? err.message : String(err) }); }
           }
+          case 'review-decision-answer': {
+            const payload = body.payload as Record<string, unknown> | undefined;
+            if (!payload || typeof payload.key !== 'string' || payload.key.length > 200 ||
+                typeof payload.roundId !== 'string' || typeof payload.headSha !== 'string' || typeof payload.draftedAt !== 'string' || typeof payload.decisionId !== 'string' ||
+                (payload.answer !== null && (typeof payload.answer !== 'object' || !payload.answer)))
+              return reply(400, { ok: false, reason: 'Choose a decision in the current draft.' });
+            const why = answerReviewDecision(payload.key, { roundId: payload.roundId, headSha: payload.headSha, draftedAt: payload.draftedAt }, payload.decisionId, payload.answer as import('@lobstah/core').ReviewDecisionAnswer | null);
+            return why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key: payload.key });
+          }
           case 'review-skip':
           case 'review-seen':
           case 'review-approve-anyway':
@@ -1222,6 +1234,7 @@ export function serveGlass(
           case 'review-mute':
           case 'review-unmute':
           case 'review-draft':
+          case 'review-new':
           case 'review-redraft': {
             // On-demand jobs follow the repo's current draft/publish setting.
             const key = (body.payload as { key?: unknown } | undefined)?.key;
@@ -1235,6 +1248,7 @@ export function serveGlass(
               : event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
               : body.kind === 'review-mute' ? Promise.resolve(muteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : body.kind === 'review-unmute' ? Promise.resolve(unmuteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
+              : body.kind === 'review-new' ? Promise.resolve().then(() => requestNewReview(key))
               : ['review-dismiss', 'review-skip'].includes(body.kind) ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),

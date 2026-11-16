@@ -38,6 +38,9 @@ import {
   withBriefHooks,
   withdrawUnseenReviews,
   writeReview,
+  carryReviewDecisionAnswers,
+  unansweredReviewDecisions,
+  newReviewRound,
 } from '@lobstah/core';
 import type { ReviewItem, ReviewRound, ReviewVerdict } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
@@ -240,7 +243,8 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
 function settleSubmittedReview(item: ReviewItem, reviews: SearchPr['reviews']): void {
   const round = latestRound(item);
   if (!round || round.state === 'posted') return;
-  const submitted = (reviews?.nodes ?? []).filter((review) => review.commit?.oid === round.headSha)
+  const submitted = (reviews?.nodes ?? []).filter((review) => review.commit?.oid === round.headSha &&
+    (!round.localRequest || review.submittedAt >= round.requestedAt))
     .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
   if (submitted) markReviewPosted(item.key, round.id, { reviewId: String(submitted.databaseId), by: 'review tool', at: submitted.submittedAt,
     verdict: SUBMITTED_VERDICTS[submitted.state] });
@@ -258,9 +262,12 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
     if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
     const draft = readRoundDraft(item.key, r.id);
     if ('error' in draft) continue;
-    if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking)) {
-      r.verdict = draft.verdict; r.blocking = draft.blocking; writeReview(item);
+    if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking) || JSON.stringify(r.decisions) !== JSON.stringify(draft.decisions)) {
+      r.verdict = draft.verdict; r.blocking = draft.blocking; r.decisions = draft.decisions;
+      r.decisionAnswers = carryReviewDecisionAnswers(draft.decisions, r.decisionAnswers);
+      writeReview(item);
     }
+    if (unansweredReviewDecisions(r).length) continue;
     const publish = reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r, draft.verdict);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
@@ -530,6 +537,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       Object.assign(r, { state: 'failed', reason: `the review job finished without a usable draft: ${draft.error}` });
     } else {
       Object.assign(r, { verdict: draft.verdict, blocking: draft.blocking, state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
+      r.decisions = draft.decisions;
+      r.decisionAnswers = carryReviewDecisionAnswers(draft.decisions, r.decisionAnswers);
       delete r.reason;
       // The head moved while the job ran: the draft reviews an older head.
       if (r.headSha !== item.pr.headSha) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
@@ -558,6 +567,28 @@ export async function draftReviewOnDemand(key: string, now = Date.now()): Promis
   acknowledgeReview(key, now);
   draftReviews(identity, () => {}, now, key);
   return latestRound(readReview(key)!)?.state === 'drafting' ? undefined : 'the round could not start drafting';
+}
+
+/** A new local request follows the repo mode and daily cap, just like discovery. */
+export function requestNewReview(key: string, now = Date.now(), run: GhGraphql = runGraphql): string | undefined {
+  const item = readReview(key);
+  if (!item || latestRound(item)?.state !== 'dismissed') return 'Only a skipped or dismissed review can start a new round.';
+  const config = loadPickupConfig().reviews;
+  if (!config) return 'Reviews are not enabled. Run lobstah setup reviews.';
+  if (githubBlockedUntil(now)) return 'GitHub is temporarily unavailable. Try again when the review can be refreshed.';
+  const data = reviewQuery<{ repository?: { pullRequest?: { state: 'OPEN' | 'MERGED' | 'CLOSED'; headRefOid: string } } }>(
+    { query: 'query($owner: String!, $repo: String!, $number: Int!) { rateLimit { cost } repository(owner: $owner, name: $repo) { pullRequest(number: $number) { state headRefOid } } }',
+      variables: { owner: item.pr.owner, repo: item.pr.repo, number: item.pr.number } }, config.token, run, now, () => {}, 'new review head check');
+  const current = data?.repository?.pullRequest;
+  if (!current?.headRefOid || current.state !== 'OPEN') return current ? 'This PR is closed. Reopen it before requesting a new review.' : 'The current PR head could not be read. Try again.';
+  if (item.pr.headSha !== current.headRefOid) delete item.pr.diffId;
+  item.pr.headSha = current.headRefOid;
+  item.pr.state = current.state;
+  writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+  const result = newReviewRound(key, now);
+  if (typeof result === 'string') return result;
+  draftReviews(config.identity, () => {}, now);
+  return undefined;
 }
 
 /**

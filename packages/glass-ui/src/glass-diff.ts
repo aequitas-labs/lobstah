@@ -1,3 +1,4 @@
+import { reviewUnreadReason } from './review-attention.js';
 export { goalLine } from '@lobstah/core/dist/goal-line.js';
 import type {
   Attachment,
@@ -387,8 +388,7 @@ export function reportFrom(r: Pick<GlassReport, 'author' | 'trap' | 'dispatch'>)
 
 /** Only actionable rounds on open PRs contribute to the Reviews badge. */
 export function reviewNeedsAttention(review: GlassReview): boolean {
-  return !review.mutedAt && !['CLOSED', 'MERGED'].includes(review.prState ?? '') &&
-    ['requested', 'drafting', 'drafted', 'stale', 'failed'].includes(review.state) && !!(review.stands || review.notification);
+  return reviewUnreadReason(review) !== undefined;
 }
 
 /** Reviews in list order: badged rows first, then the newest request first. */

@@ -124,7 +124,7 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
 function badgeLabel(t: GlassTab, n: number): string {
   if (t === 'deck') return `${n} new decision${n === 1 ? '' : 's'}`;
   if (t === 'prs') return `${n} of your PRs need${n === 1 ? 's' : ''} you`;
-  return 'reviews in inbox';
+  return `${n} unread review${n === 1 ? '' : 's'}`;
 }
 
 /**
