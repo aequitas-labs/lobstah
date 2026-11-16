@@ -13,6 +13,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-reviews-loop-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(`diff --git a/code.ts b/code.ts\n--- a/code.ts\n+++ b/code.ts\n@@ -1 +1 @@\n-old\n+${url.split('...').at(-1)}\n`)));
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -45,6 +46,7 @@ function node(pr: Pr) {
     title: `pr ${pr.number}`,
     isDraft: false,
     headRefOid: pr.head ?? 'aaaaaaa1',
+    baseRefOid: 'ccccccc3',
     author: { login: pr.author ?? 'dana', name: 'Dana Developer', avatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4' },
     repository: { nameWithOwner: pr.repo ?? 'acme/web' },
     labels: { nodes: (pr.labels ?? []).map((name) => ({ name })) },
@@ -282,7 +284,9 @@ describe('the reviews loop', () => {
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[pickup.github]\nidentity = "chris"\ntokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"\n');
     process.env.LOBSTAH_TEST_REVIEW_TOKEN = 'fixture';
     // If PR-feedback pickup runs, this identity-owned PR would yield fresh feedback.
-    const fetcher = vi.fn(async () => new Response(JSON.stringify([{
+    const fetcher = vi.fn(async (url: string) => url.includes('/compare/')
+      ? new Response('diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n')
+      : new Response(JSON.stringify([{
       number: 99, html_url: 'https://github.com/acme/web/pull/99', user: { login: ME },
       head: { ref: 'lobstah/11111111-1111-4111-8111-111111111111', sha: 'aaaaaaa1' },
       body: 'Please fix the new review comments',
@@ -291,7 +295,8 @@ describe('the reviews loop', () => {
     await runPickup('once', { reviewRun: gh([{ number: 1, author: ME }], []) });
     expect(listReviews()).toHaveLength(1);
     expect(latestRound(listReviews()[0]!)?.state).toBe('requested');
-    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]![0]).toContain('/compare/');
     expect(pendingIds('work')).toEqual([]);
     expect(pendingIds('chore')).toEqual([]);
   });

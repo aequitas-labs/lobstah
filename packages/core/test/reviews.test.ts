@@ -52,6 +52,7 @@ function seen(over: { id?: string; head?: string; number?: number; skip?: string
       title: 'Add the thing',
       author: 'dana',
       headSha: over.head ?? 'aaaaaaa1',
+      diffId: over.head ?? 'aaaaaaa1',
       state: 'OPEN',
       repoKey: 'web',
     },
@@ -190,6 +191,27 @@ describe('review rounds', () => {
     expect(new Set(last.rounds.map((round) => reviewRoundDir(first.key, round.id))).size).toBe(4);
   });
 
+  it.each(['posted', 'dismissed', 'stale'] as const)('keeps a %s round when the head changes but its diff does not', (state) => {
+    const item = observeReviewRequest(seen(), T0).item;
+    item.rounds[0]!.state = state;
+    writeReview(item);
+    const next = seen({ head: 'bbbbbbb2' });
+    next.pr.diffId = item.rounds[0]!.diffId;
+    expect(observeReviewRequest(next, T0 + 1).opened).toBe(false);
+    expect(readReview(item.key)!.rounds).toHaveLength(1);
+    expect(latestRound(readReview(item.key)!)).toMatchObject({ state, headSha: 'aaaaaaa1' });
+  });
+
+  it('waits for diff evidence and retries when it becomes available', () => {
+    const first = seen();
+    delete first.pr.diffId;
+    const item = observeReviewRequest(first, T0).item;
+    const next = seen({ head: 'bbbbbbb2' });
+    expect(observeReviewRequest(next, T0 + 1).opened).toBe(false);
+    expect(observeReviewRequest({ ...next, previousDiff: { headSha: 'aaaaaaa1', diffId: 'aaaaaaa1' } }, T0 + 2).opened).toBe(true);
+    expect(readReview(item.key)!.rounds).toHaveLength(2);
+  });
+
   it('a skip rule files the round with its reason', () => {
     observeReviewRequest(seen({ skip: 'skipped: author dana is in skipAuthors' }), T0);
     expect(latestRound(readReview('review:acme/web#7')!)).toMatchObject({ state: 'requested', reason: 'skipped: author dana is in skipAuthors' });
@@ -317,9 +339,11 @@ describe('drafts', () => {
     const item = readReview('review:acme/web#7')!;
     Object.assign(item.rounds[0]!, { state: 'stale', dispatch: 'd1', dispatchedAt: 'x', draftedAt: 'y', reason: 'moved' });
     item.pr.headSha = 'bbbbbbb2';
+    item.pr.diffId = 'bbbbbbb2';
+    item.pr.baseSha = 'new-base';
     writeReview(item);
     redraftReview('review:acme/web#7', T0);
-    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestEventId: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
+    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestEventId: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', baseSha: 'new-base', diffId: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
     expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
   });
 });

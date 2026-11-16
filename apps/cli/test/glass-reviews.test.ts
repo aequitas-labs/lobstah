@@ -391,10 +391,10 @@ describe('review requests on /requests', () => {
     const { base, token } = await start();
     expect((await send(base, token, 'review-mute', { key })).status).toBe(200);
     expect(readReview(key)?.mutedAt).toEqual(expect.any(String));
-    expect(observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'bbbbbbb2' }, round: { id: 'RRE_8', requestedAt: ago(30) } }).opened).toBe(false);
+    expect(observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'bbbbbbb2', diffId: 'new' }, previousDiff: { headSha: 'aaaaaaa1', diffId: 'old' }, round: { id: 'RRE_8', requestedAt: ago(30) } }).opened).toBe(false);
     expect((await send(base, token, 'review-unmute', { key })).status).toBe(200);
     expect(readReview(key)?.mutedAt).toBeUndefined();
-    expect(observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'bbbbbbb2' }, round: { id: 'RRE_8', requestedAt: ago(30) } }).opened).toBe(true);
+    expect(observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'bbbbbbb2', diffId: 'new' }, previousDiff: { headSha: 'aaaaaaa1', diffId: 'old' }, round: { id: 'RRE_8', requestedAt: ago(30) } }).opened).toBe(true);
   });
 
   it('Skip acknowledges a published notification without changing or deleting the sent review', async () => {

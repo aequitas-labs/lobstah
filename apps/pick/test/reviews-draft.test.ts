@@ -50,6 +50,7 @@ function request(over: { number?: number; repoKey?: string | null; head?: string
         title: 'Add the thing',
         author: 'dana',
         headSha: over.head ?? 'aaaaaaa1',
+        diffId: over.head ?? 'aaaaaaa1',
         ...(over.repoKey === null ? {} : { repoKey: over.repoKey ?? 'web' }),
       },
       round: { id: `RRE_${number}`, requestedAt: '2026-10-15T11:00:00Z', requestedBy: 'dana' },
@@ -358,7 +359,7 @@ describe('the review checkout', () => {
     const id = drafting();
     observeReviewRequest(
       {
-        pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'bbbbbbb2', repoKey: 'web' },
+        pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'bbbbbbb2', diffId: 'bbbbbbb2', repoKey: 'web' },
         round: { id: 'RRE_7b', requestedAt: '2026-10-15T11:30:00Z', requestedBy: 'dana' },
       },
       NOW,

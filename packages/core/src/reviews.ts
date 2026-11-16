@@ -12,7 +12,7 @@ import type { TendAttention } from './glass.js';
  * (`[pickup.github].identity`) for a review. `lobstah pick` finds them with
  * one search per poll and files a review item per PR here, in
  * `~/.lobstah/reviews/<owner>-<repo>-<n>/review.json`. An item holds
- * rounds: one per observed head while the review request stands. A
+ * rounds: one per distinct PR diff while the review request stands. A
  * re-request at an unchanged head keeps the existing round.
  */
 
@@ -221,6 +221,9 @@ export interface ReviewRound {
   notificationGeneration?: string;
   /** The head the round reviews. */
   headSha: string;
+  /** The base and patch fingerprint of the PR changes this round reviews. */
+  baseSha?: string;
+  diffId?: string;
   state: ReviewRoundState;
   /** The review job's dispatch id, and when it started (the daily cap counts these). */
   dispatch?: string;
@@ -259,6 +262,9 @@ export interface ReviewPr {
   authorAvatarUrl?: string;
   /** The PR's head as last observed. */
   headSha: string;
+  baseSha?: string;
+  /** Fingerprint of the merge-base...head diff, independent of commit IDs. */
+  diffId?: string;
   /** Last confirmed GitHub lifecycle state; absent in older cached items. */
   state?: 'OPEN' | 'MERGED' | 'CLOSED';
   labels?: string[];
@@ -372,12 +378,15 @@ export interface ReviewRequestSeen {
   round: Pick<ReviewRound, 'id' | 'requestedAt' | 'requestedBy' | 'requestedByName' | 'requestedByAvatarUrl' | 'requestedAutomatically' | 'humanRequester'>;
   /** A skip rule matched: the round files, and no job starts. */
   skip?: string;
+  /** Backfill the latest round's fingerprint when reading an older cached item. */
+  previousDiff?: { headSha: string; diffId: string };
 }
 
 /**
  * Record one search result. Re-requests at the round's head update request
- * attribution without replacing the round or its draft. A new head opens a
- * round, superseding earlier work even when the request event is unchanged.
+ * attribution without replacing the round or its draft. A changed PR diff
+ * opens a round, superseding earlier work even when the request event is
+ * unchanged. A new commit ID with the same diff keeps the round.
  */
 export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()): { item: ReviewItem; opened: boolean } {
   const key = reviewKey(seen.pr.owner, seen.pr.repo, seen.pr.number);
@@ -390,7 +399,9 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     return { item: changed ? writeReview({ ...item, updatedAt: at }) : prior!, opened: false };
   }
   const latest = latestRound(item);
-  if (latest?.headSha === seen.pr.headSha) {
+  if (latest && seen.previousDiff?.headSha === latest.headSha) latest.diffId ??= seen.previousDiff.diffId;
+  const sameChanges = latest?.diffId !== undefined && latest.diffId === seen.pr.diffId;
+  if (latest?.headSha === seen.pr.headSha || (latest && sameChanges)) {
     // Keep the last human's attribution when a bot repeats the request.
     const human = [seen.round, latest].find((request) => request.humanRequester ||
       (request.requestedBy && !request.requestedAutomatically && !isReviewBot(request.requestedBy)));
@@ -401,6 +412,11 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     delete item.unseenAt;
     const changed = JSON.stringify(prior) !== JSON.stringify({ ...item, updatedAt: prior!.updatedAt });
     return { item: changed ? writeReview({ ...item, updatedAt: at }) : prior!, opened: false };
+  }
+  // A new SHA alone proves nothing: wait for both diffs before superseding
+  // work. A later successful poll can retry a failed or unavailable comparison.
+  if (latest && (!latest.diffId || !seen.pr.diffId)) {
+    return { item: writeReview({ ...item, updatedAt: at }), opened: false };
   }
   // A drafting round is superseded too: pick cancels its job, then removes its checkout.
   for (const r of item.rounds) {
@@ -416,6 +432,8 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     id: known ? `${seen.round.id}-${seen.pr.headSha}-${item.rounds.length + 1}` : seen.round.id,
     requestEventId: seen.round.id,
     headSha: seen.pr.headSha,
+    ...(seen.pr.baseSha ? { baseSha: seen.pr.baseSha } : {}),
+    ...(seen.pr.diffId ? { diffId: seen.pr.diffId } : {}),
     state: 'requested',
     ...(seen.skip ? { reason: seen.skip } : {}),
   });
@@ -589,7 +607,7 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   if (!item || !r) return `no review item ${key}`;
   if (!['drafted', 'stale', 'failed'].includes(r.state)) return `${key}: the newest round is ${r.state}; only a drafted, stale or failed round re-drafts`;
   const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, verdict: _v, blocking: _b, notification: _n, needsYou: _y, seenAt: _seen, acknowledgedAt: _ack, ...rest } = r;
-  item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha, byHand: true };
+  item.rounds[item.rounds.length - 1] = { ...rest, ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha, baseSha: item.pr.baseSha, diffId: item.pr.diffId, byHand: true };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
 
