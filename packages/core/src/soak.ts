@@ -35,6 +35,7 @@ import { workerLabel, workerMetadata } from './worker-metadata.js';
 import type { WorkerConfig, WorkerMetadata } from './worker-metadata.js';
 import { resumeTrapTurn } from './trap-turn.js';
 import { dispatchUsageLimit, trapUsageLimit } from './usage-limits.js';
+import { rememberTrapPane, retireTrapPane } from './tmux-panes.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -386,6 +387,8 @@ export function signOnTrap(opts: {
   const iso = new Date(now).toISOString();
   const sameSession = prior?.sessionId === opts.sessionId;
   const window = opts.window ?? (sameSession ? prior.window : undefined);
+  if (prior && !sameSession) retireTrapPane(prior.trapId, prior.window);
+  rememberTrapPane(trapId, window);
   const codexServer = opts.codexServer || (sameSession && prior.codexServer) || undefined;
   // On the shared server the nearest harness process is the server: never this trap's to signal.
   const harnessProcess = codexServer ? undefined : opts.harnessProcess ?? (sameSession ? prior.harnessProcess : undefined);
@@ -539,6 +542,7 @@ function stowRegisteredTrap(trapId: string, reason: string, by?: string): TrapRe
   fs.rmSync(regPath(trapId), { force: true });
   fs.rmSync(beatPath(trapId), { force: true });
   fs.rmSync(prProbePath(trapId), { force: true });
+  retireTrapPane(trapId, reg.window);
   releaseTurnEnd(reg.sessionId);
   dropTrapTickets(trapId, 'its trap was stowed');
   clearFinishedTrapCaches(reg, 'signed off');
@@ -983,6 +987,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     releaseTurnEnd(reg.sessionId);
     fs.rmSync(beatPath(reg.trapId), { force: true });
     fs.rmSync(prProbePath(reg.trapId), { force: true });
+    retireTrapPane(reg.trapId, reg.window);
     postNotice({
       kind: 'trap-ghosted',
       text: (pauseExpired

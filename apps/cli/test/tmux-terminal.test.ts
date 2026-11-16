@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadConfig } from '@lobstah/core';
+import { loadConfig, reapDeadTrapPanes, rememberTrapPane, trapPaneLog } from '@lobstah/core';
 import type { Config } from '@lobstah/core';
 import { openTmuxPane, tmuxConfigFile, tmuxPaneTail, tmuxPlacementLockFile, tmuxRunner, tmuxServerEnv, tmuxWindowFor, TMUX_CONFIG } from '../src/tmux-terminal.js';
 import type { TmuxRunner, TmuxWindow } from '../src/tmux-terminal.js';
@@ -197,6 +197,27 @@ describe.skipIf(!hasTmux)('a real tmux server', () => {
     }
     // kill-server leaves the socket file behind.
     if (socketPath) fs.rmSync(socketPath, { force: true });
+  });
+
+  it('archives the last dead pane and recreates its repo window for the next launch', async () => {
+    const cfg = config(REPOS);
+    const run = tmuxRunner(socket);
+    const launch = { cwd: home, command: 'echo archived trap output; sleep 0.2; exit 1', trap: 'amber-gull', repo: 'web' };
+    const first = await openTmuxPane(cfg, launch, run, '/bin/sh');
+    socketPath = (await run(['display-message', '-p', '#{socket_path}'])).trim();
+    // Injection confines this integration test to its disposable server.
+    const cleanup = (args: string[]): string => execFileSync('tmux', ['-L', socket, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    rememberTrapPane('finished-trap', { tmuxPane: first.tmuxPane, tmuxSocket: 'lobstah' }, true);
+    for (let i = 0; i < 100; i++) {
+      if ((await run(['display-message', '-p', '-t', first.tmuxPane, '#{pane_dead}'])).trim() === '1') break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(reapDeadTrapPanes(false, cleanup)).toEqual([first.tmuxPane]);
+    expect(fs.readFileSync(trapPaneLog('finished-trap'), 'utf8')).toContain('archived trap output');
+    const next = await openTmuxPane(cfg, { ...launch, command: 'sleep 30' }, run, '/bin/sh');
+    socketPath = (await run(['display-message', '-p', '#{socket_path}'])).trim();
+    expect((await run(['list-windows', '-t', '=lobstah', '-F', '#{window_name} #{window_panes}'])).trim()).toBe('web 1');
+    expect((await run(['display-message', '-p', '-t', next.tmuxPane, '#{pane_dead}'])).trim()).toBe('0');
   });
 
   it('tiles two trap panes in the repo window, titled, and reads a pane screen back', async () => {

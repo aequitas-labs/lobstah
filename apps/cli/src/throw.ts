@@ -10,6 +10,7 @@ import {
   postNotice,
   readReservation,
   readTrap,
+  rememberTrapPane,
   readTrapAnchor,
   reserveTrap,
   configPermissionMode,
@@ -379,6 +380,7 @@ async function launchAndWait(
       w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd, listed: await (opts.listHooks ?? listCodexHooks)(w.command.cwd) }));
     }
     opened = (await w.adapter.launch({ ...w.command, trap: w.name ? trapTabTitle(w.name, w.repo) : w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
+    if (opened) rememberTrapPane(w.trapId, { ...opened, tmuxSocket: 'lobstah' });
   } catch (err) {
     giveUp(w.trapId, w.label, w.repo, w.retry, w.started, err instanceof Error ? err.message : String(err));
     throw err;

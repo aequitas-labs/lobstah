@@ -240,6 +240,7 @@ import { readCursor } from './reported.js';
 import { createCodexServerWatch, nameCodexThread, stopCodexThread, type CodexThreadStop } from './codex-server.js';
 import { createCodexClaimWatch } from './codex-claim-watch.js';
 import { createIdleTrapWatch } from './idle-traps.js';
+import { createTrapPaneWatch } from './trap-panes.js';
 import { createUsageLimitWatch } from './usage-limit-watch.js';
 import { compactDispatchSession, compactTrapSession } from './trap-compact.js';
 import { swapTrapCatch } from './trap-swap.js';
@@ -3901,6 +3902,7 @@ async function mainCli(): Promise<void> {
             await (await import('./wharf-cards.js')).publishBoatCards(Date.now(), console.log);
           },
           idleTraps: createIdleTrapWatch(),
+          trapPanes: createTrapPaneWatch(),
           trapStarts: createTrapDispatchScheduler(),
           culler: cliCuller,
           prWatches: (now, log) => {
