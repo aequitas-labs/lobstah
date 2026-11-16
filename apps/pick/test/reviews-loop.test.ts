@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, claimNext, dispatchWasCancelled, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit, reviewAsker, writeReview } from '@lobstah/core';
+import { addWatch, claimNext, dispatchWasCancelled, dismissReview, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit, reviewAsker, writeReview } from '@lobstah/core';
 import { runPickup } from '../src/run.js';
 import { REVIEW_SEARCH, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
@@ -111,6 +111,25 @@ describe('the reviews loop', () => {
     expect(pendingIds('chore')).toHaveLength(1);
   });
 
+  it.each([
+    ['notify', false], ['on-demand', false], ['auto-draft', true], ['auto-review', true],
+  ] as const)('a skipped round opens at a new head under %s with the same standing request', async (mode, drafts) => {
+    config();
+    const pr: Pr = { number: 1 };
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    dismissReview('review:acme/web#1', 'glass');
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', `mode = "${mode}"`, 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe('dismissed');
+    pr.head = 'bbbbbbb2';
+    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    const item = readReview('review:acme/web#1')!;
+    expect(item.rounds).toHaveLength(2);
+    expect(item.rounds[0]).toMatchObject({ state: 'dismissed', headSha: 'aaaaaaa1' });
+    expect(latestRound(item)).toMatchObject({ requestEventId: 'RRE_1', headSha: 'bbbbbbb2', state: drafts ? 'drafting' : 'requested' });
+    expect(pendingIds('chore')).toHaveLength(drafts ? 1 : 0);
+  });
+
   it.each(['COMMENTED', 'CHANGES_REQUESTED', 'APPROVED'] as const)('a submitted %s review completes its head and drafts again only after a push', async (state) => {
     fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'mode = "auto-draft"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
     const pr: Pr = { number: 1, reviews: [{ id: 77, state, head: 'aaaaaaa1', at: '2026-10-15T10:00:00Z' }] };
@@ -121,7 +140,6 @@ describe('the reviews loop', () => {
     expect(readReview('review:acme/web#1')!.rounds).toHaveLength(1);
     expect(pendingIds('chore')).toEqual([]);
     pr.head = 'bbbbbbb2';
-    pr.requests = [{ id: 'after-push', at: '2026-10-15T12:00:00Z', to: ME }];
     await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
     expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
     expect(pendingIds('chore')).toHaveLength(1);

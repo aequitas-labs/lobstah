@@ -143,6 +143,7 @@ describe('review rounds', () => {
     const rounds = readReview('review:acme/web#7')!.rounds;
     expect(rounds.map((round) => round.state)).toEqual(['dismissed', 'requested']);
     expect(rounds[1]).toMatchObject({ requestEventId: 'RRE_1', headSha: 'bbbbbbb2' });
+    expect(reviewRoundDir('review:acme/web#7', rounds[1]!.id)).toBeDefined();
     expect(observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 4).opened).toBe(false);
   });
 
@@ -163,19 +164,16 @@ describe('review rounds', () => {
     expect(observeReviewRequest(seen({ id: 'RRE_2', head: 'bbbbbbb2' }), T0 + 4).opened).toBe(true);
   });
 
-  it('a moved head follows a requested round, and makes a drafted round stale', () => {
-    observeReviewRequest(seen(), T0);
-    observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1000);
-    expect(latestRound(readReview('review:acme/web#7')!)).toMatchObject({ state: 'requested', headSha: 'bbbbbbb2' });
-
-    const item = readReview('review:acme/web#7')!;
-    item.rounds[0]!.state = 'drafted';
+  it.each(['requested', 'drafting', 'drafted', 'posted', 'stale'] as const)('a standing request opens a new round after the head of a %s round moves', (state) => {
+    const item = observeReviewRequest(seen(), T0).item;
+    item.rounds[0]!.state = state;
     writeReview(item);
-    observeReviewRequest(seen({ head: 'ccccccc3' }), T0 + 2000);
-    const after = readReview('review:acme/web#7')!;
-    expect(latestRound(after)).toMatchObject({ state: 'stale', headSha: 'bbbbbbb2' });
-    expect(after.pr.headSha).toBe('ccccccc3');
-    expect(after.rounds).toHaveLength(1);
+    expect(observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1000).opened).toBe(true);
+    const after = readReview(item.key)!;
+    expect(after.rounds).toHaveLength(2);
+    expect(after.rounds[0]).toMatchObject({ headSha: 'aaaaaaa1', state: state === 'posted' ? 'posted' : 'withdrawn' });
+    expect(latestRound(after)).toMatchObject({ id: 'RRE_1@bbbbbbb2', requestEventId: 'RRE_1', state: 'requested', headSha: 'bbbbbbb2' });
+    expect(observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 2000).opened).toBe(false);
   });
 
   it('a skip rule files the round with its reason', () => {
