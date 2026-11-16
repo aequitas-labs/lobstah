@@ -55,6 +55,9 @@ async function typeIntoPane(pane: string, text: string, run: TmuxRunner): Promis
   // A dialog or an unreadable pane: lobstah won't type into it.
   if (!screen || !codexPaneReady(screen)) return { blocked: screen ? `its pane shows ${screen}` : 'its pane cannot be read' };
   await run(['send-keys', '-t', pane, '-l', text]);
+  // Codex buffers a fast input burst as a paste. Enter in that burst stays
+  // in the composer instead of submitting: wait for the paste to settle.
+  await new Promise(resolve => setTimeout(resolve, 250));
   await run(['send-keys', '-t', pane, 'Enter']);
   return 'started';
 }

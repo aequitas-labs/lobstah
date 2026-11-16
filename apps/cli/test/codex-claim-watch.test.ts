@@ -52,6 +52,21 @@ describe('the Codex claim watch', () => {
     expect(tmux).not.toHaveBeenCalled();
   });
 
+  it('lets the Codex paste burst settle before submitting the wake', async () => {
+    vi.useFakeTimers();
+    try {
+      const { trap } = claimedCodexTrap({ window: LOBSTAH_PANE });
+      const tmux = vi.fn(async (args: string[]) => args[0] === 'capture-pane' ? IDLE : '');
+      const waking = wakeCodexTrap(trap, 'recovery prompt', { tmux });
+      await vi.advanceTimersByTimeAsync(249);
+      expect(tmux.mock.calls.map(c => c[0][0])).toEqual(['capture-pane', 'send-keys']);
+      expect(tmux.mock.calls[1][0]).toEqual(['send-keys', '-t', '%7', '-l', 'recovery prompt']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await waking).toBe('started');
+      expect(tmux.mock.calls[2][0]).toEqual(['send-keys', '-t', '%7', 'Enter']);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('serializes competing claim and send wakes into one prompt', async () => {
     const { trap } = claimedCodexTrap({ window: LOBSTAH_PANE });
     const tmux = vi.fn(async (args: string[]) => args[0] === 'capture-pane' ? IDLE : '');
