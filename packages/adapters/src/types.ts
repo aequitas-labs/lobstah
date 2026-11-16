@@ -1,10 +1,11 @@
-import type { DispatchLimits, NormalizedEvent } from '@lobstah/core';
+import type { CodexHeadlessSandbox, DispatchLimits, NormalizedEvent } from '@lobstah/core';
 
 export interface AdapterStartOpts {
   id: string;
   cwd: string;
   prompt: string;
   model?: string;
+  codexSandbox?: CodexHeadlessSandbox;
   effort?: string;
   limits: DispatchLimits;
   env: Record<string, string>;

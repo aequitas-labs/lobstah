@@ -181,6 +181,27 @@ Call out migrations that are not reversible.
 Same four keys as the per-repo block. Precedence for every harness setting:
 **descriptor > repo > global > adapter default.**
 
+### `[harness.codex]` — headless Codex
+
+These settings affect SDK and `codex exec` jobs only. Interactive traps keep
+using their existing model and permission settings. Both keys also work in
+`[repos.<key>.harness.codex]`; repo settings override global settings.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `headless_sandbox` | `"workspace-write"` | `"workspace-write"` allows the checkout and lobstah reporting directory. `"danger-full-access"` disables the sandbox and approval prompts, allowing network access and writes outside the checkout, including tool caches and `~/.ume`. |
+| `headless_model` | unset | Model for headless Codex jobs. An explicit dispatch model wins, then the repo headless model, global headless model, and ordinary repo/global model defaults. Must be a non-empty string. |
+
+```toml
+[harness.codex]
+headless_sandbox = "danger-full-access"
+headless_model = "gpt-5.6-sol"
+```
+
+Headless Codex uses a lobstah-managed `CODEX_HOME` with inherited auth and
+an isolated config. Interactive MCP servers and session/Stop hooks are not
+loaded; the runner handles reports, waits, and job completion.
+
 ## `[limits]`
 
 | Key | Default | Meaning |
@@ -530,14 +551,16 @@ as that identity, with its token source, independently of `[pickup.github]`. Ide
 | `autoPostRequestChanges` | `"ask"` | `"ask"`: wait for a person to post a request-changes draft; `"auto-post"`: post it automatically when the configured reviewer identity matches the GitHub token. |
 | `identity` | `gh api user` | The reviewer login. |
 | `tokenCommand`, `tokenFile`, `tokenEnv` | `gh auth token` | Token sources, using the same precedence as pickup. |
-| `work` | legacy | `"off"` maps to on-demand, `"trap"`/`"headless"` map to auto-draft; explicit mode wins. The worker choice still applies to automatic jobs. |
+| `work` | `"headless"` for drafts | `"off"` maps to on-demand, `"trap"`/`"headless"` map to auto-draft; explicit mode wins. Drafts run as fresh headless jobs by default. `"trap"` keeps the existing free-trap path for automatic and manual drafts. |
 | `post` | legacy | `"draft"` stages pending; `"auto"` maps to auto-review. Explicit mode/publish wins. Legacy publishing does not enable either per-verdict auto-post setting. Comments-only drafts always wait for a person. All posting refuses stale drafts. |
-| `harness`, `model`, `effort` | repo, then `[harness]` | The review job's worker. |
+| `harness`, `model`, `effort` | `harness = "codex"`; model/effort inherit | The review job's worker. Headless Codex uses `[harness.codex].headless_sandbox` and `headless_model`; an explicit review model wins. |
 | `wallClockSecs`, `maxTurns`, `maxBudgetUsd` | `900`, `40`, unset | Cost bounds for one review job. |
 | `trapWaitSecs` | `600` | With `work = "trap"`: how long a job waits for a free trap. |
 | `maxPerDay` | `20` | Review jobs lobstah starts on its own per day (UTC). Past it, automatic rounds file with no job and say how to start one by hand. A review you ask for (Draft on the glass, or a redraft) always runs, and counts toward the day's total. |
 | `requestedAfter` | `"enabled"` | Requests before reviews were enabled or the repo switched to automatic mode stay in Reviews without a job. Set a quoted ISO timestamp to choose a different cutoff; repo overrides are supported. |
 | `skipAuthors`, `skipLabels` | `[]` | Requests on PRs by these authors or with these labels file an item but start no job. |
+
+Each draft or re-draft starts a fresh session without follow-up chat. Headless drafts use the chore runner slots (`[limits].choreConcurrent`), so several can run at once when that limit is greater than one. The daily cap still bounds automatic starts.
 
 Setup records the activation time when settings change. For hand-edited settings, the next poll records the transition. Older requests remain available for an explicit Review action. Cancelling a review dispatch fails its round and stops the trap at its next tool hook; cancelled rounds cannot publish.
 
