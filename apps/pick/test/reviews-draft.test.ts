@@ -6,6 +6,10 @@ import { spawnSync } from 'node:child_process';
 import {
   appendStatus,
   claimNext,
+  claimBait,
+  signOnTrap,
+  loadConfig,
+  resolveDispatch,
   ensureLayout,
   laneDirs,
   latestRound,
@@ -36,7 +40,7 @@ afterEach(() => {
 const NOW = Date.parse('2026-10-15T12:00:00Z');
 const KEY = 'review:acme/web#7';
 const config = (...lines: string[]) =>
-  fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'requestedAfter = "1970-01-01T00:00:00Z"', 'identity = "chris"', 'tokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"', ...(lines.some((s) => s.startsWith('work') || s.startsWith('mode')) ? [] : ['work = "trap"']), ...lines, '[repos.web]', 'path = "/w"'].join('\n'));
+  fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'requestedAfter = "1970-01-01T00:00:00Z"', 'identity = "chris"', 'tokenEnv = "LOBSTAH_TEST_REVIEW_TOKEN"', ...(lines.some((s) => s.startsWith('work') || s.startsWith('mode')) ? [] : ['mode = "auto-draft"']), ...lines, '[repos.web]', 'path = "/w"'].join('\n'));
 
 function request(over: { number?: number; repoKey?: string | null; head?: string; skip?: string } = {}): string {
   const number = over.number ?? 7;
@@ -63,7 +67,7 @@ function request(over: { number?: number; repoKey?: string | null; head?: string
 const round = (key = KEY) => latestRound(readReview(key)!)!;
 
 describe('starting a review job', () => {
-  it('notify starts no jobs; on-demand starts only the clicked round as a pending-only trap review', async () => {
+  it('notify starts no jobs; on-demand starts only the clicked round as a pending-only headless review', async () => {
     config('mode = "notify"');
     request();
     draftReviews('chris', () => {}, NOW);
@@ -75,7 +79,7 @@ describe('starting a review job', () => {
     expect(pendingIds('chore')).toEqual([]);
     expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
     expect(round()).toMatchObject({ state: 'drafting', draftOnly: true });
-    expect(queuedDescriptor(round().dispatch!, 'chore')).toMatchObject({ readOnly: true, trapAny: true });
+    expect(queuedDescriptor(round().dispatch!, 'chore')).toMatchObject({ readOnly: true, harness: 'codex', sessionMode: 'fresh' });
     expect(round('review:acme/web#8').state).toBe('requested');
     expect(pendingIds('chore')).toHaveLength(1);
   });
@@ -132,6 +136,7 @@ describe('starting a review job', () => {
     config('mode = "on-demand"', 'maxPerDay = 1');
     request();
     expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    const firstDispatch = round().dispatch;
     const item = readReview(KEY)!;
     item.rounds[0]!.state = 'failed';
     writeReview(item);
@@ -139,6 +144,11 @@ describe('starting a review job', () => {
     expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
     expect(round()).toMatchObject({ state: 'drafting', onDemand: true });
     expect(round().draftStarts).toHaveLength(2);
+    expect(round().dispatch).not.toBe(firstDispatch);
+    const job = queuedDescriptor(round().dispatch!, 'chore')!;
+    expect(job).toMatchObject({ harness: 'codex', sessionMode: 'fresh' });
+    expect(job.trapAny).toBeUndefined();
+    expect(job.followUp).toBeUndefined();
     // `lobstah reviews redraft` leaves it to the next cycle, which starts it too.
     const again = readReview(KEY)!;
     again.rounds[0]!.state = 'failed';
@@ -153,7 +163,7 @@ describe('starting a review job', () => {
     expect(round().draftStarts).toHaveLength(3);
   });
   it('work = trap: a read-only chore for a free trap of the repo, with the cost bounds and the trap wait', () => {
-    config('maxBudgetUsd = 3');
+    config('work = "trap"', 'maxBudgetUsd = 3');
     fs.appendFileSync(path.join(home, 'config.toml'), '\n[hooks.brief]\nprReview = "Flag missing tests."\n[repos.web.hooks.brief]\nprReview = "Check the migration order."\n');
     request();
     draftReviews('chris', () => {}, NOW);
@@ -173,6 +183,28 @@ describe('starting a review job', () => {
     expect(fs.existsSync(reviewRoundDir(KEY, 'RRE_7')!)).toBe(true);
     draftReviews('chris', () => {}, NOW); // one job per round
     expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it('defaults to fresh headless Codex jobs, never claims a trap, and queues several within the daily cap', () => {
+    config('maxPerDay = 2');
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness]\ndefault = "claude"\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "gpt-5.6-sol"\n');
+    const worktree = path.join(home, 'trap');
+    fs.mkdirSync(worktree);
+    const reg = signOnTrap({ sessionId: 'review-trap', harness: 'codex', repo: 'web', worktree, cwd: worktree, ttlMs: 60_000 });
+    if ('held' in reg) throw new Error('trap held');
+    request(); request({ number: 8 }); request({ number: 9 });
+    draftReviews('chris', () => {}, NOW);
+    const jobs = pendingIds('chore').map(id => queuedDescriptor(id, 'chore')!);
+    expect(jobs).toHaveLength(2);
+    for (const job of jobs) {
+      expect(job).toMatchObject({ harness: 'codex', readOnly: true, sessionMode: 'fresh' });
+      expect(job.trapAny).toBeUndefined();
+      expect(job.for).toBeUndefined();
+      expect(job.followUp).toBeUndefined();
+      expect(resolveDispatch(job, loadConfig())).toMatchObject({ codexSandbox: 'danger-full-access', model: 'gpt-5.6-sol' });
+    }
+    expect(claimBait(reg.ok)).toBeNull();
+    expect(round('review:acme/web#9').reason).toContain('daily cap');
   });
 
   it('work = headless queues for the daemon; work = off starts nothing', () => {
@@ -260,7 +292,7 @@ describe('finishing a review job', () => {
   });
 
   it('a trap job no trap took in time goes to the daemon', () => {
-    config();
+    config('work = "trap"');
     request();
     draftReviews('chris', () => {}, NOW);
     const id = round().dispatch!;
