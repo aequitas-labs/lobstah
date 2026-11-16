@@ -32,6 +32,7 @@ import {
   type TerminalApp,
   type ThrowPlanRow,
   type TrapRegistration,
+  endHarnessProcess,
 } from '@lobstah/core';
 import { prepareReuse, restoreWorktree } from '@lobstah/worktree';
 import { codexThreadHolders, modelForHarness, toonHelp, toonKV, toonTable } from '@lobstah/core';
@@ -426,11 +427,21 @@ async function launchAndWait(
  * reservation for late sign-on; other harnesses withdraw it.
  */
 export async function throwTrap(opts: ThrowOptions & { address: string }): Promise<ThrowResult> {
+  if (opts.harness && !['claude', 'codex'].includes(opts.harness)) throw new Error('--harness takes claude or codex');
   const started = Date.now();
   let [row] = planThrow(opts.cfg, { names: [opts.address] }, { harness: opts.harness });
   let entry = rosterByAddress(opts.address);
   if (!row || !entry) throw new Error(`no roster record for ${opts.address} — \`lobstah man roster\` lists the traps a throw can bring back`);
   const label = trapLabel(entry);
+  if (entry.state === 'ghosted' && entry.harness === 'codex' && entry.harnessProcess && !readTrap(entry.trapId) && !readReservation(entry.trapId) &&
+      (row.action === 'cold' || row.action === 'resume' || row.sessionHeld)) {
+    // A ghost sweep may have lost the hook without ending the TUI. Stop
+    // that exact process before reserving a replacement, even on a cold start.
+    const ending = await endHarnessProcess(entry.harnessProcess);
+    if (ending === 'survived') throw new Error(`not throwing ${label}: Codex process ${entry.harnessProcess.pid} is still running`);
+    [row] = planThrow(opts.cfg, { names: [opts.address] }, { harness: opts.harness });
+    if (!row) throw new Error(`no roster record for ${opts.address}`);
+  }
   if (row.sessionHeld && opts.stopStale && entry.harness === 'codex' && entry.sessionId) {
     // Leftover Codex processes on the thread: each would leave the new one at "open in another app".
     const stopped = await (opts.stopStaleWriters ?? stopStaleCodexWriters)(entry.sessionId);
@@ -444,7 +455,6 @@ export async function throwTrap(opts: ThrowOptions & { address: string }): Promi
   if (row.action === 'unresolved') throw new Error(`cannot throw ${label}: ${row.why}`);
   if (opts.fresh) { row.action = 'cold'; row.why = 'fresh session requested'; }
   if (opts.harness) {
-    if (!['claude', 'codex'].includes(opts.harness)) throw new Error('--harness takes claude or codex');
     entry = setRosterProfile(entry.trapId, { harness: opts.harness }) ?? entry;
   }
   const terminal = row.terminal ?? 'terminal';

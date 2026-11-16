@@ -157,6 +157,8 @@ it('only the trap’s own process ending signs it off', () => {
   const recorded = { pid: 2669, startedAt: 'x' };
   expect(endingProcessOwnsTrap(recorded, 2669)).toBe(true);
   expect(endingProcessOwnsTrap(recorded, 6882)).toBe(false);
-  expect(endingProcessOwnsTrap(recorded, undefined)).toBe(true);
+  // A detached old SessionEnd hook no longer has a harness ancestor. It
+  // cannot sign off a replacement that recorded its own process.
+  expect(endingProcessOwnsTrap(recorded, undefined)).toBe(false);
   expect(endingProcessOwnsTrap(undefined, 6882)).toBe(true);
 });

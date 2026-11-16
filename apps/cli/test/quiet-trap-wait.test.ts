@@ -3,8 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, expect, it } from 'vitest';
-import { enqueue, ensureLayout, readTrap, signOnTrap, stowTrap } from '@lobstah/core';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { appendStatus, claimBait, enqueue, ensureLayout, readTrap, resetWaitBackoff, signOnTrap, stowTrap, sweepGhostTraps } from '@lobstah/core';
+import { HOOK_PARK_MS, PARK_RENEWAL_REASON, soakPark } from '../src/trap-park.js';
 import { stopChildren } from '../../../test/child-process.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -18,12 +19,39 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), '[helm]\npark="block"\n');
 });
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   await stopChildren(children.splice(0));
   delete process.env.LOBSTAH_HOME;
   removeTempDir(home);
 });
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+it('renews the hook before its harness deadline throughout a seven-day review, without ghosting or releasing the catch', async () => {
+  vi.useFakeTimers();
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const worktree = path.join(home, 'review'); fs.mkdirSync(worktree);
+  const signed = signOnTrap({ repo: 'r', worktree, cwd: worktree, harness: 'codex', sessionId: 'review-session', ttlMs: 60_000 });
+  if (!('ok' in signed)) throw new Error('held');
+  const trapId = signed.ok.trapId;
+  enqueue({ id: 'review', repo: 'r', for: `wt:${trapId}`, brief: 'Wait for review' });
+  claimBait(signed.ok);
+  appendStatus('review', 'work', 'paused', 'Waiting for review', undefined, undefined, true);
+  for (let hour = 0; hour < 7 * 24; hour += 4) {
+    const start = Date.now();
+    const park = soakPark(trapId, undefined);
+    // Activity can reset the idle deadline, but cannot extend this hook.
+    vi.setSystemTime(start + HOOK_PARK_MS - 1000);
+    resetWaitBackoff('review-session');
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(await park).toBe('timeout');
+    expect(Date.now() - start).toBeLessThan(14_500_000);
+    expect(JSON.parse(output.mock.calls.at(-1)![0])).toEqual({ decision: 'block', reason: PARK_RENEWAL_REASON });
+    expect(sweepGhostTraps(60_000, Date.now(), 86400_000)).toEqual([]);
+    expect(readTrap(trapId)?.claimed).toBe('review');
+  }
+});
 
 it.each(['claude', 'codex'])('%s Stop renews quiet deadlines without a model continuation, then bait wakes it', async harness => {
   const worktree = path.join(home, 'worktree'); fs.mkdirSync(worktree);
