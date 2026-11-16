@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GlassFullSnapshot } from '@lobstah/core';
+import { mergeIntentTime } from '../../../packages/glass-ui/ui/components/prs.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
@@ -102,9 +103,9 @@ describe('Merge when green', () => {
       expect(button(g, 'Keep')).toBeUndefined();
       const cancel = button(g, 'Cancel merge')!;
       expect(cancel.getAttribute('aria-pressed')).toBe('true');
-      // The table keeps its note beside the button; a card's button says it all.
-      if (view === 'table') expect(text(g.$('#prs .mergenote'))).toBe('merges when green');
-      else expect(g.$('#prs .mergenote')).toBeNull();
+      expect(text(g.$('#prs .merge-intent'))).toContain('Merge when green');
+      expect(text(g.$('#prs .merge-intent'))).toContain('Waiting on CI');
+      expect(text(g.$('#prs .merge-intent'))).toContain('You · merge card ·');
       cancel.click();
       await g.settle();
       expect(JSON.parse(g.posts().at(-1)!.body).payload).toEqual({ key: 'pr:acme/web#50', cancel: true });
@@ -121,4 +122,59 @@ describe('Merge when green', () => {
     await g.settle();
     expect(text(g.$('#prs [role="alert"]'))).toBe('Only your own PRs, or ones a dispatch opened, merge from the glass.');
   });
+});
+
+for (const view of ['cards', 'table'] as const) {
+  it(`shows authorization, hold, and status on PRs and matching reviews as ${view}`, async () => {
+    const d = fleet([50]);
+    d.focusToken = 'token';
+    const pr = d.prs.find((p) => p.number === 50)!;
+    pr.mergeRequest = { at: '2026-11-16T18:00:00Z', by: 'decision:deploy', method: 'merge', note: 'Staging then production', hold: 'Run DB steps', summary: 'Held: Run DB steps' };
+    d.reviews = [{ key: 'review:acme/web#50', repo: 'acme/web', number: 50, title: pr.title!, url: pr.url, reviewUrl: pr.url,
+      author: 'chris', requestedAt: pr.observedAt, state: 'requested', stands: true }];
+    const g = await page(d, { hash: '#prs', prefs: { view }, post: () => ({ status: 200, body: { ok: true } }) });
+    for (const hash of ['#prs', '#reviews', '#pr/' + encodeURIComponent(pr.key)]) {
+      await g.go(hash);
+      const scope = hash.startsWith('#pr/') ? '.detail-frame' : hash;
+      expect(text(g.$(scope))).toContain('Merge when green');
+      expect(text(g.$(scope))).toContain('You · merge card ·');
+      expect(text(g.$(scope))).not.toContain('decision:deploy');
+      expect(text(g.$(scope))).not.toContain('2026-11-16T18:00:00Z');
+      expect(text(g.$(scope))).toContain('merge commit');
+      expect(text(g.$(scope))).toContain('On hold · Run DB steps');
+      expect(text(g.$(scope))).toContain('Run DB steps');
+      expect(text(g.$(scope))).toContain('Staging then production');
+      expect([...g.$$(scope + ' button')].some((b) => text(b) === 'Cancel merge')).toBe(true);
+    }
+    const cancel = g.$$('.detail-frame button').find((b) => text(b) === 'Cancel merge') as HTMLElement;
+    cancel.click(); await g.settle();
+    expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'pr-merge', payload: { key: pr.key, cancel: true } });
+    expect(g.$('.detail-frame .merge-intent')).toBeNull();
+  });
+}
+
+it.each(['Waiting on CI', 'CI failed', 'Conflict', 'Merging', 'Merged'])('shows the current merge status: %s', async (summary) => {
+  const d = fleet([50]);
+  const pr = d.prs.find((p) => p.number === 50)!;
+  pr.mergeRequest = { at: '2026-11-16T18:00:00Z', by: 'chat', method: 'merge', summary, ...(summary === 'Merged' ? { mergeSha: 'abc123' } : {}) };
+  if (summary === 'Merged') { pr.state = 'MERGED'; pr.badge = { text: 'merged', state: 'merged', tone: 'dim' }; }
+  const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
+  expect(text(g.$('#prs .merge-intent'))).toContain(summary);
+  if (summary === 'Merged') expect(text(g.$('#prs .merge-intent'))).toContain('abc123');
+});
+
+
+it('formats authorization times in the local clock, with the weekday for an earlier day', () => {
+  const now = new Date(2026, 10, 17, 15, 0).getTime();
+  expect(mergeIntentTime(new Date(2026, 10, 17, 14, 0).toISOString(), now)).toBe('2:00 PM');
+  expect(mergeIntentTime(new Date(2026, 10, 16, 16, 12).toISOString(), now)).toBe('Mon 4:12 PM');
+  expect(mergeIntentTime('not a date', now)).toBe('Time unavailable');
+});
+
+it('shows chat authorization and the squash method in human words', async () => {
+  const d = fleet([50]);
+  d.prs.find((p) => p.number === 50)!.mergeRequest = { at: new Date(NOW).toISOString(), by: 'chat', method: 'squash' };
+  const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
+  expect(text(g.$('#prs .merge-intent'))).toContain('You · chat ·');
+  expect(text(g.$('#prs .merge-intent'))).toContain('squash');
 });

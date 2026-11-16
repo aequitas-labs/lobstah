@@ -491,27 +491,38 @@ stack. When two PRs share a head branch, the parent is the one first seen
 last. The attention list is in standing order: the time each condition
 started. `observedAt` is shown as the time of the last check.
 
-**Merge when green.** On the glass PRs tab, each open PR of yours has Merge
-when green. A second tap names the merge (`Merge #12 into main as one
-squashed commit`) and stores the request on the PR record. The boat refuses
-a PR it has no record of (404), one that isn't open (409), and one that is
-neither authored by the login `gh` signs in as nor opened by a dispatch
-(403). Each PR-watch tick, the daemon takes each request in turn:
+**Merge when green.** Record a chat instruction or a decision answer on the PR:
 
-- A green PR that GitHub calls clean, with no open PR below it in its stack,
-  merges with `gh pr merge --<method> --match-head-commit <head>`. A refused
-  merge is tried again on the next tick.
-- A conflicting PR, or one with failing checks, is repaired first. A
-  dispatch's PR already has its PR repair. For a PR no dispatch opened, the
-  daemon queues one repair dispatch per head, which pushes to that PR's
-  branch; once it reports the PR, the repair chain takes later rounds.
-- When a PR's repair stops at a head, the helm gets one `repair-stopped`
-  notice for that head.
-- Drafts and running checks wait. A merged or closed PR drops its request.
+```sh
+lobstah pr merge-when-green owner/repo#12 --by chat
+lobstah pr merge-when-green owner/repo#12 --by decision:deploy --method merge --note "After staging and production" --hold "Run DB steps"
+lobstah pr merge-when-green owner/repo#12 --release-hold
+lobstah pr merge-when-green --clear owner/repo#12
+```
 
-Cancel withdraws the request. The method is the repo's
-[`mergeMethod`](configuration.md#reposkey--workspace-definitions), else
-`[pickup.github.merge].method`, else squash.
+The CLI reads the repository's allowed methods with `gh repo view`. The
+method defaults to the repo's configured `mergeMethod` (merge commits for
+lobstah), then pickup's method, then squash. An explicit CLI authorization
+can name any open PR. The glass's Merge when green button accepts your own
+PRs and PRs opened by a dispatch.
+
+`man tend`, PR cards, PR details, and matching Reviews rows show who gave
+permission, when, the note, any hold, and the current status. Cancel merge
+withdraws permission. A hold is a non-CI precondition; checks passing does
+not release it.
+
+Each PR-watch tick, the daemon merges a green, clean PR with no hold and no
+open PR below it. GitHub's merge endpoint checks the recorded head SHA and
+branch protection. The daemon never force-merges, bypasses protection, or
+enables GitHub auto-merge. It records the merge SHA and tells the helm.
+After the bottom PR merges, the daemon retargets the next PR to its base
+and waits for fresh checks before continuing with that PR's authorization.
+
+Failing checks and conflicts notify the helm and keep the merge waiting.
+Existing PR repair can work those failures back to green. A refused merge
+notifies the helm and can be tried again on the next tick. Drafts, unknown
+checks, and running checks wait. A merged PR retains its authorization and
+merge SHA; a PR closed without merging drops the request.
 
 **Merge stack when green.** A stack card of several PRs, all yours or a
 dispatch's, has Merge stack when green. Hovering names the merge (`Merges

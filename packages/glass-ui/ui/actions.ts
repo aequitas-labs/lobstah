@@ -742,7 +742,7 @@ export async function requestPrMerge(key: string, cancel = false): Promise<void>
             const { mergeRequest: _gone, ...rest } = p;
             return rest;
           }
-          return { ...p, mergeRequest: { at, method: result.method ?? 'squash' } };
+          return { ...p, mergeRequest: { at, by: 'glass', method: result.method ?? 'squash' } };
         }),
       },
     });

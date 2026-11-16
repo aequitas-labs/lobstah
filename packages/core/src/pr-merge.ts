@@ -11,10 +11,24 @@ export const PR_MERGE_METHODS: readonly PrMergeMethod[] = ['merge', 'squash', 'r
 export interface PrMergeRequest {
   /** When it was asked for. */
   at: string;
-  /** Who asked: `glass`, or a hosted glass's relay. */
+  /** Who authorized it: `chat`, `decision:<key>`, `glass`, or a hosted relay. */
   by: string;
-  /** The method it merges with, fixed when asked (the repo's, at that time). */
+  /** The recorded merge method; only an explicit request changes it. */
   method: PrMergeMethod;
+  /** Optional context supplied with the authorization. */
+  note?: string;
+  /** A non-CI precondition; only an explicit release lets the daemon merge. */
+  hold?: string;
+  /** Last attempt, retained across daemon restarts and observations. */
+  status?: 'waiting' | 'failed' | 'conflict' | 'merging' | 'merged';
+  /** GitHub's merge commit, retained after completion. */
+  mergeSha?: string;
+  /** When GitHub confirmed the merge. */
+  mergedAt?: string;
+  /** Last refusal from GitHub, visible to the helm. */
+  error?: string;
+  /** Retarget children after a merge, retrying safely after a crash or refusal. */
+  retargetPending?: boolean;
   /** The repair dispatch lobstah filed for a PR no dispatch owned, and the head it was filed for. */
   repair?: { dispatchId: string; headSha: string };
   /** A head the helm was told is stuck: told once per head. */
@@ -92,6 +106,8 @@ export type PrMergeStep =
  */
 export function prMergeStep(pr: PrRecord, belowOpen: boolean): PrMergeStep {
   if (pr.state !== 'OPEN') return { kind: 'done' };
+  if (pr.mergeRequest?.hold) return { kind: 'wait', why: `held: ${pr.mergeRequest.hold}` };
+  if (pr.checks?.unknown) return { kind: 'wait', why: 'checks unknown' };
   if (pr.repair && (pr.repair.status === 'gave-up' || pr.repair.status === 'blocked') && pr.repair.headSha === pr.headSha) {
     return { kind: 'stuck', why: pr.repair.reason ?? `repair ${pr.repair.status}` };
   }
@@ -102,4 +118,16 @@ export function prMergeStep(pr: PrRecord, belowOpen: boolean): PrMergeStep {
   if (belowOpen) return { kind: 'wait', why: 'a PR below it in its stack merges first' };
   if (pr.mergeStateStatus !== 'CLEAN') return { kind: 'wait', why: `GitHub says ${pr.mergeStateStatus.toLowerCase().replace(/_/g, ' ')}` };
   return { kind: 'merge' };
+}
+
+/** The same standing merge status on PR cards, reviews, and the helm's listing. */
+export function prMergeStatus(pr: PrRecord): string {
+  const request = pr.mergeRequest;
+  if (!request) return '';
+  if (pr.state === 'MERGED' || request.status === 'merged') return 'Merged';
+  if (pr.mergeStateStatus === 'DIRTY') return 'Conflict';
+  if ((pr.checks?.failed ?? 0) > 0) return 'CI failed';
+  if (request.status === 'merging') return 'Merging';
+  if (request.error) return `Merge failed: ${request.error}`;
+  return 'Waiting on CI';
 }
