@@ -449,6 +449,7 @@ export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerD
       model: modelForHarness(harness, launch.model).model,
       effort: resolved.effort,
       codexSandbox: launch.codexSandbox,
+      codexCliPath: launch.codexCliPath,
       limits: resolved.limits,
       env: {
         ...resolved.env,
