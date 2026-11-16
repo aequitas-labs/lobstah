@@ -249,7 +249,7 @@ describe('drafts', () => {
     fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ error: 'review.md is empty' });
     fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
-    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ body: '', comments: [], verdict: 'approve', blocking: [] });
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ body: '', comments: [], verdict: 'approve', blocking: [], decisions: [] });
     fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [] }));
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ error: 'review.md is empty' });
   });

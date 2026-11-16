@@ -16,8 +16,12 @@ import {
   reviewCheckoutDir,
   reviewRoundDir,
   writeReview,
+  answerReviewDecision,
+  redraftReview,
+  withdrawUnseenReviews,
 } from '@lobstah/core';
-import { draftReviewOnDemand, draftReviews } from '../src/loops/reviews.js';
+import { draftReviewOnDemand, draftReviews, requestNewReview } from '../src/loops/reviews.js';
+import { REVIEW_DECISIONS } from '../../../test/review-decisions.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -63,6 +67,48 @@ function request(over: { number?: number; repoKey?: string | null; head?: string
 const round = (key = KEY) => latestRound(readReview(key)!)!;
 
 describe('starting a review job', () => {
+  it.each(['notify', 'on-demand', 'auto-draft', 'auto-review'])('New review preserves the dismissed round and follows %s', mode => {
+    config(`mode = "${mode}"`);
+    request();
+    const old = readReview(KEY)!;
+    Object.assign(old.rounds[0]!, { state: 'dismissed', verdict: 'comment', reason: 'skipped' });
+    old.pr.headSha = 'bbbbbbb2'; writeReview(old);
+    expect(requestNewReview(KEY, NOW)).toBeUndefined();
+    const item = readReview(KEY)!;
+    expect(item.rounds).toHaveLength(2);
+    expect(item.rounds[0]).toMatchObject({ state: 'dismissed', headSha: 'aaaaaaa1', reason: 'skipped' });
+    expect(round()).toMatchObject({ state: mode.startsWith('auto-') ? 'drafting' : 'requested', headSha: 'bbbbbbb2', localRequest: true });
+    expect(round().byHand).toBeUndefined();
+    expect(round().decisionAnswers).toBeUndefined();
+    expect(round().reason).toBeUndefined();
+    expect(pendingIds('chore')).toHaveLength(mode.startsWith('auto-') ? 1 : 0);
+    // A local request remains even when GitHub no longer asks for a review.
+    expect(withdrawUnseenReviews(new Set(), () => true)).toEqual([]);
+    expect(requestNewReview(KEY, NOW)).toContain('Only a skipped');
+  });
+
+  it('New review respects the daily limit and can still be drafted explicitly', async () => {
+    config('mode = "auto-draft"', 'maxPerDay = 0');
+    request();
+    const item = readReview(KEY)!;
+    item.rounds[0]!.state = 'dismissed'; writeReview(item);
+    expect(requestNewReview(KEY, NOW)).toBeUndefined();
+    expect(round()).toMatchObject({ state: 'requested', reason: expect.stringContaining('daily cap') });
+    expect(pendingIds('chore')).toEqual([]);
+    expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
+    expect(round().state).toBe('drafting');
+  });
+
+  it('a repeated GitHub event updates a local request without replacing its id or history', () => {
+    config('mode = "on-demand"'); request();
+    const item = readReview(KEY)!;
+    item.rounds[0]!.state = 'dismissed'; writeReview(item);
+    requestNewReview(KEY, NOW);
+    const id = round().id;
+    request({ head: 'bbbbbbb2' });
+    expect(readReview(KEY)!.rounds).toHaveLength(2);
+    expect(round()).toMatchObject({ id, requestEventId: 'RRE_7', requestedAt: new Date(NOW).toISOString(), headSha: 'bbbbbbb2' });
+  });
   it('notify starts no jobs; on-demand starts only the clicked round as a pending-only trap review', async () => {
     config('mode = "notify"');
     request();
@@ -319,6 +365,31 @@ describe('the review checkout', () => {
     draftReviews('chris', () => {}, NOW);
     expect(round().state).toBe('drafted');
     gone();
+  });
+
+  it('carries answers to surviving question ids when a new head is redrafted', () => {
+    const id = drafting();
+    const dir = reviewRoundDir(KEY, 'RRE_7')!;
+    fs.writeFileSync(path.join(dir, 'review.md'), '');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [], decisions: REVIEW_DECISIONS }));
+    appendStatus(id, 'chore', 'done', 'drafted');
+    draftReviews('chris', () => {}, NOW);
+    const first = round();
+    const draft = { roundId: first.id, headSha: first.headSha, draftedAt: first.draftedAt! };
+    expect(answerReviewDecision(KEY, draft, 'rollout-owner', { optionId: 'platform' })).toBeUndefined();
+    expect(answerReviewDecision(KEY, draft, 'existing-users', { text: 'Ask each user.' })).toBeUndefined();
+    request({ head: 'bbbbbbb2' });
+    expect(typeof redraftReview(KEY, NOW + 1)).toBe('object');
+    draftReviews('chris', () => {}, NOW + 2);
+    const next = round().dispatch!;
+    claimNext('chore');
+    expect(queuedOrActiveBrief(next)).toContain('Previous calls (preserve ids');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [], decisions: [REVIEW_DECISIONS[0], { ...REVIEW_DECISIONS[1], id: 'new-question' }] }));
+    appendStatus(next, 'chore', 'done', 'redrafted');
+    draftReviews('chris', () => {}, NOW + 3);
+    expect(round()).toMatchObject({ state: 'drafted', headSha: 'bbbbbbb2', decisionAnswers: { 'rollout-owner': { optionId: 'platform' } } });
+    expect(round().decisionAnswers).not.toHaveProperty('existing-users');
+    expect(round().decisionAnswers).not.toHaveProperty('new-question');
   });
 
   it('is removed when the draft is stale', () => {

@@ -14,6 +14,7 @@ import { prsNeedingYou } from './prs.js';
 import { Dialog } from './dialog.js';
 import { Button } from './button.js';
 import { ITEM_ICON, TAB_ICON } from './icons.js';
+import { reviewUnreadReason } from '../review-attention.js';
 
 /** The header: the title and ⚙, the daemon and helm chips and clock, the tabs, and the filter controls. */
 
@@ -123,7 +124,7 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
 function badgeLabel(t: GlassTab, n: number): string {
   if (t === 'deck') return `${n} new decision${n === 1 ? '' : 's'}`;
   if (t === 'prs') return `${n} of your PRs need${n === 1 ? 's' : ''} you`;
-  return 'reviews in inbox';
+  return `${n} unread review${n === 1 ? '' : 's'}`;
 }
 
 /**
@@ -202,7 +203,7 @@ function Navigation({ d, tab, unread }: { d?: GlassSnapshot; tab: GlassTab; unre
       t === 'deck'
         ? unread
         : t === 'reviews'
-          ? (d?.reviews ?? []).filter((r) => r.stands || r.notification).length
+          ? (d?.reviews ?? []).filter(reviewUnreadReason).length
           : t === 'prs'
             ? prsNeedingYou(d?.prs ?? [])
             : 0;
@@ -273,7 +274,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
   }, [mode]);
   // A decision or run card takes the bottom edge with its own dock.
   if (getState().decisionModal) return null;
-  const reviews = (d?.reviews ?? []).filter((r) => r.stands || r.notification).length;
+  const reviews = (d?.reviews ?? []).filter(reviewUnreadReason).length;
   const prsWaiting = prsNeedingYou(d?.prs ?? []);
   const count = (n: number, label: string) => n > 0 && html`<span class="dbadge" aria-label=${label}>${n}</span>`;
   if (mode === 'search') {

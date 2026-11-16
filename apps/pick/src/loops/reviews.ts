@@ -36,6 +36,9 @@ import {
   withBriefHooks,
   withdrawUnseenReviews,
   writeReview,
+  carryReviewDecisionAnswers,
+  unansweredReviewDecisions,
+  newReviewRound,
 } from '@lobstah/core';
 import type { ReviewItem, ReviewRound } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
@@ -188,9 +191,12 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
     if (r?.state !== 'drafted' || r.reason?.startsWith('post failed') || r.reason?.startsWith('stage failed')) continue;
     const draft = readRoundDraft(item.key, r.id);
     if ('error' in draft) continue;
-    if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking)) {
-      r.verdict = draft.verdict; r.blocking = draft.blocking; writeReview(item);
+    if (r.verdict !== draft.verdict || JSON.stringify(r.blocking) !== JSON.stringify(draft.blocking) || JSON.stringify(r.decisions) !== JSON.stringify(draft.decisions)) {
+      r.verdict = draft.verdict; r.blocking = draft.blocking; r.decisions = draft.decisions;
+      r.decisionAnswers = carryReviewDecisionAnswers(draft.decisions, r.decisionAnswers);
+      writeReview(item);
     }
+    if (unansweredReviewDecisions(r).length) continue;
     const publish = reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r, draft.verdict);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
@@ -435,6 +441,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       Object.assign(r, { state: 'failed', reason: `the review job finished without a usable draft: ${draft.error}` });
     } else {
       Object.assign(r, { verdict: draft.verdict, blocking: draft.blocking, state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
+      r.decisions = draft.decisions;
+      r.decisionAnswers = carryReviewDecisionAnswers(draft.decisions, r.decisionAnswers);
       delete r.reason;
       // The head moved while the job ran: the draft reviews an older head.
       if (r.headSha !== item.pr.headSha) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
@@ -463,6 +471,15 @@ export async function draftReviewOnDemand(key: string, now = Date.now()): Promis
   acknowledgeReview(key, now);
   draftReviews(identity, () => {}, now, key);
   return latestRound(readReview(key)!)?.state === 'drafting' ? undefined : 'the round could not start drafting';
+}
+
+/** A new local request follows the repo mode and daily cap, just like discovery. */
+export function requestNewReview(key: string, now = Date.now()): string | undefined {
+  const result = newReviewRound(key, now);
+  if (typeof result === 'string') return result;
+  const identity = loadPickupConfig().reviews?.identity;
+  if (identity) draftReviews(identity, () => {}, now);
+  return undefined;
 }
 
 /**

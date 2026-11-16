@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, latestRound, loadConfig, observeReviewRequest, pendingIds, readReview, REVIEW_ROUND_STATES, writeReview, refreshReviewNotifications } from '@lobstah/core';
+import { ensureLayout, latestRound, loadConfig, observeReviewRequest, pendingIds, readReview, REVIEW_ROUND_STATES, writeReview, refreshReviewNotifications, reviewRoundDir } from '@lobstah/core';
+import { REVIEW_DECISIONS } from '../../../test/review-decisions.js';
 import { glassReviews } from '../src/reviews.js';
 import type { GlassReview } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
@@ -66,6 +67,46 @@ async function openCard(g: GlassDom, n: number) {
 }
 
 describe('the Reviews tab', () => {
+  it.each(['cards', 'table'])('excludes the live #2919 withdrawn notification and marks every counted %s item until opened', async view => {
+    const withdrawn = review(2919, { state: 'withdrawn', stands: false, title: 'Add the deterministic pricing aggregate node', notification: { kind: 'draft-ready', at: ago(30), text: 'Draft ready: #2919 Add the deterministic pricing aggregate node · request changes · 2 blocking' } });
+    let rows = [withdrawn, review(7, { state: 'drafted', verdict: 'comment', notification: { kind: 'draft-ready', at: ago(30), text: 'Draft ready' } }), review(8, { state: 'failed' }), review(9, { state: 'stale' })];
+    const snapshot = () => ({ ...fleet(), reviews: rows });
+    const g = await loadGlass(GLASS_PAGE, snapshot(), {
+      now: NOW, hash: '#reviews', prefs: { view },
+      post: (_url, init) => {
+        const request = JSON.parse(init.body);
+        if (request.kind === 'review-seen') {
+          rows = rows.map(row => row.key === request.payload.key ? { ...row, seenAt: ago(0) } : row);
+          g.serve(snapshot());
+        }
+        return { status: 200, body: { ok: true } };
+      },
+    }); open.push(g);
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('3');
+    expect(g.$('.bbitem[href="#reviews"] .dbadge')?.textContent).toBe('3');
+    expect(g.$$('#reviews [data-review-unread]')).toHaveLength(3);
+    expect(g.$('#reviews [data-review="review:acme/web#2919"] [data-review-unread]')).toBeNull();
+    expect(g.$('#reviews [data-review="review:acme/web#7"] [data-review-unread]')?.textContent).toContain('New draft');
+    (g.$('#reviews [data-review="review:acme/web#7"]') as unknown as HTMLElement).click(); await g.settle();
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
+    (g.$('.detail-close') as unknown as HTMLElement).click(); await g.settle();
+    expect(g.$$('#reviews [data-review-unread]')).toHaveLength(2);
+    const reload = await loadGlass(GLASS_PAGE, snapshot(), { now: NOW, hash: '#reviews', prefs: { view } }); open.push(reload);
+    expect(reload.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
+  });
+  it.each(['cards', 'table'])('shows needs your call in %s until every decision has an answer', async view => {
+    const r = review(7, { state: 'drafted', verdict: 'approve', decisions: REVIEW_DECISIONS });
+    const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews: [r] }, { now: NOW, hash: '#reviews', prefs: { view } });
+    open.push(g);
+    expect(g.$('#reviews')?.textContent).toContain('needs your call');
+    const button = g.$$('#reviews button').find(button => button.textContent?.includes('Approve'))!;
+    expect(button.hasAttribute('disabled')).toBe(true);
+    expect(g.$('#reviews')?.textContent).toContain('Answer every decision before posting.');
+    g.serve({ ...fleet(), reviews: [{ ...r, decisionAnswers: { 'rollout-owner': { optionId: 'product' }, 'existing-users': { text: 'Ask each user.' } } }] });
+    await g.poll();
+    expect(g.$('#reviews')?.textContent).not.toContain('needs your call');
+    expect(g.$$('#reviews button').find(button => button.textContent?.includes('Approve'))?.hasAttribute('disabled')).toBe(false);
+  });
   it.each(['card', 'keyboard', 'row'])('opening a review by %s acknowledges its lob and decrements only its badge', async (entry) => {
     const d = {
       ...fleet(),
@@ -106,7 +147,7 @@ describe('the Reviews tab', () => {
     const r = review(7, { state: 'drafted', verdict, needsYou: verdict === 'approve', summary: 'Reviewed summary', blocking: verdict === 'request_changes' ? [{ path: 'src/a.ts', line: 12, body: 'Race condition' }] : [] });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards' }, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g); await g.go('#reviews');
-    if (verdict === 'approve') expect(g.$$('#reviews .gstate .gchip').map((c) => c.textContent)).toEqual(['draft ready', 'needs you']);
+    if (verdict === 'approve') expect(g.$$('#reviews .gstate .gchip').map((c) => c.textContent)).toEqual(['draft ready', '● Draft ready', 'needs you']);
     const box = await openCard(g, 7);
     expect(box.textContent).toContain(label);
     expect(box.textContent).toContain('Reviewed summary');
@@ -145,7 +186,7 @@ describe('the Reviews tab', () => {
     expect(g.$('[data-review]')?.classList.contains('seen')).toBe(true);
     expect(g.$('#reviews')?.textContent).toContain('needs you');
     expect(g.posts()).toEqual([]);
-    expect(g.$('#tabs a[data-tab="reviews"] .dbadge')?.textContent).toBe('1');
+    expect(g.$('#tabs a[data-tab="reviews"] .dbadge')).toBeNull();
   });
 
   it('puts mute in the card menu, keeps unmute on the bar, and links to a posted review', async () => {
@@ -290,7 +331,7 @@ describe('the Reviews tab', () => {
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
     expect(g.window.location.hash).toBe('#pr/pr%3Aacme%2Fweb%237');
-    expect(g.posts()).toEqual([]);
+    expect(g.posts().map(post => JSON.parse(post.body))).toEqual([{ kind: 'review-seen', payload: { key: 'review:acme/web#7' } }]);
     (g.$('.detail-close') as unknown as HTMLElement).click();
     await g.settle();
     (rows[2]!.querySelector('button') as unknown as HTMLElement).click();
@@ -337,7 +378,7 @@ describe('review requests on /requests', () => {
 
   it('refuses the review kinds without the page token, and has no post or edit', async () => {
     const { base, token } = await start();
-    for (const kind of ['review-dismiss', 'review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment', 'review-redraft', 'review-draft', 'review-mode']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
+    for (const kind of ['review-dismiss', 'review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment', 'review-decision-answer', 'review-new', 'review-redraft', 'review-draft', 'review-mode']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
     for (const kind of ['review-post', 'review-edit']) expect((await send(base, token, kind, { key: 'review:acme/web#7' })).status).toBe(400);
   });
 
@@ -353,6 +394,34 @@ describe('review requests on /requests', () => {
     }
     expect(fs.readFileSync(configFile, 'utf8')).toBe(before);
     expect(loadConfig().reviews.mode).toBe('notify');
+  });
+
+  it('saves per-round answers through the guarded API and returns them after reload', async () => {
+    const key = 'review:acme/web#7';
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaa' }, round: { id: 'round1', requestedAt: ago(60) } }).item;
+    const draftedAt = ago(30);
+    Object.assign(item.rounds[0]!, { state: 'drafted', draftedAt, decisions: REVIEW_DECISIONS }); writeReview(item);
+    const dir = reviewRoundDir(key, 'round1')!; fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), 'Code looks right.');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [], decisions: REVIEW_DECISIONS }));
+    const { base, token } = await start();
+    const payload = { key, roundId: 'round1', headSha: 'aaa', draftedAt, decisionId: 'rollout-owner', answer: { optionId: 'product' } };
+    expect((await send(base, token, 'review-decision-answer', payload)).status).toBe(200);
+    expect((await send(base, token, 'review-decision-answer', { ...payload, decisionId: 'existing-users', answer: { text: 'Ask each user.' } })).status).toBe(200);
+    expect(glassReviews()[0]).toMatchObject({ roundId: 'round1', decisions: REVIEW_DECISIONS, decisionAnswers: { 'rollout-owner': { optionId: 'product' }, 'existing-users': { text: 'Ask each user.' } } });
+    expect((await send(base, token, 'review-decision-answer', { ...payload, headSha: 'old' })).status).toBe(409);
+    expect((await send(base, token, 'review-decision-answer', { ...payload, answer: { optionId: 'bad' } })).status).toBe(409);
+  });
+
+  it('New review opens a requested round without changing the skipped history', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "on-demand"\n');
+    const key = 'review:acme/web#7';
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaa' }, round: { id: 'round1', requestedAt: ago(60) } }).item;
+    item.rounds[0]!.state = 'dismissed'; writeReview(item);
+    const { base, token } = await start();
+    expect((await send(base, token, 'review-new', { key })).status).toBe(200);
+    expect(readReview(key)!.rounds.map(round => round.state)).toEqual(['dismissed', 'requested']);
+    expect((await send(base, token, 'review-new', { key })).status).toBe(409);
   });
 
   it('the Draft action follows the configured on-demand mode', async () => {
@@ -415,6 +484,8 @@ describe('review requests on /requests', () => {
     const { base, token } = await start();
     expect((await send(base, token, 'review-seen', { key })).status).toBe(200);
     expect(latestRound(readReview(key)!)).toMatchObject({ needsYou: true, notification: { kind: 'needs-you' }, seenAt: expect.any(String) });
+    const seen = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviews: glassReviews() }, { now: Date.now(), hash: '#reviews' }); open.push(seen);
+    expect(seen.$('#tabs [data-tab="reviews"] .dbadge')).toBeNull();
     expect((await send(base, token, 'review-skip', { key })).status).toBe(200);
     expect(latestRound(readReview(key)!)).toMatchObject({ state: 'dismissed', acknowledgedAt: expect.any(String) });
     expect(latestRound(readReview(key)!)?.notification).toBeUndefined();

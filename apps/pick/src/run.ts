@@ -21,7 +21,7 @@ export { readMergeView, readPickupMap } from './merge-view.js';
 export type { MergeView, MergeViewPr } from './merge-view.js';
 export { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from './config.js';
 export { dismissReviewRound, postReview, redraftReviewRound, stageReview } from './reviews-post.js';
-export { draftReviewOnDemand } from './loops/reviews.js';
+export { draftReviewOnDemand, requestNewReview } from './loops/reviews.js';
 export type { PostBy, PostResult } from './reviews-post.js';
 export type { PickupConfig } from './config.js';
 

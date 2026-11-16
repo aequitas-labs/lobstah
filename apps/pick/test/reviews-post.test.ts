@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { enqueue, claimNext, requestCancel, complete, ensureLayout, latestRound, muteReview, observeReviewRequest, readReview, reviewRoundDir, writeReview } from '@lobstah/core';
+import { answerReviewDecision, enqueue, claimNext, requestCancel, complete, ensureLayout, latestRound, muteReview, observeReviewRequest, readReview, reviewRoundDir, writeReview } from '@lobstah/core';
 import { dismissReviewRound, postReview, redraftReviewRound, stageReview } from '../src/reviews-post.js';
 import type { FetchLike } from '../src/reviews-post.js';
 import { draftReviews, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { REVIEW_DECISIONS } from '../../../test/review-decisions.js';
 
 let home: string;
 beforeEach(() => {
@@ -36,7 +37,7 @@ function drafted(state: 'drafted' | 'stale' = 'drafted'): void {
   fs.writeFileSync(path.join(dir, 'review.md'), 'Looks right.\n');
   fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([{ path: 'src/a.ts', line: 12, body: 'Why not b()?' }]));
   const item = readReview(KEY)!;
-  Object.assign(item.rounds[0]!, { state, dispatch: 'd1' });
+  Object.assign(item.rounds[0]!, { state, dispatch: 'd1', draftedAt: '2026-11-16T12:00:00Z' });
   writeReview(item);
 }
 
@@ -79,6 +80,63 @@ function github(calls: Call[], existing: Array<{ id: number; body: string; state
 }
 
 const posts = (calls: Call[]) => calls.filter((c) => c.method === 'POST');
+
+/** Save real per-round answers through the same function as Glass. */
+function answerCalls(): void {
+  const r = latestRound(readReview(KEY)!)!;
+  const draft = { roundId: r.id, headSha: r.headSha, draftedAt: r.draftedAt! };
+  expect(answerReviewDecision(KEY, draft, 'rollout-owner', { optionId: 'product' })).toBeUndefined();
+  expect(answerReviewDecision(KEY, draft, 'existing-users', { text: 'Ask each user before migrating.' })).toBeUndefined();
+}
+
+describe('review decision posting gate', () => {
+  it.each(['approve', 'comment', 'request_changes'] as const)('blocks %s until every call is answered, then includes answers in the posted body', async verdict => {
+    drafted();
+    const blocking = verdict === 'request_changes' ? [{ path: 'src/a.ts', line: 14, body: 'This loses writes.' }] : [];
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict, blocking, decisions: REVIEW_DECISIONS }));
+    if (verdict !== 'comment') enableAutoPost(verdict);
+    const calls: Call[] = [];
+    const event = verdict === 'approve' ? 'APPROVE' : verdict === 'request_changes' ? 'REQUEST_CHANGES' : 'COMMENT';
+    for (const by of ['glass', 'cli', 'auto'] as const) {
+      expect(await postReview(KEY, { by, event, token: tok, fetch: github(calls) })).toMatchObject({ posted: false, why: expect.stringContaining('Answer every decision') });
+    }
+    expect(await stageReview(KEY, { token: tok, fetch: github(calls) })).toMatchObject({ staged: false, why: expect.stringContaining('Answer every decision') });
+    expect(calls).toEqual([]);
+    answerCalls();
+    expect(await postReview(KEY, { by: 'glass', event, token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+    const body = posts(calls)[0]!.body!.body as string;
+    expect(body).toContain('## Decisions from Chris');
+    expect(body).toContain('### Who should own the rollout?\n\nProduct team — Product chooses when the feature goes live.');
+    expect(body).toContain('### Should existing users get the new default?\n\nAsk each user before migrating.');
+    expect(body.endsWith(MARKER)).toBe(true);
+  });
+
+  it('uses the latest answers when submitting a staged review', async () => {
+    drafted();
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [], decisions: REVIEW_DECISIONS }));
+    answerCalls();
+    const calls: Call[] = [];
+    expect(await stageReview(KEY, { token: tok, fetch: github(calls) })).toMatchObject({ staged: true });
+    const r = latestRound(readReview(KEY)!)!;
+    expect(answerReviewDecision(KEY, { roundId: r.id, headSha: r.headSha, draftedAt: r.draftedAt! }, 'rollout-owner', { text: 'Chris will own the rollout.' })).toBeUndefined();
+    expect(await postReview(KEY, { by: 'glass', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+    expect(posts(calls).at(-1)?.url).toContain('/99/events');
+    expect(posts(calls).at(-1)?.body?.body).toContain('Chris will own the rollout.');
+  });
+
+  it.each(['approve', 'request_changes'] as const)('the loop never auto-posts %s with unanswered decisions', async verdict => {
+    drafted(); enableAutoPost(verdict);
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict, blocking: verdict === 'request_changes' ? [{ path: 'a.ts', line: 1, body: 'Race' }] : [], decisions: REVIEW_DECISIONS }));
+    const calls: Call[] = [];
+    const run: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 1, nodes: [] } } }) });
+    await reviewsLoop('chris', tok, () => {}, { run, fetch: github(calls) });
+    expect(posts(calls)).toEqual([]);
+    answerCalls();
+    await reviewsLoop('chris', tok, () => {}, { run, fetch: github(calls) });
+    expect(posts(calls)).toHaveLength(1);
+    expect(posts(calls)[0]?.body?.body).toContain('Decisions from Chris');
+  });
+});
 
 describe('postReview', () => {
   it('posts a comment-only review at the drafted head, marked with its round', async () => {
