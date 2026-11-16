@@ -180,7 +180,7 @@ describe('the Reviews tab', () => {
     unmute.click(); await muted.settle();
     expect(muted.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-unmute', payload: { key: 'review:acme/web#7' } });
   });
-  it('shows every round state, cached requester avatars, automatic attribution, and the pending review link', async () => {
+  it('shows every round state, cached author avatars, and the pending review link', async () => {
     const d = { ...fleet(), reviews: REVIEW_ROUND_STATES.map((state, i) => review(20 + i, {
       state, stands: ['requested', 'drafted', 'stale', 'failed'].includes(state),
       asker: 'dana', askerName: 'Dana Developer', askerAvatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4',
@@ -199,11 +199,10 @@ describe('the Reviews tab', () => {
     expect([draftLink.getAttribute('aria-label'), draftLink.getAttribute('href')]).toEqual(['Open draft', 'https://github.com/acme/web/pull/22#pullrequestreview-99']);
     const firstOpen = g.$('#reviews .card .gactions a') as unknown as HTMLElement;
     expect(firstOpen.getAttribute('href')).toContain('linear://review/');
-    // Who asked, with the avatar, is in the modal.
+    // The author's name and avatar are in the modal.
     const box = await openCard(g, drafted);
     expect(box.querySelector('.rv-person img')?.getAttribute('src')).toContain('avatars.githubusercontent.com/u/7');
     expect(box.querySelector('.rv-person')?.textContent).toContain('Dana Developer');
-    expect(box.querySelector('.rv-person')?.textContent).toContain('automatic');
     expect(box.querySelector('.rv-staged')?.getAttribute('href')).toContain('#pullrequestreview-99');
     (box.querySelector('.splitcaret') as unknown as HTMLElement).click();
     await g.settle();
@@ -254,11 +253,12 @@ describe('the Reviews tab', () => {
     observeReviewRequest({ pr, round: { id: 'bot', requestedAt: ago(60), requestedBy: 'github-actions', requestedAutomatically: true } });
     const page = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviews: glassReviews() }, { now: NOW, hash: '#reviews', prefs: { view } });
     open.push(page);
-    if (view === 'cards') await openCard(page, 7);
-    expect(page.$('.rv-person')?.textContent).toContain('Maya Maintainer');
-    expect(page.$('.rv-person')?.textContent).not.toContain('github-actions');
-    expect(page.$('.rv-person img')?.getAttribute('src')).toBe('https://avatars.githubusercontent.com/u/9?v=4');
-    expect(page.$('.rv-person .badge')?.getAttribute('title')).toBe('A bot re-requested this review');
+    const person = page.$(view === 'cards' ? '#reviews .gavatar' : '#reviews .rv-person');
+    const label = view === 'cards' ? person?.getAttribute('title') : person?.textContent;
+    expect(label).toContain('Maya Maintainer');
+    expect(label).not.toContain('github-actions');
+    expect(person?.querySelector('img')?.getAttribute('src')).toBe('https://avatars.githubusercontent.com/u/9?v=4');
+    if (view === 'table') expect(person?.querySelector('.badge')?.getAttribute('title')).toBe('A bot re-requested this review');
   });
   it('the repo filter scopes the settings chip and row labels use each repo policy', async () => {
     const g = await loadGlass(GLASS_PAGE, {
