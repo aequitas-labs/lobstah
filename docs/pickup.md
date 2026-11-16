@@ -256,7 +256,7 @@ in roughly harness start-up time.
 ## Review requests
 
 Opt-in with `[reviews].enabled` ([configuration.md](configuration.md)). Each
-cycle spends one GitHub request: a GraphQL search for open PRs with
+cycle runs one GraphQL search for open PRs with
 `user-review-requested:<identity>`, through `gh api graphql` on the shared
 GitHub budget. A blocked budget skips the cycle. `user-review-requested`
 matches requests that name the identity; a request made only to a team the
@@ -264,10 +264,16 @@ identity is on files nothing.
 
 Each PR is one review item, `review:<owner>/<repo>#<n>`, in
 `~/.lobstah/reviews/<owner>-<repo>-<n>/review.json`. An item holds rounds,
-one per `ReviewRequestedEvent`: the same standing request never opens a
-second round, and a re-request opens a new one (an open earlier round is
-withdrawn as superseded). A new push with no new request moves a requested
-round's head; a drafted round becomes `stale` and starts nothing on its own.
+one per distinct PR diff while your review request stands on GitHub. A
+re-request at the same head keeps the existing round and its draft. A new
+push that changes the PR diff opens a fresh round even without another
+request event, including after Skip or a posted review. Merging the base or
+rebasing with the same diff keeps the existing round. A changed diff
+supersedes an open earlier round as `withdrawn`.
+The new round follows the repo's review mode and daily automatic limit.
+Diff comparisons run once per observed head and use the shared GitHub
+budget; an unavailable comparison
+waits for a later poll.
 When the search stops returning a PR (the request was withdrawn, the
 person reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
 truncated search (more than 50 results) withdraws nothing.

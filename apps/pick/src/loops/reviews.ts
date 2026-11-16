@@ -22,6 +22,7 @@ import {
   queuedDescriptor,
   readRoundDraft,
   readReview,
+  reviewKey,
   readStatusLog,
   reconcile,
   recordGitHubRateLimit,
@@ -45,6 +46,7 @@ import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview,
 import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
 import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
+import { reviewDiffId } from '../reviews-diff.js';
 
 /**
  * One search per poll for open PRs whose review is requested from the
@@ -59,7 +61,7 @@ export const REVIEW_SEARCH = `query($q: String!, $identity: String!) {
     issueCount
     nodes {
       ... on PullRequest {
-        number url title isDraft headRefOid
+        number url title isDraft headRefOid baseRefOid
         author { login avatarUrl ... on User { name } }
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
@@ -84,6 +86,7 @@ interface SearchPr {
   title?: string;
   isDraft?: boolean;
   headRefOid?: string;
+  baseRefOid?: string;
   author?: { login?: string; name?: string; avatarUrl?: string } | null;
   repository?: { nameWithOwner?: string };
   labels?: { nodes?: Array<{ name?: string }> };
@@ -161,7 +164,7 @@ export async function reviewsLoop(
   const w = { ...opts.wharf, now };
   // The search needs the budget; drafting is local and runs either way.
   if (!githubBlockedUntil(now)) {
-    const found = searchReviews(identity, token, log, opts.run ?? runGraphql, now);
+    const found = await searchReviews(identity, token, log, opts.run ?? runGraphql, now, opts.fetch);
     if (found) await settleGone(found, identity, gh, opts.run ?? runGraphql, log);
   }
   // On wharf grounds, a round is claimed (its document created) before it is drafted.
@@ -297,7 +300,7 @@ function reviewQuery<T>(request: { query: string; variables: Record<string, unkn
   return answer.data;
 }
 
-function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number): { seen: Set<string>; inScope: (item: ReviewItem) => boolean } | undefined {
+async function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number, fetch?: FetchLike): Promise<{ seen: Set<string>; inScope: (item: ReviewItem) => boolean } | undefined> {
   const rc = loadConfig().reviews;
   const answer = reviewQuery<{ search?: { issueCount?: number; nodes?: SearchPr[] } }>(
     { query: REVIEW_SEARCH, variables: { q: reviewSearchQuery(identity), identity } }, token, run, now, log, 'search');
@@ -325,6 +328,16 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
     const settings = reviewSettings(rc, repoKey);
     const skipLabel = labels.find((l) => settings.skipLabels.includes(l));
     const skip = settings.skipAuthors.includes(author) ? `skipped: author ${author} is in skipAuthors` : skipLabel ? `skipped: label ${skipLabel} is in skipLabels` : undefined;
+    const prior = readReview(reviewKey(owner, repo, pr.number));
+    const round = prior && latestRound(prior);
+    let previousDiffId = round?.diffId;
+    let diffId = prior?.pr.headSha === pr.headRefOid ? prior.pr.diffId : undefined;
+    if (!prior?.mutedAt && pr.baseRefOid) {
+      if (round && round.headSha !== pr.headRefOid)
+        previousDiffId ??= await reviewDiffId(nwo, round.baseSha ?? pr.baseRefOid, round.headSha, { token, fetch, now, log });
+      diffId ??= await reviewDiffId(nwo, pr.baseRefOid, pr.headRefOid, { token, fetch, now, log });
+      if (round?.headSha === pr.headRefOid) previousDiffId ??= diffId;
+    }
     const { item, opened } = observeReviewRequest(
       {
         pr: {
@@ -337,6 +350,8 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
           ...(pr.author?.name ? { authorName: pr.author.name } : {}),
           ...(pr.author?.avatarUrl ? { authorAvatarUrl: pr.author.avatarUrl } : {}),
           headSha: pr.headRefOid,
+          ...(pr.baseRefOid ? { baseSha: pr.baseRefOid } : {}),
+          ...(diffId ? { diffId } : {}),
           state: 'OPEN',
           ...(labels.length ? { labels } : {}),
           ...(pr.isDraft ? { draft: true } : {}),
@@ -351,6 +366,7 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
           ...(humanRequester?.login ? { humanRequester: { login: humanRequester.login, name: humanRequester.name, avatarUrl: humanRequester.avatarUrl } } : {}),
         },
         ...(skip ? { skip } : {}),
+        ...(previousDiffId && round ? { previousDiff: { headSha: round.headSha, diffId: previousDiffId } } : {}),
       },
       now,
     );
