@@ -432,7 +432,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
 
     // Stop work the person already submitted, withdrew, or dismissed; remove its checkout once the job ends.
     for (const old of item.rounds) {
-      if ((!['withdrawn', 'dismissed', 'merged', 'closed'].includes(old.state) && !(old.state === 'posted' && old.by === 'review tool') && !(old.state === 'failed' && old.reason === 'the review job was cancelled')) || !old.dispatch) continue;
+      if ((!['withdrawn', 'dismissed', 'merged', 'closed'].includes(old.state) && old.state !== 'posted' && !(old.state === 'failed' && old.reason === 'the review job was cancelled')) || !old.dispatch) continue;
       const oldJob = verbOf(old.dispatch);
       if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
         try {

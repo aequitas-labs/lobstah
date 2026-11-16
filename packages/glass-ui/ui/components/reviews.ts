@@ -1,5 +1,8 @@
+import { useState } from 'preact/hooks';
+import { createPortal } from 'preact/compat';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
+import { reviewNeedsAttention } from '../../src/glass-diff.js';
 import { dismissReview, hideLob, muteReviewPr, reviewRequest, showModal, unmuteReviewPr } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html } from '../html.js';
@@ -11,6 +14,7 @@ import type { CardPerson, CardTone, MenuAction } from './card.js';
 import { MergeIntent, MergeWhenGreen, PrStateIcon, StatusChip, dispatchTrap, prShapedCard } from './prs.js';
 import type { PrIconState } from './prs.js';
 import { Button } from './button.js';
+import { Dialog } from './dialog.js';
 
 /**
  * The Reviews tab: one row or card per PR that asked for your review,
@@ -126,6 +130,7 @@ export function ReviewActions({
   /** View actions keep secondary choices in the split menu. */
   inView?: boolean;
 }) {
+  const [confirmApproval, setConfirmApproval] = useState(false);
   // A source without review actions may still dismiss or mute through its boat.
   if (!can('review-request')) {
     if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /></span>`;
@@ -152,6 +157,22 @@ export function ReviewActions({
     e.stopPropagation();
     return reviewRequest(kind, { key: r.key });
   };
+  const approve: MenuAction = {
+    label: 'Approve anyway', icon: ActionIcon.approve,
+    onClick: (event: Event): void => { event.stopPropagation(); setConfirmApproval(true); },
+  };
+  const canApprove = ['open', 'draft'].includes(reviewPrState(r));
+  const approvalMenu = canApprove ? [approve] : [];
+  const confirmation = confirmApproval && createPortal(html`<${Dialog} title=${`Approve #${r.number}?`} onClose=${() => setConfirmApproval(false)}>
+    <p>Approve this PR without the draft’s comments or findings.</p>
+    <div class="dialog-actions"><${Button} onClick=${() => setConfirmApproval(false)}>Cancel<//>
+    <${Button} variant="primary" sending="Approving…" action=${async (event: Event): Promise<string | undefined> => {
+      event.stopPropagation();
+      const why = await reviewRequest('review-approve-anyway', { key: r.key });
+      if (!why) setConfirmApproval(false);
+      return why;
+    }}>Approve anyway<//></div>
+  <//>`, document.body);
   const send = SEND[r.verdict ?? 'comment'];
   const verdictDone =
     send.kind === 'review-approve'
@@ -175,7 +196,7 @@ export function ReviewActions({
           : kind === 'review-skip'
             ? 'Skipping…'
             : 'Sending…';
-  if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /></span>`;
+  if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /><${SplitButton} more=${approvalMenu} />${confirmation}</span>`;
   const sendButton =
     r.state === 'drafted' &&
     html`<${Button} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${send.label}<//>`;
@@ -190,7 +211,7 @@ export function ReviewActions({
         : drafts
           ? html`<${Button} size=${inView ? 'lg' : 'md'} variant="primary" action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`
           : null;
-    const more: MenuAction[] = [];
+    const more: MenuAction[] = [...approvalMenu];
     if (skips)
       more.push({
         label: inView ? 'Dismiss' : 'Skip',
@@ -204,15 +225,20 @@ export function ReviewActions({
       more.push({ label: 'Redraft', icon: ActionIcon.draft, action: act('review-redraft'), done: 'Draft requested' });
     const mute = muteMenuAction(r);
     if (mute) more.push(mute);
-    return html`<span class=${'rv-actions' + (!main && more.length ? ' rv-menu-only' : '')}>${(main || more.length) && html`<${SplitButton} main=${main} more=${more} />`}</span>`;
+    return html`<span class=${'rv-actions' + (!main && more.length ? ' rv-menu-only' : '')}>${(main || more.length) && html`<${SplitButton} main=${main} more=${more} />`}${confirmation}</span>`;
   }
   return html`<span class="rv-actions">
     ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} action=${act('review-draft')} done=${done('review-draft')} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Redraft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}
     ${sendButton}
+    <${SplitButton} more=${approvalMenu} />${confirmation}
     <${MuteAction} r=${r} />
     ${(OPEN.has(r.state) || r.notification) && html`<${Button} action=${act('review-skip')} done=${done('review-skip')} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.">Dismiss<//>`}
   </span>`;
 }
+
+/** Mark exactly the rows counted by the Reviews badge. */
+const attentionDot = (review: GlassReview) => reviewNeedsAttention(review) &&
+  html`<span class="warn" role="img" aria-label="Needs attention" title="Needs attention">●</span> `;
 
 const badge = (r: GlassReview) =>
   html`<span class=${'badge ' + (TONE[r.state] ?? '')}>${reviewState(r)}</span>${r.verdict && html`<span class="badge">${r.verdict.replace('_', ' ')}</span>`}${r.needsYou && html`<span class="badge warn">needs you</span>`}`;
@@ -255,7 +281,7 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
       showReview(r)();
       e.preventDefault();
     }}><${PrStateIcon} state=${reviewPrState(r)} /> ${r.repo}#${r.number}</a></td>
-    <td class="grow">${r.title}${findings(r)}</td>
+    <td class="grow">${attentionDot(r)}${r.title}${findings(r)}</td>
     <td>${r.author}</td>
     <td>${asker(r)}</td>
     <td>${Age(r.requestedAt)}</td>
@@ -322,6 +348,7 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
     titleAttr: r.title,
     prState: reviewPrState(r),
     status: [
+      attentionDot(r),
       StatusChip(status.word, status.tone),
       r.needsYou && StatusChip('needs you', 'bad'),
       r.mutedAt && StatusChip('muted', 'dim'),

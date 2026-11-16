@@ -108,11 +108,11 @@ describe('postReview', () => {
     if (verdict !== 'comment') enableAutoPost(verdict);
     const calls: Call[] = [];
     const result = await postReview(KEY, { by: 'auto', token: tok, fetch: github(calls) });
-    if (verdict === 'comment') {
-      expect(result).toMatchObject({ posted: false, why: expect.stringContaining('publishing is off') });
+    if (verdict === 'comment' || verdict === 'approve') {
+      expect(result).toMatchObject({ posted: false });
       expect(posts(calls)).toEqual([]);
-      expect(await postReview(KEY, { by: 'glass', event: 'COMMENT', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
-      expect(posts(calls)[0]?.body).toMatchObject({ event: 'COMMENT' });
+      expect(await postReview(KEY, { by: 'glass', event: verdict === 'approve' ? 'APPROVE' : 'COMMENT', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+      expect(posts(calls)[0]?.body).toMatchObject({ event: verdict === 'approve' ? 'APPROVE' : 'COMMENT' });
     } else {
       expect(result).toMatchObject({ posted: true });
       expect(posts(calls)[0]?.body?.event).toBe(verdict === 'approve' ? 'APPROVE' : 'REQUEST_CHANGES');
@@ -206,15 +206,15 @@ describe('posting from the reviews loop', () => {
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict, blocking }));
     const calls: Call[] = [];
     for (let i = 0; i < 2; i++) await reviewsLoop('chris', tok, () => {}, { run: search, fetch: github(calls) });
-    expect(posts(calls).map((call) => call.body?.event)).toEqual([event]);
-    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'posted', by: 'auto', postedReviewId: '99' });
+    expect(posts(calls).map((call) => call.body?.event)).toEqual([verdict === 'approve' ? undefined : event]);
+    expect(latestRound(readReview(KEY)!)).toMatchObject(verdict === 'approve' ? { state: 'drafted', needsYou: true } : { state: 'posted', by: 'auto', postedReviewId: '99' });
   });
 
   it('refuses auto-post when the GitHub token is not the configured reviewer', async () => {
     drafted();
-    enableAutoPost('approve');
-    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
-    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nidentity = "alex"\nmode = "auto-draft"\nautoPostApprove = "auto-post"\n');
+    enableAutoPost('request_changes');
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 1, body: 'Race' }] }));
+    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nidentity = "alex"\nmode = "auto-draft"\nautoPostRequestChanges = "auto-post"\n');
     const calls: Call[] = [];
     const out = await postReview(KEY, { by: 'auto', token: tok, fetch: github(calls) });
     expect(out).toMatchObject({ posted: false, why: expect.stringContaining('not alex') });
@@ -375,6 +375,45 @@ describe('staged reviews', () => {
   });
 });
 
+describe('Approve anyway', () => {
+  it.each(['requested', 'drafting', 'drafted', 'stale', 'failed', 'dismissed', 'withdrawn', 'posted'] as const)('approves from %s without draft comments or blockers at the live head', async state => {
+    drafted();
+    const item = readReview(KEY)!;
+    Object.assign(item.rounds[0]!, { state, verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 1, body: 'Race' }] });
+    writeReview(item);
+    const calls: Call[] = [];
+    expect(await postReview(KEY, { by: 'glass', approveAnyway: true, token: tok, fetch: github(calls, [], 200, 'bbbbbbb2') })).toMatchObject({ posted: true });
+    expect(posts(calls)).toHaveLength(1);
+    expect(posts(calls)[0]!.body).toEqual({ commit_id: 'bbbbbbb2', event: 'APPROVE', body: '<!-- lobstah:review RRE_7-approve -->' });
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'posted', headSha: 'bbbbbbb2', verdict: 'approve', blocking: [], postedEvent: 'APPROVE', by: 'glass' });
+  });
+
+  it.each([true, false])('handles a staged review that still exists: %s', async exists => {
+    drafted(); const item = readReview(KEY)!;
+    Object.assign(item.rounds[0]!, { state: 'dismissed', staged: { reviewId: '77', at: 'now' } }); writeReview(item);
+    const calls: Call[] = [];
+    const existing = exists ? [{ id: 77, state: 'PENDING', body: MARKER }] : [];
+    expect(await postReview(KEY, { by: 'glass', approveAnyway: true, token: tok, fetch: github(calls, existing) })).toMatchObject({ posted: true });
+    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(exists ? 1 : 0);
+    expect(posts(calls)[0]?.body?.comments).toBeUndefined();
+    expect(latestRound(readReview(KEY)!)?.staged).toBeUndefined();
+  });
+
+  it('refuses automation and a closed PR without posting', async () => {
+    drafted(); const calls: Call[] = [];
+    expect(await postReview(KEY, { by: 'auto', approveAnyway: true, token: tok, fetch: github(calls) })).toMatchObject({ posted: false });
+    const item = readReview(KEY)!; item.pr.state = 'CLOSED'; writeReview(item);
+    expect(await postReview(KEY, { by: 'glass', approveAnyway: true, token: tok, fetch: github(calls) })).toMatchObject({ posted: false });
+    expect(posts(calls)).toEqual([]);
+  });
+
+  it('concurrent clicks submit once', async () => {
+    drafted(); const calls: Call[] = []; const fetch = github(calls);
+    await Promise.all([1, 2].map(() => postReview(KEY, { by: 'glass', approveAnyway: true, token: tok, fetch })));
+    expect(posts(calls)).toHaveLength(1);
+  });
+});
+
 describe('post-time review policy', () => {
   it.each(['notify', 'on-demand'])('refuses an in-flight publishing round after switching to %s', async mode => {
     drafted();
@@ -386,16 +425,16 @@ describe('post-time review policy', () => {
   });
 
   it('rechecks policy after the live-head request, before submitting a staged review', async () => {
-    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nidentity = "chris"\nmode = "auto-review"\nautoPostApprove = "auto-post"\n');
+    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nidentity = "chris"\nmode = "auto-review"\nautoPostRequestChanges = "auto-post"\n');
     drafted();
     const item = readReview(KEY)!;
-    Object.assign(item.rounds[0]!, { autoPostApprove: 'auto-post', autoPostRequestChanges: 'ask', verdict: 'approve', staged: { reviewId: '50', at: new Date().toISOString() } }); writeReview(item);
-    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
+    Object.assign(item.rounds[0]!, { autoPostRequestChanges: 'auto-post', autoPostApprove: 'ask', verdict: 'request_changes', staged: { reviewId: '50', at: new Date().toISOString() } }); writeReview(item);
+    fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 1, body: 'Race' }] }));
     const calls: Call[] = [];
     const request = github(calls);
     const fetcher: FetchLike = async (url, init) => {
       const result = await request(url, init);
-      if (init.method === 'GET' && /\/pulls\/7$/.test(url)) fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nidentity = "chris"\nmode = "auto-draft"\nautoPostApprove = "ask"\n');
+      if (init.method === 'GET' && /\/pulls\/7$/.test(url)) fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nidentity = "chris"\nmode = "auto-draft"\nautoPostRequestChanges = "ask"\n');
       return result;
     };
     expect(await postReview(KEY, { by: 'auto', token: tok, fetch: fetcher })).toMatchObject({ posted: false });
@@ -417,8 +456,8 @@ it.each(['auto', 'glass'] as const)('refuses %s publishing after cancellation, i
 
 it('refuses cancellation that arrives during the live-head request', async () => {
   drafted();
-  enableAutoPost('approve');
-  fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
+  enableAutoPost('request_changes');
+  fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'verdict.json'), JSON.stringify({ verdict: 'request_changes', blocking: [{ path: 'a.ts', line: 1, body: 'Race' }] }));
   enqueue({ id: 'd1', repo: 'web', brief: 'review' }, 'chore'); claimNext('chore');
   const calls: Call[] = [];
   const request = github(calls);

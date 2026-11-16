@@ -175,7 +175,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['report-viewed', 1024],
   ['grant-revoke', 1024],
   ['review-dismiss', 1024],
-  ...['review-skip', 'review-seen', 'review-approve', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
+  ...['review-skip', 'review-seen', 'review-approve', 'review-approve-anyway', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
   ['review-redraft', 1024],
   ['review-draft', 1024],
   ['pr-ack', 256 * 1024],
@@ -1214,6 +1214,7 @@ export function serveGlass(
           }
           case 'review-skip':
           case 'review-seen':
+          case 'review-approve-anyway':
           case 'review-approve':
           case 'review-request-changes':
           case 'review-comment':
@@ -1230,7 +1231,8 @@ export function serveGlass(
             const current = readReview(key);
             if (body.kind === 'review-skip' && current && latestRound(current)?.state === 'posted') return reply(200, { ok: true });
             const event = body.kind === 'review-approve' ? 'APPROVE' : body.kind === 'review-request-changes' ? 'REQUEST_CHANGES' : body.kind === 'review-comment' ? 'COMMENT' : undefined;
-            const act = event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
+            const act = body.kind === 'review-approve-anyway' ? postReview(key, { by: 'glass', approveAnyway: true }).then(out => out.posted ? undefined : out.why)
+              : event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
               : body.kind === 'review-mute' ? Promise.resolve(muteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : body.kind === 'review-unmute' ? Promise.resolve(unmuteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : ['review-dismiss', 'review-skip'].includes(body.kind) ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
