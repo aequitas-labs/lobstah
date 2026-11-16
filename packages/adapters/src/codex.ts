@@ -1,11 +1,44 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
-import { codexInvocation, gitPushTargets, lobstahHome, toolTarget } from '@lobstah/core';
+import { spawn, spawnSync } from 'node:child_process';
+import { codexInvocation, gitPushTargets, lobstahHome, resolveOnPath, toolTarget } from '@lobstah/core';
 import type { CodexHeadlessSandbox, NormalizedEvent } from '@lobstah/core';
 import { AsyncQueue, InputGate, now } from './types.js';
 import type { Adapter, AdapterRun, AdapterStartOpts } from './types.js';
+
+/** Resolve once so the SDK and CLI fallback run the same executable. */
+export function resolveCodexCli(opts: Pick<AdapterStartOpts, 'codexCliPath' | 'cwd' | 'env'>): string | undefined {
+  if (opts.codexCliPath !== undefined) {
+    const file = path.resolve(opts.cwd, opts.codexCliPath);
+    try {
+      fs.accessSync(file, fs.constants.X_OK);
+      if (!fs.statSync(file).isFile()) throw new Error('not a file');
+    } catch {
+      throw new Error(`Codex CLI is not executable: ${file}. Check [harness.codex].cli_path.`);
+    }
+    return file;
+  }
+  const found = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', ['codex'], {
+    cwd: opts.cwd,
+    env: { ...process.env, ...opts.env },
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (found.status === 0) {
+    const files = found.stdout.trim().split(/\r?\n/);
+    // npm also installs a Unix shim without an extension on Windows.
+    const file = process.platform === 'win32' ? files.find((file) => /\.(exe|com|cmd|bat)$/i.test(file)) : files[0];
+    if (file) return path.resolve(opts.cwd, file);
+  }
+  // Minimal worker PATHs may contain Codex without a `which` executable.
+  if (found.error) {
+    const file = resolveOnPath('codex', opts.env.PATH ?? process.env.PATH);
+    if (file) return path.resolve(opts.cwd, file);
+  }
+  console.warn('No codex CLI found on PATH; using the bundled CLI. Set [harness.codex].cli_path to choose a CLI.');
+  return undefined;
+}
 
 /**
  * Dispatches inherit auth but never interactive config: the operator's MCP
@@ -235,15 +268,23 @@ export function createCodexAdapter(): Adapter {
   return {
     name: 'codex',
     async start(opts: AdapterStartOpts): Promise<AdapterRun> {
+      const cliPath = resolveCodexCli(opts);
+      // The SDK spawns without a shell; npm's Windows launchers need one.
+      if (cliPath && process.platform === 'win32' && /\.(cmd|bat)$/i.test(cliPath)) {
+        return startCodexCli((argv) => ({ file: cliPath, argv }), opts);
+      }
       let mod: any;
       try {
         mod = (await import('@openai/codex-sdk' as string)) as any;
       } catch (err) {
-        if (codexInvocation([])) return startCodexCli((argv) => codexInvocation(argv)!, opts);
+        if (cliPath) return startCodexCli((argv) => ({ file: cliPath, argv }), opts);
+        const bundled = codexInvocation([], '');
+        if (bundled) return startCodexCli((argv) => ({ file: bundled.file, argv: [...bundled.argv, ...argv] }), opts);
         const detail = err instanceof Error ? err.message : String(err);
         throw new Error(`codex adapter: SDK unavailable (${detail}) and no codex CLI found (PATH or vendored)`);
       }
       const codex = new mod.Codex({
+        ...(cliPath ? { codexPathOverride: cliPath } : {}),
         env: { ...process.env, ...opts.env, CODEX_HOME: isolatedCodexHome() },
       });
       // The SDK defaults to a read-only sandbox; a dispatch owns its worktree.

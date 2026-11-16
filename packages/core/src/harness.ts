@@ -64,8 +64,8 @@ export function detectHarnesses(): string[] {
  * SDK dependency vendors the full CLI, so an installed lobstah can run it as
  * `node <resolved bin/codex.js>`. Returns undefined when neither exists.
  */
-export function codexInvocation(argv: string[]): { file: string; argv: string[] } | undefined {
-  if (onPath('codex')) return { file: 'codex', argv };
+export function codexInvocation(argv: string[], pathVar: string | undefined = process.env.PATH): { file: string; argv: string[] } | undefined {
+  if (onPath('codex', pathVar)) return { file: 'codex', argv };
   const require_ = createRequire(import.meta.url);
   try {
     const cli = require_.resolve('@openai/codex/bin/codex.js');

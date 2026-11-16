@@ -19,6 +19,7 @@ export interface HarnessPermissionDefaults {
 export type CodexHeadlessSandbox = 'workspace-write' | 'danger-full-access';
 
 export interface CodexHarnessDefaults extends HarnessPermissionDefaults {
+  cli_path?: string;
   headless_sandbox?: CodexHeadlessSandbox;
   headless_model?: string;
 }
@@ -58,6 +59,9 @@ function parseHarness(raw: unknown, where: string): HarnessDefaults | undefined 
     parsePermissionDefaults(defaults[harness], `${where.slice(0, -1)}.${harness}]`);
   }
   const codex = defaults?.codex;
+  if (codex?.cli_path !== undefined && (typeof codex.cli_path !== 'string' || !codex.cli_path.trim())) {
+    throw new Error(`${where.slice(0, -1)}.codex].cli_path must be a non-empty string`);
+  }
   if (codex?.headless_sandbox !== undefined && codex.headless_sandbox !== 'workspace-write' && codex.headless_sandbox !== 'danger-full-access') {
     throw new Error(`${where.slice(0, -1)}.codex].headless_sandbox must be "workspace-write" or "danger-full-access"`);
   }
@@ -839,6 +843,7 @@ export function loadConfig(): Config {
 
 export interface ResolvedDispatch {
   harness: string;
+  codexCliPath?: string;
   codexSandbox?: CodexHeadlessSandbox;
   model?: string;
   effort?: string;
@@ -857,7 +862,10 @@ export function resolveDispatch(d: Descriptor, cfg: Config): ResolvedDispatch {
   const harness = d.harness ?? rh.default ?? gh.default ?? 'claude';
   return {
     harness,
-    ...(harness === 'codex' ? { codexSandbox: rh.codex?.headless_sandbox ?? gh.codex?.headless_sandbox ?? 'workspace-write' } : {}),
+    ...(harness === 'codex' ? {
+      codexSandbox: rh.codex?.headless_sandbox ?? gh.codex?.headless_sandbox ?? 'workspace-write',
+      codexCliPath: rh.codex?.cli_path ?? gh.codex?.cli_path,
+    } : {}),
     model: d.model ?? (harness === 'codex' ? rh.codex?.headless_model ?? gh.codex?.headless_model : undefined) ?? rh.model ?? gh.model,
     effort: d.effort ?? rh.effort ?? gh.effort,
     limits: {

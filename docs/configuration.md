@@ -184,18 +184,19 @@ Same four keys as the per-repo block. Precedence for every harness setting:
 ### `[harness.codex]` — headless Codex
 
 These settings affect SDK and `codex exec` jobs only. Interactive traps keep
-using their existing model and permission settings. Both keys also work in
+using their existing model and permission settings. These settings also work in
 `[repos.<key>.harness.codex]`; repo settings override global settings.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `headless_sandbox` | `"workspace-write"` | `"workspace-write"` allows the checkout and lobstah reporting directory. `"danger-full-access"` disables the sandbox and approval prompts, allowing network access and writes outside the checkout, including tool caches and `~/.ume`. |
 | `headless_model` | unset | Model for headless Codex jobs. An explicit dispatch model wins, then the repo headless model, global headless model, and ordinary repo/global model defaults. Must be a non-empty string. |
+| `cli_path` | `which codex` | Executable path for headless Codex jobs, including SDK runs. A repo value overrides the global value. Relative paths resolve from the job's working directory. If unset and no Codex is on PATH, lobstah warns and uses the bundled CLI, which may support fewer models. An invalid explicit path fails the job. |
 
 ```toml
 [harness.codex]
 headless_sandbox = "danger-full-access"
-headless_model = "gpt-5.6-sol"
+headless_model = "gpt-6.1-sol"
 ```
 
 Headless Codex uses a lobstah-managed `CODEX_HOME` with inherited auth and
