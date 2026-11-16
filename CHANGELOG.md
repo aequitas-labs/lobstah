@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.8.12 — 2026-11-16
+
+### Glass actions and views
+
+- Phone menu links keep the selected page. On deck shows every open decision
+  and repo capacity; report chevrons open reports inside Glass, and todo swipes
+  follow the finger with a larger revealed Snooze target. (#504)
+- Confirmations disappear after 2.5 seconds; decision notices stay until opened
+  or dismissed. Toasts support swipe dismissal, and opening a review clears its
+  notification while keeping the draft. (#505)
+- Section headings keep spaces around counts and arrows. PR details put the
+  drafted review above the description, simplify the header and keep description
+  disclosure markers beside their text. (#507, #509)
+
+### Reviews and merge authorization
+
+- Review rounds retain drafts at an unchanged head, recognize submitted reviews,
+  and distinguish merged, closed and withdrawn requests. A standing request
+  opens a new round only when the PR's own diff changes. (#510, #517)
+- Review drafts collect decisions separately from findings. Answer every decision
+  before posting; saved answers survive reloads and matching redrafts. **New
+  review** starts a fresh review after Skip or Dismiss. (#515)
+- The Reviews badge counts actionable rows, marks them with a dot and puts them
+  first. **Approve anyway** confirms and posts an approval at the current head.
+  (#520)
+- Empty comment drafts are rejected before completion so the drafter can fix
+  them. Secondary GitHub rate limits without a retry time back off from one
+  minute to fifteen minutes. (#521)
+- Merge-when-green authorization records its source, method and holds, survives
+  session changes, and appears on PR and review views with **Cancel merge**.
+  Stacked PRs merge from the bottom with fresh checks between merges. (#519)
+
+### Dispatch and trap sessions
+
+- Parked Codex traps stay registered through long reviews. Ending hooks cannot
+  sign off a replacement session, and ghost recovery stops the old process
+  before starting another. (#506)
+- Turn-wait wakes return to the original dispatch and owning trap, restoring a
+  stowed or ghosted owner with its saved context instead of starting a headless
+  follow-up. (#508)
+- Codex traps keep working after acknowledging a claim. Unread messages wake
+  idle traps, and a stalled working trap gets one automatic recovery prompt
+  before the helm is alerted. (#518)
+- Departed tmux traps save their last 200 terminal lines before dead panes are
+  closed; failed cleanup retries without disturbing live panes. (#511)
+
+### Headless Codex jobs
+
+- Configure the headless sandbox and model globally or per repo. PR review
+  drafts default to fresh headless Codex jobs; the existing trap option remains
+  available. (#512, #513)
+- Headless SDK runs use the host's PATH Codex, with `cli_path` for an explicit
+  executable and a warning before falling back to the bundled CLI. (#516)
+
+### Maintenance
+
+- The release cut script checks the GitHub API exit status so a missing tag is
+  not mistaken for an existing release. (#503)
+
 ## 0.8.11 — 2026-11-13
 
 ### Glass actions and views

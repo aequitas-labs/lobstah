@@ -163,12 +163,19 @@ export function ReviewActions({
     return reviewRequest(kind, { key: r.key });
   };
   const approve: MenuAction = {
-    label: 'Approve anyway', icon: ActionIcon.approve,
-    onClick: (event: Event): void => { event.stopPropagation(); setConfirmApproval(true); },
+    label: 'Approve anyway',
+    icon: ActionIcon.approve,
+    onClick: (event: Event): void => {
+      event.stopPropagation();
+      setConfirmApproval(true);
+    },
   };
   const canApprove = ['open', 'draft'].includes(reviewPrState(r));
   const approvalMenu = canApprove ? [approve] : [];
-  const confirmation = confirmApproval && createPortal(html`<${Dialog} title=${`Approve #${r.number}?`} onClose=${() => setConfirmApproval(false)}>
+  const confirmation =
+    confirmApproval &&
+    createPortal(
+      html`<${Dialog} title=${`Approve #${r.number}?`} onClose=${() => setConfirmApproval(false)}>
     <p>Approve this PR without the draft’s comments or findings.</p>
     <div class="dialog-actions"><${Button} onClick=${() => setConfirmApproval(false)}>Cancel<//>
     <${Button} variant="primary" sending="Approving…" action=${async (event: Event): Promise<string | undefined> => {
@@ -177,7 +184,9 @@ export function ReviewActions({
       if (!why) setConfirmApproval(false);
       return why;
     }}>Approve anyway<//></div>
-  <//>`, document.body);
+  <//>`,
+      document.body,
+    );
   const send = SEND[r.verdict ?? 'comment'];
   const verdictDone =
     send.kind === 'review-approve'
@@ -201,7 +210,8 @@ export function ReviewActions({
           : kind === 'review-skip'
             ? 'Skipping…'
             : 'Sending…';
-  if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /><${SplitButton} more=${approvalMenu} />${confirmation}</span>`;
+  if (r.mutedAt)
+    return html`<span class="rv-actions"><${MuteAction} r=${r} /><${SplitButton} more=${approvalMenu} />${confirmation}</span>`;
   const postBlocked = r.state === 'drafted' && (decisionSaving || unansweredReviewDecisions(r).length > 0);
   const sendButton =
     r.state === 'drafted' &&

@@ -199,14 +199,7 @@ function Navigation({ d, tab, unread, reviewCount }: { d?: GlassSnapshot; tab: G
     };
   }, [open]);
   const badge = (t: GlassTab) => {
-    const count =
-      t === 'deck'
-        ? unread
-        : t === 'reviews'
-          ? reviewCount
-          : t === 'prs'
-            ? prsNeedingYou(d?.prs ?? [])
-            : 0;
+    const count = t === 'deck' ? unread : t === 'reviews' ? reviewCount : t === 'prs' ? prsNeedingYou(d?.prs ?? []) : 0;
     return count > 0 && html`<span class="dbadge" aria-label=${badgeLabel(t, count)}>${count}</span>`;
   };
   const link = (t: GlassTab, inMenu = false) =>
