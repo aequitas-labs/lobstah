@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enqueue, ensureLayout, postNotice, readBeat, readTrap, readHelm, sendTrapMessage, signOnTrap, takeHelm,
-  noticeDispatchProgress, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop, baitBrief } from '@lobstah/core';
+  noticeDispatchProgress, recordCodexIdleWake, unseenNotices, expectReply, claimNext, appendStatus, laneDirs, statusPath, trapWorkingStop, baitBrief } from '@lobstah/core';
 import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -263,6 +263,14 @@ describe('lobstah hook stop (alias: man haul)', () => {
     expect(second).not.toContain('trap-stowed');
   });
 
+  it('keeps acknowledgements and working reports in the same turn in both trap skills', () => {
+    for (const plugin of ['codex', 'claude-code']) {
+      const text = fs.readFileSync(new URL(`../../../plugins/${plugin}/skills/trap/SKILL.md`, import.meta.url), 'utf8');
+      expect(text).toContain('continue the task in the same turn');
+      expect(text).not.toContain('after every completion or report, end your turn');
+    }
+  });
+
   it('keeps the human-wait rule in bait and both plugins, and pause triage in the charter', () => {
     const rule = 'Waiting on a human is `needs-decision` with the question or the thing to look at, never `paused`.';
     expect(baitBrief('job', { repo: 'web', brief: 'work' })).toContain(rule);
@@ -313,7 +321,7 @@ describe('lobstah hook stop (alias: man haul)', () => {
   }
 });
 
-it('idle-working attention appears in helm Stop, tend and status with the full note', () => {
+it('idle-working attention appears after Codex recovery in helm Stop, tend and status with the full note', () => {
   const trapId = trap('idle-session');
   const id = '77777777-7777-4777-8777-777777777777';
   enqueue({ id, repo: 'web', brief: 'b' }); claimNext('work');
@@ -324,6 +332,8 @@ it('idle-working attention appears in helm Stop, tend and status with the full n
   appendStatus(id, 'work', 'working', note, undefined, undefined, true);
   trapWorkingStop(reg, true, Date.now() - 120_000);
   trapWorkingStop(reg, true, Date.now() - 120_000);
+  expect(buildTendReport().attention.some(a => a.id === id)).toBe(false);
+  recordCodexIdleWake(reg, Date.now() - 60_001);
   takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
   noticeDispatchProgress(); unseenNotices(true);
   const stopped = hook(['hook', 'stop'], { session_id: HELM });

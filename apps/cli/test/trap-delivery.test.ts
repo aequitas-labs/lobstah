@@ -52,6 +52,8 @@ it.each(['codex', 'claude'])('the %s Stop hook recovers a brief claimed by an ex
   expect(result.stdout).toContain(`assigned dispatch ${id}`);
   expect(result.stdout).toContain('unique original task');
   expect(result.stdout).toContain('Acknowledge this assignment now');
+  expect(result.stdout).toContain('continue the task in this same turn');
+  expect(result.stdout).not.toContain('After every report, end your turn');
   expect(readStatusLog(id, 'work')).toHaveLength(1);
 });
 
@@ -127,4 +129,20 @@ it('a foreground waiter cannot consume the only wake for an already parked Codex
   } finally {
     if (child.exitCode === null) { child.kill(); await exited; }
   }
+});
+
+it('a real claim and takeover report keep the task in the same turn instead of instructing a park', () => {
+  enqueueBait();
+  const claimed = run('hook', 'stop', '--timeout', '0');
+  expect(claimed.status, claimed.stderr).toBe(0);
+  expect(readSessionClaim(id, 'work')?.by).toBe(`wt:${trapId}`);
+  expect(JSON.parse(claimed.stdout).reason).toContain('unique original task');
+  expect(JSON.parse(claimed.stdout).reason).toContain('Do not stop after an acknowledgement or takeover note');
+  const reported = run('report', id, 'working', 'Taking over; next I will read the code');
+  expect(reported.status, reported.stderr).toBe(0);
+  expect(reported.stdout).toContain('Continue the task now in this same turn');
+  expect(reported.stdout).not.toContain('end your turn');
+  expect(reported.stdout).not.toContain('lobstah soak --wait');
+  const stopped = run('hook', 'stop', '--timeout', '0');
+  expect(JSON.parse(stopped.stdout).reason).toContain('keep working');
 });

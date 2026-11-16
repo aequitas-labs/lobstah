@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { enqueue, ensureLayout, claimNext, appendStatus, listNotices, laneDirs, trapWorkingStop, unseenNotices, claimBait, readTrap, signOnTrap } from '@lobstah/core';
+import { enqueue, ensureLayout, claimNext, appendStatus, listNotices, laneDirs, trapWorkingStop, unseenNotices, claimBait, readTrap, signOnTrap, recordCodexIdleWake } from '@lobstah/core';
 import { tick } from '../src/daemon.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
@@ -29,7 +29,7 @@ it('a trap-any queue at capacity wakes the helm with all-busy reason and clears 
   expect(claimBait(readTrap(on.ok.trapId)!)?.id).toBe('waiting');
   expect(unseenNotices(false).filter((n) => n.kind === 'dispatch-progress' && n.refId === 'waiting')).toEqual([]);
 });
-it('idle-working wakes promptly, backs off, clears on a waiting report and never doubles as stalled', () => {
+it('idle-working attempts recovery before waking the helm, backs off, and clears on a waiting report', () => {
   const trap = { trapId: 'seat', name: 'kind-crab', sessionId: 'session', harness: 'codex', worktree: home, cwd: home,
     claimed: 'idle', signedOnAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() };
   enqueue({ id: 'idle', repo: 'r', brief: 'b' }); claimNext('work');
@@ -39,7 +39,12 @@ it('idle-working wakes promptly, backs off, clears on a waiting report and never
   trapWorkingStop(trap); trapWorkingStop(trap);
   vi.setSystemTime(Date.now() + 59_000); tick();
   expect(listNotices().filter((n) => n.kind === 'trap-idle-working')).toHaveLength(0);
-  vi.setSystemTime(Date.now() + 1000); tick(); tick();
+  vi.setSystemTime(Date.now() + 1000);
+  const recover = vi.fn((now: number) => recordCodexIdleWake(trap, now));
+  tick(() => {}, { codexTrapWatch: recover });
+  expect(recover).toHaveBeenCalledOnce();
+  expect(listNotices().filter(n => n.kind === 'trap-idle-working')).toHaveLength(0);
+  vi.setSystemTime(Date.now() + 60_000); tick(); tick();
   expect(listNotices().filter((n) => n.kind === 'trap-idle-working')).toHaveLength(1);
   expect(unseenNotices(true).find((n) => n.kind === 'trap-idle-working')?.text).toContain('kind-crab');
   vi.setSystemTime(Date.now() + 900_000); tick();

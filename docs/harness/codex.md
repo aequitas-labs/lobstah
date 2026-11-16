@@ -257,6 +257,22 @@ a prompt into the trap's tmux pane when that pane shows Codex's idle prompt.
 If the trap still doesn't report after `[soak].codexClaimReleaseSecs`, the
 dispatch goes back to the queue.
 
+A claimed brief includes the task and tells the trap to keep working in the
+same turn after acknowledging it. `lobstah report <id> working` also tells
+the trap to continue. An acknowledgement or takeover note is not a stopping
+point; the trap ends its turn after `done`, `failed`, `needs-decision`,
+`blocked`, or `paused`.
+
+If a Codex trap still ends its turn on `working`, the daemon attempts one
+recovery prompt per claim and session after `[helm].idleWorkingNoticeSecs`.
+It uses the shared server or types into the idle tmux composer. The helm
+hears only if the trap remains idle for another such interval. A dialog is
+left untouched and reaches helm attention after that interval. Unread
+`lobstah send` messages use the same delivery path when no park hook is
+running; busy sessions receive them through their park hook or when they
+next become idle. The daemon records delivered wakes across restarts and
+leaves messages unread until the trap reads them.
+
 ## CLI vs desktop app
 
 Verified from a Codex desktop task on PR #48 and in #55:

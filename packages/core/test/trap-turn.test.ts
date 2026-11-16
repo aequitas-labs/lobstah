@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { appendStatus, beatTrap, checkHeavyLine, claimNext, dispatchProgress, enqueue, ensureLayout, idleWorkingTrap,
-  joinHeavyLine, laneDirs, releaseHeavyTicket, listNotices, loadConfig, noticeDispatchProgress, noticeStands, trapWorkingStop, unseenNotices, resumeTrapTurn } from '../src/index.js';
+  joinHeavyLine, laneDirs, releaseHeavyTicket, listNotices, loadConfig, noticeDispatchProgress, noticeStands, recordCodexIdleWake, trapWorkingStop, unseenNotices, resumeTrapTurn } from '../src/index.js';
 import type { TrapRegistration } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -25,6 +25,8 @@ beforeEach(() => {
   enqueue({ id: 'job', repo: 'r', brief: 'b' }); claimNext('work');
   fs.writeFileSync(path.join(laneDirs('work').active, 'job', 'claim.json'), JSON.stringify({ by: 'wt:seat', sessionId: trap.sessionId, at: new Date().toISOString() }));
   appendStatus('job', 'work', 'working', 'Holding both PRs until Chris says the design is settled', undefined, undefined, true);
+  // These guard/notice tests start after the claim's automatic recovery attempt.
+  recordCodexIdleWake(trap, Date.now() - 60_000);
 });
 afterEach(() => { vi.useRealTimers(); delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 

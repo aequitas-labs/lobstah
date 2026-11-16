@@ -5,6 +5,7 @@ import path from 'node:path';
 import { laneDirs } from './paths.js';
 import { activeIds, pendingIds, queuedAt, storedDescriptor, cancelRequested } from './queue.js';
 import { readSessionClaim, trapByAddress, trapRepoLabel, hasOpenCatch } from './soak.js';
+import { codexIdleWakeAt } from './codex-idle-recovery.js';
 import { idleWorkingTrap } from './trap-turn.js';
 import { readStatusLog } from './status.js';
 import { readActivity, ageLabel } from './activity.js';
@@ -78,8 +79,8 @@ export function progressNotice(n: { kind: string }): boolean {
   return n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working';
 }
 
-/** Current conditions, independent of notice consumption or daemon restarts. */
-export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): DispatchProgress[] {
+/** Current attention, after Codex recovery; the daemon can also request conditions eligible for recovery. */
+export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), opts: { includeRecoverableCodex?: boolean } = {}): DispatchProgress[] {
   const out: DispatchProgress[] = [];
   for (const lane of ['work', 'chore'] as const) {
     for (const id of pendingIds(lane)) {
@@ -106,6 +107,11 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig()): 
         if (since === undefined) continue; // Its command waits or runs in the heavy line: the trap is working.
         const ageSecs = (now - Date.parse(since)) / 1000;
         if (cfg.helm.idleWorkingNoticeSecs > 0 && ageSecs >= cfg.helm.idleWorkingNoticeSecs) {
+          if (trap!.harness === 'codex' && !opts.includeRecoverableCodex) {
+            const wokeAt = codexIdleWakeAt(trap!);
+            // Recover once before asking the helm; activity withdraws the idle condition.
+            if (wokeAt === undefined || now - wokeAt < cfg.helm.idleWorkingNoticeSecs * 1000) continue;
+          }
           out.push({ id, lane, repo: d.repo, state: 'idle-while-working', since, ageSecs,
             thresholdSecs: cfg.helm.idleWorkingNoticeSecs, stateHash: `idle-working:${since}`,
             text: `idle-while-working ${id}: ${trapRepoLabel(trap!)} ended its turn ${ageLabel(ageSecs * 1000)} ago while reporting working; last note: ${idle.note}. Read the note, resolve the question on a card, or ask the worker to keep working.` });
