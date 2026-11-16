@@ -34,14 +34,26 @@ function isolatedCodexHome(): string {
   return dir;
 }
 
-/** Worker reports and tool ledgers live outside the checkout. */
+/** Worker reports live outside the checkout. */
 export function codexWritableDirectories(opts: AdapterStartOpts): string[] {
-  const dirs = [opts.env.LOBSTAH_HOME ?? lobstahHome(), opts.env.UME_HOME ?? process.env.UME_HOME ?? path.join(os.homedir(), '.ume')];
+  const dirs = [opts.env.LOBSTAH_HOME ?? lobstahHome()];
   for (const dir of dirs) fs.mkdirSync(dir, { recursive: true });
   return dirs;
 }
 
-export function codexThreadOptions(opts: AdapterStartOpts) {
+/** Sandbox and model settings used by a headless Codex SDK thread. */
+export interface CodexThreadOptions {
+  workingDirectory: string;
+  skipGitRepoCheck: boolean;
+  sandboxMode: 'workspace-write';
+  additionalDirectories: string[];
+  approvalPolicy: 'never';
+  model?: string;
+  modelReasoningEffort?: string;
+}
+
+/** Build SDK thread options with the same writable reporting roots as the CLI fallback. */
+export function codexThreadOptions(opts: AdapterStartOpts): CodexThreadOptions {
   return {
     workingDirectory: opts.cwd,
     skipGitRepoCheck: true,

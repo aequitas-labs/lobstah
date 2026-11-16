@@ -4,6 +4,7 @@ import {
   readTrap, resumeTrapTurn, stowTrap, toonHelp, toonKV, trapSessionTitle,
   TRAP_INSTRUCTION_RULE, unhandled, unhandledTrapMessages, unreportedTrapBait,
 } from '@lobstah/core';
+import type { Lane } from '@lobstah/core';
 
 /** Leave time for hook setup and output before the harness's 14,500s limit. */
 export const HOOK_PARK_MS = 14_400_000;
@@ -11,6 +12,17 @@ export const PARK_RENEWAL_REASON = 'lobstah: this trap is still signed on. End t
 
 /** How a park ended: an event, sign-off, hook renewal, or an explicit zero-time probe. */
 export type ParkEnd = 'woke' | 'gone' | 'timeout';
+
+/** Dispatch messages stay unread until the trap consumes its inbox, including recovery on a new claim. */
+function dispatchInboxInstruction(id: string, lane: Lane): string | undefined {
+  const messages = unhandled(id, lane);
+  return messages.length > 0 ? [
+    `New instruction for your dispatch ${id}:`,
+    ...messages.map(message => message.text),
+    `Read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`,
+    TRAP_INSTRUCTION_RULE,
+  ].join('\n\n') : undefined;
+}
 
 /**
  * The trap side of the park: heartbeat, then wait for something to act on.
@@ -76,13 +88,7 @@ export async function soakPark(trapId: string, timeout: string | undefined, plai
         return 'woke';
       }
       const pending = unreportedTrapBait(reg);
-      const messages = unhandled(id, lane);
-      const instruction = messages.length > 0 ? [
-        `New instruction for your dispatch ${id}:`,
-        ...messages.map((m) => m.text),
-        `Read it with \`lobstah inbox ${id}\`, act on it, and keep reporting.`,
-        TRAP_INSTRUCTION_RULE,
-      ].join('\n\n') : undefined;
+      const instruction = dispatchInboxInstruction(id, lane);
       // The daemon swaps outside this process; the old conversation never receives fresh work.
       const awaitingFreshSession = pending && needsFreshTrapSession(pending.descriptor);
       if (!awaitingFreshSession && (pending || instruction)) {
@@ -102,7 +108,7 @@ export async function soakPark(trapId: string, timeout: string | undefined, plai
           const title = trapSessionTitle({ sessionId: reg.sessionId, cwd: reg.worktree })?.title;
           if (title) console.log(toonKV({ title }));
         }
-        block(baitBrief(caught.id, caught.descriptor));
+        block([baitBrief(caught.id, caught.descriptor), dispatchInboxInstruction(caught.id, caught.lane)].filter(Boolean).join('\n\n'));
         return 'woke';
       }
     }

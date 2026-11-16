@@ -10,7 +10,7 @@ import { dropHeavyTickets, liveHeavyTickets } from './heavy.js';
 import { uniqueTempPath, atomicRenameSync, laneDirs, soakingDir } from './paths.js';
 import { linkMismatch, validSessionLink } from './session-link.js';
 import { validRemoteLink } from './remote-link.js';
-import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, requeue } from './queue.js';
+import { cancelRequested, claimNext, complete, queuedDescriptor, pendingIds, readDescriptor, requeue } from './queue.js';
 import { appendStatus, readStatusLog } from './status.js';
 import { mergeEvidence } from './evidence.js';
 import { gitPushTargets, recordPush, resolvePushTargets } from './pushes.js';
@@ -743,6 +743,37 @@ export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued
   return { requeued: id };
 }
 
+/** Save the park context and keep its waiting dispatch addressed to the trap across sign-off and ghost sweeps. */
+export function pinTrapCatch(id: string, lane: Lane, trapId: string, parkContext: string): boolean {
+  return withTrapLifecycleLock(trapId, () => {
+    const address = `wt:${trapId}`;
+    if (readSessionClaim(id, lane)?.by !== address) return false;
+    const descriptor = readDescriptor(id, lane);
+    if (descriptor.for && descriptor.for !== address) return false;
+    if (descriptor.for !== address || descriptor.parkContext !== parkContext)
+      atomicWrite(path.join(laneDirs(lane).active, id, 'descriptor.json'), JSON.stringify({ ...descriptor, for: address, parkContext }, null, 2));
+    return true;
+  });
+}
+
+/** Return an absent trap's unfinished dispatch to its own queue; never create a follow-up or headless job. */
+export function restoreTrapCatch(id: string, lane: Lane, trapId: string, parkContext: string): boolean {
+  return withTrapLifecycleLock(trapId, () => {
+    if (readTrap(trapId) || cancelRequested(id, lane)) return false;
+    const last = readStatusLog(id, lane).at(-1)?.verb;
+    if (last && TERMINAL_VERBS.includes(last)) return false;
+    const address = `wt:${trapId}`;
+    const claim = readSessionClaim(id, lane);
+    if (claim && claim.by !== address) return false;
+    const queued = queuedDescriptor(id, lane);
+    const descriptor = queued ?? readDescriptor(id, lane);
+    if (descriptor.for && descriptor.for !== address) return false;
+    const file = queued ? path.join(laneDirs(lane).queue, `${id}.json`) : path.join(laneDirs(lane).active, id, 'descriptor.json');
+    atomicWrite(file, JSON.stringify({ ...descriptor, for: address, sessionMode: 'continue', parkContext }, null, 2));
+    return queued !== undefined || releaseCatch({ claimed: id }).requeued === id;
+  });
+}
+
 /** A newly claimed dispatch must reach its replacement session before the brief is delivered. */
 export function needsFreshTrapSession(descriptor: Descriptor): boolean {
   return descriptor.sessionMode === 'fresh' && !descriptor.handoff && !descriptor.target;
@@ -1016,6 +1047,7 @@ export function baitBrief(id: string, d: Descriptor): string {
     '',
     d.brief,
     ...(d.handoff ? ['', d.handoff] : []),
+    ...(d.parkContext ? ['', d.parkContext] : []),
     ...(d.attachments?.length ? ['', attachmentBlock(d.attachments)] : []),
   ].join('\n');
 }

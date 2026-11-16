@@ -1,14 +1,16 @@
 import fs from 'node:fs';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import {
   atomicRenameSync,
-  enqueue,
   hasOpenCatch,
   laneOf,
   listTraps,
+  loadConfig,
+  pinTrapCatch,
+  readReservation,
+  restoreTrapCatch,
   lobstahHome,
   lobstahTurnSessions,
   postNotice,
@@ -27,7 +29,8 @@ import {
   uniqueTempPath,
   unhandled,
 } from '@lobstah/core';
-import type { Lane, TrapRegistration, TurnWait } from '@lobstah/core';
+import type { Lane, StatusEntry, TrapRegistration, TurnWait } from '@lobstah/core';
+import { throwTrap } from './throw.js';
 
 /**
  * The owner's half of the turn-end contract (packages/core/src/turn-owner.ts):
@@ -39,7 +42,7 @@ import type { Lane, TrapRegistration, TurnWait } from '@lobstah/core';
  * - Each record's `wait` runs as one child process at a time, with `{cursor}`
  *   filled in. When it prints a line, lobstah wakes the session with a
  *   pointer to `read`, never the content: a live trap through its inbox, a
- *   trap that's gone through a continuation of its dispatch.
+ *   trap that's gone through a re-throw of its owner, with its recorded park context.
  * - A pointer the trap hasn't read after STALE_MS raises one helm notice:
  *   nobody is listening.
  * - A record ends when its registration file is removed while the trap is
@@ -50,12 +53,18 @@ import type { Lane, TrapRegistration, TurnWait } from '@lobstah/core';
 export const STALE_MS = 15 * 60_000;
 /**
  * How a wait that printed nothing ended: exit 0 or 2 is a quiet timeout (2 is
- * the usual "timed out" code, as `ume await` uses), a signal is the daemon
+ * a common "timed out" code), a signal is the daemon
  * stopping it, and any other exit code is a failure, however long it ran.
  */
 const QUIET_EXITS: ReadonlySet<number> = new Set([0, 2]);
 /** Backoff after a failed wait: 5 s, doubling, at most 5 minutes. */
 const backoffMs = (failures: number): number => Math.min(300_000, 5_000 * 2 ** Math.max(0, failures - 1));
+
+/** Context recorded by the waiting dispatch and tool, replayed as text without interpreting its source. */
+export interface DispatchParkContext {
+  report?: StatusEntry;
+  instructions?: string;
+}
 
 export interface TurnWaitRecord {
   key: string;
@@ -69,16 +78,16 @@ export interface TurnWaitRecord {
   cwd: string;
   cursor?: string;
   registeredAt: string;
-  /** Project context captured from the registering tool’s folder; never credentials. */
-  env?: Record<string, string>;
+  /** The dispatch report and opaque tool instructions captured while it parked. */
+  parkContext?: DispatchParkContext;
   /** Consecutive failed runs, and when the next run may start. */
   failures?: number;
   nextRunAt?: string;
   lastError?: string;
   /** The last pointer delivered to a live trap: the inbox it went to and its file. */
   pointer?: { inbox: string; lane: Lane; file: string; at: string; staleNoticed?: boolean };
-  /** The continuation queued for a trap that's gone; one at a time. */
-  followUp?: string;
+  /** Failed owner starts back off independently of the wait process. */
+  ownerRestart?: { failures: number; nextAttemptAt: string; lastError: string };
 }
 
 export const turnWaitsDir = (): string => path.join(lobstahHome(), 'turn-waits');
@@ -141,17 +150,28 @@ function dispatchEnded(id: string): boolean {
   return last !== undefined && TERMINAL_VERBS.includes(last);
 }
 
-/** The live owning trap, including a replacement session on the same catch. */
-function liveTrap(r: TurnWaitRecord): TrapRegistration | undefined {
-  const lane = r.dispatch ? laneOf(r.dispatch) : undefined;
-  const claim = r.dispatch && lane ? readSessionClaim(r.dispatch, lane) : undefined;
-  if (claim?.by.startsWith('wt:')) {
-    const owner = readTrap(claim.by.slice(3));
-    // The catch survives a re-throw or an explicit handover to another trap.
-    if (owner && owner.claimed === r.dispatch && hasOpenCatch(owner)) return owner;
-  }
-  const t = readTrap(r.trapId);
-  return t?.sessionId === r.session ? t : undefined;
+/** Resolve the dispatch's current trap claim or sticky address before its original registration. */
+export function turnWaitOwnerId(record: TurnWaitRecord): string {
+  const lane = record.dispatch ? laneOf(record.dispatch) : undefined;
+  const claim = record.dispatch && lane ? readSessionClaim(record.dispatch, lane) : undefined;
+  const descriptor = record.dispatch && lane ? storedDescriptor(record.dispatch, lane) : undefined;
+  const address = claim?.by ?? descriptor?.for;
+  return address?.startsWith('wt:') ? address.slice(3) : record.trapId;
+}
+
+/** A live owner must still hold this dispatch; a later catch never receives an earlier catch's wake. */
+function liveTrap(record: TurnWaitRecord): TrapRegistration | undefined {
+  const trap = readTrap(turnWaitOwnerId(record));
+  if (record.dispatch) return trap?.claimed === record.dispatch && hasOpenCatch(trap) ? trap : undefined;
+  return trap?.sessionId === record.session ? trap : undefined;
+}
+
+/** Capture a dispatch's latest waiting report and any recovery text supplied by the tool. */
+function savedParkContext(dispatch: string | undefined, instructions: string | undefined): DispatchParkContext {
+  const lane = dispatch ? laneOf(dispatch) : undefined;
+  const report = dispatch && lane ? readStatusLog(dispatch, lane).filter(entry =>
+    entry.verb === 'paused' || entry.verb === 'needs-decision' || entry.verb === 'blocked').at(-1) : undefined;
+  return { ...(report ? { report } : {}), ...(instructions !== undefined ? { instructions } : {}) };
 }
 
 /**
@@ -169,14 +189,21 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     if (!trap) continue;
     noteSeenTool(w.from);
     const existing = readRecord(key);
-    const dispatch = hasOpenCatch(trap) ? trap.claimed : existing?.dispatch;
     const cwd = w.cwd ?? readTurnOwner(w.session)?.cwd ?? trap.cwd;
-    const env = waitEnvironment(w.from, cwd) ?? existing?.env;
+    const retargeted = existing && (existing.wait !== w.wait || existing.read !== w.read || existing.cwd !== cwd);
+    const dispatch = retargeted ? (hasOpenCatch(trap) ? trap.claimed : existing.dispatch) : existing?.dispatch ?? (hasOpenCatch(trap) ? trap.claimed : undefined);
+    const previous = existing ?? readTurnWaitRecords().find(record => record.dispatch === dispatch &&
+      record.from === w.from && record.read === w.read && turnWaitOwnerId(record) === trap.trapId);
+    const parkContext = savedParkContext(dispatch, w.context ?? (previous?.dispatch === dispatch ? previous?.parkContext?.instructions : undefined));
+    if (dispatch) {
+      const lane = laneOf(dispatch);
+      if (lane && trap.claimed === dispatch) pinTrapCatch(dispatch, lane, trap.trapId, dispatchParkContextText({ dispatch, cwd, read: w.read, parkContext }));
+    }
     const changed = !existing || existing.wait !== w.wait || existing.read !== w.read || existing.dispatch !== dispatch ||
-      existing.cwd !== cwd || JSON.stringify(existing.env) !== JSON.stringify(env);
+      existing.cwd !== cwd || JSON.stringify(existing.parkContext) !== JSON.stringify(parkContext);
     if (!changed) continue;
     writeRecord({
-      ...(existing ?? {}),
+      ...(previous ?? {}),
       key,
       session: w.session,
       trapId: trap.trapId,
@@ -185,18 +212,18 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
       wait: w.wait,
       read: w.read,
       cwd,
-      ...(existing?.cursor ?? w.cursor ? { cursor: existing?.cursor ?? w.cursor } : {}),
-      env,
+      ...(previous?.cursor ?? w.cursor ? { cursor: previous?.cursor ?? w.cursor } : {}),
+      parkContext,
       registeredAt: existing?.registeredAt ?? new Date(now).toISOString(),
     });
   }
   const records = readTurnWaitRecords();
   for (const r of records) {
     // Once the new session registers the same wait, only its watcher runs.
-    const superseded = records.some((next) => next.key !== r.key && next.trapId === r.trapId &&
+    const superseded = records.some((next) => next.key !== r.key &&
       next.dispatch === r.dispatch && next.from === r.from && next.read === r.read &&
-      next.session === readTrap(r.trapId)?.sessionId && next.session !== r.session);
-    const withdrawn = !registered.has(r.key) && liveTrap(r)?.sessionId === r.session;
+      next.session === readTrap(next.trapId)?.sessionId && next.session !== r.session);
+    const withdrawn = !registered.has(r.key) && readTrap(r.trapId)?.sessionId === r.session;
     const finished = r.dispatch ? dispatchEnded(r.dispatch) : liveTrap(r) === undefined;
     if (superseded || withdrawn || finished) {
       removeRecord(r.key);
@@ -204,16 +231,6 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     }
   }
   return ended;
-}
-
-/** Ume's local pin follows its set, including a project move. Do not inherit a daemon's unrelated token. */
-function waitEnvironment(from: string, cwd: string): Record<string, string> | undefined {
-  if (from !== 'ume') return undefined;
-  try {
-    const state = JSON.parse(fs.readFileSync(path.join(cwd, '.ume', 'next.json'), 'utf8'));
-    const project = state.projectContext?.destination ?? state.project;
-    return typeof project === 'string' && project ? { UME_PROJECT: project, UME_TOKEN: '' } : undefined;
-  } catch { return undefined; }
 }
 
 /** The one-line pointer a wake carries. */
@@ -224,10 +241,10 @@ export function pointerText(r: Pick<TurnWaitRecord, 'from' | 'read'>, summary: s
 /**
  * One line a wait printed. Records its cursor, then wakes the session:
  * a live trap gets the pointer in its dispatch's inbox (or its own, between
- * dispatches); a trap that's gone gets a continuation of its dispatch, one
- * at a time. Returns where the pointer went.
+ * dispatches). A missing owner's pointer stays in that dispatch's inbox for
+ * its re-thrown trap, with the saved park context. Never creates a new dispatch.
  */
-export function deliverTurnWaitLine(key: string, line: string, now = Date.now()): 'inbox' | 'trap' | 'continuation' | 'held' | 'dropped' {
+export function deliverTurnWaitLine(key: string, line: string, now = Date.now()): 'inbox' | 'trap' | 'dropped' {
   const r = readRecord(key);
   if (!r) return 'dropped';
   let parsed: { cursor?: unknown; summary?: unknown };
@@ -238,28 +255,17 @@ export function deliverTurnWaitLine(key: string, line: string, now = Date.now())
   }
   const summary = typeof parsed.summary === 'string' ? parsed.summary.slice(0, 200) : undefined;
   const next: TurnWaitRecord = { ...r, ...(typeof parsed.cursor === 'string' || typeof parsed.cursor === 'number' ? { cursor: String(parsed.cursor) } : {}) };
-  const env = waitEnvironment(r.from, r.cwd) ?? r.env;
   const text = pointerText(r, summary);
   const from = `wait:${r.from}`;
   const trap = liveTrap(r);
   const lane = r.dispatch ? laneOf(r.dispatch) : undefined;
   let outcome: ReturnType<typeof deliverTurnWaitLine>;
-  if (trap && r.dispatch && lane && !dispatchEnded(r.dispatch)) {
+  if (r.dispatch && lane && !dispatchEnded(r.dispatch)) {
     next.pointer = { inbox: r.dispatch, lane, file: sendMessage(r.dispatch, lane, text, from), at: new Date(now).toISOString() };
     outcome = 'inbox';
-  } else if (trap) {
+  } else if (!r.dispatch && trap) {
     sendTrapMessage(trap.trapId, from, text);
     outcome = 'trap';
-  } else if (r.dispatch && lane && !dispatchEnded(r.dispatch)) {
-    if (r.followUp && !dispatchEnded(r.followUp)) {
-      outcome = 'held';
-    } else {
-      const descriptor = storedDescriptor(r.dispatch, lane);
-      const id = randomUUID();
-      enqueue({ id, repo: descriptor?.repo ?? '', brief: text, followUp: r.dispatch, ...(env ? { env } : {}) }, 'work');
-      next.followUp = id;
-      outcome = 'continuation';
-    }
   } else {
     outcome = 'dropped';
   }
@@ -291,17 +297,51 @@ export function noticeUnreadPointers(now = Date.now()): string[] {
   return noticed;
 }
 
+/** The saved waiting report and tool context, shown to the replacement trap as recovery instructions. */
+export function parkContextText(record: Pick<TurnWaitRecord, 'dispatch' | 'cwd' | 'read' | 'parkContext'>): string {
+  const report = record.parkContext?.report;
+  return [
+    `Saved park context for dispatch ${record.dispatch}:`,
+    `Working directory: ${record.cwd}`,
+    ...(report?.note ? [report.note] : []),
+    ...(report?.waitingOn ? [`Waiting on: ${report.waitingOn}`] : []),
+    ...(report?.link ? [`Link: ${report.link}`] : []),
+    ...(record.parkContext?.instructions ? [record.parkContext.instructions] : []),
+    `Read command: \`${record.read}\``,
+    'Restore this context in your own session, then register the wait and park again.',
+  ].join('\n');
+}
+
+/** Preserve every tool's recorded context when several waits belong to the same dispatch. */
+function dispatchParkContextText(record: Pick<TurnWaitRecord, 'dispatch' | 'cwd' | 'read' | 'parkContext'>): string {
+  const otherContexts = readTurnWaitRecords().filter(other => other.dispatch === record.dispatch &&
+    (other.cwd !== record.cwd || other.read !== record.read)).map(parkContextText);
+  return [...new Set([parkContextText(record), ...otherContexts])].sort().join('\n\n');
+}
+
 /** What starts a wait: injectable for tests. */
-export type SpawnWait = (command: string, cwd: string, env?: Record<string, string>) => ChildProcess;
-const spawnWait: SpawnWait = (command, cwd, env) => spawn(command, { env: { ...process.env, ...env }, shell: true, cwd: fs.existsSync(cwd) ? cwd : undefined, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+export type SpawnWait = (command: string, cwd: string) => ChildProcess;
+const spawnWait: SpawnWait = (command, cwd) => spawn(command, { shell: true, cwd: fs.existsSync(cwd) ? cwd : undefined, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+
+/** Bring back the existing trap through its normal interactive launch path, never a runner fork. */
+export type RethrowTurnWaitTrap = (trapId: string) => Promise<void>;
+const rethrowTurnWaitTrap: RethrowTurnWaitTrap = async (trapId) => {
+  await throwTrap({ cfg: loadConfig(), address: `wt:${trapId}` });
+};
+
+/** Dependencies for restarting a missing owner; wait process injection remains separate. */
+export interface TurnWaitOptions {
+  rethrow?: RethrowTurnWaitTrap;
+}
 
 /**
  * The daemon's turn-waits pass: sync the records, start each due wait that
  * isn't running, stop the ones whose record ended, and notice unread
  * pointers. `children` lives across passes.
  */
-export function createTurnWaits(start: SpawnWait = spawnWait): { pass: (now: number, log: (m: string) => void) => void; children: Map<string, ChildProcess> } {
+export function createTurnWaits(start: SpawnWait = spawnWait, options: TurnWaitOptions = {}): { pass: (now: number, log: (m: string) => void) => void; children: Map<string, ChildProcess> } {
   const children = new Map<string, ChildProcess>();
+  const restarting = new Set<string>();
   // A wait outlives no daemon: the next one starts it again.
   process.once('exit', () => {
     for (const child of children.values()) child.kill();
@@ -314,7 +354,7 @@ export function createTurnWaits(start: SpawnWait = spawnWait): { pass: (now: num
     }
     for (const r of readTurnWaitRecords()) {
       if (children.has(r.key) || (r.nextRunAt && Date.parse(r.nextRunAt) > now)) continue;
-      const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd, waitEnvironment(r.from, r.cwd) ?? r.env);
+      const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd);
       children.set(r.key, child);
       let buffered = '';
       let printed = false;
@@ -352,6 +392,26 @@ export function createTurnWaits(start: SpawnWait = spawnWait): { pass: (now: num
           writeRecord(rest);
         }
       });
+    }
+    for (const record of readTurnWaitRecords()) {
+      const pointer = record.pointer;
+      if (!record.dispatch || !pointer || !unhandled(pointer.inbox, pointer.lane).some(message => message.file === pointer.file)) continue;
+      const ownerId = turnWaitOwnerId(record);
+      if (readTrap(ownerId) || readReservation(ownerId) || restarting.has(ownerId) ||
+        (record.ownerRestart && Date.parse(record.ownerRestart.nextAttemptAt) > now)) continue;
+      restarting.add(ownerId);
+      void (async () => {
+        if (!restoreTrapCatch(record.dispatch!, pointer.lane, ownerId, dispatchParkContextText(record))) return;
+        await (options.rethrow ?? rethrowTurnWaitTrap)(ownerId);
+        log(`turn wait ${record.key}: owner wt:${ownerId} re-thrown for ${record.dispatch}`);
+      })().catch(error => {
+        const current = readRecord(record.key);
+        if (!current) return;
+        const failures = (current.ownerRestart?.failures ?? 0) + 1;
+        const lastError = error instanceof Error ? error.message : String(error);
+        writeRecord({ ...current, ownerRestart: { failures, lastError, nextAttemptAt: new Date(Date.now() + backoffMs(failures)).toISOString() } });
+        log(`turn wait ${record.key}: owner restart failed (${lastError})`);
+      }).finally(() => restarting.delete(ownerId));
     }
     noticeUnreadPointers(now);
   };
