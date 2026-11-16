@@ -8,7 +8,8 @@ import { can } from '../backend.js';
 import { getState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone, MenuAction } from './card.js';
-import { StatusChip, dispatchTrap, prShapedCard } from './prs.js';
+import { PrStateIcon, StatusChip, dispatchTrap, prShapedCard } from './prs.js';
+import type { PrIconState } from './prs.js';
 import { Button } from './button.js';
 import { unansweredReviewDecisions } from '../../../core/src/review-decisions.js';
 import { reviewUnreadReason } from '../review-attention.js';
@@ -23,11 +24,26 @@ import { reviewUnreadReason } from '../review-attention.js';
  */
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
-const TONE: Record<string, string> = { drafted: 'ok', stale: 'warn', failed: 'bad', posted: 'dim', dismissed: 'dim', withdrawn: 'dim' };
+const TONE: Record<string, string> = {
+  drafted: 'ok',
+  stale: 'warn',
+  failed: 'bad',
+  posted: 'dim',
+  dismissed: 'dim',
+  withdrawn: 'dim',
+  merged: 'dim',
+  closed: 'dim',
+};
 
 /** The state as a person reads it: a staged draft is waiting in the review tool. */
 export const reviewState = (r: Pick<GlassReview, 'state' | 'decisions' | 'decisionAnswers'>): string =>
   r.state === 'drafted' && unansweredReviewDecisions(r).length ? 'needs your call' : r.state;
+
+/** Prefer the PR lifecycle over round status; older payloads retain merged/closed and otherwise use open. */
+export function reviewPrState(r: Pick<GlassReview, 'prState' | 'prDraft' | 'state'>, draft = false): PrIconState {
+  const state = r.prState ?? (r.state === 'merged' ? 'MERGED' : r.state === 'closed' ? 'CLOSED' : 'OPEN');
+  return state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : (r.prDraft ?? draft) ? 'draft' : 'open';
+}
 
 export const openReview = (r: Pick<GlassReview, 'reviewUrl'> & { key?: string }) => () => {
   window.open(r.reviewUrl, '_blank', 'noopener');
@@ -250,7 +266,7 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
       e.stopPropagation();
       showReview(r)();
       e.preventDefault();
-    }}>${r.repo}#${r.number}</a></td>
+    }}><${PrStateIcon} state=${reviewPrState(r)} /> ${r.repo}#${r.number}</a></td>
     <td class="grow">${r.title}${findings(r)}</td>
     <td>${r.author}</td>
     <td>${asker(r)}</td>
@@ -280,14 +296,14 @@ export function reviewStatus(r: Pick<GlassReview, 'state' | 'staged' | 'verdict'
   if (r.state === 'posted')
     return { word: (r.verdict && POSTED[r.verdict]) || 'posted', tone: r.verdict === 'request_changes' ? 'warn' : 'ok' };
   if (r.state === 'failed') return { word: 'failed', tone: 'bad' };
-  if (r.state === 'dismissed' || r.state === 'withdrawn') return { word: r.state, tone: 'dim' };
+  if (['dismissed', 'withdrawn', 'merged', 'closed'].includes(r.state)) return { word: r.state, tone: 'dim' };
   return { word: reviewState(r), tone: 'warn' };
 }
 
 /** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
 function reviewTone(r: GlassReview): CardTone {
   if (r.state === 'posted') return 'ok';
-  if (r.state === 'dismissed' || r.state === 'withdrawn') return 'dim';
+  if (['dismissed', 'withdrawn', 'merged', 'closed'].includes(r.state)) return 'dim';
   if (unansweredReviewDecisions(r).length || r.needsYou || r.stands || r.state === 'failed') return 'bad';
   return 'warn';
 }
@@ -321,6 +337,7 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
     key: r.key,
     title: r.title,
     titleAttr: r.title,
+    prState: reviewPrState(r),
     status: [
       StatusChip(status.word, status.tone),
       reviewUnreadReason(r) && html`<span class="gchip bad" data-review-unread>● ${reviewUnreadReason(r)}</span>`,

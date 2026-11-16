@@ -3,7 +3,7 @@ import { unansweredReviewDecisions } from '../../core/src/review-decisions.js';
 
 /** One rule for the Reviews badge and each row's unread marker; closed rounds never count. */
 export function reviewUnreadReason(review: GlassReview): string | undefined {
-  if (review.state === 'dismissed' || review.state === 'withdrawn') return undefined;
+  if (['dismissed', 'withdrawn', 'merged', 'closed'].includes(review.state)) return undefined;
   const since = review.notification?.at ?? review.draftedAt ?? review.requestedAt;
   if ((review.seenAt && review.seenAt >= since) || (review.acknowledgedAt && review.acknowledgedAt >= since)) return undefined;
   if (review.state === 'drafted' && unansweredReviewDecisions(review).length) return 'Needs your call';

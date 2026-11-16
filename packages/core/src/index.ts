@@ -53,6 +53,7 @@ export * from './requests.js';
 export * from './notices.js';
 export * from './pr-stacks.js';
 export * from './window.js';
+export * from './tmux-panes.js';
 export * from './helm.js';
 export * from './grounds-name.js';
 export * from './sent.js';

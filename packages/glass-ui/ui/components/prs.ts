@@ -175,13 +175,21 @@ export function dispatchTrap(ids: readonly (string | undefined)[]): string | und
   return undefined;
 }
 
+/** GitHub's lifecycle and draft states, as the shared PR icon displays them. */
+export type PrIconState = 'open' | 'draft' | 'merged' | 'closed';
+
+/** The PR icon in GitHub's state color, shared by cards, rows and review headers. */
+export function PrStateIcon({ state = 'open' }: { state?: PrIconState }): Children {
+  return html`<span class=${'prstate pr-' + state}>${PrIcon}</span>`;
+}
+
 /** What a PR-shaped card shows: a PR card, or a review card, which is a PR asking for your review. */
 export interface PrCardParts {
   key: string;
   title: Children;
   titleAttr?: string;
   /** GitHub's state for the PR, which colors its icon: open green, draft grey, merged purple, closed red. */
-  prState?: 'open' | 'draft' | 'merged' | 'closed';
+  prState?: PrIconState;
   /** The status chips under the title. */
   status: Children;
   /** The colored edge: red when it waits on you, amber in progress, green done. */
@@ -231,7 +239,7 @@ export function prShapedCard(c: PrCardParts) {
     key=${c.key}
     title=${c.title}
     titleAttr=${c.titleAttr}
-    icon=${html`<span class=${'prstate pr-' + (c.prState ?? 'open')}>${PrIcon}</span>`}
+    icon=${html`<${PrStateIcon} state=${c.prState} />`}
     iconFirst
     state=${{ word: '', tone: c.tone, mark: 'edge' }}
     status=${c.status}

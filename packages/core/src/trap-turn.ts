@@ -50,7 +50,9 @@ export function trapWorkingStop(reg: TrapRegistration, stopHookActive = false, n
     if (old?.idleSince) write(reg, state);
     return {};
   }
-  if (stopHookActive || same(old, reg, w)) {
+  // Codex sets stop_hook_active after any park wake, before this guard has
+  // necessarily corrected the worker. Only our own marker proves a nudge.
+  if ((stopHookActive && reg.harness !== 'codex') || same(old, reg, w)) {
     write(reg, { ...state, idleSince: same(old, reg, w) ? old?.idleSince ?? new Date(now).toISOString() : new Date(now).toISOString() });
     return {};
   }

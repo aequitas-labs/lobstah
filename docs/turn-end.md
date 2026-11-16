@@ -40,6 +40,7 @@ A registration, written into `waits` (one file per tool, any name ending in
 | `read` | What the agent runs to see what's new. |
 | `cwd` | Where to run `wait`. Optional; the owner's `cwd` otherwise. |
 | `cursor` | Where `{cursor}` starts. Optional. |
+| `context` | Optional recovery text (at most 20,000 characters): the tool's set, artifact, or instructions for restoring its state in the trap's own session. Lobstah stores and replays it without interpreting or executing it. |
 
 `wait` prints `{ "cursor": "<next>", "summary": "<one line>" }` and exits 0.
 With nothing new by its own deadline, it prints nothing and exits 0 or 2.
@@ -70,7 +71,22 @@ not move what `read` shows the agent: the agent reads it later.
 - When a wait prints, a live trap gets the pointer in its dispatch's inbox
   (its own inbox between dispatches), which wakes its park: "ume has
   something new: Chris picked an option. Run `ume feedback a1` to see it."
-  A trap that's gone gets a continuation of its dispatch, one at a time.
+  The wake stays keyed to that dispatch, even if the trap has moved on to
+  another catch. A working trap receives no injected turn: its own park
+  delivers the inbox message.
+- The waiting dispatch stays addressed to its owning trap. Lobstah saves
+  the waiting report (including its note and link) and each tool's opaque
+  `context` with the dispatch. It does not read any tool's private state or
+  pass tool-specific environment variables.
+- If the owner is stowed or ghosted when a wake is pending, the daemon
+  re-throws that same trap through its normal interactive launch path.
+  It restores the original dispatch and delivers its brief, saved park
+  context, and unread inbox together. The trap restores the tool's state
+  and registers its own wait again. A replacement registration retires the
+  old watcher. Turn-wait wakes never create a headless follow-up dispatch.
+- Only one re-throw per owner runs at a time. Existing start reservations
+  prevent duplicate launches across daemon restarts; failed starts back
+  off while the dispatch and its messages remain in place.
 - A pointer still unread after 15 minutes raises one `trap-not-receiving`
   notice to the helm: the trap has stopped receiving.
 - A wait that ends without printing, with exit 0 or 2, timed out quietly

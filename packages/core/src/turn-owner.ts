@@ -60,6 +60,8 @@ export interface TurnWaitRegistration {
   cwd?: string;
   /** The cursor `{cursor}` starts from. */
   cursor?: string;
+  /** Opaque recovery instructions to replay to the trap after a restart; the owner never executes them. */
+  context?: string;
 }
 
 /** A registration as read from disk, with where it came from. */
@@ -140,6 +142,7 @@ export function turnWaitProblem(r: unknown): string | undefined {
   }
   if (o.cwd !== undefined && (typeof o.cwd !== 'string' || !path.isAbsolute(o.cwd))) return '"cwd" must be an absolute path';
   if (o.cursor !== undefined && typeof o.cursor !== 'string') return '"cursor" must be a string';
+  if (o.context !== undefined && (typeof o.context !== 'string' || o.context.length > 20_000)) return '"context" must be text of at most 20000 characters';
   return undefined;
 }
 
@@ -168,6 +171,7 @@ export function readTurnWaits(session: string): TurnWait[] {
       read: reg.read,
       ...(reg.cwd !== undefined ? { cwd: reg.cwd } : {}),
       ...(reg.cursor !== undefined ? { cursor: reg.cursor } : {}),
+      ...(reg.context !== undefined ? { context: reg.context } : {}),
     });
   }
   return out;

@@ -283,7 +283,7 @@ describe('lobstah hook stop (alias: man haul)', () => {
       const reg = readTrap(trapId)!;
       fs.writeFileSync(path.join(home, 'soaking', `${trapId}.json`), JSON.stringify({ ...reg, claimed: id }));
       appendStatus(id, 'work', 'working', 'still executing', undefined, undefined, true);
-      const first = hook(['hook', 'stop'], { session_id: 'working-session' });
+      const first = hook(['hook', 'stop'], { session_id: 'working-session', stop_hook_active: harness === 'codex' });
       expect(first.status, first.stderr).toBe(0);
       expect(JSON.parse(first.stdout).reason).toContain('about to go idle');
       expect(JSON.parse(first.stdout).reason).toContain('waiting on an external await, report paused and name it');
@@ -322,6 +322,7 @@ it('idle-working attention appears in helm Stop, tend and status with the full n
   fs.writeFileSync(path.join(home, 'soaking', `${trapId}.json`), JSON.stringify(reg));
   const note = 'Holding both PRs until Chris says the design is settled; full final question?';
   appendStatus(id, 'work', 'working', note, undefined, undefined, true);
+  trapWorkingStop(reg, true, Date.now() - 120_000);
   trapWorkingStop(reg, true, Date.now() - 120_000);
   takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
   noticeDispatchProgress(); unseenNotices(true);
