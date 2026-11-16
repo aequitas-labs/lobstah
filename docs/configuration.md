@@ -195,7 +195,7 @@ using their existing model and permission settings. Both keys also work in
 ```toml
 [harness.codex]
 headless_sandbox = "danger-full-access"
-headless_model = "gpt-6.1-sol"
+headless_model = "gpt-5.6-sol"
 ```
 
 Headless Codex uses a lobstah-managed `CODEX_HOME` with inherited auth and
