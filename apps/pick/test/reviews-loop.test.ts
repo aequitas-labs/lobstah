@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit, reviewAsker } from '@lobstah/core';
+import { addWatch, claimNext, dispatchWasCancelled, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit, reviewAsker, writeReview } from '@lobstah/core';
 import { runPickup } from '../src/run.js';
 import { REVIEW_SEARCH, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
@@ -33,6 +33,8 @@ interface Pr {
   head?: string;
   requester?: string;
   automatic?: boolean;
+  state?: 'OPEN' | 'MERGED' | 'CLOSED';
+  reviews?: Array<{ id: number; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; head: string; at: string }>;
   requests?: Array<{ id: string; at: string; to: string; team?: boolean; actor?: { login: string; __typename?: string; name?: string; avatarUrl?: string } }>;
 }
 
@@ -46,6 +48,7 @@ function node(pr: Pr) {
     author: { login: pr.author ?? 'dana', name: 'Dana Developer', avatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4' },
     repository: { nameWithOwner: pr.repo ?? 'acme/web' },
     labels: { nodes: (pr.labels ?? []).map((name) => ({ name })) },
+    reviews: { nodes: (pr.reviews ?? []).map((review) => ({ databaseId: review.id, state: review.state, submittedAt: review.at, commit: { oid: review.head } })) },
     timelineItems: {
       nodes: (pr.requests ?? [{ id: `RRE_${pr.number}`, at: '2026-10-15T09:00:00Z', to: ME }]).map((r) => ({
         id: r.id,
@@ -58,11 +61,16 @@ function node(pr: Pr) {
 }
 
 /** A fake `gh api graphql --include` that answers with these PRs and records each call. */
-function gh(prs: Pr[], calls: Array<{ query: string; q: string }>, issueCount?: number): GhGraphql {
+function gh(prs: Pr[], calls: Array<{ query: string; q: string }>, issueCount?: number, missing: Pr[] = []): GhGraphql {
   return (body) => {
     calls.push({ query: body.query, q: String(body.variables.q) });
     const headers = 'HTTP/2.0 200 OK\nX-Ratelimit-Resource: graphql\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 4990\nX-Ratelimit-Reset: 9999999999\n\n';
-    const data = { rateLimit: { cost: 1 }, search: { issueCount: issueCount ?? prs.length, nodes: prs.map(node) } };
+    const data = body.query === REVIEW_SEARCH
+      ? { rateLimit: { cost: 1 }, search: { issueCount: issueCount ?? prs.length, nodes: prs.map(node) } }
+      : Object.fromEntries(Object.keys(body.variables).filter((key) => key.startsWith('number')).map((key) => {
+          const pr = missing.find((candidate) => candidate.number === body.variables[key]);
+          return [`pr${key.slice('number'.length)}`, { pullRequest: { state: pr?.state ?? 'OPEN', reviews: node(pr ?? { number: Number(body.variables[key]) }).reviews } }];
+        }));
     return { status: 0, stdout: headers + JSON.stringify({ data }) };
   };
 }
@@ -71,6 +79,99 @@ const config = (...extra: string[]) => fs.writeFileSync(path.join(home, 'config.
 const tok = () => 'token';
 
 describe('the reviews loop', () => {
+  it.each([
+    { requester: 'codeclaw', automatic: true },
+    { requester: 'maya', automatic: false },
+  ])('keeps the existing draft when $requester re-requests at the same SHA', async (requester) => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    const item = readReview('review:acme/web#1')!;
+    Object.assign(latestRound(item)!, { state: 'drafted', draftedAt: '2026-10-15T10:00:00Z' });
+    writeReview(item);
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'mode = "auto-draft"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    const requests = [{ id: 'again', at: '2026-10-15T11:00:00Z', to: ME }];
+    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, ...requester, requests }], []) });
+    const after = readReview(item.key)!;
+    expect(after.rounds).toHaveLength(1);
+    expect(latestRound(after)).toMatchObject({ id: 'RRE_1', requestEventId: 'again', state: 'drafted', draftedAt: '2026-10-15T10:00:00Z' });
+    expect(pendingIds('chore')).toEqual([]);
+  });
+
+  it('starts one new draft when a push is followed by a re-request', async () => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    const item = readReview('review:acme/web#1')!;
+    latestRound(item)!.state = 'drafted';
+    writeReview(item);
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'mode = "auto-draft"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    const pr = { number: 1, head: 'bbbbbbb2', requests: [{ id: 'after-push', at: '2026-10-15T11:00:00Z', to: ME }] };
+    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    expect(readReview(item.key)!.rounds.map((round) => round.state)).toEqual(['withdrawn', 'drafting']);
+    expect(latestRound(readReview(item.key)!)).toMatchObject({ id: 'after-push', headSha: 'bbbbbbb2' });
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it.each(['COMMENTED', 'CHANGES_REQUESTED', 'APPROVED'] as const)('a submitted %s review completes its head and drafts again only after a push', async (state) => {
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'mode = "auto-draft"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    const pr: Pr = { number: 1, reviews: [{ id: 77, state, head: 'aaaaaaa1', at: '2026-10-15T10:00:00Z' }] };
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'posted', postedReviewId: '77', by: 'review tool', verdict: state === 'COMMENTED' ? 'comment' : state === 'APPROVED' ? 'approve' : 'request_changes' });
+    pr.requests = [{ id: 'again', at: '2026-10-15T11:00:00Z', to: ME }];
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    expect(readReview('review:acme/web#1')!.rounds).toHaveLength(1);
+    expect(pendingIds('chore')).toEqual([]);
+    pr.head = 'bbbbbbb2';
+    pr.requests = [{ id: 'after-push', at: '2026-10-15T12:00:00Z', to: ME }];
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it.each([
+    ['MERGED', 'merged'], ['CLOSED', 'closed'], ['OPEN', 'withdrawn'],
+  ] as const)('a vanished request on a %s PR becomes %s', async (state, expected) => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([], [], undefined, [{ number: 1, state }]) });
+    expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe(expected);
+  });
+
+  it('records an unstaged COMMENTED review when the request disappears', async () => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([], [], undefined, [{ number: 1,
+      reviews: [{ id: 77, state: 'COMMENTED', head: 'aaaaaaa1', at: '2026-10-15T10:00:00Z' }] }]) });
+    expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'posted', postedReviewId: '77', verdict: 'comment' });
+  });
+
+  it('cancels a running draft after Chris submits a review of its head', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "headless"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    const dispatch = latestRound(readReview('review:acme/web#1')!)!.dispatch!;
+    claimNext('chore');
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1,
+      reviews: [{ id: 77, state: 'COMMENTED', head: 'aaaaaaa1', at: '2026-10-15T10:00:00Z' }] }], []) });
+    expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe('posted');
+    expect(dispatchWasCancelled(dispatch, 'chore')).toBe(true);
+  });
+
+  it('repairs an already withdrawn row when the PR later merges', async () => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([], [], undefined, [{ number: 1, state: 'MERGED' }]) });
+    expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe('merged');
+  });
+
+  it('leaves a missing request alone when its PR state cannot be confirmed', async () => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    const search = gh([], []);
+    const run: GhGraphql = (body, token) => body.query === REVIEW_SEARCH ? search(body, token) : { status: 1, stdout: '', stderr: 'HTTP 502' };
+    await reviewsLoop(ME, tok, () => {}, { run });
+    expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe('requested');
+  });
+
   it.each([
     { requester: 'github-actions', automatic: false },
     { requester: 'github-actions[bot]', automatic: false },
@@ -100,7 +201,8 @@ describe('the reviews loop', () => {
     await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, requests: [requests[3]!] }], []) });
     await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1, requests: [{ ...requests[3]!, id: 'bot-again', at: '2026-10-15T10:00:00Z' }] }], []) });
     item = readReview('review:acme/web#1')!;
-    expect(latestRound(item)!.id).toBe('bot-again');
+    expect(item.rounds).toHaveLength(1);
+    expect(latestRound(item)).toMatchObject({ id: 'bot', requestEventId: 'bot-again' });
     expect(reviewAsker(item, latestRound(item)!)).toMatchObject({ login: 'maya' });
   });
   it('new requests remain silent across polls, with no notification callbacks', async () => {

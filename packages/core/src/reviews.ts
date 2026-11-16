@@ -167,7 +167,7 @@ export function reviewSettings(cfg: ReviewsConfig, repoKey?: string): ReviewSett
 
 // ── The item store ─────────────────────────────────────────────────────────
 
-export const REVIEW_ROUND_STATES = ['requested', 'drafting', 'drafted', 'stale', 'failed', 'posted', 'dismissed', 'withdrawn'] as const;
+export const REVIEW_ROUND_STATES = ['requested', 'drafting', 'drafted', 'stale', 'failed', 'posted', 'dismissed', 'withdrawn', 'merged', 'closed'] as const;
 export type ReviewRoundState = (typeof REVIEW_ROUND_STATES)[number];
 
 export const REVIEW_VERDICTS = ['approve', 'comment', 'request_changes'] as const;
@@ -185,9 +185,9 @@ export interface ReviewPerson {
 export const reviewHash = (key: string): string => `#review-${encodeURIComponent(key)}`;
 
 export interface ReviewRound {
-  /** The request event's id: one round per request. */
+  /** Stable round id, taken from the request that opened it. */
   id: string;
-  /** The GitHub request event that this round answers; synthetic ids split dismissed rounds by head. */
+  /** The latest GitHub request event this round answers; same-head re-requests share a round. */
   requestEventId?: string;
   requestedAt: string;
   requestedBy?: string;
@@ -259,6 +259,8 @@ export interface ReviewPr {
   authorAvatarUrl?: string;
   /** The PR's head as last observed. */
   headSha: string;
+  /** Last confirmed GitHub lifecycle state; absent in older cached items. */
+  state?: 'OPEN' | 'MERGED' | 'CLOSED';
   labels?: string[];
   draft?: boolean;
   /** The configured repo key, when the PR is in one. */
@@ -373,10 +375,10 @@ export interface ReviewRequestSeen {
 }
 
 /**
- * Record one search result. A request event the item has not seen opens a
- * round (an open earlier round is withdrawn as superseded). The same event
- * changes only the PR's fields: a moved head updates a requested round, and
- * makes a drafted one stale. Returns the item and whether a round opened.
+ * Record one search result. Re-requests at the round's head update request
+ * attribution without replacing the round or its draft. A new event at a new
+ * head opens a round, superseding earlier work. A moved head on the same
+ * event updates a requested round or makes a drafted one stale.
  */
 export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()): { item: ReviewItem; opened: boolean } {
   const key = reviewKey(seen.pr.owner, seen.pr.repo, seen.pr.number);
@@ -388,8 +390,20 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     const changed = !prior || JSON.stringify(prior.pr) !== JSON.stringify(item.pr);
     return { item: changed ? writeReview({ ...item, updatedAt: at }) : prior!, opened: false };
   }
+  const latest = latestRound(item);
+  if (latest?.headSha === seen.pr.headSha) {
+    // Keep the last human's attribution when a bot repeats the request.
+    const human = [seen.round, latest].find((request) => request.humanRequester ||
+      (request.requestedBy && !request.requestedAutomatically && !isReviewBot(request.requestedBy)));
+    const humanRequester = human?.humanRequester ?? (human?.requestedBy
+      ? { login: human.requestedBy, name: human.requestedByName, avatarUrl: human.requestedByAvatarUrl }
+      : undefined);
+    Object.assign(latest, seen.round, { id: latest.id, requestEventId: seen.round.id }, humanRequester ? { humanRequester } : {});
+    delete item.unseenAt;
+    const changed = JSON.stringify(prior) !== JSON.stringify({ ...item, updatedAt: prior!.updatedAt });
+    return { item: changed ? writeReview({ ...item, updatedAt: at }) : prior!, opened: false };
+  }
   if (known) {
-    const latest = latestRound(item);
     if (latest === known && known.state === 'dismissed' && (known.headSha !== seen.pr.headSha || item.unseenAt)) {
       const id = `${seen.round.id}@${seen.pr.headSha}`;
       item.rounds.push({ ...seen.round, id, requestEventId: seen.round.id, headSha: seen.pr.headSha, state: 'requested', ...(seen.skip ? { reason: seen.skip } : {}) });
@@ -401,7 +415,7 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
       item.rounds.push({ ...seen.round, id, requestEventId: seen.round.id, headSha: seen.pr.headSha, state: 'requested', ...(seen.skip ? { reason: seen.skip } : {}) });
       return { item: writeReview({ ...item, updatedAt: at }), opened: true };
     }
-    Object.assign(known, seen.round);
+    Object.assign(known, seen.round, { id: known.id });
     if (latest === known && known.headSha !== seen.pr.headSha) {
       if (known.state === 'requested') known.headSha = seen.pr.headSha;
       else if (known.state === 'drafted') {
@@ -448,24 +462,36 @@ export function unmuteReview(key: string, now = Date.now()): ReviewItem | string
 }
 
 /**
- * The search no longer returns these items (the request was withdrawn, the
- * PR closed or merged, or the person reviewed it on GitHub): their open newest
- * round is withdrawn. A drafted review is kept for reading, never posted.
- * `inScope` limits it to items the search could have returned.
+ * Settle missing requests only after the caller confirms the PR's state.
+ * Merged and closed PRs retain that outcome; only an open PR loses its
+ * request as withdrawn. `inScope` must exclude unconfirmed state checks.
  */
 export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item: ReviewItem) => boolean, now = Date.now()): string[] {
   const out: string[] = [];
   const at = new Date(now).toISOString();
   for (const item of listReviews()) {
     const latest = latestRound(item);
+    if (seen.has(item.key) || !latest || !inScope(item) || !item.pr.state) continue;
+    if (item.pr.state === 'MERGED' || item.pr.state === 'CLOSED') {
+      const state = item.pr.state === 'MERGED' ? 'merged' : 'closed';
+      if (latest.state === state) continue;
+      latest.state = state;
+      delete latest.reason;
+      delete latest.staged;
+      delete latest.needsYou;
+      delete latest.notification;
+      writeReview({ ...item, updatedAt: at });
+      out.push(item.key);
+      continue;
+    }
     if (!seen.has(item.key) && latest?.state === 'dismissed' && inScope(item) && !item.unseenAt) {
       item.unseenAt = at;
       writeReview({ ...item, updatedAt: at });
       continue;
     }
-    if (seen.has(item.key) || !latest || !OPEN_STATES.includes(latest.state) || !inScope(item)) continue;
+    if (!OPEN_STATES.includes(latest.state)) continue;
     latest.state = 'withdrawn';
-    latest.reason = 'the request is gone: withdrawn, reviewed on GitHub, or the PR closed';
+    latest.reason = 'the review request was removed';
     writeReview({ ...item, updatedAt: at });
     out.push(item.key);
   }
@@ -605,11 +631,12 @@ export function dismissReview(key: string, by: string, now = Date.now()): Review
 }
 
 /** Record a posted round (`posted.json` is the post's write-once receipt; this is the item's view). */
-export function markReviewPosted(key: string, roundId: string, post: { reviewId: string; by: string; at: string }): ReviewItem | undefined {
+export function markReviewPosted(key: string, roundId: string, post: { reviewId: string; by: string; at: string; verdict?: ReviewVerdict }): ReviewItem | undefined {
   const item = readReview(key);
   const r = item?.rounds.find((x) => x.id === roundId);
   if (!item || !r) return undefined;
   Object.assign(r, { state: 'posted', postedAt: post.at, postedReviewId: post.reviewId, by: post.by });
+  if (post.verdict) r.verdict = post.verdict;
   delete r.reason;
   delete r.staged;
   delete r.needsYou;

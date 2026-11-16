@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, executorPath, observeReviewRequest, reviewBrief } from '@lobstah/core';
+import { ensureLayout, executorPath, latestRound, observeReviewRequest, readReview, reviewBrief, reviewRoundDir, writeReview } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
 import { reviewRows, glassReviews } from '../src/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -43,6 +43,20 @@ describe('review attention in tend', () => {
 });
 
 describe('lobstah reviews', () => {
+  it('keeps the original draft visible in CLI and glass after a human re-requests the same head', () => {
+    request(7);
+    const key = 'review:acme/web#7';
+    const item = readReview(key)!;
+    latestRound(item)!.state = 'drafted';
+    writeReview(item);
+    const dir = reviewRoundDir(key, 'RRE_7')!;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), 'Original review findings');
+    request(7, 're-request');
+    expect(readReview(key)!.rounds).toHaveLength(1);
+    expect(reviewRows()).toMatchObject([{ key, state: 'drafted' }]);
+    expect(glassReviews()).toMatchObject([{ key, state: 'drafted', summary: 'Original review findings' }]);
+  });
   it.each(['github-actions', 'github-actions[bot]', 'approval-gate[bot]'])('uses the author consistently for a cached bot request from %s', (bot) => {
     const { item } = observeReviewRequest({
       pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', authorName: 'Dana Developer', authorAvatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4', headSha: 'aaaaaaa1' },
@@ -62,7 +76,7 @@ describe('lobstah reviews', () => {
   it('lists open rounds; --all adds closed ones', () => {
     request(7);
     request(8);
-    request(8, 'RRE_8b'); // the first round of #8 is withdrawn, its second is open
+    request(8, 'RRE_8b'); // the existing round remains open at the same head
     expect(reviewRows().map((r) => [r.key, r.state])).toEqual(
       expect.arrayContaining([
         ['review:acme/web#7', 'requested'],

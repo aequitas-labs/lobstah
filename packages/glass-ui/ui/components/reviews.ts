@@ -21,7 +21,16 @@ import { Button } from './button.js';
  */
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
-const TONE: Record<string, string> = { drafted: 'ok', stale: 'warn', failed: 'bad', posted: 'dim', dismissed: 'dim', withdrawn: 'dim' };
+const TONE: Record<string, string> = {
+  drafted: 'ok',
+  stale: 'warn',
+  failed: 'bad',
+  posted: 'dim',
+  dismissed: 'dim',
+  withdrawn: 'dim',
+  merged: 'dim',
+  closed: 'dim',
+};
 
 /** The state as a person reads it: a staged draft is waiting in the review tool. */
 export const reviewState = (r: Pick<GlassReview, 'state' | 'staged'>): string => r.state;
@@ -260,14 +269,14 @@ export function reviewStatus(r: Pick<GlassReview, 'state' | 'staged' | 'verdict'
   if (r.state === 'posted')
     return { word: (r.verdict && POSTED[r.verdict]) || 'posted', tone: r.verdict === 'request_changes' ? 'warn' : 'ok' };
   if (r.state === 'failed') return { word: 'failed', tone: 'bad' };
-  if (r.state === 'dismissed' || r.state === 'withdrawn') return { word: r.state, tone: 'dim' };
+  if (['dismissed', 'withdrawn', 'merged', 'closed'].includes(r.state)) return { word: r.state, tone: 'dim' };
   return { word: reviewState(r), tone: 'warn' };
 }
 
 /** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
 function reviewTone(r: GlassReview): CardTone {
   if (r.state === 'posted') return 'ok';
-  if (r.state === 'dismissed' || r.state === 'withdrawn') return 'dim';
+  if (['dismissed', 'withdrawn', 'merged', 'closed'].includes(r.state)) return 'dim';
   if (r.needsYou || r.stands || r.state === 'failed') return 'bad';
   return 'warn';
 }
