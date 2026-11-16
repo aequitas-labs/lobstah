@@ -68,14 +68,21 @@ describe('[reviews] config', () => {
       ops: { reviews: { mode: 'notify', publish: true } },
     });
     expect(reviewSettings(cfg, 'web')).toMatchObject({ mode: 'on-demand', publish: false, work: 'off', autoPostApprove: 'auto-post', autoPostRequestChanges: 'auto-post' });
-    expect(reviewSettings(cfg, 'api')).toMatchObject({ mode: 'auto-draft', publish: false, work: 'trap' });
+    expect(reviewSettings(cfg, 'api')).toMatchObject({ mode: 'auto-draft', publish: false, work: 'headless' });
     expect(reviewSettings(cfg, 'cli')).toMatchObject({ mode: 'auto-draft', publish: false });
     expect(reviewSettings(cfg, 'ops')).toMatchObject({ mode: 'notify', publish: true, work: 'off' });
-    expect(reviewSettings(cfg, 'other')).toMatchObject({ mode: 'auto-review', publish: true, work: 'trap', post: 'auto' });
+    expect(reviewSettings(cfg, 'other')).toMatchObject({ mode: 'auto-review', publish: true, work: 'headless', post: 'auto' });
     expect(reviewSettings(cfg, 'other').autoPostRequestChanges).toBe('ask');
-    expect(parseReviews({ post: 'auto', work: 'off' })).toMatchObject({ mode: 'auto-review', publish: true, work: 'trap' });
+    expect(parseReviews({ post: 'auto', work: 'off' })).toMatchObject({ mode: 'auto-review', publish: true, work: 'headless' });
     expect(parseReviews({ mode: 'on-demand', publish: true })).toMatchObject({ mode: 'on-demand', publish: true, work: 'off' });
     expect(() => parseReviews({ publish: 'yes' })).toThrow('publish must be a boolean');
+  });
+  it('uses headless Codex for manual and automatic drafts, with the existing trap override', () => {
+    const cfg = parseReviews({ mode: 'on-demand', work: 'trap' });
+    expect(reviewSettings(cfg).work).toBe('off');
+    expect(reviewSettings(cfg, undefined, true)).toMatchObject({ harness: 'codex', work: 'trap' });
+    expect(reviewSettings(parseReviews({ mode: 'on-demand' }), undefined, true)).toMatchObject({ harness: 'codex', work: 'headless' });
+    expect(reviewSettings(parseReviews({ mode: 'auto-draft' }))).toMatchObject({ harness: 'codex', work: 'headless' });
   });
   it('is off by default, with the planned defaults', () => {
     const cfg = loadConfig().reviews;

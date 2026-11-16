@@ -333,7 +333,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if (!r) continue;
     // A round a person asked for (this Draft click, or a redraft) starts as a Draft click does, past the daily cap and in any mode.
     const manual = manualKey !== undefined || r.byHand === true;
-    const settings = { ...reviewSettings(cfg.reviews, item.pr.repoKey), ...(manual ? { work: 'trap' as const } : {}) };
+    const settings = reviewSettings(cfg.reviews, item.pr.repoKey, manual);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
     // A withdrawn or dismissed round (the request went, a re-request superseded it, or the person dropped it) has its job cancelled, then its checkout removed once the job ends.
@@ -374,6 +374,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
           repo: item.pr.repoKey!,
           brief: withBriefHooks(reviewBrief(item, r, { identity, id, outDir, checkout: reviewCheckoutDir(item.key, r.id)! }), cfg, item.pr.repoKey, 'prReview'),
           readOnly: true,
+          sessionMode: 'fresh',
           ...(settings.harness ? { harness: settings.harness } : {}),
           ...(settings.model ? { model: settings.model } : {}),
           ...(settings.effort ? { effort: settings.effort } : {}),
