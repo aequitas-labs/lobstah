@@ -374,6 +374,10 @@ export interface GlassReview {
   summary?: string;
   /** Every inline finding, with its full body, separate from the blocking findings. */
   comments?: import('./reviews.js').ReviewComment[];
+  /** The exact draft to which decision answers belong. */
+  roundId?: string;
+  decisions?: import('./reviews.js').ReviewDecision[];
+  decisionAnswers?: import('./reviews.js').ReviewDecisionAnswers;
   needsYou?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;
