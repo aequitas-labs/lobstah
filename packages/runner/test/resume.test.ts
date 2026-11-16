@@ -296,10 +296,10 @@ describe('runner — a follow-up resumes with the origin session’s harness', (
 
 describe('runner — evidence records the harness', () => {
   it('passes headless Codex settings through to the selected adapter', async () => {
-    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "gpt-6.1-sol"\n');
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "gpt-6.1-sol"\ncli_path = "/opt/codex"\n');
     const { deps, starts } = mockDeps({ owns: {} });
     await runFollowUp('headless-config', { harness: 'codex' }, deps);
-    expect(starts[0]!.opts).toMatchObject({ codexSandbox: 'danger-full-access', model: 'gpt-6.1-sol' });
+    expect(starts[0]!.opts).toMatchObject({ codexSandbox: 'danger-full-access', model: 'gpt-6.1-sol', codexCliPath: '/opt/codex' });
     expect(readEvidence('headless-config', 'work').worker?.model).toBe('gpt-6.1-sol');
   });
 

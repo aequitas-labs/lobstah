@@ -6,6 +6,7 @@ export interface AdapterStartOpts {
   prompt: string;
   model?: string;
   codexSandbox?: CodexHeadlessSandbox;
+  codexCliPath?: string;
   effort?: string;
   limits: DispatchLimits;
   env: Record<string, string>;

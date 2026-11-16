@@ -52,6 +52,7 @@ function seen(over: { id?: string; head?: string; number?: number; skip?: string
       title: 'Add the thing',
       author: 'dana',
       headSha: over.head ?? 'aaaaaaa1',
+      diffId: over.head ?? 'aaaaaaa1',
       state: 'OPEN',
       repoKey: 'web',
     },
@@ -112,7 +113,7 @@ describe('[reviews] config', () => {
 });
 
 describe('review rounds', () => {
-  it.each(['drafting', 'drafted', 'posted', 'withdrawn'] as const)('keeps a %s round and its draft receipts on a same-head re-request', (state) => {
+  it.each(['requested', 'drafting', 'drafted', 'stale', 'failed', 'posted', 'dismissed', 'withdrawn'] as const)('keeps a %s round and its draft receipts on a same-head re-request', (state) => {
     const item = observeReviewRequest(seen(), T0).item;
     Object.assign(item.rounds[0]!, { state, dispatch: 'job', draftedAt: '2026-10-15T10:00:00Z' });
     writeReview(item);
@@ -170,19 +171,52 @@ describe('review rounds', () => {
     expect(observeReviewRequest(seen({ id: 'RRE_2', head: 'bbbbbbb2' }), T0 + 4).opened).toBe(true);
   });
 
-  it('a moved head follows a requested round, and makes a drafted round stale', () => {
-    observeReviewRequest(seen(), T0);
-    observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1000);
-    expect(latestRound(readReview('review:acme/web#7')!)).toMatchObject({ state: 'requested', headSha: 'bbbbbbb2' });
+  it.each(['requested', 'drafting', 'drafted', 'stale', 'failed', 'posted', 'dismissed', 'withdrawn'] as const)(
+    'a new head opens a round after a %s round without another request event', (state) => {
+      const item = observeReviewRequest(seen(), T0).item;
+      Object.assign(item.rounds[0]!, { state, dispatch: 'job', draftedAt: '2026-10-15T10:00:00Z' });
+      writeReview(item);
+      const next = observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1);
+      expect(next.opened).toBe(true);
+      expect(next.item.rounds).toHaveLength(2);
+      const round = latestRound(next.item)!;
+      expect(round).toMatchObject({ requestEventId: 'RRE_1', headSha: 'bbbbbbb2', state: 'requested' });
+      expect(round.dispatch).toBeUndefined();
+      expect(round.draftedAt).toBeUndefined();
+      expect(reviewRoundDir(item.key, round.id)).toBeDefined();
+      expect(next.item.rounds[0]!.headSha).toBe('aaaaaaa1');
+      expect(next.item.rounds[0]!.state).toBe(['posted', 'dismissed', 'withdrawn'].includes(state) ? state : 'withdrawn');
+      expect(observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 2).opened).toBe(false);
+    },
+  );
 
-    const item = readReview('review:acme/web#7')!;
-    item.rounds[0]!.state = 'drafted';
+  it('keeps separate draft paths when a force-push revisits a head', () => {
+    const first = observeReviewRequest(seen(), T0).item;
+    observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1);
+    observeReviewRequest(seen(), T0 + 2);
+    const last = observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 3).item;
+    expect(new Set(last.rounds.map((round) => reviewRoundDir(first.key, round.id))).size).toBe(4);
+  });
+
+  it.each(['posted', 'dismissed', 'stale'] as const)('keeps a %s round when the head changes but its diff does not', (state) => {
+    const item = observeReviewRequest(seen(), T0).item;
+    item.rounds[0]!.state = state;
     writeReview(item);
-    observeReviewRequest(seen({ head: 'ccccccc3' }), T0 + 2000);
-    const after = readReview('review:acme/web#7')!;
-    expect(latestRound(after)).toMatchObject({ state: 'stale', headSha: 'bbbbbbb2' });
-    expect(after.pr.headSha).toBe('ccccccc3');
-    expect(after.rounds).toHaveLength(1);
+    const next = seen({ head: 'bbbbbbb2' });
+    next.pr.diffId = item.rounds[0]!.diffId;
+    expect(observeReviewRequest(next, T0 + 1).opened).toBe(false);
+    expect(readReview(item.key)!.rounds).toHaveLength(1);
+    expect(latestRound(readReview(item.key)!)).toMatchObject({ state, headSha: 'aaaaaaa1' });
+  });
+
+  it('waits for diff evidence and retries when it becomes available', () => {
+    const first = seen();
+    delete first.pr.diffId;
+    const item = observeReviewRequest(first, T0).item;
+    const next = seen({ head: 'bbbbbbb2' });
+    expect(observeReviewRequest(next, T0 + 1).opened).toBe(false);
+    expect(observeReviewRequest({ ...next, previousDiff: { headSha: 'aaaaaaa1', diffId: 'aaaaaaa1' } }, T0 + 2).opened).toBe(true);
+    expect(readReview(item.key)!.rounds).toHaveLength(2);
   });
 
   it('a skip rule files the round with its reason', () => {
@@ -312,9 +346,11 @@ describe('drafts', () => {
     const item = readReview('review:acme/web#7')!;
     Object.assign(item.rounds[0]!, { state: 'stale', dispatch: 'd1', dispatchedAt: 'x', draftedAt: 'y', reason: 'moved' });
     item.pr.headSha = 'bbbbbbb2';
+    item.pr.diffId = 'bbbbbbb2';
+    item.pr.baseSha = 'new-base';
     writeReview(item);
     redraftReview('review:acme/web#7', T0);
-    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestEventId: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
+    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestEventId: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', baseSha: 'new-base', diffId: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
     expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
   });
 });

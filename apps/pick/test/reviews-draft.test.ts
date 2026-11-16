@@ -59,6 +59,7 @@ function request(over: { number?: number; repoKey?: string | null; head?: string
         title: 'Add the thing',
         author: 'dana',
         headSha: over.head ?? 'aaaaaaa1',
+        diffId: over.head ?? 'aaaaaaa1',
         ...(over.repoKey === null ? {} : { repoKey: over.repoKey ?? 'web' }),
       },
       round: { id: `RRE_${number}`, requestedAt: '2026-10-15T11:00:00Z', requestedBy: 'dana' },
@@ -114,6 +115,7 @@ describe('starting a review job', () => {
     expect(readReview(KEY)!.rounds).toHaveLength(1);
     expect(requestNewReview(KEY, NOW, () => ({ status: 0, stdout: JSON.stringify({ data: { repository: { pullRequest: { state: 'OPEN', headRefOid: 'fresh-head' } } } }) }))).toBeUndefined();
     expect(round()).toMatchObject({ state: 'requested', headSha: 'fresh-head' });
+    expect(readReview(KEY)!.pr.diffId).toBeUndefined();
     expect(readReview(KEY)!.rounds[0]).toMatchObject({ state: 'dismissed', headSha: 'aaaaaaa1' });
   });
 
@@ -123,9 +125,9 @@ describe('starting a review job', () => {
     item.rounds[0]!.state = 'dismissed'; writeReview(item);
     requestNewReview(KEY, NOW, currentPr);
     const id = round().id;
-    request({ head: 'bbbbbbb2' });
+    request();
     expect(readReview(KEY)!.rounds).toHaveLength(2);
-    expect(round()).toMatchObject({ id, requestEventId: 'RRE_7', requestedAt: new Date(NOW).toISOString(), headSha: 'bbbbbbb2' });
+    expect(round()).toMatchObject({ id, requestEventId: 'RRE_7', requestedAt: new Date(NOW).toISOString(), headSha: 'aaaaaaa1' });
   });
   it('notify starts no jobs; on-demand starts only the clicked round as a pending-only headless review', async () => {
     config('mode = "notify"');
@@ -342,13 +344,14 @@ describe('finishing a review job', () => {
     expect(round()).toMatchObject({ state: 'failed', reason: 'the review job failed: wall clock' });
   });
 
-  it('a head that moved while the job ran makes the draft stale', () => {
+  it('a head that moved while the job ran starts a fresh round', () => {
     const id = drafting();
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'fine');
     request({ head: 'bbbbbbb2' });
     appendStatus(id, 'chore', 'done', 'drafted');
     draftReviews('chris', () => {}, NOW);
-    expect(round()).toMatchObject({ state: 'stale', headSha: 'aaaaaaa1' });
+    expect(readReview(KEY)!.rounds[0]).toMatchObject({ state: 'withdrawn', headSha: 'aaaaaaa1' });
+    expect(round()).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
   });
 
   it('a trap job no trap took in time goes to the daemon', () => {
@@ -424,7 +427,9 @@ describe('the review checkout', () => {
     const draft = { roundId: first.id, headSha: first.headSha, draftedAt: first.draftedAt! };
     expect(answerReviewDecision(KEY, draft, 'rollout-owner', { optionId: 'platform' })).toBeUndefined();
     expect(answerReviewDecision(KEY, draft, 'existing-users', { text: 'Ask each user.' })).toBeUndefined();
-    request({ head: 'bbbbbbb2' });
+    const moved = readReview(KEY)!;
+    moved.pr.headSha = 'bbbbbbb2'; moved.pr.diffId = 'new-diff';
+    latestRound(moved)!.state = 'stale'; writeReview(moved);
     expect(typeof redraftReview(KEY, NOW + 1)).toBe('object');
     draftReviews('chris', () => {}, NOW + 2);
     const next = round().dispatch!;
@@ -438,13 +443,14 @@ describe('the review checkout', () => {
     expect(round().decisionAnswers).not.toHaveProperty('new-question');
   });
 
-  it('is removed when the draft is stale', () => {
+  it('is removed when a new head supersedes the completed draft', () => {
     const id = drafting();
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'Fine.');
     request({ head: 'bbbbbbb2' });
     appendStatus(id, 'chore', 'done', 'drafted');
     draftReviews('chris', () => {}, NOW);
-    expect(round().state).toBe('stale');
+    expect(readReview(KEY)!.rounds[0]!.state).toBe('withdrawn');
+    expect(round()).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
     gone();
   });
 
@@ -473,7 +479,7 @@ describe('the review checkout', () => {
     const id = drafting();
     observeReviewRequest(
       {
-        pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'bbbbbbb2', repoKey: 'web' },
+        pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'bbbbbbb2', diffId: 'bbbbbbb2', repoKey: 'web' },
         round: { id: 'RRE_7b', requestedAt: '2026-10-15T11:30:00Z', requestedBy: 'dana' },
       },
       NOW,

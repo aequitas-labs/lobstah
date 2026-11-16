@@ -28,6 +28,13 @@ describe('onPath', () => {
 });
 
 describe('codexInvocation', () => {
+  it('can select only the bundled CLI after a worker PATH lookup has failed', () => {
+    const inv = codexInvocation(['exec', '--json'], '');
+    expect(inv?.file).toBe(process.execPath);
+    expect(inv?.argv[0]).toMatch(/codex\.js$/);
+    expect(inv?.argv.slice(-2)).toEqual(['exec', '--json']);
+  });
+
   it('resolves to something runnable in this workspace (SDK dep is installed)', () => {
     const inv = codexInvocation(['resume', 'abc']);
     expect(inv).toBeDefined();

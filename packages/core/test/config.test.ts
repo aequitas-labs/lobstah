@@ -218,17 +218,17 @@ describe('headless Codex settings', () => {
   const dispatch = { id: 'x', repo: 'myapp', brief: 'b', harness: 'codex' };
   it('keeps workspace-write by default, and leaves interactive defaults intact', () => {
     expect(resolveDispatch(dispatch, loadConfig())).toMatchObject({ codexSandbox: 'workspace-write', model: 'opus' });
-    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "gpt-6.1-sol"\n');
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "gpt-6.1-sol"\ncli_path = "/opt/codex"\n');
     const cfg = loadConfig();
-    expect(resolveDispatch(dispatch, cfg)).toMatchObject({ codexSandbox: 'danger-full-access', model: 'gpt-6.1-sol' });
+    expect(resolveDispatch(dispatch, cfg)).toMatchObject({ codexSandbox: 'danger-full-access', model: 'gpt-6.1-sol', codexCliPath: '/opt/codex' });
     expect(cfg.harness.model).toBe('sonnet');
     expect(cfg.repos.myapp.harness?.model).toBe('opus');
     expect(configPermissionMode(cfg, 'myapp', 'codex')).toBeUndefined();
     expect(resolveDispatch({ ...dispatch, harness: 'claude' }, cfg).model).toBe('opus');
   });
   it('prefers an explicit dispatch model, then repo headless settings over global headless settings', () => {
-    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "global"\n[repos.myapp.harness.codex]\nheadless_sandbox = "workspace-write"\nheadless_model = "repo"\n');
-    expect(resolveDispatch(dispatch, loadConfig())).toMatchObject({ codexSandbox: 'workspace-write', model: 'repo' });
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "global"\ncli_path = "/global/codex"\n[repos.myapp.harness.codex]\nheadless_sandbox = "workspace-write"\nheadless_model = "repo"\ncli_path = "/repo/codex"\n');
+    expect(resolveDispatch(dispatch, loadConfig())).toMatchObject({ codexSandbox: 'workspace-write', model: 'repo', codexCliPath: '/repo/codex' });
     expect(resolveDispatch({ ...dispatch, model: 'explicit' }, loadConfig()).model).toBe('explicit');
   });
   it.each(['harness.codex', 'repos.myapp.harness.codex'])('validates %s', (scope) => {
@@ -237,6 +237,8 @@ describe('headless Codex settings', () => {
       expect(() => loadConfig()).toThrow(`[${scope}].headless_sandbox must be`);
     }
     for (const value of ['""', '"  "', 'true', '42', '["gpt-6.1-sol"]']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[${scope}]\ncli_path = ${value}\n`);
+      expect(() => loadConfig()).toThrow(`[${scope}].cli_path must be a non-empty string`);
       fs.writeFileSync(path.join(home, 'config.toml'), `[${scope}]\nheadless_model = ${value}\n`);
       expect(() => loadConfig()).toThrow(`[${scope}].headless_model must be a non-empty string`);
     }
