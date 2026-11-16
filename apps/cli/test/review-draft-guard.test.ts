@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { claimNext, enqueue, ensureLayout, observeReviewRequest, readStatusLog, reviewRoundDir, writeReview } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { REVIEW_DECISIONS } from '../../../test/review-decisions.js';
 
 let home: string;
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -20,7 +21,7 @@ afterEach(() => {
   delete process.env.LOBSTAH_HOME;
 });
 
-it('returns an invalid draft to the job before recording done, then accepts the corrected verdict', () => {
+it.each(['approve', 'decision-only comment'] as const)('returns an empty comment draft to the job, then accepts the corrected %s', correction => {
   enqueue({ id: ID, repo: 'web', brief: 'Draft a PR review' }, 'chore');
   claimNext('chore');
   const { item } = observeReviewRequest({
@@ -42,7 +43,7 @@ it('returns an invalid draft to the job before recording done, then accepts the 
   expect(refused.status).not.toBe(0);
   expect(refused.stderr + refused.stdout).toContain('Fix verdict.json');
   expect(readStatusLog(ID, 'chore').map(event => event.verb)).not.toContain('done');
-  fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
+  fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: correction === 'approve' ? 'approve' : 'comment', blocking: [], ...(correction === 'decision-only comment' ? { decisions: REVIEW_DECISIONS } : {}) }));
   const accepted = report();
   expect(accepted.status, accepted.stderr).toBe(0);
   expect(readStatusLog(ID, 'chore').at(-1)?.verb).toBe('done');

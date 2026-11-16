@@ -595,7 +595,7 @@ export function readRoundDraft(key: string, roundId: string): ReviewDraft | { er
       return { error: err instanceof Error ? err.message : 'invalid verdict.json' };
     }
   }
-  if (verdict === 'comment' && !comments.length)
+  if (verdict === 'comment' && !comments.length && !decisions.length)
     return { error: 'A comment verdict needs an inline comment. Fix verdict.json or add a code finding to comments.json.' };
   if (verdict === 'comment' && blocking.length)
     return { error: 'A comment verdict cannot have blocking findings. Fix verdict.json.' };
