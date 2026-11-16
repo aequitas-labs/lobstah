@@ -606,11 +606,14 @@ export function readRoundDraft(key: string, roundId: string): ReviewDraft | { er
       blocking = findings;
       if (verdict === 'approve' && blocking.length) return { error: 'an approve verdict cannot have blocking findings' };
       if (verdict === 'request_changes' && !blocking.length) return { error: 'request_changes needs blocking findings with file and line' };
-      if (blocking.length) verdict = 'request_changes';
     } catch (err) {
       return { error: err instanceof Error ? err.message : 'invalid verdict.json' };
     }
   }
+  if (verdict === 'comment' && !comments.length && !decisions.length)
+    return { error: 'A comment verdict needs an inline comment. Fix verdict.json or add a code finding to comments.json.' };
+  if (verdict === 'comment' && blocking.length)
+    return { error: 'A comment verdict cannot have blocking findings. Fix verdict.json.' };
   if (!body.trim() && verdict !== 'approve' && !decisions.length) return { error: 'review.md is empty' };
   return { body, comments, verdict, blocking, decisions };
 }

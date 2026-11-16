@@ -52,6 +52,7 @@ describe('lobstah reviews', () => {
     const dir = reviewRoundDir(key, 'RRE_7')!;
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'review.md'), 'Original review findings');
+    fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([{ path: 'a.ts', line: 1, body: 'Consider a retry.' }]));
     request(7, 're-request');
     expect(readReview(key)!.rounds).toHaveLength(1);
     expect(reviewRows()).toMatchObject([{ key, state: 'drafted' }]);
