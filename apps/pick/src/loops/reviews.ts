@@ -13,6 +13,7 @@ import {
   githubBlockedUntil,
   lastEventAt,
   latestRound,
+  markReviewPosted,
   isReviewBot,
   reviewAsker,
   listReviews,
@@ -37,7 +38,7 @@ import {
   withdrawUnseenReviews,
   writeReview,
 } from '@lobstah/core';
-import type { ReviewItem, ReviewRound } from '@lobstah/core';
+import type { ReviewItem, ReviewRound, ReviewVerdict } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
 import { dispatchLane } from './report.js';
 import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
@@ -49,9 +50,10 @@ import type { FetchLike } from '../reviews-post.js';
  * One search per poll for open PRs whose review is requested from the
  * identity by name. `user-review-requested` matches direct requests only: a
  * request made only to a team the identity is on is not this account's to
- * answer. The newest ReviewRequestedEvent naming the identity is the round.
+ * answer. Requests and the identity's submitted reviews are read together,
+ * so a re-request cannot redraft a head the person already reviewed.
  */
-export const REVIEW_SEARCH = `query($q: String!) {
+export const REVIEW_SEARCH = `query($q: String!, $identity: String!) {
   rateLimit { cost }
   search(query: $q, type: ISSUE, first: 50) {
     issueCount
@@ -61,6 +63,9 @@ export const REVIEW_SEARCH = `query($q: String!) {
         author { login avatarUrl ... on User { name } }
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
+        reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
+          nodes { databaseId state submittedAt commit { oid } }
+        }
         timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
           nodes { ... on ReviewRequestedEvent { id createdAt actor { __typename login avatarUrl ... on User { name } } requestedReviewer { __typename ... on User { login } } } }
         }
@@ -82,10 +87,33 @@ interface SearchPr {
   author?: { login?: string; name?: string; avatarUrl?: string } | null;
   repository?: { nameWithOwner?: string };
   labels?: { nodes?: Array<{ name?: string }> };
+  reviews?: { nodes?: SubmittedReview[] };
   timelineItems?: {
     nodes?: Array<{ id?: string; createdAt?: string; actor?: { __typename?: string; login?: string; name?: string; avatarUrl?: string } | null; requestedReviewer?: { __typename?: string; login?: string } | null }>;
   };
 }
+
+/** A review submitted by the configured identity, scoped to the commit it reviewed. */
+interface SubmittedReview {
+  databaseId: number;
+  state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED';
+  submittedAt: string;
+  commit: { oid: string } | null;
+}
+
+/** Lifecycle and reviewer evidence for a PR whose request disappeared from search. */
+interface ReviewPrSnapshot {
+  state: NonNullable<ReviewItem['pr']['state']>;
+  reviews?: SearchPr['reviews'];
+}
+
+type ReviewPrBatch = Record<string, { pullRequest?: ReviewPrSnapshot | null } | null>;
+
+const SUBMITTED_VERDICTS: Record<SubmittedReview['state'], ReviewVerdict> = {
+  APPROVED: 'approve',
+  CHANGES_REQUESTED: 'request_changes',
+  COMMENTED: 'comment',
+};
 
 export type GhGraphql = (
   body: { query: string; variables: Record<string, unknown> },
@@ -113,10 +141,10 @@ function configuredRepos(): Map<string, string> {
 }
 
 /**
- * The reviews loop: search, file a round per new request, withdraw what the
+ * The reviews loop: search, file requests by head, withdraw what the
  * search stopped returning. Off (`[reviews].enabled = false`) it makes no
- * call. It spends one request per cycle on the shared GitHub budget, and
- * skips the cycle while that budget is blocked.
+ * call. The search and batched checks of missing PRs share the GitHub budget;
+ * they wait while that budget is blocked.
  */
 export async function reviewsLoop(
   identity: string,
@@ -134,7 +162,7 @@ export async function reviewsLoop(
   // The search needs the budget; drafting is local and runs either way.
   if (!githubBlockedUntil(now)) {
     const found = searchReviews(identity, token, log, opts.run ?? runGraphql, now);
-    if (found) await settleGone(found, gh, log);
+    if (found) await settleGone(found, identity, gh, opts.run ?? runGraphql, log);
   }
   // On wharf grounds, a round is claimed (its document created) before it is drafted.
   if (wharf) await claimReviewDocs(log, w);
@@ -160,24 +188,63 @@ export async function reviewsLoop(
 }
 
 /**
- * The search stopped returning these items. A staged round may be gone
- * because the person sent the review from their tool (that removes the
- * request): check it first, so it reads posted, not withdrawn. Then
- * withdraw the open rounds left.
+ * Confirm missing PRs in GraphQL batches before settling their requests.
+ * This also repairs cached withdrawn/posted rows when their PR later merges.
+ * A failed or incomplete state check leaves unconfirmed rounds untouched.
  */
-async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem) => boolean }, gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
+async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem) => boolean }, identity: string, gh: { token: () => string; fetch?: FetchLike; now: number }, run: GhGraphql, log: (m: string) => void): Promise<void> {
+  const missing = listReviews().filter((item) => !found.seen.has(item.key) && found.inScope(item) &&
+    !['merged', 'closed'].includes(latestRound(item)?.state ?? ''));
+  const confirmed = new Set<string>();
+  for (let start = 0; start < missing.length; start += 50) {
+    if (githubBlockedUntil(gh.now)) break;
+    const batch = missing.slice(start, start + 50);
+    const declarations = ['$identity: String!'];
+    const fields: string[] = [];
+    const variables: Record<string, unknown> = { identity };
+    batch.forEach((item, index) => {
+      declarations.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
+      Object.assign(variables, { [`owner${index}`]: item.pr.owner, [`repo${index}`]: item.pr.repo, [`number${index}`]: item.pr.number });
+      fields.push(`pr${index}: repository(owner: $owner${index}, name: $repo${index}) { pullRequest(number: $number${index}) {
+        state reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
+          nodes { databaseId state submittedAt commit { oid } }
+        }
+      } }`);
+    });
+    const data = reviewQuery<ReviewPrBatch>(
+      { query: `query(${declarations.join(', ')}) { rateLimit { cost } ${fields.join('\n')} }`, variables }, gh.token, run, gh.now, log, 'PR state check');
+    if (!data) continue;
+    batch.forEach((item, index) => {
+      const pr = data[`pr${index}`]?.pullRequest;
+      if (!pr || !['OPEN', 'MERGED', 'CLOSED'].includes(pr.state)) return;
+      confirmed.add(item.key);
+      if (item.pr.state !== pr.state) writeReview({ ...item, pr: { ...item.pr, state: pr.state }, updatedAt: new Date(gh.now).toISOString() });
+      settleSubmittedReview(item, pr.reviews);
+    });
+  }
   for (const item of listReviews()) {
     const r = latestRound(item);
-    if (found.seen.has(item.key) || !r?.staged || (r.state !== 'drafted' && r.state !== 'stale') || !found.inScope(item)) continue;
+    if (!confirmed.has(item.key) || !r?.staged || (r.state !== 'drafted' && r.state !== 'stale') || item.pr.state !== 'OPEN') continue;
     const out = await settleStagedReview(item.key, gh);
     if (out === 'posted') log(`${item.key}: review sent from the review tool`);
     if (out === 'deleted') log(`${item.key}: pending review deleted in the review tool; round dismissed`);
   }
-  for (const key of withdrawUnseenReviews(found.seen, found.inScope, gh.now)) log(`${key}: review request gone; round withdrawn`);
+  for (const key of withdrawUnseenReviews(found.seen, (item) => confirmed.has(item.key), gh.now))
+    log(`${key}: review request gone; round ${latestRound(readReview(key)!)!.state}`);
+}
+
+/** Submitted approvals, change requests, and comments all finish work on their reviewed head. */
+function settleSubmittedReview(item: ReviewItem, reviews: SearchPr['reviews']): void {
+  const round = latestRound(item);
+  if (!round || round.state === 'posted') return;
+  const submitted = (reviews?.nodes ?? []).filter((review) => review.commit?.oid === round.headSha)
+    .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
+  if (submitted) markReviewPosted(item.key, round.id, { reviewId: String(submitted.databaseId), by: 'review tool', at: submitted.submittedAt,
+    verdict: SUBMITTED_VERDICTS[submitted.state] });
 }
 
 /**
- * A fresh draft is staged pending or published as COMMENT according to
+ * A fresh draft is staged pending or published with its verdict according to
  * the repo policy and the job's publishing receipt. Stale drafts and failed
  * attempts are not retried automatically.
  */
@@ -202,11 +269,12 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
   }
 }
 
-function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number): { seen: Set<string>; inScope: (item: ReviewItem) => boolean } | undefined {
-  const rc = loadConfig().reviews;
-  const res = run({ query: REVIEW_SEARCH, variables: { q: reviewSearchQuery(identity) } }, token());
+/** Apply the shared GitHub budget and reject partial GraphQL responses before changing rounds. */
+function reviewQuery<T>(request: { query: string; variables: Record<string, unknown> }, token: () => string, run: GhGraphql, now: number,
+  log: (m: string) => void, operation: string): T | undefined {
+  const res = run(request, token());
   const { headers, body } = splitGitHubResponse(res.stdout);
-  let answer: { data?: { rateLimit?: { cost?: number }; search?: { issueCount?: number; nodes?: SearchPr[] } }; errors?: Array<{ message: string }> } = {};
+  let answer: { data?: T & { rateLimit?: { cost?: number } }; errors?: Array<{ message: string }> } = {};
   try {
     answer = JSON.parse(body);
   } catch {
@@ -215,18 +283,26 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
   const reason =
     res.error?.message ?? answer.errors?.map((e) => e.message).join('; ') ?? firstMeaningfulLine(res.stderr) ?? `gh exited ${res.status}`;
   const limited = classifyGhError(reason).kind === 'rate-limit' || headers['x-ratelimit-remaining'] === '0';
-  const search = answer.data?.search;
-  recordGitHubResponse(headers, { now, cost: answer.data?.rateLimit?.cost, success: res.status === 0 && !limited && !!search });
+  recordGitHubResponse(headers, { now, cost: answer.data?.rateLimit?.cost, success: res.status === 0 && !limited && !!answer.data && !answer.errors?.length });
   if (limited) {
     const retry = Number(headers['retry-after']);
     recordGitHubRateLimit(now, Number.isFinite(retry) && retry > 0 ? now + retry * 1000 : undefined);
     log('reviews: GitHub rate limit reached; the search waits for the budget');
     return undefined;
   }
-  if (res.status !== 0 || !search) {
-    log(`reviews: search failed: ${reason}`);
+  if (res.status !== 0 || !answer.data || answer.errors?.length) {
+    log(`reviews: ${operation} failed: ${reason}`);
     return undefined;
   }
+  return answer.data;
+}
+
+function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number): { seen: Set<string>; inScope: (item: ReviewItem) => boolean } | undefined {
+  const rc = loadConfig().reviews;
+  const answer = reviewQuery<{ search?: { issueCount?: number; nodes?: SearchPr[] } }>(
+    { query: REVIEW_SEARCH, variables: { q: reviewSearchQuery(identity), identity } }, token, run, now, log, 'search');
+  const search = answer?.search;
+  if (!search) return undefined;
 
   const repos = configuredRepos();
   const inScope = (nwo: string): boolean => rc.repos === 'any' || repos.has(nwo.toLowerCase());
@@ -261,6 +337,7 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
           ...(pr.author?.name ? { authorName: pr.author.name } : {}),
           ...(pr.author?.avatarUrl ? { authorAvatarUrl: pr.author.avatarUrl } : {}),
           headSha: pr.headRefOid,
+          state: 'OPEN',
           ...(labels.length ? { labels } : {}),
           ...(pr.isDraft ? { draft: true } : {}),
           ...(repoKey ? { repoKey } : {}),
@@ -278,6 +355,7 @@ function searchReviews(identity: string, token: () => string, log: (m: string) =
       now,
     );
     seen.add(item.key);
+    settleSubmittedReview(item, pr.reviews);
     if (opened) log(`${item.key}: review requested by ${reviewAsker(item, latestRound(item)!).login}${skip ? ` (${skip})` : ''}`);
   }
   // A truncated search cannot say a request is gone.
@@ -336,9 +414,9 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     const settings = reviewSettings(cfg.reviews, item.pr.repoKey, manual);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
-    // A withdrawn or dismissed round (the request went, a re-request superseded it, or the person dropped it) has its job cancelled, then its checkout removed once the job ends.
+    // Stop work the person already submitted, withdrew, or dismissed; remove its checkout once the job ends.
     for (const old of item.rounds) {
-      if ((old.state !== 'withdrawn' && old.state !== 'dismissed' && !(old.state === 'failed' && old.reason === 'the review job was cancelled')) || !old.dispatch) continue;
+      if ((!['withdrawn', 'dismissed', 'merged', 'closed'].includes(old.state) && !(old.state === 'posted' && old.by === 'review tool') && !(old.state === 'failed' && old.reason === 'the review job was cancelled')) || !old.dispatch) continue;
       const oldJob = verbOf(old.dispatch);
       if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
         try {

@@ -8,8 +8,8 @@ import { Avatar, githubAvatarUrl } from './card.js';
 import { DetailFrame } from './detail-frame.js';
 import { Age, TrapName, reviewLink, stackNumbers } from './common.js';
 import { GitHubDescription, MarkdownElements } from './markdown.js';
-import { MergeIntent, MergeWhenGreen, StatusChip } from './prs.js';
-import { ReviewActions, reviewStatus } from './reviews.js';
+import { MergeIntent, MergeWhenGreen, PrStateIcon, StatusChip } from './prs.js';
+import { ReviewActions, reviewPrState, reviewStatus } from './reviews.js';
 import { LinkedText } from './links.js';
 
 /** Shared safe Markdown for review summaries and complete findings. */
@@ -86,7 +86,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
           ? 'Review required'
           : '';
   return html`<${DetailFrame} identity=${identity} open=${open} footer=${footer}>
-    <header class="pr-view-head"><h2>${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${state && StatusChip(draft ? 'Draft' : state === 'OPEN' ? 'Open' : state === 'MERGED' ? 'Merged' : 'Closed', state === 'OPEN' ? 'ok' : 'dim')}${p && StatusChip(p.badge.text, p.badge.tone ?? 'dim')}${p?.mine && StatusChip('yours', 'dim')}${p?.gate && StatusChip(p.gate, 'warn')}${status && StatusChip(status.word, status.tone)}${review?.needsYou && StatusChip('needs you', 'bad')}</div>
+    <header class="pr-view-head"><h2>${review && html`<${PrStateIcon} state=${reviewPrState(review, draft)} /> `}${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${state && StatusChip(draft ? 'Draft' : state === 'OPEN' ? 'Open' : state === 'MERGED' ? 'Merged' : 'Closed', state === 'OPEN' ? 'ok' : 'dim')}${p && StatusChip(p.badge.text, p.badge.tone ?? 'dim')}${p?.mine && StatusChip('yours', 'dim')}${p?.gate && StatusChip(p.gate, 'warn')}${status && StatusChip(status.word, status.tone)}${review?.needsYou && StatusChip('needs you', 'bad')}</div>
     ${author && html`<div class=${'pr-view-person' + (asker === author ? ' rv-person' : '')}><${Avatar} url=${avatar} name=${authorName ?? author} size=${20} /><b>${authorName}</b></div>`}
     ${(data?.headRefName ?? p?.headRefName) && html`<div class="sub">${data?.headRefName ?? p?.headRefName} → ${data?.baseRefName ?? p?.baseRefName}${(data?.updatedAt ?? p?.updatedAt) && html` · updated ${Age(data?.updatedAt ?? p?.updatedAt)} ago`}</div>`}</header>
     ${p?.mergeRequest && html`<section><${MergeIntent} p=${p} /></section>`}

@@ -321,7 +321,7 @@ describe('staged reviews', () => {
     item.rounds[0]!.staged = { reviewId: '77', at: '2026-10-15T10:00:00Z' };
     writeReview(item);
   }
-  const gone: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 0, nodes: [] } } }) });
+  const gone: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 0, nodes: [] }, pr0: { pullRequest: { state: 'OPEN' } } } }) });
   const config = () =>
     fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "off"', '[repos.web]', 'path = "/w"', 'origin = "git@github.com:acme/web.git"'].join('\n'));
 

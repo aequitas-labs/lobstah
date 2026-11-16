@@ -388,7 +388,7 @@ describe('the review checkout', () => {
     const id = drafting();
     observeReviewRequest(
       {
-        pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'aaaaaaa1', repoKey: 'web' },
+        pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Add the thing', author: 'dana', headSha: 'bbbbbbb2', repoKey: 'web' },
         round: { id: 'RRE_7b', requestedAt: '2026-10-15T11:30:00Z', requestedBy: 'dana' },
       },
       NOW,

@@ -52,6 +52,7 @@ function seen(over: { id?: string; head?: string; number?: number; skip?: string
       title: 'Add the thing',
       author: 'dana',
       headSha: over.head ?? 'aaaaaaa1',
+      state: 'OPEN',
       repoKey: 'web',
     },
     round: { id: over.id ?? 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana' },
@@ -111,6 +112,18 @@ describe('[reviews] config', () => {
 });
 
 describe('review rounds', () => {
+  it.each(['drafting', 'drafted', 'posted', 'withdrawn'] as const)('keeps a %s round and its draft receipts on a same-head re-request', (state) => {
+    const item = observeReviewRequest(seen(), T0).item;
+    Object.assign(item.rounds[0]!, { state, dispatch: 'job', draftedAt: '2026-10-15T10:00:00Z' });
+    writeReview(item);
+    const repeated = seen({ id: 'RRE_2' });
+    expect(observeReviewRequest(repeated, T0 + 1).opened).toBe(false);
+    const after = readReview(item.key)!;
+    expect(after.rounds).toHaveLength(1);
+    expect(latestRound(after)).toMatchObject({ id: 'RRE_1', requestEventId: 'RRE_2', state, dispatch: 'job', draftedAt: '2026-10-15T10:00:00Z' });
+    expect(observeReviewRequest(repeated, T0 + 2).opened).toBe(false);
+  });
+
   it('the same standing request seen on three polls is one item with one round', () => {
     expect(observeReviewRequest(seen(), T0).opened).toBe(true);
     expect(observeReviewRequest(seen(), T0 + 45_000).opened).toBe(false);
@@ -119,9 +132,9 @@ describe('review rounds', () => {
     expect(readReview('review:acme/web#7')!.rounds).toHaveLength(1);
   });
 
-  it('a re-request opens a second round on the same item, withdrawing the first', () => {
+  it('a re-request after a push opens a second round, withdrawing the first', () => {
     observeReviewRequest(seen(), T0);
-    observeReviewRequest(seen({ id: 'RRE_2' }), T0 + 1000);
+    observeReviewRequest(seen({ id: 'RRE_2', head: 'bbbbbbb2' }), T0 + 1000);
     const item = readReview('review:acme/web#7')!;
     expect(item.rounds.map((r) => [r.id, r.state])).toEqual([
       ['RRE_1', 'withdrawn'],
@@ -140,12 +153,12 @@ describe('review rounds', () => {
     expect(observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 4).opened).toBe(false);
   });
 
-  it('a dismissed request that disappears and returns starts a fresh round on PR reopen', () => {
+  it('a dismissed request that disappears and returns at the same head stays dismissed', () => {
     observeReviewRequest(seen(), T0);
     dismissReview('review:acme/web#7', 'glass', T0 + 1);
     withdrawUnseenReviews(new Set(), () => true, T0 + 2);
-    expect(observeReviewRequest(seen(), T0 + 3).opened).toBe(true);
-    expect(readReview('review:acme/web#7')!.rounds.map((round) => round.state)).toEqual(['dismissed', 'requested']);
+    expect(observeReviewRequest(seen(), T0 + 3).opened).toBe(false);
+    expect(readReview('review:acme/web#7')!.rounds.map((round) => round.state)).toEqual(['dismissed']);
   });
 
   it('mutes PR requests until unmuted and keeps the item visible', () => {
