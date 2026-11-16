@@ -282,7 +282,7 @@ describe('the Reviews tab', () => {
     await g.go('#reviews');
     expect(g.$('#tabs a[data-tab="reviews"]')?.textContent).toContain('Reviews');
     const rows = g.$$('#reviews tr.rowhead');
-    expect(rows.map((r) => r.querySelector('td')?.textContent)).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
+    expect(rows.map((r) => r.querySelector('td')?.textContent?.trim())).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
     expect(rows[1]!.textContent).toContain('drafted');
     expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Publish comment', 'Mute this PR', 'Dismiss']);
     expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Redraft', 'Mute this PR', 'Dismiss']);

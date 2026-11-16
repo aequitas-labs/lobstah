@@ -1,4 +1,4 @@
-import type { ReviewRoundState } from './reviews.js';
+import type { ReviewPr, ReviewRoundState } from './reviews.js';
 import type { RecentRun } from './run-history.js';
 import type { AttentionKind } from './config.js';
 import type { HelmRegistration } from './helm.js';
@@ -352,6 +352,9 @@ export interface GlassReview {
   repo: string;
   number: number;
   title: string;
+  /** GitHub lifecycle and draft state, separate from the review round's status. */
+  prState?: ReviewPr['state'];
+  prDraft?: boolean;
   author: string;
   /** The configured repo key, when the PR is in one. */
   repoKey?: string;

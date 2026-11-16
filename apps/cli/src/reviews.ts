@@ -49,6 +49,8 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       title: item.pr.title,
       author: item.pr.author,
       asker,
+      ...(item.pr.state ? { prState: item.pr.state } : {}),
+      ...(item.pr.draft !== undefined ? { prDraft: item.pr.draft } : {}),
       ...(name ? { askerName: name } : {}),
       ...(avatar ? { askerAvatarUrl: avatar } : {}),
       ...(automatic ? { automatic: true } : {}),
