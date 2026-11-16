@@ -201,7 +201,7 @@ export interface PrCardParts {
   /** The trap that has its work, as `wt:<id>`. */
   trap?: string;
 
-  /** After the meta line's parts: a standing merge request. */
+  /** Standing merge details below the status chips, outside the clamped meta line. */
   tail?: Children;
   /** The bottom bar's buttons: only the ones that apply to this card. */
   actions: Children;
@@ -232,7 +232,7 @@ export const StatusChip = (word: string, cls: string, hover?: string) =>
 export function prShapedCard(c: PrCardParts) {
   const trap = c.trap && [`${TRAP_MARK} `, WorkerAddress(c.trap)];
   const parts: Children[] = [RepoName(c.repo), c.at && [Age(c.at), ' ago'], `#${c.number}`, trap].filter(Boolean);
-  const meta = [...parts.flatMap((part, i) => (i ? [' · ', part] : [part])), c.tail];
+  const meta = parts.flatMap((part, i) => (i ? [' · ', part] : [part]));
   const text = [c.repo, c.at && `${ageText(c.at)} ago`, `#${c.number}`, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`]
     .filter(Boolean)
     .join(' · ');
@@ -243,7 +243,7 @@ export function prShapedCard(c: PrCardParts) {
     icon=${html`<span class=${'prstate pr-' + (c.prState ?? 'open')}>${PrIcon}</span>`}
     iconFirst
     state=${{ word: '', tone: c.tone, mark: 'edge' }}
-    status=${c.status}
+    status=${[c.status, c.tail]}
     context=${meta}
     contextTitle=${text}
     actions=${c.actions}

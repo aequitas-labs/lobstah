@@ -87,7 +87,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { flags: {}, maxPositionals: 0 },
   pr: {
-    subverbs: ['merge-when-green'], positionals: 'merge-when-green <owner/repo#n>', maxPositionals: 2,
+    subverbs: ['merge-when-green'], positionals: '<owner/repo#n>', maxPositionals: 2,
     flags: { '--by': { value: 'chat|decision:<key>' }, '--method': { value: 'merge|squash' }, '--note': { value: '<text>' }, '--hold': { value: '<reason>' }, '--release-hold': {}, '--clear': {} },
   },
   reports: { flags: { '--json': {} } },
