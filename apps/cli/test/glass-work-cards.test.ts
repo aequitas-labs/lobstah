@@ -238,7 +238,7 @@ describe('a review card', () => {
     expect([...card(9).querySelectorAll('.gactions button')].map((b) => text(b) || b.getAttribute('aria-label'))).toEqual(['More actions']);
     await click(g, card(9).querySelector('.gactions .splitmore'));
     expect([...card(9).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Mute PR']);
-    // Who asked and the reason are in the modal, not on the card.
+    // The requester is absent from the card.
     expect(text(card(7))).not.toContain('maya');
     // Sending a review verdict is one click; the card never opens.
     const approve = () => [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Approve');
@@ -248,7 +248,7 @@ describe('a review card', () => {
     expect(sends().map((p) => JSON.parse(p.body))).toEqual([{ kind: 'review-approve', payload: { key: 'review:acme/web#7' } }]);
   });
 
-  it('opens the PR view without acknowledgement, with who asked, the reason, the pending review and the actions', async () => {
+  it('opens the PR view without acknowledgement, with the reason, the pending review and the actions', async () => {
     const r = review(9, { state: 'stale', reason: 'the head moved', staged: true });
     const g = await page({ ...emptyFleet(), focusToken: 'tok', reviews: [r] }, '#reviews', () => ({ status: 200, body: { ok: true } }));
     await click(g, g.$('#reviews .card'));
@@ -258,7 +258,6 @@ describe('a review card', () => {
     expect(text(box.querySelector('h2'))).toBe('pr 9');
     expect(text(box)).toContain('acme/web#9');
     expect(text(box)).toContain('the head moved');
-    expect(text(box.querySelector('.rv-person'))).toContain('maya');
     expect(text(box.querySelector('.rv-staged'))).toBe('Open draft');
     // Its actions; the modal's close is a button too.
     expect(text(box.querySelector('.detail-actions'))).toContain('Redraft');
