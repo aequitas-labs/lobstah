@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, claimNext, dispatchWasCancelled, ensureLayout, latestRound, listReviews, pendingIds, readReview, recordGitHubRateLimit, reviewAsker, writeReview } from '@lobstah/core';
+import { addWatch, claimNext, dispatchWasCancelled, ensureLayout, latestRound, listReviews, newReviewRound, pendingIds, readReview, recordGitHubRateLimit, reviewAsker, writeReview } from '@lobstah/core';
 import { runPickup } from '../src/run.js';
 import { REVIEW_SEARCH, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
@@ -79,6 +79,22 @@ const config = (...extra: string[]) => fs.writeFileSync(path.join(home, 'config.
 const tok = () => 'token';
 
 describe('the reviews loop', () => {
+  it('keeps a New review request open when an earlier submitted review covers the same head', async () => {
+    config();
+    const pr: Pr = { number: 1 };
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    const key = 'review:acme/web#1';
+    const item = readReview(key)!; latestRound(item)!.state = 'dismissed'; writeReview(item);
+    const at = Date.parse('2026-11-16T12:00:00Z');
+    expect(typeof newReviewRound(key, at)).toBe('object');
+    pr.reviews = [{ id: 77, state: 'COMMENTED', head: 'aaaaaaa1', at: '2026-10-15T10:00:00Z' }];
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []), now: at });
+    expect(latestRound(readReview(key)!)).toMatchObject({ state: 'requested', localRequest: true, requestedAt: new Date(at).toISOString() });
+    pr.reviews.push({ id: 78, state: 'APPROVED', head: 'aaaaaaa1', at: new Date(at + 1000).toISOString() });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []), now: at + 2000 });
+    expect(latestRound(readReview(key)!)).toMatchObject({ state: 'posted', postedReviewId: '78' });
+    expect(readReview(key)!.rounds[0]!.state).toBe('dismissed');
+  });
   it.each([
     { requester: 'codeclaw', automatic: true },
     { requester: 'maya', automatic: false },

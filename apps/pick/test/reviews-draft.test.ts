@@ -21,6 +21,7 @@ import {
   withdrawUnseenReviews,
 } from '@lobstah/core';
 import { draftReviewOnDemand, draftReviews, requestNewReview } from '../src/loops/reviews.js';
+import type { GhGraphql } from '../src/loops/reviews.js';
 import { REVIEW_DECISIONS } from '../../../test/review-decisions.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -65,6 +66,7 @@ function request(over: { number?: number; repoKey?: string | null; head?: string
 }
 
 const round = (key = KEY) => latestRound(readReview(key)!)!;
+const currentPr: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { repository: { pullRequest: { state: 'OPEN', headRefOid: readReview(KEY)!.pr.headSha } } } }) });
 
 describe('starting a review job', () => {
   it.each(['notify', 'on-demand', 'auto-draft', 'auto-review'])('New review preserves the dismissed round and follows %s', mode => {
@@ -73,7 +75,7 @@ describe('starting a review job', () => {
     const old = readReview(KEY)!;
     Object.assign(old.rounds[0]!, { state: 'dismissed', verdict: 'comment', reason: 'skipped' });
     old.pr.headSha = 'bbbbbbb2'; writeReview(old);
-    expect(requestNewReview(KEY, NOW)).toBeUndefined();
+    expect(requestNewReview(KEY, NOW, currentPr)).toBeUndefined();
     const item = readReview(KEY)!;
     expect(item.rounds).toHaveLength(2);
     expect(item.rounds[0]).toMatchObject({ state: 'dismissed', headSha: 'aaaaaaa1', reason: 'skipped' });
@@ -84,7 +86,7 @@ describe('starting a review job', () => {
     expect(pendingIds('chore')).toHaveLength(mode.startsWith('auto-') ? 1 : 0);
     // A local request remains even when GitHub no longer asks for a review.
     expect(withdrawUnseenReviews(new Set(), () => true)).toEqual([]);
-    expect(requestNewReview(KEY, NOW)).toContain('Only a skipped');
+    expect(requestNewReview(KEY, NOW, currentPr)).toContain('Only a skipped');
   });
 
   it('New review respects the daily limit and can still be drafted explicitly', async () => {
@@ -92,18 +94,30 @@ describe('starting a review job', () => {
     request();
     const item = readReview(KEY)!;
     item.rounds[0]!.state = 'dismissed'; writeReview(item);
-    expect(requestNewReview(KEY, NOW)).toBeUndefined();
+    expect(requestNewReview(KEY, NOW, currentPr)).toBeUndefined();
     expect(round()).toMatchObject({ state: 'requested', reason: expect.stringContaining('daily cap') });
     expect(pendingIds('chore')).toEqual([]);
     expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
     expect(round().state).toBe('drafting');
   });
 
+  it('New review refreshes a dismissed PR head, refusing closed or unreadable PRs without losing history', () => {
+    config('mode = "on-demand"'); request();
+    const item = readReview(KEY)!; item.rounds[0]!.state = 'dismissed'; writeReview(item);
+    const closed: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { repository: { pullRequest: { state: 'MERGED', headRefOid: 'bbb' } } } }) });
+    expect(requestNewReview(KEY, NOW, closed)).toContain('closed');
+    expect(requestNewReview(KEY, NOW, () => ({ status: 1, stdout: '' }))).toContain('could not be read');
+    expect(readReview(KEY)!.rounds).toHaveLength(1);
+    expect(requestNewReview(KEY, NOW, () => ({ status: 0, stdout: JSON.stringify({ data: { repository: { pullRequest: { state: 'OPEN', headRefOid: 'fresh-head' } } } }) }))).toBeUndefined();
+    expect(round()).toMatchObject({ state: 'requested', headSha: 'fresh-head' });
+    expect(readReview(KEY)!.rounds[0]).toMatchObject({ state: 'dismissed', headSha: 'aaaaaaa1' });
+  });
+
   it('a repeated GitHub event updates a local request without replacing its id or history', () => {
     config('mode = "on-demand"'); request();
     const item = readReview(KEY)!;
     item.rounds[0]!.state = 'dismissed'; writeReview(item);
-    requestNewReview(KEY, NOW);
+    requestNewReview(KEY, NOW, currentPr);
     const id = round().id;
     request({ head: 'bbbbbbb2' });
     expect(readReview(KEY)!.rounds).toHaveLength(2);

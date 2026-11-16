@@ -240,7 +240,8 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
 function settleSubmittedReview(item: ReviewItem, reviews: SearchPr['reviews']): void {
   const round = latestRound(item);
   if (!round || round.state === 'posted') return;
-  const submitted = (reviews?.nodes ?? []).filter((review) => review.commit?.oid === round.headSha)
+  const submitted = (reviews?.nodes ?? []).filter((review) => review.commit?.oid === round.headSha &&
+    (!round.localRequest || review.submittedAt >= round.requestedAt))
     .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
   if (submitted) markReviewPosted(item.key, round.id, { reviewId: String(submitted.databaseId), by: 'review tool', at: submitted.submittedAt,
     verdict: SUBMITTED_VERDICTS[submitted.state] });
@@ -552,11 +553,23 @@ export async function draftReviewOnDemand(key: string, now = Date.now()): Promis
 }
 
 /** A new local request follows the repo mode and daily cap, just like discovery. */
-export function requestNewReview(key: string, now = Date.now()): string | undefined {
+export function requestNewReview(key: string, now = Date.now(), run: GhGraphql = runGraphql): string | undefined {
+  const item = readReview(key);
+  if (!item || latestRound(item)?.state !== 'dismissed') return 'Only a skipped or dismissed review can start a new round.';
+  const config = loadPickupConfig().reviews;
+  if (!config) return 'Reviews are not enabled. Run lobstah setup reviews.';
+  if (githubBlockedUntil(now)) return 'GitHub is temporarily unavailable. Try again when the review can be refreshed.';
+  const data = reviewQuery<{ repository?: { pullRequest?: { state: 'OPEN' | 'MERGED' | 'CLOSED'; headRefOid: string } } }>(
+    { query: 'query($owner: String!, $repo: String!, $number: Int!) { rateLimit { cost } repository(owner: $owner, name: $repo) { pullRequest(number: $number) { state headRefOid } } }',
+      variables: { owner: item.pr.owner, repo: item.pr.repo, number: item.pr.number } }, config.token, run, now, () => {}, 'new review head check');
+  const current = data?.repository?.pullRequest;
+  if (!current?.headRefOid || current.state !== 'OPEN') return current ? 'This PR is closed. Reopen it before requesting a new review.' : 'The current PR head could not be read. Try again.';
+  item.pr.headSha = current.headRefOid;
+  item.pr.state = current.state;
+  writeReview({ ...item, updatedAt: new Date(now).toISOString() });
   const result = newReviewRound(key, now);
   if (typeof result === 'string') return result;
-  const identity = loadPickupConfig().reviews?.identity;
-  if (identity) draftReviews(identity, () => {}, now);
+  draftReviews(config.identity, () => {}, now);
   return undefined;
 }
 

@@ -83,6 +83,18 @@ describe('the PR view', () => {
     expect(text(g)).not.toContain('Save failed. Try again.');
   });
 
+  it('saves the last text edit when Chris closes the PR view immediately', async () => {
+    const review = { ...draft, roundId: 'round1', draftedAt: ago(30), decisions: REVIEW_DECISIONS, seenAt: ago(10) };
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviews: [review], focusToken: 'tok' }, {
+      now: NOW, hash: '#pr/' + encodeURIComponent(key), post: () => ({ status: 200, body: { ok: true } }),
+    }); opened.push(g);
+    const field = g.$('fieldset textarea') as unknown as HTMLTextAreaElement;
+    field.value = 'Chris will own the rollout.';
+    field.dispatchEvent(new g.window.Event('input', { bubbles: true }) as unknown as Event);
+    (g.$('.detail-close') as unknown as HTMLElement).click(); await g.settle();
+    expect(g.posts().map(post => JSON.parse(post.body))).toContainEqual({ kind: 'review-decision-answer', payload: { key: review.key, roundId: 'round1', headSha: 'aaa', draftedAt: review.draftedAt, decisionId: 'rollout-owner', answer: { text: 'Chris will own the rollout.' } } });
+  });
+
   it('offers New review in the skipped PR menu', async () => {
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), reviews: [{ ...draft, state: 'dismissed' }], focusToken: 'tok' }, {
       now: NOW, hash: '#pr/' + encodeURIComponent(key), post: () => ({ status: 200, body: { ok: true } }),

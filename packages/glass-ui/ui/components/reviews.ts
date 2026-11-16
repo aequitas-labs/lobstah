@@ -229,8 +229,12 @@ export function ReviewActions({
   </span>`;
 }
 
-const badge = (r: GlassReview) =>
-  html`<span class=${'badge ' + (reviewState(r) === 'needs your call' ? 'bad' : (TONE[r.state] ?? ''))}>${reviewState(r)}</span>${r.verdict && html`<span class="badge">${r.verdict.replace('_', ' ')}</span>`}${reviewUnreadReason(r) && html`<span class="badge bad" data-review-unread>● ${reviewUnreadReason(r)}</span>`}${r.needsYou && html`<span class="badge warn">needs you</span>`}`;
+const badge = (r: GlassReview) => {
+  const state = reviewState(r);
+  const unread = reviewUnreadReason(r);
+  const unreadState = unread?.toLowerCase() === state;
+  return html`<span class=${'badge ' + (state === 'needs your call' ? 'bad' : (TONE[r.state] ?? ''))} data-review-unread=${unreadState || undefined}>${unreadState ? '● ' : ''}${state}</span>${r.verdict && html`<span class="badge">${r.verdict.replace('_', ' ')}</span>`}${unread && !unreadState && html`<span class="badge bad" data-review-unread>● ${unread}</span>`}${r.needsYou && html`<span class="badge warn">needs you</span>`}`;
+};
 const findings = (r: GlassReview) =>
   html`${r.summary && html`<details onClick=${(e: Event) => e.stopPropagation()}><summary>Summary</summary><div class="rv-reason">${r.summary}</div></details>`}${r.blocking?.map((b) => html`<div class="rv-reason bad">${b.path}:${b.line} · ${b.body}</div>`)}`;
 
@@ -333,14 +337,18 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
   const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;
   const open = showReview(r);
   const status = reviewStatus(r);
+  const unread = reviewUnreadReason(r);
+  const unreadStatus = unread?.toLowerCase() === status.word;
   return prShapedCard({
     key: r.key,
     title: r.title,
     titleAttr: r.title,
     prState: reviewPrState(r),
     status: [
-      StatusChip(status.word, status.tone),
-      reviewUnreadReason(r) && html`<span class="gchip bad" data-review-unread>● ${reviewUnreadReason(r)}</span>`,
+      unreadStatus
+        ? html`<span data-review-unread>${StatusChip('● ' + status.word, status.tone)}</span>`
+        : StatusChip(status.word, status.tone),
+      unread && !unreadStatus && html`<span class="gchip bad" data-review-unread>● ${unread}</span>`,
       r.needsYou && StatusChip('needs you', 'bad'),
       r.mutedAt && StatusChip('muted', 'dim'),
       posted(r),

@@ -147,7 +147,7 @@ describe('the Reviews tab', () => {
     const r = review(7, { state: 'drafted', verdict, needsYou: verdict === 'approve', summary: 'Reviewed summary', blocking: verdict === 'request_changes' ? [{ path: 'src/a.ts', line: 12, body: 'Race condition' }] : [] });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards' }, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g); await g.go('#reviews');
-    if (verdict === 'approve') expect(g.$$('#reviews .gstate .gchip').map((c) => c.textContent)).toEqual(['draft ready', '● Draft ready', 'needs you']);
+    if (verdict === 'approve') expect(g.$$('#reviews .gstate .gchip').map((c) => c.textContent)).toEqual(['● draft ready', 'needs you']);
     const box = await openCard(g, 7);
     expect(box.textContent).toContain(label);
     expect(box.textContent).toContain('Reviewed summary');
@@ -232,7 +232,7 @@ describe('the Reviews tab', () => {
     open.push(g);
     await g.go('#reviews');
     // A drafted round's chip says its draft is ready; every other state says itself.
-    const chips = g.$$('#reviews .gstate .gchip').map((b) => b.textContent);
+    const chips = g.$$('#reviews .gstate .gchip').map((b) => b.textContent?.replace(/^● /, ''));
     for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'draft ready' : state);
     // The drafted round's card links its pending review; the others open the review tool.
     const drafted = 20 + REVIEW_ROUND_STATES.indexOf('drafted');
@@ -413,15 +413,14 @@ describe('review requests on /requests', () => {
     expect((await send(base, token, 'review-decision-answer', { ...payload, answer: { optionId: 'bad' } })).status).toBe(409);
   });
 
-  it('New review opens a requested round without changing the skipped history', async () => {
+  it('New review refuses an unconfigured identity without changing the skipped history', async () => {
     fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "on-demand"\n');
     const key = 'review:acme/web#7';
     const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaa' }, round: { id: 'round1', requestedAt: ago(60) } }).item;
     item.rounds[0]!.state = 'dismissed'; writeReview(item);
     const { base, token } = await start();
-    expect((await send(base, token, 'review-new', { key })).status).toBe(200);
-    expect(readReview(key)!.rounds.map(round => round.state)).toEqual(['dismissed', 'requested']);
     expect((await send(base, token, 'review-new', { key })).status).toBe(409);
+    expect(readReview(key)!.rounds.map(round => round.state)).toEqual(['dismissed']);
   });
 
   it('the Draft action follows the configured on-demand mode', async () => {

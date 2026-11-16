@@ -22,6 +22,8 @@ function DecisionAnswer({
   const pending = useRef(false);
   const version = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout>>();
+  const pendingWrite = useRef<() => void>();
+  const mounted = useRef(true);
   const writes = useRef(Promise.resolve());
   const editable = can('review-request') && review.state === 'drafted' && review.headSha === review.prHeadSha;
   useEffect(() => {
@@ -30,6 +32,8 @@ function DecisionAnswer({
   useEffect(
     () => () => {
       clearTimeout(timer.current);
+      mounted.current = false;
+      pendingWrite.current?.();
       onPending(decision.id, false);
     },
     [],
@@ -43,6 +47,7 @@ function DecisionAnswer({
     const generation = ++version.current;
     clearTimeout(timer.current);
     const write = () => {
+      pendingWrite.current = undefined;
       writes.current = writes.current.then(async () => {
         if (generation !== version.current) return;
         let why: string | undefined;
@@ -58,7 +63,7 @@ function DecisionAnswer({
         } catch {
           why = 'Your answer could not be saved. Try again.';
         }
-        if (generation !== version.current) return;
+        if (generation !== version.current || !mounted.current) return;
         setSaving(false);
         setError(why);
         if (!why) {
@@ -67,13 +72,17 @@ function DecisionAnswer({
         }
       });
     };
+    pendingWrite.current = write;
     if (delay) timer.current = setTimeout(write, delay);
     else write();
   };
-  return html`<fieldset data-review-decision=${decision.id} disabled=${!editable}>
+  return html`<fieldset class="pr-findings" data-review-decision=${decision.id} disabled=${!editable}>
     <legend>${decision.question}</legend>
     ${decision.options.map((option) => html`<p key=${option.id}><label><input type="radio" name=${'review-decision-' + decision.id} checked=${answer?.optionId === option.id} onChange=${() => save({ optionId: option.id })} /> <b>${option.label}</b>${decision.recommendation === option.id && html` <span class="badge">Recommended</span>`}<br /><span class="dim">${option.consequence}</span></label></p>`)}
-    <label>Write your own answer<textarea class="danswer" rows="2" maxlength="8000" value=${answer?.text ?? ''} onInput=${(event: Event) => save({ text: (event.currentTarget as HTMLTextAreaElement).value }, 350)} /></label>
+    <label>Write your own answer<textarea class="danswer" rows="2" maxlength="8000" value=${answer?.text ?? ''} onInput=${(event: Event) => save({ text: (event.currentTarget as HTMLTextAreaElement).value }, 350)} onBlur=${() => {
+      clearTimeout(timer.current);
+      pendingWrite.current?.();
+    }} /></label>
     <div role="status">${saving ? 'Saving…' : error ? html`<span class="bad">${error}</span> <${Button} onClick=${() => save(answer)}>Retry save<//>` : answer && (answer.optionId || answer.text?.trim()) ? 'Saved' : 'Choose an option or write an answer.'}</div>
   </fieldset>`;
 }
