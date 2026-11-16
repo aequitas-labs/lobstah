@@ -149,7 +149,8 @@ describe('codexExecArgs', () => {
     expect(first.join(' ')).toContain('-m gpt-5-codex');
     expect(first.at(-1)).toBe('go');
     const resumed = codexExecArgs(opts(), 'more', 't-42');
-    expect(resumed.slice(0, 3)).toEqual(['exec', 'resume', 't-42']);
+    expect(resumed.slice(-3)).toEqual(['resume', 't-42', 'more']);
+    expect(resumed.indexOf('--sandbox')).toBeLessThan(resumed.indexOf('resume'));
   });
 });
 
@@ -194,7 +195,7 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     const argvs = fs.readFileSync(argvLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]);
     expect(argvs).toHaveLength(2);
     expect(argvs[0]!.slice(0, 2)).toEqual(['exec', '--json']);
-    expect(argvs[1]!.slice(0, 3)).toEqual(['exec', 'resume', 't-42']);
+    expect(argvs[1]!.slice(-3)).toEqual(['resume', 't-42', 'second turn']);
   });
 
   it('a turn.failed event ends the run with that error', async () => {
@@ -208,4 +209,25 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     await collect(run.events);
     expect(result.error).toBe('quota exhausted');
   });
+});
+
+
+it.each(['workspace-write', 'danger-full-access'] as const)('Codex SDK and CLI honor %s for fresh and resumed jobs', (codexSandbox) => {
+  const options = opts({ codexSandbox, model: 'gpt-6.1-sol' });
+  expect(codexThreadOptions(options)).toMatchObject({ sandboxMode: codexSandbox, approvalPolicy: 'never', model: 'gpt-6.1-sol' });
+  for (const thread of [undefined, 't-42']) {
+    const argv = codexExecArgs(options, 'go', thread);
+    expect(argv).toContain('approval_policy="never"');
+    expect(argv).toContain('gpt-6.1-sol');
+    if (codexSandbox === 'danger-full-access') {
+      expect(argv).toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(argv).not.toContain('--sandbox');
+      expect(argv).not.toContain('--add-dir');
+    } else {
+      expect(argv).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(argv).toContain('--sandbox');
+      expect(argv).toContain('workspace-write');
+      expect(argv).toContain('--add-dir');
+    }
+  }
 });

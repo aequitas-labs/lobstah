@@ -16,13 +16,20 @@ export interface HarnessPermissionDefaults {
   permissionMode?: string;
 }
 
+export type CodexHeadlessSandbox = 'workspace-write' | 'danger-full-access';
+
+export interface CodexHarnessDefaults extends HarnessPermissionDefaults {
+  headless_sandbox?: CodexHeadlessSandbox;
+  headless_model?: string;
+}
+
 export interface HarnessDefaults extends HarnessPermissionDefaults {
   default?: string;
   model?: string;
   effort?: string;
   /** Permission defaults for traps launched with this harness. */
   claude?: HarnessPermissionDefaults;
-  codex?: HarnessPermissionDefaults;
+  codex?: CodexHarnessDefaults;
 }
 
 /** Permission modes a throw can start a trap in; `bypass` is `bypassPermissions`. */
@@ -49,6 +56,13 @@ function parseHarness(raw: unknown, where: string): HarnessDefaults | undefined 
   const defaults = parsePermissionDefaults(raw, where) as HarnessDefaults | undefined;
   if (defaults) for (const harness of ['claude', 'codex'] as const) {
     parsePermissionDefaults(defaults[harness], `${where.slice(0, -1)}.${harness}]`);
+  }
+  const codex = defaults?.codex;
+  if (codex?.headless_sandbox !== undefined && codex.headless_sandbox !== 'workspace-write' && codex.headless_sandbox !== 'danger-full-access') {
+    throw new Error(`${where.slice(0, -1)}.codex].headless_sandbox must be "workspace-write" or "danger-full-access"`);
+  }
+  if (codex?.headless_model !== undefined && (typeof codex.headless_model !== 'string' || !codex.headless_model.trim())) {
+    throw new Error(`${where.slice(0, -1)}.codex].headless_model must be a non-empty string`);
   }
   return defaults;
 }
@@ -825,6 +839,7 @@ export function loadConfig(): Config {
 
 export interface ResolvedDispatch {
   harness: string;
+  codexSandbox?: CodexHeadlessSandbox;
   model?: string;
   effort?: string;
   limits: DispatchLimits;
@@ -839,9 +854,11 @@ export function resolveDispatch(d: Descriptor, cfg: Config): ResolvedDispatch {
   if (!repo) throw new Error(`unknown repo key "${d.repo}" — add it to ${configPath()}`);
   const rh = repo.harness ?? {};
   const gh = cfg.harness;
+  const harness = d.harness ?? rh.default ?? gh.default ?? 'claude';
   return {
-    harness: d.harness ?? rh.default ?? gh.default ?? 'claude',
-    model: d.model ?? rh.model ?? gh.model,
+    harness,
+    ...(harness === 'codex' ? { codexSandbox: rh.codex?.headless_sandbox ?? gh.codex?.headless_sandbox ?? 'workspace-write' } : {}),
+    model: d.model ?? (harness === 'codex' ? rh.codex?.headless_model ?? gh.codex?.headless_model : undefined) ?? rh.model ?? gh.model,
     effort: d.effort ?? rh.effort ?? gh.effort,
     limits: {
       wallClockSecs: cfg.limits.wallClockSecs,

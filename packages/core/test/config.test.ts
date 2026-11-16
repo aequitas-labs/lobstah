@@ -212,3 +212,33 @@ describe('config precedence: descriptor > repo > global > default', () => {
     expect(() => resolveDispatch({ id: 'x', repo: 'nope', brief: 'b' }, loadConfig())).toThrow(/unknown repo key/);
   });
 });
+
+
+describe('headless Codex settings', () => {
+  const dispatch = { id: 'x', repo: 'myapp', brief: 'b', harness: 'codex' };
+  it('keeps workspace-write by default, and leaves interactive defaults intact', () => {
+    expect(resolveDispatch(dispatch, loadConfig())).toMatchObject({ codexSandbox: 'workspace-write', model: 'opus' });
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "gpt-6.1-sol"\n');
+    const cfg = loadConfig();
+    expect(resolveDispatch(dispatch, cfg)).toMatchObject({ codexSandbox: 'danger-full-access', model: 'gpt-6.1-sol' });
+    expect(cfg.harness.model).toBe('sonnet');
+    expect(cfg.repos.myapp.harness?.model).toBe('opus');
+    expect(configPermissionMode(cfg, 'myapp', 'codex')).toBeUndefined();
+    expect(resolveDispatch({ ...dispatch, harness: 'claude' }, cfg).model).toBe('opus');
+  });
+  it('prefers an explicit dispatch model, then repo headless settings over global headless settings', () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), '\n[harness.codex]\nheadless_sandbox = "danger-full-access"\nheadless_model = "global"\n[repos.myapp.harness.codex]\nheadless_sandbox = "workspace-write"\nheadless_model = "repo"\n');
+    expect(resolveDispatch(dispatch, loadConfig())).toMatchObject({ codexSandbox: 'workspace-write', model: 'repo' });
+    expect(resolveDispatch({ ...dispatch, model: 'explicit' }, loadConfig()).model).toBe('explicit');
+  });
+  it.each(['harness.codex', 'repos.myapp.harness.codex'])('validates %s', (scope) => {
+    for (const value of ['"read-only"', '""', 'true', '42', '["workspace-write"]']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[${scope}]\nheadless_sandbox = ${value}\n`);
+      expect(() => loadConfig()).toThrow(`[${scope}].headless_sandbox must be`);
+    }
+    for (const value of ['""', '"  "', 'true', '42', '["gpt-6.1-sol"]']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[${scope}]\nheadless_model = ${value}\n`);
+      expect(() => loadConfig()).toThrow(`[${scope}].headless_model must be a non-empty string`);
+    }
+  });
+});

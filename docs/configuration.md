@@ -181,6 +181,27 @@ Call out migrations that are not reversible.
 Same four keys as the per-repo block. Precedence for every harness setting:
 **descriptor > repo > global > adapter default.**
 
+### `[harness.codex]` — headless Codex
+
+These settings affect SDK and `codex exec` jobs only. Interactive traps keep
+using their existing model and permission settings. Both keys also work in
+`[repos.<key>.harness.codex]`; repo settings override global settings.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `headless_sandbox` | `"workspace-write"` | `"workspace-write"` allows the checkout and lobstah reporting directory. `"danger-full-access"` disables the sandbox and approval prompts, allowing network access and writes outside the checkout, including tool caches and `~/.ume`. |
+| `headless_model` | unset | Model for headless Codex jobs. An explicit dispatch model wins, then the repo headless model, global headless model, and ordinary repo/global model defaults. Must be a non-empty string. |
+
+```toml
+[harness.codex]
+headless_sandbox = "danger-full-access"
+headless_model = "gpt-6.1-sol"
+```
+
+Headless Codex uses a lobstah-managed `CODEX_HOME` with inherited auth and
+an isolated config. Interactive MCP servers and session/Stop hooks are not
+loaded; the runner handles reports, waits, and job completion.
+
 ## `[limits]`
 
 | Key | Default | Meaning |
