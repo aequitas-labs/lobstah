@@ -40,7 +40,7 @@ export function repoKeyForForge(cfg: Pick<Config, 'repos'>, forgeRepo: string): 
 
 /**
  * How a PR in this forge repo merges: its repo's `[repos.<key>].mergeMethod`,
- * else the `[pickup.github]` merge method, else squash.
+ * else merge commits for lobstah, then `[pickup.github]`, then squash.
  */
 export function prMergeMethod(
   cfg: Pick<Config, 'repos'>,
@@ -48,7 +48,7 @@ export function prMergeMethod(
   pickup: () => PrMergeMethod | undefined = pickupMergeMethod,
 ): PrMergeMethod {
   const key = repoKeyForForge(cfg, forgeRepo);
-  return (key && cfg.repos[key]?.mergeMethod) || pickup() || 'squash';
+  return (key && cfg.repos[key]?.mergeMethod) || (forgeRepo.split('/').at(-1) === 'lobstah' ? 'merge' : undefined) || pickup() || 'squash';
 }
 
 /** pick's method, read at most once a minute: loading pick's config resolves its token, and the glass asks per PR. */
@@ -66,30 +66,46 @@ function pickupMergeMethod(now = Date.now()): PrMergeMethod | undefined {
   return method;
 }
 
+/** Options for a merge authorization, shared by the ownership-checked Glass and local helm CLI. */
+export interface PrMergeOptions {
+  viewer?: () => string | undefined;
+  now?: number;
+  cfg?: Config;
+  method?: PrMergeMethod;
+  note?: string;
+  hold?: string;
+  releaseHold?: boolean;
+  /** The local helm CLI explicitly authorized this PR, regardless of its author. */
+  authorized?: boolean;
+}
+
 /**
- * Ask the boat to merge a PR once it's green (`pr-merge`). Only the person's
- * own PRs: authored by the login gh signs in as, or opened by a dispatch and
- * not known to be someone else's. The request stands until the PR merges,
- * closes, or `cancelPrMerge`.
+ * Record permission to merge an open PR. Glass requests require ownership;
+ * the helm CLI supplies explicit authorization. Completed requests retain
+ * their provenance and merge SHA until cancelled.
  */
 export function requestPrMerge(
   key: string,
   by: string,
-  opts: { viewer?: () => string | undefined; now?: number; cfg?: Config } = {},
+  opts: PrMergeOptions = {},
 ): PrMergeRequest {
   const cfg = opts.cfg ?? loadConfig();
   return withPrLock(key, () => {
     const pr = readPr(key);
     if (!pr) throw new PrMergeRefused(404, 'lobstah has no record of that PR. Watch it first.');
     if (pr.state !== 'OPEN') throw new PrMergeRefused(409, `That PR is ${pr.state.toLowerCase()}.`);
-    if (!mayAutoWatch(prAuthorship(pr, opts.viewer ?? (() => githubViewer())))) {
+    if (!opts.authorized && !mayAutoWatch(prAuthorship(pr, opts.viewer ?? (() => githubViewer())))) {
       throw new PrMergeRefused(403, 'Only your own PRs, or ones a dispatch opened, merge from the glass.');
     }
     const request: PrMergeRequest = pr.mergeRequest ?? {
       at: new Date(opts.now ?? Date.now()).toISOString(),
       by,
-      method: prMergeMethod(cfg, pr.repo),
+      method: opts.method ?? prMergeMethod(cfg, pr.repo),
     };
+    if (opts.method) request.method = opts.method;
+    if (opts.note !== undefined) request.note = opts.note;
+    if (opts.hold !== undefined) request.hold = opts.hold;
+    if (opts.releaseHold) delete request.hold;
     writePr({ ...pr, mergeRequest: request });
     // Its watch checks it every poll; a PR watched by no one yet gets one.
     const ref = parsePrRef(pr.url);
@@ -116,20 +132,25 @@ export function openPrBelow(pr: PrRecord, records: readonly PrRecord[]): boolean
 
 /** Test seams for the merge pass. */
 export interface PrMergeDeps {
-  merge?: (pr: PrRecord, method: PrMergeMethod) => { ok: true } | { ok: false; why: string };
+  api?: GithubApi;
+  merge?: (pr: PrRecord, method: PrMergeMethod) => { ok: true; sha?: string } | { ok: false; why: string };
+  retarget?: (pr: PrRecord, base: string) => { ok: boolean; why?: string };
   now?: number;
 }
 
-/** `gh pr merge` on exactly the head that was checked. */
-function ghMerge(pr: PrRecord, method: PrMergeMethod): { ok: true } | { ok: false; why: string } {
-  const res = spawnSync('gh', ['pr', 'merge', pr.url, `--${method}`, '--match-head-commit', pr.headSha], {
-    encoding: 'utf8',
-    timeout: 60_000,
-    windowsHide: true,
-  });
-  return res.status === 0
-    ? { ok: true }
-    : { ok: false, why: (res.stderr || res.stdout || `gh exited ${res.status}`).trim().split('\n')[0]! };
+/** REST merges exactly the checked head; it cannot enable auto-merge or bypass protection. */
+function ghMerge(pr: PrRecord, method: PrMergeMethod, api: GithubApi = ghApi): { ok: true; sha?: string } | { ok: false; why: string } {
+  const result = api('PUT', `repos/${pr.repo}/pulls/${pr.number}/merge`, { sha: pr.headSha, merge_method: method });
+  if (!result.ok) return result;
+  if (result.json.merged !== true || typeof result.json.sha !== 'string') {
+    return { ok: false, why: String(result.json.message ?? 'GitHub did not confirm the merge.') };
+  }
+  return { ok: true, sha: result.json.sha };
+}
+
+/** Change only the next PR's base; its checks must be observed again before merging. */
+function ghRetarget(pr: PrRecord, base: string, api: GithubApi = ghApi): { ok: boolean; why?: string } {
+  return api('PATCH', `repos/${pr.repo}/pulls/${pr.number}`, { base });
 }
 
 /**
@@ -150,21 +171,65 @@ export function mergeRequestedPrs(log: (message: string) => void, deps: PrMergeD
       const pr = readPr(record.key);
       const request = pr?.mergeRequest;
       if (!pr || !request) return;
+      // A batch fetched before our successful merge can still report OPEN.
+      if (request.status === 'merged' && pr.state === 'OPEN') return;
+      const failure = pr.mergeStateStatus === 'DIRTY' ? 'conflict' : (pr.checks?.failed ?? 0) > 0 ? 'checks' : undefined;
+      if (failure) {
+        postNotice({ kind: 'stack-stopped', text: `${pr.key}: merge when green is waiting on ${failure}.`, refId: pr.key,
+          dedupeKey: `merge-wait-${pr.key}-${pr.headSha}-${failure}` });
+      }
       const step = prMergeStep(pr, openPrBelow(pr, records));
+      const retargetChildren = () => {
+        let complete = true;
+        for (const child of readPrs().filter((p) => p.repo === pr.repo && p.state === 'OPEN' && !!pr.headRefName && p.baseRefName === pr.headRefName && p.key !== pr.key)) {
+          if (!pr.baseRefName) { complete = false; continue; }
+          const result = (deps.retarget ?? ((child, base) => ghRetarget(child, base, deps.api)))(child, pr.baseRefName);
+          if (!result.ok) {
+            complete = false;
+            postNotice({ kind: 'stack-stopped', text: `Could not retarget ${child.key}: ${result.why ?? 'GitHub refused'}`, refId: child.key,
+              dedupeKey: `merge-retarget-${child.key}-${pr.headSha}` });
+            continue;
+          }
+          withPrLock(child.key, () => {
+            const current = readPr(child.key);
+            if (current) writePr({ ...current, baseRefName: pr.baseRefName, mergeStateStatus: 'UNKNOWN', checks: { ...current.checks, unknown: 'latest run' } });
+          });
+        }
+        return complete;
+      };
       if (step.kind === 'done') {
-        const { mergeRequest: _done, ...rest } = pr;
-        writePr(rest);
+        if (pr.state === 'MERGED') {
+          const complete = request.retargetPending ? retargetChildren() : true;
+          writePr({ ...pr, mergeRequest: { ...request, status: 'merged', retargetPending: !complete } });
+        } else {
+          const { mergeRequest: _done, ...rest } = pr;
+          writePr(rest);
+        }
         return;
       }
       if (step.kind === 'merge') {
-        const result = (deps.merge ?? ghMerge)(pr, request.method);
+        writePr({ ...pr, mergeRequest: { ...request, status: 'merging', error: undefined } });
+        const result = (deps.merge ?? ((pr, method) => ghMerge(pr, method, deps.api)))(pr, request.method);
         if (result.ok) {
-          log(`merged ${pr.key} (${request.method}), as asked from the glass`);
-          const { mergeRequest: _merged, ...rest } = pr;
-          writePr(rest);
+          log(`merged ${pr.key} (${request.method}), as authorized by ${request.by}`);
+          const mergedAt = new Date(deps.now ?? Date.now()).toISOString();
+          // Persist completion before retargeting, so a restart cannot submit a second merge.
+          writePr({ ...pr, state: 'MERGED', mergedAt, mergeRequest: { ...request, status: 'merged', mergeSha: result.sha, mergedAt, retargetPending: true } });
+          const complete = retargetChildren();
+          const merged = readPr(pr.key)!;
+          writePr({ ...merged, mergeRequest: { ...merged.mergeRequest!, retargetPending: !complete } });
+          postNotice({ kind: 'pr-merged', text: `Merged ${pr.key} (${request.method})${result.sha ? ` at ${result.sha}` : ''}, authorized by ${request.by}.`,
+            refId: pr.key, dedupeKey: `merge-complete-${pr.key}-${pr.headSha}` });
         } else {
+          writePr({ ...pr, mergeRequest: { ...request, status: 'failed', error: result.why } });
+          postNotice({ kind: 'stack-stopped', text: `Could not merge ${pr.key}: ${result.why}`, refId: pr.key,
+            dedupeKey: `merge-refused-${pr.key}-${pr.headSha}-${result.why}` });
           log(`could not merge ${pr.key}, will try again: ${result.why}`);
         }
+        return;
+      }
+      if (step.kind === 'wait') {
+        if (request.status !== 'waiting') writePr({ ...pr, mergeRequest: { ...request, status: 'waiting', error: undefined } });
         return;
       }
       if (step.kind === 'stuck') {
@@ -290,13 +355,13 @@ export function cancelStackMerge(stackKey: string): 'cancelled' | 'none' | 'merg
 
 /** One GitHub REST call: its JSON, or why it failed. */
 export type GithubApi = (
-  method: 'GET' | 'POST' | 'PUT',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH',
   path: string,
   body?: unknown,
 ) => { ok: true; json: Record<string, unknown> } | { ok: false; why: string };
 
 /** `gh api`, signed in as the person, with the body on stdin. */
-function ghApi(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): ReturnType<GithubApi> {
+function ghApi(method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, body?: unknown): ReturnType<GithubApi> {
   const res = spawnSync('gh', ['api', '-X', method, path, ...(body === undefined ? [] : ['--input', '-'])], {
     encoding: 'utf8',
     input: body === undefined ? undefined : JSON.stringify(body),

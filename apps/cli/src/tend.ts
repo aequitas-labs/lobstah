@@ -1,3 +1,4 @@
+import { prMergeStatus } from '@lobstah/core';
 import { configuredTrapViews, orderedDispatchPrUrls, reviewAttention } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -638,6 +639,8 @@ export interface TendReport {
   helms: Array<{ grounds: string; man: string; session: string; heartbeatAgeSecs: number; worker?: string; chat: 'full' | 'brief' }>;
   merge?: MergeView;
   stacks: GlassStack[];
+  /** Standing authorizations and their latest merge result. */
+  mergeWhenGreen?: Array<{ pr: string; by: string; at: string; method: string; status: string; hold?: string; note?: string; sha?: string }>;
   /** Dispatches parked on `paused`, oldest first: what each waits on, and for how long. They hold no slot. */
   parked?: Array<{ id: string; lane: Lane; trap: boolean; since: string; parkedSecs: number; note?: string; waiting?: WaitingView }>;
   /** PR repairs that are due but wait: who holds each and why. Not attention. */
@@ -1209,6 +1212,10 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     helms,
     ...(merge ? { merge: mergeViewWithTitles(merge, records) } : {}),
     stacks,
+    mergeWhenGreen: records.filter((pr) => pr.mergeRequest).map((pr) => ({
+      pr: pr.key, by: pr.mergeRequest!.by, at: pr.mergeRequest!.at, method: pr.mergeRequest!.method,
+      status: prMergeStatus(pr), hold: pr.mergeRequest!.hold, note: pr.mergeRequest!.note, sha: pr.mergeRequest!.mergeSha,
+    })),
     parked: parked.map((p) => ({
       id: p.id,
       lane: p.lane,
@@ -1255,6 +1262,7 @@ export function renderTend(r: TendReport): string {
       ...(r.hold ? { diskHold: `${r.hold.reason} on ${r.hold.dir} (since ${r.hold.since})` } : {}),
     }),
   );
+  if (r.mergeWhenGreen?.length) lines.push(toonTable('merge when green', r.mergeWhenGreen.map((m) => ({ ...m })), ['pr', 'by', 'at', 'method', 'status', 'hold', 'note', 'sha']));
   if (r.heavy) lines.push(formatHeavyView(r.heavy));
   if (r.queueWait) lines.push(r.queueWait);
   if (r.todoNote) lines.push(r.todoNote);

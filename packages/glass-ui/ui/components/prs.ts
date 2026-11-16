@@ -116,7 +116,7 @@ const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', r
  */
 export function MergeWhenGreen({ p, size = 'md' }: { p: GlassPr; size?: ButtonSize }) {
   // Constant for the page's life, so the hooks below always run in the same order.
-  if (!can('pr-merge') || !p.mine || p.state !== 'OPEN') return null;
+  if (!can('pr-merge') || (!p.mine && !p.mergeRequest) || p.state !== 'OPEN') return null;
   const send = (cancel: boolean) => async (e: Event) => {
     e.stopPropagation();
     await requestPrMerge(p.key, cancel);
@@ -160,9 +160,38 @@ export function MergeStackWhenGreen({ s, prs }: { s: GlassStack; prs: GlassPr[] 
   return html`<span class="prmerge stackmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}</span>`;
 }
 
-/** What a standing merge request says on the row's status line. */
-const mergeNote = (p: GlassPr) =>
-  p.mergeRequest && html`<span class="mergenote" title=${`merges as ${METHOD_WORDS[p.mergeRequest.method]}`}>merges when green</span>`;
+/** Local clock time today; include the day for earlier authorizations. */
+export function mergeIntentTime(at: string, now = Date.now()): string {
+  const date = new Date(at);
+  const today = new Date(now);
+  if (!Number.isFinite(date.getTime())) return 'Time unavailable';
+  const clock = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  if (date.toDateString() === today.toDateString()) return clock;
+  const days = Math.abs(today.getTime() - date.getTime()) / 86_400_000;
+  const day = date.toLocaleDateString(
+    undefined,
+    days < 7
+      ? { weekday: 'short' }
+      : { month: 'short', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) },
+  );
+  return `${day} ${clock}`;
+}
+
+const MERGE_METHOD_LABELS = { merge: 'merge commit', squash: 'squash', rebase: 'rebase' } as const;
+
+/** One visible authorization on PR cards, PR details, and matching review rows. */
+export function MergeIntent({ p }: { p?: GlassPr }) {
+  const request = p?.mergeRequest;
+  if (!request) return null;
+  return html`<div class="merge-intent"><span class="mergenote">Merge when green</span> · ${request.summary ?? (p.state === 'MERGED' ? 'Merged' : 'Waiting on CI')}
+    <div class="dim">You · ${request.by === 'chat' ? 'chat' : 'merge card'} · <time datetime=${request.at} title=${new Date(request.at).toLocaleString()}>${mergeIntentTime(request.at)}</time></div>
+    <div class="dim">${MERGE_METHOD_LABELS[request.method]}</div>
+    ${request.hold && html`<div>On hold · ${request.hold}</div>`}${request.note && html`<div>${request.note}</div>`}
+    ${request.mergeSha && html`<div>Merge commit: <code>${request.mergeSha}</code></div>`}
+  </div>`;
+}
+
+const mergeNote = (p: GlassPr) => html`<${MergeIntent} p=${p} />`;
 
 /** The trap that has one of these dispatches (addressed to it, else claimed by it), as `wt:<id>`; none for headless work. */
 export function dispatchTrap(ids: readonly (string | undefined)[]): string | undefined {
@@ -200,7 +229,7 @@ export interface PrCardParts {
   /** The trap that has its work, as `wt:<id>`. */
   trap?: string;
 
-  /** After the meta line's parts: a standing merge request. */
+  /** Standing merge details below the status chips, outside the clamped meta line. */
   tail?: Children;
   /** The bottom bar's buttons: only the ones that apply to this card. */
   actions: Children;
@@ -231,7 +260,7 @@ export const StatusChip = (word: string, cls: string, hover?: string) =>
 export function prShapedCard(c: PrCardParts) {
   const trap = c.trap && [`${TRAP_MARK} `, WorkerAddress(c.trap)];
   const parts: Children[] = [RepoName(c.repo), c.at && [Age(c.at), ' ago'], `#${c.number}`, trap].filter(Boolean);
-  const meta = [...parts.flatMap((part, i) => (i ? [' · ', part] : [part])), c.tail];
+  const meta = parts.flatMap((part, i) => (i ? [' · ', part] : [part]));
   const text = [c.repo, c.at && `${ageText(c.at)} ago`, `#${c.number}`, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`]
     .filter(Boolean)
     .join(' · ');
@@ -242,7 +271,7 @@ export function prShapedCard(c: PrCardParts) {
     icon=${html`<${PrStateIcon} state=${c.prState} />`}
     iconFirst
     state=${{ word: '', tone: c.tone, mark: 'edge' }}
-    status=${c.status}
+    status=${[c.status, c.tail]}
     context=${meta}
     contextTitle=${text}
     actions=${c.actions}
@@ -293,6 +322,7 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
         p.badge.tone !== 'ok' &&
         StatusChip(p.badge.text.toLowerCase(), p.badge.tone, /^checks\b/.test(p.badge.text) ? prChecks(p) : undefined),
     ],
+    tail: mergeNote(p),
     tone: p.badge.tone,
     repo: p.repo,
     number: p.number,

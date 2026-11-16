@@ -1951,6 +1951,11 @@ async function mainCli(): Promise<void> {
         );
       break;
     }
+    case 'pr': {
+      const { mergeWhenGreenCommand } = await import('./pr-merge-command.js');
+      console.log(mergeWhenGreenCommand(pos, { opt, has }));
+      break;
+    }
     case 'prs': {
       const now = Date.now();
       const watches = new Map(listWatches().map((w) => [w.key, w]));

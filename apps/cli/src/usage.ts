@@ -86,6 +86,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   catch: { flags: {}, positionals: '<uuid>' },
   prs: { flags: {}, maxPositionals: 0 },
+  pr: {
+    subverbs: ['merge-when-green'], positionals: '<owner/repo#n>', maxPositionals: 2,
+    flags: { '--by': { value: 'chat|decision:<key>' }, '--method': { value: 'merge|squash' }, '--note': { value: '<text>' }, '--hold': { value: '<reason>' }, '--release-hold': {}, '--clear': {} },
+  },
   reports: { flags: { '--json': {} } },
   reviews: {
     subverbs: ['ls', 'redraft', 'post', 'dismiss'],
@@ -357,6 +361,9 @@ working unless --force; --print shows the command instead of running it.`,
   swap: `Hand an active dispatch to a fresh session — same worktree and brief plus a
 git progress note.`,
   catch: `The evidence: branch, commits, PR, session, and the worktree it ran in.`,
+  pr: `Record permission to merge when checks pass. A hold waits for non-CI steps.
+Use --release-hold to release it, or --clear to cancel. Defaults to --by chat.
+The daemon uses the recorded method and respects branch protection.`,
   prs: `List known PR records newest first with state, checks, age, and watch state.
 Use watch check-pr <key> to force a refresh of one PR watch.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the
