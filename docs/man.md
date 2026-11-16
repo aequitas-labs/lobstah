@@ -1471,6 +1471,8 @@ does it. Each trap keeps one Codex pane: the one it recorded at sign-on.
   whatever its title says.
 - Panes running anything but Codex are left alone.
 
+The daemon archives a departed trap's last 200 terminal lines in `~/.lobstah/logs/traps/<trap-id>.log` before closing its dead pane, and sweeps unowned dead panes at startup and every five minutes (unknown owners use `pane-<pane-id>.log`).
+
 `man throw --remote-control` makes one start reachable from a phone, new
 (`--new`) or returning. A Codex trap attaches to Codex's shared app-server, so its
 pane and a paired phone drive one thread. Other traps are unchanged unless

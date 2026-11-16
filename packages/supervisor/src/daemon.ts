@@ -456,6 +456,8 @@ export interface DaemonHooks {
   turnWaits?: (now: number, log: (message: string) => void) => void;
   /** Stows continuously idle traps and stops their own harness; provided by the CLI daemon entry. */
   idleTraps?: (cfg: Config, now: number, log: (message: string) => void) => void;
+  /** Archives and reaps dead terminal panes; provided by the CLI daemon entry. */
+  trapPanes?: (now: number, log: (message: string) => void) => void;
   /** CLI-owned asynchronous trap startup; never waits for sign-on in the tick. */
   trapStarts?: (cfg: Config, now: number, log: (message: string) => void) => void;
   /** CLI-owned boat broker: starts after the daemon lock, polls on this cadence. */
@@ -655,6 +657,8 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
       void endHarnessProcess(proc).then((ending) => log(`ghost trap ${label}: its Codex process ${proc.pid} ${ending}`));
     }
   }
+  try { hooks.trapPanes?.(now, log); }
+  catch (error) { log(`trap panes: ${error instanceof Error ? error.message : String(error)}`); }
   // A reserved trap whose session never signed on by its deadline fails
   // with a notice; its addressed work stays queued.
   for (const r of expireReservations(now)) log(`trap ${trapLabel(r)} did not start — ${r.reason}`);
