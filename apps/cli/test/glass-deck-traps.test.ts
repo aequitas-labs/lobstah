@@ -121,7 +121,7 @@ it('moves the overview to On deck while the Traps page retains grouping and clos
   expect(section.textContent).not.toMatch(/ghost-crab|failed-crab|stowed-crab/);
   expect(section.textContent).toContain('free-crab');
   expect(section.querySelector('.harness-icon')?.getAttribute('aria-label')).toBe('Codex');
-  expect(section.querySelector('.trap-buoy-harness')?.textContent).toContain('Codex');
+  expect(section.querySelector('.trap-buoy-harness')?.getAttribute('aria-label')).toContain('Codex');
   expect(section.querySelector('.startcmds')).toBeNull();
   expect(section.querySelector('.deckmore')).toBeNull();
   await page.go('#traps');

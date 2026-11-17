@@ -3,11 +3,9 @@ import { trapPageUrl } from '../../src/glass-diff.js';
 import { html, type Children } from '../html.js';
 import buoyBody from '../assets/buoy-body-160.webp';
 import buoyBodyRetina from '../assets/buoy-body-320.webp';
-import buoyFlag from '../assets/buoy-flag-160.webp';
-import buoyFlagRetina from '../assets/buoy-flag-320.webp';
 import { Button } from './button.js';
 import { Harness, HoverInfo, opener, trapDisplayName } from './common.js';
-import { isIconVerb, RunStatusIcon, VerbIcon, type VerbIconVerb } from './run-status.js';
+import { isIconVerb, VERB_TONE, type VerbIconVerb } from './run-status.js';
 
 function trapBuoy(trap: GlassTrapView): Children {
   const current = trap.catches.find((dispatch) => dispatch.id === trap.claimed && dispatch.bucket === 'active');
@@ -56,17 +54,18 @@ function trapBuoy(trap: GlassTrapView): Children {
     }
   };
   return html`<div key=${trap.trapId} class="trap-buoy">
-    <${HoverInfo} cls="trap-buoy-status" text=${progress} focusable=${false}>
-      <${Button} variant="icon" label=${progress}><span aria-hidden="true">${!current && !trap.usageLimit && !trap.listening ? html`<${RunStatusIcon} status="stopped" />` : html`<${VerbIcon} verb=${verb} />`}</span><//>
-    <//>
-    <${HoverInfo} cls="trap-buoy-art" text=${repo} focusable=${false}>
-      <a href=${trapPageUrl(trap.trapId)} aria-label=${`Open ${name} · ${repo}`} onClick=${open}>
-        <img src=${buoyBody} srcset=${`${buoyBody} 1x, ${buoyBodyRetina} 2x`} alt="" width="80" height="162" />
-        <img class="trap-buoy-flag" src=${buoyFlag} srcset=${`${buoyFlag} 1x, ${buoyFlagRetina} 2x`} alt="" width="80" height="162" />
-      </a>
-    <//>
+    <div class="trap-buoy-figure">
+      <${HoverInfo} cls="trap-buoy-art" text=${repo} focusable=${false}>
+        <a href=${trapPageUrl(trap.trapId)} aria-label=${`Open ${name} · ${repo}`} onClick=${open}>
+          <img src=${buoyBody} srcset=${`${buoyBody} 1x, ${buoyBodyRetina} 2x`} alt="" width="40" height="81" />
+        </a>
+      <//>
+      <${Harness} worker=${trap} cls="trap-buoy-harness" compact />
+      <${HoverInfo} cls="trap-buoy-status" text=${progress} focusable=${false}>
+        <${Button} variant="icon" label=${progress}><span class=${`trap-buoy-dot ${VERB_TONE[verb]}`} aria-hidden="true"></span><//>
+      <//>
+    </div>
     <b class="trap-buoy-name">${name}</b>
-    <${Harness} worker=${trap} cls="trap-buoy-harness" withIcon />
   </div>`;
 }
 
