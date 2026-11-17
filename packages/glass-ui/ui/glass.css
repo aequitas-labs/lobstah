@@ -1343,10 +1343,10 @@ tr.rowhead:hover {
   background: transparent;
   border-color: transparent;
 }
-/* A menu action: its whole row is the target, with the icon beside left-aligned words. */
+/* A menu action: its whole row is the target, with the icon and words centered together. */
 .btn-menu {
   display: flex;
-  justify-content: flex-start;
+  justify-content: center;
   width: 100%;
   gap: 8px;
   padding: 0 10px;
@@ -1354,7 +1354,7 @@ tr.rowhead:hover {
   border: 0;
   border-radius: 4px;
   color: var(--fg);
-  text-align: left;
+  text-align: center;
 }
 .btn-menu:hover,
 .btn-menu:focus-visible {

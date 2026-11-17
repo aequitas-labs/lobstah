@@ -12,7 +12,7 @@ import { showToast } from './toast.js';
  * - `danger`: filled red, for what can't be undone (Stop, Revoke).
  * - `icon`: an icon alone, a square, named by its label for screen readers and on hover.
  * - `icon-flat`: the same icon hit target, without a background or border.
- * - `menu`: a full-width row with its icon and words aligned to the left.
+ * - `menu`: a full-width row with its icon and words centered together.
  *
  * Touch pointers keep `md` at 32px and `lg` at 40px. Fine pointers use 26px
  * and 32px. The pointer, not viewport width, selects the size.
