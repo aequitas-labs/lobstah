@@ -370,9 +370,12 @@ describe('the glass page', () => {
     g.queueShow({ id: 'show-1', hash: '#prs' });
     await g.poll();
     expect(g.window.location.hash).toBe('#traps');
-    g.queueShow({ id: 'show-2', hash: '#decision/abc' });
+    const key = acceptanceFleet().attention.find((a) => a.kind === 'question')!.key!;
+    const hash = '#decision/' + encodeURIComponent(key);
+    g.queueShow({ id: 'show-2', hash });
     await g.poll();
-    expect(g.window.location.hash).toBe('#decision/abc');
+    expect(g.window.location.hash).toBe(hash);
+    expect(g.$('.dmodal')?.getAttribute('data-decision')).toBe(key);
   });
 
   it("ignores a hash location.hash would not take, and opens a report's sheet in place", async () => {
