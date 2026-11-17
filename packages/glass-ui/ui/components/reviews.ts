@@ -344,10 +344,14 @@ const posted = (r: GlassReview) =>
  * "approved" or "changes requested" once posted with that verdict, else
  * "posted"; otherwise its round's state (requested, drafting, stale, failed).
  */
-export function reviewStatus(r: Pick<GlassReview, 'state' | 'staged' | 'verdict' | 'decisions' | 'decisionAnswers'>): {
+export function reviewStatus(
+  r: Pick<GlassReview, 'state' | 'staged' | 'verdict' | 'decisions' | 'decisionAnswers' | 'reReview' | 'autoReapproved'>,
+): {
   word: string;
   tone: CardTone;
 } {
+  if (r.reReview) return { word: 're-review needed', tone: 'bad' };
+  if (r.autoReapproved) return { word: 'automatically re-approved', tone: 'ok' };
   if (reviewState(r) === 'needs your call') return { word: 'needs your call', tone: 'bad' };
   if (r.state === 'drafted') return { word: 'draft ready', tone: 'ok' };
   if (r.state === 'posted')
@@ -359,6 +363,7 @@ export function reviewStatus(r: Pick<GlassReview, 'state' | 'staged' | 'verdict'
 
 /** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
 function reviewTone(r: GlassReview): CardTone {
+  if (r.reReview) return 'bad';
   if (r.state === 'posted') return 'ok';
   if (['dismissed', 'withdrawn', 'merged', 'closed'].includes(r.state)) return 'dim';
   if (unansweredReviewDecisions(r).length || r.needsYou || r.stands || r.state === 'failed') return 'bad';
