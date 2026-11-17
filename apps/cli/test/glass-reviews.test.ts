@@ -269,6 +269,79 @@ describe('the Reviews tab', () => {
     expect(g.$$('.toast-content').map((status) => status.textContent)).toContain('Approved #7');
   });
 
+  it.each(['cards', 'table', 'detail'])('toasts a stale publish failure and offers re-drafting in %s', async (view) => {
+    const r = review(7, { state: 'drafted', verdict: 'request_changes' });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
+      now: NOW, prefs: { view: view === 'table' ? 'table' : 'cards' },
+      hash: view === 'detail' ? '#pr/pr%3Aacme%2Fweb%237' : '#reviews',
+      post: (_url, init) => ({ status: JSON.parse(init.body).kind === 'review-request-changes' ? 409 : 200,
+        body: JSON.parse(init.body).kind === 'review-request-changes'
+          ? { ok: false, reason: `${r.key}: the draft is stale; re-draft it before publishing` }
+          : { ok: true } }),
+    });
+    open.push(g);
+    const scope = () => g.$(view === 'detail' ? '.detail-frame' : '#reviews')!;
+    const publish = [...scope().querySelectorAll('button')].find(b => b.textContent === 'Request changes')!;
+    (publish as unknown as HTMLElement).click(); await g.settle();
+    expect(g.$$('.toast-content').map(t => t.textContent)).toEqual(['This draft is out of date. Re-draft it before publishing.']);
+    expect(scope().querySelector('[role="alert"]')).toBeNull();
+    expect(scope().textContent).not.toContain(r.key);
+    if (view !== 'table') {
+      (scope().querySelector('.splitcaret') as unknown as HTMLElement).click(); await g.settle();
+    }
+    const redraft = [...scope().querySelectorAll('button')].find(b => b.textContent === 'Re-draft')!;
+    expect(redraft).toBeTruthy();
+    (redraft as unknown as HTMLElement).click(); await g.settle();
+    expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-redraft', payload: { key: r.key } });
+    expect(g.$$('.toast-content').map(t => t.textContent)).toContain('Draft requested');
+  });
+
+  it.each([
+    ['the newest round is drafting; there is no draft to post', 'This draft is being prepared. Wait for it to finish before publishing.'],
+    ['this round is already posted', 'This review has already been published.'],
+    ['GitHub POST /repos/acme/web/pulls/7/reviews: 422 internal diagnostics', 'This review could not be changed. Try again.'],
+  ])('toasts other publish failures without CLI diagnostics: %s', async (reason, message) => {
+    const r = review(7, { state: 'drafted', verdict: 'approve' });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
+      now: NOW, hash: '#reviews', prefs: { view: 'cards' },
+      post: () => ({ status: 409, body: { ok: false, reason: `${r.key}: ${reason}` } }),
+    });
+    open.push(g);
+    (g.$('#reviews .gactions button') as unknown as HTMLElement).click(); await g.settle();
+    expect(g.$('.toast-content')?.textContent).toBe(message);
+    expect(g.$('#reviews [role="alert"]')).toBeNull();
+  });
+
+  it('toasts menu failures without announcing success or showing inline errors', async () => {
+    const r = review(7, { state: 'drafted' });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
+      now: NOW, hash: '#reviews', prefs: { view: 'cards' },
+      post: () => ({ status: 409, body: { ok: false, reason: `${r.key}: this review was already sent from the review tool` } }),
+    });
+    open.push(g);
+    (g.$('#reviews .splitcaret') as unknown as HTMLElement).click(); await g.settle();
+    const redraft = g.$$('#reviews button').find(b => b.textContent === 'Re-draft')!;
+    (redraft as unknown as HTMLElement).click(); await g.settle();
+    expect(g.$$('.toast-content').map(t => t.textContent)).toEqual(['This review has already been published.']);
+    expect(g.$('#reviews [role="alert"]')).toBeNull();
+  });
+
+  it.each(['cards', 'table', 'detail'].flatMap(view => ['approve', 'comment', 'request_changes'].map(verdict => [view, verdict])))('disables publishing while preparing a %s %s draft', async (view, verdict) => {
+    const r = review(7, { state: 'drafting', verdict: verdict as GlassReview['verdict'] });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
+      now: NOW, prefs: { view: view === 'table' ? 'table' : 'cards' },
+      hash: view === 'detail' ? '#pr/pr%3Aacme%2Fweb%237' : '#reviews',
+      post: () => ({ status: 200, body: { ok: true } }),
+    });
+    open.push(g);
+    const scope = g.$(view === 'detail' ? '.detail-frame' : '#reviews')!;
+    const preparing = [...scope.querySelectorAll('button')].find(b => b.textContent === 'Preparing draft…')!;
+    expect(preparing).toBeTruthy();
+    expect(preparing.disabled).toBe(true);
+    (preparing as unknown as HTMLElement).click(); await g.settle();
+    expect(g.posts()).toEqual([]);
+  });
+
   it('legacy deep links open Reviews despite stored filters and leave the draft pending', async () => {
     const r = review(7, { state: 'drafted', verdict: 'approve', needsYou: true, seenAt: ago(10) });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards', repo: 'other', q: 'unrelated' }, post: () => ({ status: 200, body: { ok: true } }) });
@@ -416,8 +489,8 @@ describe('the Reviews tab', () => {
     const rows = g.$$('#reviews tr.rowhead');
     expect(rows.map((r) => r.querySelector('td')?.textContent?.trim())).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
     expect(rows[1]!.textContent).toContain('draft ready');
-    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Publish comment', 'More actions', 'Mute this PR', 'Dismiss']);
-    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Redraft', 'More actions', 'Mute this PR', 'Dismiss']);
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Publish comment', 'Re-draft', 'More actions', 'Mute this PR', 'Dismiss']);
+    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Re-draft', 'More actions', 'Mute this PR', 'Dismiss']);
     expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['More actions', 'Mute this PR']);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
@@ -427,9 +500,9 @@ describe('the Reviews tab', () => {
     await g.settle();
     (rows[2]!.querySelector('button') as unknown as HTMLElement).click();
     await g.settle();
-    const sent = g.posts().find((p) => JSON.parse(p.body).kind === 'review-draft')!;
+    const sent = g.posts().find((p) => JSON.parse(p.body).kind === 'review-redraft')!;
     expect(sent.headers['x-lobstah-token']).toBe('tok');
-    expect(JSON.parse(sent.body)).toEqual({ kind: 'review-draft', payload: { key: 'review:acme/web#9' } });
+    expect(JSON.parse(sent.body)).toEqual({ kind: 'review-redraft', payload: { key: 'review:acme/web#9' } });
   });
 
   it('card mode shows the Reviews inbox and On Deck has no review cards', async () => {
