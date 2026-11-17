@@ -344,6 +344,21 @@ describe('finishing a review job', () => {
     expect(round()).toMatchObject({ state: 'failed', reason: 'the review job failed: wall clock' });
   });
 
+  it('keeps a completed approval fresh when a base merge preserves the patch', () => {
+    const id = drafting();
+    const dir = reviewRoundDir(KEY, 'RRE_7')!;
+    fs.writeFileSync(path.join(dir, 'review.md'), '');
+    fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
+    const item = readReview(KEY)!;
+    item.pr.headSha = 'bbbbbbb2';
+    item.pr.diffId = item.rounds[0]!.diffId;
+    writeReview(item);
+    appendStatus(id, 'chore', 'done', 'drafted');
+    draftReviews('chris', () => {}, NOW);
+    expect(round()).toMatchObject({ state: 'drafted', verdict: 'approve', headSha: 'aaaaaaa1' });
+  });
+
   it('a head that moved while the job ran starts a fresh round', () => {
     const id = drafting();
     fs.writeFileSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'review.md'), 'fine');
@@ -351,6 +366,8 @@ describe('finishing a review job', () => {
     appendStatus(id, 'chore', 'done', 'drafted');
     draftReviews('chris', () => {}, NOW);
     expect(readReview(KEY)!.rounds[0]).toMatchObject({ state: 'withdrawn', headSha: 'aaaaaaa1' });
+    expect(round()).toMatchObject({ state: 'requested', headSha: 'bbbbbbb2' });
+    draftReviews('chris', () => {}, NOW + 30_000);
     expect(round()).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
   });
 
@@ -451,8 +468,10 @@ describe('the review checkout', () => {
     appendStatus(id, 'chore', 'done', 'drafted');
     draftReviews('chris', () => {}, NOW);
     expect(readReview(KEY)!.rounds[0]!.state).toBe('withdrawn');
-    expect(round()).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
+    expect(round()).toMatchObject({ state: 'requested', headSha: 'bbbbbbb2' });
     gone();
+    draftReviews('chris', () => {}, NOW + 30_000);
+    expect(round()).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
   });
 
   it('is removed when the job fails', () => {

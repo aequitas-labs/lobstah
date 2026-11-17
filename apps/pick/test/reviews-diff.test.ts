@@ -4,6 +4,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { dismissReview, ensureLayout, latestRound, readReview, writeReview } from '@lobstah/core';
+import { GithubSource } from '../src/sources/github.js';
+import { qualifiedApproval, staleApprovals } from '../src/loops/merge.js';
 import { reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
 import { reviewDiffId, reviewPatchId } from '../src/reviews-diff.js';
@@ -27,6 +29,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "on-demand"\n[repos.web]\npath = "/w"\norigin = "https://github.com/acme/web.git"\n');
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
@@ -52,7 +55,7 @@ function history() {
   const head = commit('code.txt', changed);
   git('checkout', 'main');
   // Shift the PR's hunk without changing its contents or context.
-  const nextBase = commit('code.txt', 'new base line\n' + original);
+  const nextBase = commit('code.txt', 'new base line\n' + original.replace('line 22', 'base context changed'));
   git('checkout', 'topic');
   git('merge', '--no-ff', 'main', '-m', 'Merge main');
   const merged = git('rev-parse', 'HEAD');
@@ -103,6 +106,34 @@ describe('review diffs', () => {
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'requested', headSha: h.real });
   });
 
+  it.each(['base-merge', 'own-change', 'comparison-failure'] as const)('preserves approvals only with verified matching PR changes: %s', async kind => {
+    const h = history();
+    const current = kind === 'own-change' ? h.real : h.merged;
+    const comparisons: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.includes('/compare/')) {
+        comparisons.push(url);
+        return kind === 'comparison-failure' ? new Response('unavailable', { status: 503 }) : compare(url);
+      }
+      if (url.includes('/reviews')) return new Response(JSON.stringify([
+        { id: 10, user: { login: 'chris' }, state: 'APPROVED', commit_id: h.head },
+      ]));
+      return new Response(JSON.stringify({ number: 1, html_url: 'https://github.com/acme/web/pull/1', state: 'open',
+        user: { login: 'dana' }, head: { ref: 'topic', sha: current }, base: { ref: 'main', sha: h.nextBase, repo: { default_branch: 'main' } },
+        labels: [], assignees: [], draft: false, mergeable_state: 'clean' }));
+    });
+    const github = new GithubSource({ repo: 'acme/web', key: 'web', identity: 'dana', token: () => 'token', startLabel: 'start', claimedLabel: 'claimed' });
+    const candidate = (await github.refresh(1))!;
+    const policy = { enabled: true, approvers: ['chris'], assigneeApproves: false, restrictedLabels: [], method: 'merge' };
+    expect(qualifiedApproval(policy, candidate)?.id).toBe(kind === 'base-merge' ? 10 : undefined);
+    expect(staleApprovals(policy, candidate)).toEqual(kind === 'base-merge' ? [] : ['chris']);
+    if (kind === 'base-merge') {
+      await github.refresh(1);
+      expect(comparisons).toHaveLength(2);
+    }
+    vi.unstubAllGlobals();
+  });
+
   it('defers a new round when comparison fails, then retries without needing another head', async () => {
     const h = history();
     const poll = (head: string, fetch = compare) => reviewsLoop('chris', () => 'token', () => {}, { run: search(head, h.nextBase), fetch, now: NOW });
@@ -123,6 +154,13 @@ describe('review diffs', () => {
     expect(reviewPatchId(diff)).not.toBe(reviewPatchId(diff.replace('+new', '+ new')));
     expect(reviewPatchId('')).toBe('empty');
     expect(reviewPatchId('{"message":"error"}')).toBeUndefined();
+  });
+
+  it('distinguishes changes to the final newline', () => {
+    const base = commit('a.txt', 'old\n');
+    const first = commit('a.txt', 'new\n');
+    const second = commit('a.txt', 'new');
+    expect(reviewPatchId(git('diff', `${base}...${first}`))).not.toBe(reviewPatchId(git('diff', `${base}...${second}`)));
   });
 
   it('shares GitHub rate limits with the review loop', async () => {

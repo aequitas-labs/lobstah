@@ -115,6 +115,38 @@ describe('the reviews loop', () => {
     expect(pendingIds('chore')).toEqual([]);
   });
 
+  it('opens a same-head round for a new author request without reusing the earlier submitted review', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'mode = "auto-draft"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    const pr: Pr = { number: 1, reviews: [{ id: 77, state: 'APPROVED', head: 'aaaaaaa1', at: '2026-10-15T10:00:00Z' }] };
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    pr.requests = [{ id: 'author-again', at: '2026-10-15T11:00:00Z', to: ME, actor: { login: 'dana', __typename: 'User' } }];
+    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    const after = readReview('review:acme/web#1')!;
+    expect(after.rounds).toHaveLength(2);
+    expect(latestRound(after)).toMatchObject({ id: 'author-again', state: 'drafting', headSha: 'aaaaaaa1' });
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it('drafts the latest push once after a 30-second quiet period', async () => {
+    config();
+    const start = Date.parse('2026-11-17T12:00:00Z');
+    const pr: Pr = { number: 1 };
+    const poll = (elapsed: number) => reviewsLoop(ME, tok, () => {}, { run: gh([pr], []), now: start + elapsed });
+    await poll(0);
+    const item = readReview('review:acme/web#1')!;
+    Object.assign(latestRound(item)!, { state: 'posted', verdict: 'approve', postedAt: new Date(start).toISOString() });
+    writeReview(item);
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'mode = "auto-draft"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    pr.head = 'bbbbbbb2'; await poll(1000);
+    pr.head = 'ccccccc3'; await poll(20_000);
+    await poll(49_999);
+    expect(pendingIds('chore')).toEqual([]);
+    await poll(50_000);
+    expect(readReview(item.key)!.rounds).toHaveLength(2);
+    expect(latestRound(readReview(item.key)!)).toMatchObject({ state: 'drafting', headSha: 'ccccccc3' });
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
   it('starts one new draft when a push is followed by a re-request', async () => {
     config();
     await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
@@ -123,7 +155,7 @@ describe('the reviews loop', () => {
     writeReview(item);
     fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'mode = "auto-draft"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
     const pr = { number: 1, head: 'bbbbbbb2', requests: [{ id: 'after-push', at: '2026-10-15T11:00:00Z', to: ME }] };
-    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []), now: Date.now() + i * 30_000 });
     expect(readReview(item.key)!.rounds.map((round) => round.state)).toEqual(['withdrawn', 'drafting']);
     expect(latestRound(readReview(item.key)!)).toMatchObject({ id: 'after-push', headSha: 'bbbbbbb2' });
     expect(pendingIds('chore')).toHaveLength(1);
@@ -139,7 +171,7 @@ describe('the reviews loop', () => {
       await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
       expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe('dismissed');
       pr.head = 'bbbbbbb2';
-      for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+      for (let i = 0; i < 2; i++) await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []), now: Date.now() + i * 30_000 });
       const after = readReview('review:acme/web#1')!;
       expect(after.rounds).toHaveLength(2);
       expect(after.rounds[0]!.state).toBe('dismissed');
@@ -155,6 +187,7 @@ describe('the reviews loop', () => {
     dismissReview('review:acme/web#1', 'glass');
     pr.head = 'bbbbbbb2';
     await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []), now: Date.now() + 30_000 });
     expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'requested', headSha: 'bbbbbbb2', reason: expect.stringContaining('daily cap') });
   });
 
@@ -174,13 +207,14 @@ describe('the reviews loop', () => {
     const pr: Pr = { number: 1, reviews: [{ id: 77, state, head: 'aaaaaaa1', at: '2026-10-15T10:00:00Z' }] };
     await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
     expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'posted', postedReviewId: '77', by: 'review tool', verdict: state === 'COMMENTED' ? 'comment' : state === 'APPROVED' ? 'approve' : 'request_changes' });
-    pr.requests = [{ id: 'again', at: '2026-10-15T11:00:00Z', to: ME }];
+    pr.requests = [{ id: 'again', at: '2026-10-15T11:00:00Z', to: ME, actor: { login: 'github-actions', __typename: 'Bot' } }];
     await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
     expect(readReview('review:acme/web#1')!.rounds).toHaveLength(1);
     expect(pendingIds('chore')).toEqual([]);
     pr.head = 'bbbbbbb2';
     // The same request event still stands after this push.
     await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([pr], []), now: Date.now() + 30_000 });
     expect(latestRound(readReview('review:acme/web#1')!)).toMatchObject({ state: 'drafting', headSha: 'bbbbbbb2' });
     expect(pendingIds('chore')).toHaveLength(1);
   });

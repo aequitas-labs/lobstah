@@ -89,6 +89,81 @@ function answerCalls(): void {
   expect(answerReviewDecision(KEY, draft, 'existing-users', { text: 'Ask each user before migrating.' })).toBeUndefined();
 }
 
+describe('equivalent-head approvals', () => {
+  it.each(['post', 'stage'] as const)('%s an anchor-free approval on the observed equivalent head', async action => {
+    drafted();
+    const dir = reviewRoundDir(KEY, 'RRE_7')!;
+    fs.writeFileSync(path.join(dir, 'review.md'), '');
+    fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
+    const item = readReview(KEY)!;
+    Object.assign(item.pr, { headSha: 'bbbbbbb2', diffId: 'same-patch' });
+    Object.assign(item.rounds[0]!, { diffId: 'same-patch', verdict: 'approve' });
+    writeReview(item);
+    const calls: Call[] = [];
+    if (action === 'post') expect((await postReview(KEY, { by: 'glass', event: 'APPROVE', token: tok, fetch: github(calls, [], 200, 'bbbbbbb2') })).posted).toBe(true);
+    else expect((await stageReview(KEY, { token: tok, fetch: github(calls, [], 200, 'bbbbbbb2') })).staged).toBe(true);
+    expect(posts(calls)[0]!.body!.commit_id).toBe('bbbbbbb2');
+  });
+
+  it('does not reuse inline anchors on an equivalent head', async () => {
+    drafted();
+    const item = readReview(KEY)!;
+    Object.assign(item.pr, { headSha: 'bbbbbbb2', diffId: 'same-patch' });
+    item.rounds[0]!.diffId = 'same-patch';
+    writeReview(item);
+    const calls: Call[] = [];
+    expect((await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls) })).posted).toBe(false);
+    expect((await stageReview(KEY, { token: tok, fetch: github(calls) })).staged).toBe(false);
+    expect(posts(calls)).toEqual([]);
+  });
+});
+
+describe('publishable findings', () => {
+  it.each(['post', 'stage'] as const)('%s merges paraphrased finding ids but keeps different points on the same line', async action => {
+    drafted();
+    const dir = reviewRoundDir(KEY, 'RRE_7')!;
+    fs.writeFileSync(path.join(dir, 'review.md'), 'Draft only; nothing was posted to GitHub.\n\nFix the retry race.');
+    fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([
+      { path: 'a.ts', line: 98, findingId: 'retry-race', body: 'Two callers can send the same request.' },
+      { path: 'a.ts', line: 98, findingId: 'account-scope', body: 'This query can read another account.' },
+      { path: 'a.ts', line: 99, side: 'LEFT', findingId: 'retry-race', body: 'The removed guard prevented duplicate requests.' },
+    ]));
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'request_changes', blocking: [
+      { path: 'a.ts', line: 98, findingId: 'retry-race', body: 'Concurrent retries duplicate the request.' },
+      { path: 'a.ts', line: 99, findingId: 'retry-race', body: 'Guard concurrent retries.' },
+    ] }));
+    const calls: Call[] = [];
+    if (action === 'post') expect((await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls) })).posted).toBe(true);
+    else expect((await stageReview(KEY, { token: tok, fetch: github(calls) })).staged).toBe(true);
+    const sent = posts(calls)[0]!.body!;
+    const comments = sent.comments as Array<{ body: string }>;
+    expect(comments).toHaveLength(4);
+    expect(comments.filter(comment => comment.body.includes('**Blocking:**'))).toHaveLength(2);
+    expect(comments.some(comment => comment.body.includes('another account'))).toBe(true);
+    expect(comments.some(comment => comment.body.includes('Two callers'))).toBe(false);
+    expect(sent.body).not.toContain('Draft only');
+    expect(sent.body).toContain('Fix the retry race.');
+  });
+
+  it('deduplicates old drafts with matching issue titles and retains separate titles', async () => {
+    drafted();
+    const dir = reviewRoundDir(KEY, 'RRE_7')!;
+    fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([
+      { path: 'a.ts', line: 98, body: '**Bound concurrent retries before sending**\nTwo callers can send the same request.' },
+      { path: 'a.ts', line: 98, body: '**Scope the account**\nAnother account can be read.' },
+      { path: 'a.ts', line: 98, body: '**Race condition**\nThe queue loses wakeups.' },
+    ]));
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'request_changes', blocking: [
+      { path: 'a.ts', line: 98, body: '**Bound concurrent retries before sending**\nConcurrent retries duplicate requests.' },
+      { path: 'a.ts', line: 98, body: '**Race condition**\nThe counter can become negative.' },
+    ] }));
+    const calls: Call[] = [];
+    await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls) });
+    expect(posts(calls)[0]!.body!.comments).toHaveLength(4);
+  });
+});
+
 describe('review decision posting gate', () => {
   it.each(['approve', 'comment', 'request_changes'] as const)('blocks %s until every call is answered, then includes answers in the posted body', async verdict => {
     drafted();

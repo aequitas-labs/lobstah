@@ -22,7 +22,7 @@ export function qualifyingSet(policy: MergePolicy, pr: PrCandidate): string[] {
 }
 
 /**
- * The qualifying approval: an APPROVED review on the current head, from a
+ * The qualifying approval: an APPROVED review on the current PR changes, from a
  * member of the qualifying set, with no other reviewer's latest review at
  * CHANGES_REQUESTED. Dedup-by-approval happens at the caller.
  */
@@ -30,7 +30,7 @@ export function qualifiedApproval(policy: MergePolicy, pr: PrCandidate): PrCandi
   const outstanding = pr.reviews.some((r) => r.state === 'CHANGES_REQUESTED');
   if (outstanding) return undefined;
   const set = qualifyingSet(policy, pr);
-  return pr.reviews.find((r) => r.state === 'APPROVED' && r.sha === pr.headSha && set.includes(r.author));
+  return pr.reviews.find((r) => r.state === 'APPROVED' && (r.sha === pr.headSha || r.unchanged === true) && set.includes(r.author));
 }
 
 /** Qualifying reviewers whose approval was for a previous head, unless a
@@ -39,7 +39,7 @@ export function staleApprovals(policy: MergePolicy, pr: PrCandidate): string[] {
   if (pr.reviews.some((r) => r.state === 'CHANGES_REQUESTED')) return [];
   const qualifying = qualifyingSet(policy, pr);
   return [...new Set(pr.reviews
-    .filter((r) => r.state === 'APPROVED' && r.sha !== pr.headSha && r.author !== pr.author && qualifying.includes(r.author))
+    .filter((r) => r.state === 'APPROVED' && r.sha !== pr.headSha && !r.unchanged && r.author !== pr.author && qualifying.includes(r.author))
     .map((r) => r.author))];
 }
 

@@ -29,6 +29,7 @@ import {
   recordGitHubResponse,
   requestCancel,
   reviewBrief,
+  reviewDraftCoversHead,
   acknowledgeReview,
   refreshReviewNotifications,
   reviewCheckoutDir,
@@ -42,14 +43,14 @@ import {
   unansweredReviewDecisions,
   newReviewRound,
 } from '@lobstah/core';
-import type { ReviewItem, ReviewRound, ReviewVerdict } from '@lobstah/core';
+import type { ReviewItem, ReviewRound, ReviewThread, ReviewVerdict } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
 import { dispatchLane } from './report.js';
 import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
 import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
 import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
-import { reviewDiffId } from '../reviews-diff.js';
+import { currentReviewDiffId, reviewDiffId } from '../reviews-diff.js';
 
 /**
  * One search per poll for open PRs whose review is requested from the
@@ -172,7 +173,7 @@ export async function reviewsLoop(
   }
   // On wharf grounds, a round is claimed (its document created) before it is drafted.
   if (wharf) await claimReviewDocs(log, w);
-  draftReviews(identity, log, now);
+  draftReviews(identity, log, now, undefined, { token, run: opts.run ?? runGraphql });
   if (!githubBlockedUntil(now)) await postOrStage(gh, log);
   for (const event of refreshReviewNotifications(now)) {
     const port = Number(process.env.LOBSTAH_GLASS_PORT ?? cfg.glass.port);
@@ -244,7 +245,7 @@ function settleSubmittedReview(item: ReviewItem, reviews: SearchPr['reviews']): 
   const round = latestRound(item);
   if (!round || round.state === 'posted') return;
   const submitted = (reviews?.nodes ?? []).filter((review) => review.commit?.oid === round.headSha &&
-    (!round.localRequest || review.submittedAt >= round.requestedAt))
+    Date.parse(review.submittedAt) >= Date.parse(round.requestedAt))
     .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
   if (submitted) markReviewPosted(item.key, round.id, { reviewId: String(submitted.databaseId), by: 'review tool', at: submitted.submittedAt,
     verdict: SUBMITTED_VERDICTS[submitted.state] });
@@ -307,6 +308,68 @@ function reviewQuery<T>(request: { query: string; variables: Record<string, unkn
   return answer.data;
 }
 
+interface ReviewConnection<T> {
+  nodes: T[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+interface ThreadComment { author: { login: string } | null; body: string; url: string }
+interface GitHubReviewThread {
+  id: string;
+  path: string;
+  line: number | null;
+  isResolved: boolean;
+  isOutdated: boolean;
+  comments: ReviewConnection<ThreadComment>;
+}
+interface ReviewThreadsResponse { repository?: { pullRequest?: { reviewThreads: ReviewConnection<GitHubReviewThread> } } }
+
+/** Fetch every unresolved inline thread and every reply; never present partial results as complete. */
+export function readOpenReviewThreads(item: ReviewItem, token: () => string, run: GhGraphql, now: number,
+  log: (message: string) => void): ReviewThread[] | undefined {
+  const threads: ReviewThread[] = [];
+  const commentFields = 'pageInfo { hasNextPage endCursor } nodes { author { login } body url }';
+  let cursor: string | null = null;
+  const visited = new Set<string>();
+  do {
+    if (githubBlockedUntil(now)) return undefined;
+    const data: ReviewThreadsResponse | undefined = reviewQuery<ReviewThreadsResponse>({
+      query: `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) { rateLimit { cost } repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $cursor) { pageInfo { hasNextPage endCursor } nodes { id path line isResolved isOutdated comments(first: 100) { ${commentFields} } } }
+      } } }`,
+      variables: { owner: item.pr.owner, repo: item.pr.repo, number: item.pr.number, cursor },
+    }, token, run, now, log, 'review threads');
+    const page: ReviewConnection<GitHubReviewThread> | undefined = data?.repository?.pullRequest?.reviewThreads;
+    if (!page?.pageInfo || !Array.isArray(page.nodes)) return undefined;
+    for (const thread of page.nodes) {
+      if (thread.isResolved) continue;
+      let comments = thread.comments;
+      const replies: ThreadComment[] = [];
+      const replyCursors = new Set<string>();
+      while (comments?.pageInfo && Array.isArray(comments.nodes)) {
+        replies.push(...comments.nodes);
+        if (!comments.pageInfo.hasNextPage) break;
+        const after = comments.pageInfo.endCursor;
+        if (!after || replyCursors.has(after) || githubBlockedUntil(now)) return undefined;
+        replyCursors.add(after);
+        const next = reviewQuery<{ node?: { comments: ReviewConnection<ThreadComment> } }>({
+          query: `query($id: ID!, $cursor: String!) { rateLimit { cost } node(id: $id) { ... on PullRequestReviewThread { comments(first: 100, after: $cursor) { ${commentFields} } } } }`,
+          variables: { id: thread.id, cursor: after },
+        }, token, run, now, log, 'review replies');
+        if (!next?.node?.comments) return undefined;
+        comments = next.node.comments;
+      }
+      if (!comments?.pageInfo || !Array.isArray(comments.nodes)) return undefined;
+      threads.push({ id: thread.id, path: thread.path, line: thread.line, isOutdated: thread.isOutdated,
+        comments: replies.map(comment => ({ author: comment.author?.login ?? 'deleted user', body: comment.body, url: comment.url })) });
+    }
+    if (!page.pageInfo.hasNextPage) return threads;
+    cursor = page.pageInfo.endCursor;
+    if (!cursor || visited.has(cursor)) return undefined;
+    visited.add(cursor);
+  } while (cursor);
+  return undefined;
+}
+
 async function searchReviews(identity: string, token: () => string, log: (m: string) => void, run: GhGraphql, now: number, fetch?: FetchLike): Promise<{ seen: Set<string>; inScope: (item: ReviewItem) => boolean } | undefined> {
   const rc = loadConfig().reviews;
   const answer = reviewQuery<{ search?: { issueCount?: number; nodes?: SearchPr[] } }>(
@@ -337,8 +400,8 @@ async function searchReviews(identity: string, token: () => string, log: (m: str
     const skip = settings.skipAuthors.includes(author) ? `skipped: author ${author} is in skipAuthors` : skipLabel ? `skipped: label ${skipLabel} is in skipLabels` : undefined;
     const prior = readReview(reviewKey(owner, repo, pr.number));
     const round = prior && latestRound(prior);
-    let previousDiffId = round?.diffId;
-    let diffId = prior?.pr.headSha === pr.headRefOid ? prior.pr.diffId : undefined;
+    let previousDiffId = currentReviewDiffId(round?.diffId);
+    let diffId = prior?.pr.headSha === pr.headRefOid && prior.pr.baseSha === pr.baseRefOid ? currentReviewDiffId(prior.pr.diffId) : undefined;
     if (!prior?.mutedAt && pr.baseRefOid) {
       if (round && round.headSha !== pr.headRefOid)
         previousDiffId ??= await reviewDiffId(nwo, round.baseSha ?? pr.baseRefOid, round.headSha, { token, fetch, now, log });
@@ -422,7 +485,8 @@ function noJob(item: ReviewItem, round: ReviewRound, started: number, byHand: bo
  * the daemon when its trap wait expires, and cancel the job of a round the
  * request no longer stands for.
  */
-export function draftReviews(identity: string, log: (m: string) => void = () => {}, now = Date.now(), manualKey?: string): void {
+export function draftReviews(identity: string, log: (m: string) => void = () => {}, now = Date.now(), manualKey?: string,
+  github?: { token: () => string; run: GhGraphql }): void {
   const cfg = loadConfig();
   const items = listReviews();
   const scopes = backendScopes(cfg);
@@ -452,6 +516,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     }
 
     if (r.state === 'requested' && !r.dispatch) {
+      if (!manual && r.changesObservedAt && now - Date.parse(r.changesObservedAt) < 30_000) continue;
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
       if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
       const cutoff = reviewAutomationCutoff(cfg.reviews, item.pr.repoKey, now);
@@ -464,6 +529,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
         }
         continue;
       }
+      if (github && (item.rounds.length > 1 || r.previousReviews?.length))
+        r.openThreads = readOpenReviewThreads(item, github.token, github.run, now, log);
       const outDir = reviewRoundDir(item.key, r.id);
       if (!outDir) continue;
       fs.mkdirSync(outDir, { recursive: true });
@@ -541,7 +608,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       r.decisionAnswers = carryReviewDecisionAnswers(draft.decisions, r.decisionAnswers);
       delete r.reason;
       // The head moved while the job ran: the draft reviews an older head.
-      if (r.headSha !== item.pr.headSha) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
+      if (!reviewDraftCoversHead(item, r, draft)) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
     }
     save();
     removeReviewCheckout(item, r, log);
@@ -565,7 +632,7 @@ export async function draftReviewOnDemand(key: string, now = Date.now()): Promis
     if (why) return why;
   }
   acknowledgeReview(key, now);
-  draftReviews(identity, () => {}, now, key);
+  draftReviews(identity, () => {}, now, key, { token: loadPickupConfig().reviews!.token, run: runGraphql });
   return latestRound(readReview(key)!)?.state === 'drafting' ? undefined : 'the round could not start drafting';
 }
 
@@ -587,7 +654,7 @@ export function requestNewReview(key: string, now = Date.now(), run: GhGraphql =
   writeReview({ ...item, updatedAt: new Date(now).toISOString() });
   const result = newReviewRound(key, now);
   if (typeof result === 'string') return result;
-  draftReviews(config.identity, () => {}, now);
+  draftReviews(config.identity, () => {}, now, undefined, { token: config.token, run });
   return undefined;
 }
 
