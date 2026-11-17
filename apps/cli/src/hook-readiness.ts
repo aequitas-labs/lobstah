@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
-import { hasOpenCatch, helmLabel, listHelms, listTraps, trapLabel } from '@lobstah/core';
+import { hasOpenCatch, laneOf, readStatusLog, helmLabel, listHelms, listTraps, trapLabel } from '@lobstah/core';
 import type { HelmRegistration, TrapRegistration } from '@lobstah/core';
 import type { CodexHookList } from './codex-hook-list.js';
 import { LOBSTAH_HOOKS, readHookRuns } from './hook-runs.js';
@@ -316,13 +316,15 @@ export function listenerRow(now = Date.now()): { check: string; status: 'ok' | '
   }
   for (const t of traps) {
     const on = trapListening(t, now);
-    const working = !on && hasOpenCatch(t);
-    parts.push(`trap ${trapLabel(t)}: ${on ? 'parked' : working ? 'working a catch' : 'not listening'}`);
+    const lane = t.claimed ? laneOf(t.claimed) : undefined;
+    const paused = t.claimed && lane && readStatusLog(t.claimed, lane).at(-1)?.verb === 'paused';
+    const working = !on && hasOpenCatch(t) && !paused;
+    parts.push(`trap ${trapLabel(t)}: ${on ? 'parked' : working ? 'working a catch' : paused ? 'paused without a park listener' : 'not listening'}`);
     if (!on && !working) quiet.push(`trap ${trapLabel(t)}`);
   }
   return {
     check: 'listeners',
     status: quiet.length ? 'warn' : 'ok',
-    detail: `${parts.join('; ')}${quiet.length ? ` — no automatic wake reaches ${quiet.join(', ')} until it parks again` : ''}`,
+    detail: `${parts.join('; ')}${quiet.length ? ` — no automatic wake reaches ${quiet.join(', ')} through a park listener until it parks again; Codex inbox wakes also use the daemon` : ''}`,
   };
 }

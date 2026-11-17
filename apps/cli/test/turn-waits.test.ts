@@ -182,7 +182,7 @@ describe('waking the session', () => {
       trap('replacement');
       await soakPark(t.trapId, '0');
     });
-    const { pass } = createTurnWaits(idleWait, { rethrow });
+    const { pass } = createTurnWaits(idleWait, { rethrow, umeRead: async () => ({ feedbackCount: 0 }) });
     pass(Date.now(), () => {});
     await vi.waitFor(() => expect(rethrow).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(output).toHaveBeenCalled());
@@ -202,7 +202,7 @@ describe('waking the session', () => {
     deliverTurnWaitLine(readTurnWaitRecords()[0]!.key, '{"cursor":"31"}');
     stowTrap(t.trapId);
     const rethrow = vi.fn(async () => {});
-    createTurnWaits(idleWait, { rethrow }).pass(Date.now(), () => {});
+    createTurnWaits(idleWait, { rethrow, umeRead: async () => ({ feedbackCount: 0 }) }).pass(Date.now(), () => {});
     await vi.waitFor(() => expect(rethrow).toHaveBeenCalledOnce());
     expect(queuedDescriptor('plan', 'work')?.parkContext).toContain('Attach set-42 / artifact a1');
     expect(unhandled('plan', 'work')).toHaveLength(1);
@@ -217,7 +217,7 @@ describe('waking the session', () => {
     const before = readTrap(t.trapId);
     deliverTurnWaitLine(readTurnWaitRecords()[0]!.key, '{"cursor":"31"}');
     const rethrow = vi.fn(async () => {});
-    createTurnWaits(idleWait, { rethrow }).pass(Date.now(), () => {});
+    createTurnWaits(idleWait, { rethrow, umeRead: async () => ({ feedbackCount: 0 }) }).pass(Date.now(), () => {});
     expect(rethrow).not.toHaveBeenCalled();
     expect(readTrap(t.trapId)).toEqual(before);
     expect(unhandled('plan', 'work')).toHaveLength(1);
@@ -264,7 +264,7 @@ describe('waking the session', () => {
     stowTrap(t.trapId);
     let finish!: () => void;
     const rethrow = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-    const { pass } = createTurnWaits(idleWait, { rethrow });
+    const { pass } = createTurnWaits(idleWait, { rethrow, umeRead: async () => ({ feedbackCount: 0 }) });
     expect(deliverTurnWaitLine(key, '{"cursor":"31"}')).toBe('inbox');
     pass(Date.now(), () => {});
     expect(deliverTurnWaitLine(key, '{"cursor":"32"}')).toBe('inbox');
@@ -285,7 +285,7 @@ describe('waking the session', () => {
     stowTrap(t.trapId);
     deliverTurnWaitLine(key, '{"cursor":"31"}');
     const rethrow = vi.fn(async () => {});
-    createTurnWaits(idleWait, { rethrow }).pass(Date.now(), () => {});
+    createTurnWaits(idleWait, { rethrow, umeRead: async () => ({ feedbackCount: 0 }) }).pass(Date.now(), () => {});
     await vi.waitFor(() => expect(rethrow).toHaveBeenCalledOnce());
     const context = queuedDescriptor('plan', 'work')?.parkContext;
     expect(context).toContain('Attach set-42 / artifact a1.');
@@ -299,7 +299,7 @@ describe('waking the session', () => {
     stowTrap(t.trapId);
     deliverTurnWaitLine(readTurnWaitRecords()[0]!.key, '{"cursor":"31"}');
     const rethrow = vi.fn(async () => { throw new Error('terminal unavailable'); });
-    const { pass } = createTurnWaits(idleWait, { rethrow });
+    const { pass } = createTurnWaits(idleWait, { rethrow, umeRead: async () => ({ feedbackCount: 0 }) });
     pass(Date.now(), () => {});
     await vi.waitFor(() => expect(readTurnWaitRecords()[0]?.ownerRestart?.lastError).toBe('terminal unavailable'));
     pass(Date.now(), () => {});
@@ -317,7 +317,7 @@ describe('waking the session', () => {
     deliverTurnWaitLine(readTurnWaitRecords()[0]!.key, '{"cursor":"31"}');
     reserveTrap({ repo: 'web', returning: { trapId: t.trapId, worktree: t.worktree } });
     const rethrow = vi.fn(async () => {});
-    createTurnWaits(idleWait, { rethrow }).pass(Date.now(), () => {});
+    createTurnWaits(idleWait, { rethrow, umeRead: async () => ({ feedbackCount: 0 }) }).pass(Date.now(), () => {});
     expect(rethrow).not.toHaveBeenCalled();
   });
 

@@ -30,6 +30,7 @@ import {
   unhandled,
 } from '@lobstah/core';
 import type { Lane, StatusEntry, TrapRegistration, TurnWait } from '@lobstah/core';
+import { createUmeReviewWatch, isUmeReviewWait, type UmeRead } from './ume-review-watch.js';
 import { throwTrap } from './throw.js';
 
 /**
@@ -226,6 +227,11 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     const withdrawn = !registered.has(r.key) && readTrap(r.trapId)?.sessionId === r.session;
     const finished = r.dispatch ? dispatchEnded(r.dispatch) : liveTrap(r) === undefined;
     if (superseded || withdrawn || finished) {
+      // A completed review must not be inherited by the trap's next catch.
+      if (finished && r.dispatch && isUmeReviewWait(r)) {
+        const registration = registered.get(r.key);
+        if (registration) fs.rmSync(registration.file, { force: true });
+      }
       removeRecord(r.key);
       ended.push(r.key);
     }
@@ -332,6 +338,7 @@ const rethrowTurnWaitTrap: RethrowTurnWaitTrap = async (trapId) => {
 /** Dependencies for restarting a missing owner; wait process injection remains separate. */
 export interface TurnWaitOptions {
   rethrow?: RethrowTurnWaitTrap;
+  umeRead?: UmeRead;
 }
 
 /**
@@ -340,6 +347,14 @@ export interface TurnWaitOptions {
  * pointers. `children` lives across passes.
  */
 export function createTurnWaits(start: SpawnWait = spawnWait, options: TurnWaitOptions = {}): { pass: (now: number, log: (m: string) => void) => void; children: Map<string, ChildProcess> } {
+  const reviews = createUmeReviewWatch(options.umeRead, (watch, lane, file, at) => {
+    // Keep generic wait recovery and unread-pointer notices for a stowed or ghosted owner.
+    for (const record of readTurnWaitRecords()) {
+      if (record.dispatch !== watch.owner.slice('dispatch:'.length) || !isUmeReviewWait(record) ||
+        record.read !== `ume feedback ${watch.umeReview!.artifact}`) continue;
+      writeRecord({ ...record, pointer: { inbox: record.dispatch, lane, file, at: new Date(at).toISOString() } });
+    }
+  }, key => readRecord(key)?.dispatch);
   const children = new Map<string, ChildProcess>();
   const restarting = new Set<string>();
   // A wait outlives no daemon: the next one starts it again.
@@ -352,7 +367,13 @@ export function createTurnWaits(start: SpawnWait = spawnWait, options: TurnWaitO
       children.delete(key);
       log(`turn wait ${key}: ended`);
     }
+    void reviews(now, log);
     for (const r of readTurnWaitRecords()) {
+      if (r.dispatch && isUmeReviewWait(r)) {
+        children.get(r.key)?.kill();
+        children.delete(r.key);
+        continue; // The dispatch-owned feedback watch preserves project context.
+      }
       if (children.has(r.key) || (r.nextRunAt && Date.parse(r.nextRunAt) > now)) continue;
       const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd);
       children.set(r.key, child);

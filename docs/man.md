@@ -202,6 +202,17 @@ a document in its own tool (a link that isn't a PR) doesn't even wake the
 helm: that tool shows it to the person and wakes the worker. A paused
 headless worker is never counted as wedged and its wall clock stops.
 
+For an `app.ume.so/a/<artifact>` review, `ume park` or a paused report naming
+that artifact registers a dispatch-owned watch. The daemon peeks at feedback
+without consuming the worker's read cursor, then sends an inbox pointer for
+new comments, thread changes, picks, or approval. It preserves the project's
+context and searches accessible projects across organizations for older parks
+that did not record it. Codex traps receive the same daemon wake as an unread
+send, including without a Stop hook; park listeners deliver the pointer in
+both harnesses. The watch ends when the dispatch finishes. Doctor's
+`listeners` row warns when a paused trap has no park listener; its
+`codex trap hooks` row checks startup trust, not a running session's hooks.
+
 A paused headless dispatch is **parked**. When the worker's turn ends on
 `paused`, the runner ends the session, stops what the harness started,
 and exits. The dispatch stays active and keeps its worktree lock, but it

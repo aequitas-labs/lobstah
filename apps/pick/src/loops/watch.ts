@@ -193,6 +193,7 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
   const autoRepair = loadConfig().watch.autoRepair;
   const held: string[] = [];
   for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
+    if (watch.umeReview) continue; // The daemon delivers reviews to the owning dispatch inbox.
     if (autoRepair && watch.key.startsWith('pr:') && readPr(watch.key)) {
       markWatchSeen(watch.key);
       continue;
@@ -242,6 +243,7 @@ export async function watchLoop(
   const autoRepair = loadConfig().watch.autoRepair;
   preparePrWatchBatch(defaultEverySecs);
   for (const w of listWatches()) {
+    if (w.umeReview) continue;
     // The daemon observes and repairs dispatch-owned PRs when auto-repair is on.
     if (autoRepair && w.key.startsWith('pr:') && w.owner.startsWith('dispatch:')) continue;
     if (watchDue(w, defaultEverySecs)) {

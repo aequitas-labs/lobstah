@@ -249,6 +249,7 @@ import { createUsageLimitWatch } from './usage-limit-watch.js';
 import { compactDispatchSession, compactTrapSession } from './trap-compact.js';
 import { swapTrapCatch } from './trap-swap.js';
 import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
+import { registerUmeReview, clearFinishedUmeReviews } from './ume-review-watch.js';
 import { createTurnWaits } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
@@ -1723,6 +1724,8 @@ async function mainCli(): Promise<void> {
           : verb === 'paused' && !noWatch
             ? registerWaitWatches(id, lane, entry)
             : [];
+      registerUmeReview(id, lane, entry);
+      clearFinishedUmeReviews();
       const warnings = [waitWarning(id, lane, entry), filed && unattachedWarning(filed)].filter((w): w is string => !!w);
       let permissionCard: string | undefined;
       if (permCommand !== undefined || permPath !== undefined) {
@@ -3644,7 +3647,7 @@ async function mainCli(): Promise<void> {
       console.log(
         toonHelp([
           ...(inside ? [] : [`cd ${reg.worktree}   (do this first: every task runs in the trap's worktree)`]),
-          `lobstah soak --wait --timeout 600${sessionFlag}   (hookless: listen until work or sign-off; quiet deadlines renew without a model turn)`,
+          `lobstah soak --wait --timeout 600${sessionFlag}   (only without a Stop hook: listen until work or sign-off; quiet deadlines renew without a model turn)`,
           `lobstah stow${sessionFlag}   (sign off; keeps this worktree${reg.createdWorktree ? ', --remove removes it when it holds no unpushed work' : ''})`,
         ]),
       );
