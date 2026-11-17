@@ -152,7 +152,7 @@ export function MergeStackWhenGreen({ s, prs }: { s: GlassStack; prs: GlassPr[] 
 export function MergeIntent({ p }: { p?: GlassPr }): Children {
   const request = p?.mergeRequest;
   if (!request) return null;
-  const status = request.summary ?? (request.hold ? `On hold · ${request.hold}` : p.state === 'MERGED' ? 'Merged' : 'Waiting on CI');
+  const status = p.state === 'MERGED' ? 'Merged' : request.hold ? `On hold · ${request.hold}` : (request.summary ?? 'Waiting on CI');
   return html`<div class="merge-intent">${StatusChip('Merge when green', 'warn')}<span> · ${status}</span></div>`;
 }
 

@@ -124,7 +124,7 @@ for (const view of ['cards', 'table'] as const) {
     const d = fleet([50]);
     d.focusToken = 'token';
     const pr = d.prs.find((p) => p.number === 50)!;
-    pr.mergeRequest = { at: '2026-11-16T18:00:00Z', by: 'decision:deploy', method: 'merge', note: 'Staging then production', hold: 'Run DB steps', summary: 'Held: Run DB steps' };
+    pr.mergeRequest = { at: '2026-11-16T18:00:00Z', by: 'decision:deploy', method: 'merge', note: 'Staging then production', hold: 'Run DB steps', summary: 'Waiting on CI' };
     d.reviews = [{ key: 'review:acme/web#50', repo: 'acme/web', number: 50, title: pr.title!, url: pr.url, reviewUrl: pr.url,
       author: 'chris', requestedAt: pr.observedAt, state: 'requested', stands: true }];
     const g = await page(d, { hash: '#prs', prefs: { view }, post: () => ({ status: 200, body: { ok: true } }) });
@@ -132,7 +132,7 @@ for (const view of ['cards', 'table'] as const) {
       await g.go(hash);
       const scope = hash.startsWith('#pr/') ? '.detail-frame' : hash;
       const intent = g.$(scope + ' .merge-intent');
-      expect(text(intent)).toBe('Merge when green · Held: Run DB steps');
+      expect(text(intent)).toBe('Merge when green · On hold · Run DB steps');
       expect(intent?.querySelector('time')).toBeNull();
       for (const detail of ['You', 'decision:deploy', '2026-11-16T18:00:00Z', 'merge commit', 'Staging then production']) expect(text(intent)).not.toContain(detail);
       expect([...g.$$(scope + ' button')].some((b) => text(b) === 'Cancel merge')).toBe(true);
@@ -147,7 +147,7 @@ for (const view of ['cards', 'table'] as const) {
 it.each(['Waiting on CI', 'CI failed', 'Conflict', 'Merging', 'Merged'])('shows the current merge status: %s', async (summary) => {
   const d = fleet([50]);
   const pr = d.prs.find((p) => p.number === 50)!;
-  pr.mergeRequest = { at: '2026-11-16T18:00:00Z', by: 'chat', method: 'merge', summary, ...(summary === 'Merged' ? { mergeSha: 'abc123' } : {}) };
+  pr.mergeRequest = { at: '2026-11-16T18:00:00Z', by: 'chat', method: 'merge', summary, ...(summary === 'Merged' ? { mergeSha: 'abc123', hold: 'A previous hold' } : {}) };
   if (summary === 'Merged') { pr.state = 'MERGED'; pr.badge = { text: 'merged', state: 'merged', tone: 'dim' }; }
   const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
   expect(text(g.$('#prs .merge-intent'))).toContain(summary);
