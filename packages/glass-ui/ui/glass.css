@@ -1281,7 +1281,7 @@ tr.rowhead:hover {
 /*
  * The Button atom (components/button.ts): every button on the glass, local
  * and hosted. Touch pointers keep md at 32px and lg at 40px; fine pointers
- * use 26px and 32px. Variants change color only; molecules (a split button,
+ * use 26px and 32px. The menu variant is a full-width row; molecules (a split button,
  * an option card, a segmented control) add layout only.
  */
 .btn {
@@ -1342,6 +1342,27 @@ tr.rowhead:hover {
 .btn-icon-flat:hover {
   background: transparent;
   border-color: transparent;
+}
+/* A menu action: its whole row is the target, with the icon beside left-aligned words. */
+.btn-menu {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+  gap: 8px;
+  padding: 0 10px;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg);
+  text-align: left;
+}
+.btn-menu:hover,
+.btn-menu:focus-visible {
+  background: var(--row-hover);
+}
+.btn-menu svg {
+  flex: 0 0 auto;
+  color: var(--dim);
 }
 .badge {
   border-radius: var(--badge-radius);
@@ -3518,29 +3539,6 @@ footer .glass-brand {
   right: 0;
   left: auto;
 }
-.cmenuitem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 0 10px;
-  background: none;
-  border: 0;
-  border-radius: 4px;
-  color: var(--fg);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.cmenuitem:hover,
-.cmenuitem:focus-visible {
-  background: var(--row-hover);
-}
-.cmenuitem svg {
-  flex: 0 0 auto;
-  color: var(--dim);
-}
 /* A report card's way out: a small arrow at the far right of its top line. */
 .gopen {
   flex: 0 0 auto;
@@ -3637,7 +3635,7 @@ footer .glass-brand {
   .btn-lg.btn-icon {
     min-width: 32px;
   }
-  .cmenuitem {
+  .btn-menu {
     min-height: 28px;
   }
   .deckgrid h2 a,

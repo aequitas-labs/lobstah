@@ -12,7 +12,7 @@ import { html } from '../../../packages/glass-ui/ui/html.js';
 
 /**
  * The Button atom (packages/glass-ui/ui/components/button.ts): every action
- * on the glass is one, in one of five variants and two sizes, and no other
+ * on the glass is one, in one of six variants and two sizes, and no other
  * stylesheet rule sizes or colors a button.
  */
 
@@ -147,7 +147,7 @@ describe('every page', () => {
   it('has no stylesheet rule but the atom that sizes or colors a button', () => {
     // A Windows checkout may end lines with CRLF.
     const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-    const atom = /^\.btn(-(primary|danger|icon|icon-flat|lg)(:hover)?|:hover|:disabled|\.on|\[aria-pressed='true'\]|-lg\.btn-icon)?$/;
+    const atom = /^\.btn(-(primary|danger|icon|icon-flat|menu|lg)(:hover|:focus-visible)?|:hover|:disabled|\.on|\[aria-pressed='true'\]|-lg\.btn-icon)?$/;
     const offenders: string[] = [];
     for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       const selectors = m[1]!
