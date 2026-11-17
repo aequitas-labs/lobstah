@@ -25,7 +25,7 @@ export const onRoute = (fn: (tab: GlassRoute) => void): (() => void) => {
 export function navigateTab(event: MouseEvent, target: GlassTab): void {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
   event.preventDefault();
-  if (currentRoute() === target) {
+  if (location.hash === '#' + target || (!location.hash && target === 'deck')) {
     history.replaceState(history.state, '', '#' + target);
     const section = document.getElementById(target);
     if (section) window.scrollTo(0, window.scrollY + section.getBoundingClientRect().top);

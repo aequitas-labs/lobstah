@@ -88,6 +88,18 @@ describe('the tab bar and More', () => {
     expect(g.scrolls()).toHaveLength(scrolls.length + 1);
   });
 
+  it('leaves a PR detail when a tab is selected, including the default On deck route', async () => {
+    const d = acceptanceFleet();
+    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#prs' });
+    pages.push(g);
+    await g.go('#pr/' + encodeURIComponent(d.prs[0]!.key));
+    expect(g.$('.detail-frame')).toBeTruthy();
+    await click(g, '#tabs a[data-tab="deck"]');
+    expect(g.window.location.hash).toBe('#deck');
+    expect(g.$('.tabpage.on')?.id).toBe('page-deck');
+    expect(g.$('.detail-frame')).toBeNull();
+  });
+
   it('keeps On deck, Reviews and PRs in the bar; More lists the rest, opens with focus, navigates, restores focus and marks where you are', async () => {
     const { g } = await page();
     expect(g.$('#tabs a[data-tab="deck"] .dbadge')?.textContent).toBe('1');
