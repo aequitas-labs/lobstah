@@ -27,7 +27,7 @@ function Findings({ review }: { review: GlassReview }) {
   if (!review.summary && !blocking.length && !comments.length && !review.verdict) return null;
   return html`<section class="pr-findings"><h4>Findings <span class="dim">${review.verdict?.replaceAll('_', ' ')} · ${blocking.length} blocking</span></h4>
     ${review.summary && markdown(review.summary)}
-    ${[...blocking.map((finding) => ({ ...finding, severity: 'blocking' })), ...comments.map((finding) => ({ ...finding, severity: /^nit\b/i.test(finding.body) ? 'nit' : 'non-blocking' }))].map((finding) => html`<article class=${'pr-finding ' + (finding.severity === 'blocking' ? 'bad' : 'warn')}><div><span class="badge">${finding.severity}</span> <code>${finding.path}:${finding.line}</code></div>${markdown(finding.body)}</article>`)}
+    ${[...blocking.map((finding) => ({ ...finding, severity: 'blocking' })), ...comments.map((finding) => ({ ...finding, severity: /^nit\b/i.test(finding.body) ? 'nit' : 'non-blocking' }))].map((finding) => html`<article class=${'pr-finding ' + (finding.severity === 'blocking' ? 'bad' : 'warn')}><div>${StatusChip(finding.severity, finding.severity === 'blocking' ? 'bad' : 'warn')} <code>${finding.path}:${finding.line}</code></div>${markdown(finding.body)}</article>`)}
   </section>`;
 }
 
@@ -99,7 +99,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
     ${review && html`<${ReviewDecisions} key=${[review.key, review.roundId, review.headSha, review.draftedAt].join(':')} review=${review} onSaving=${setDecisionSaving} />`}
     ${review && html`<${Findings} review=${review} />`}
     <section><h4>Description</h4><div class="pr-description">${data ? (data.bodyHtml ? html`<${GitHubDescription} source=${data.bodyHtml} openImage=${openLightbox} />` : html`<span class="dim">No description.</span>`) : html`<span class="dim">${loaded.key === prKey && loaded.error ? loaded.error : 'Loading description…'}</span>`}</div></section>
-    ${p && html`<section><h4>Checks <span class="dim">${p.checks.passed} passed · ${p.checks.pending} pending</span></h4>${p.failingChecks?.map((check) => html`<div class="pr-check"><span class="badge bad">failed</span> ${check.detailsUrl ? html`<a href=${check.detailsUrl} target="_blank" rel="noopener">${check.name}</a>` : check.name}</div>`)}${!p.failingChecks?.length && p.checks.failed > 0 && html`<div class="bad">${p.checks.failed} failed</div>`}</section>`}
+    ${p && html`<section><h4>Checks <span class="dim">${p.checks.passed} passed · ${p.checks.pending} pending</span></h4>${p.failingChecks?.map((check) => html`<div class="pr-check">${StatusChip('failed', 'bad')} ${check.detailsUrl ? html`<a href=${check.detailsUrl} target="_blank" rel="noopener">${check.name}</a>` : check.name}</div>`)}${!p.failingChecks?.length && p.checks.failed > 0 && html`<div class="bad">${p.checks.failed} failed</div>`}</section>`}
     ${p && (decision || (p.review?.unresolvedThreads ?? 0) > 0) && html`<section><h4>Reviews</h4><div>${decision}${(p.review?.unresolvedThreads ?? 0) > 0 && ` · ${p.review?.unresolvedThreads ?? 0} unresolved threads`}${p.review && p.review.unresolvedThreads === 0 && ' · no unresolved threads'}</div></section>`}
     ${
       context?.chain.length

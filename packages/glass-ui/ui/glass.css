@@ -1016,6 +1016,12 @@ tr.rowhead:hover {
   font-size: 12px;
 }
 .gchip {
+  display: inline-block;
+  box-sizing: border-box;
+  height: 20px;
+  line-height: 18px;
+  font-weight: 400;
+  vertical-align: middle;
   border: 1px solid currentColor;
   border-radius: 999px;
   padding: 0 8px;

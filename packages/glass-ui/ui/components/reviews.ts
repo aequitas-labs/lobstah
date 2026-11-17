@@ -10,7 +10,7 @@ import { can } from '../backend.js';
 import { getState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone, MenuAction } from './card.js';
-import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, dispatchTrap, prShapedCard } from './prs.js';
+import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, dispatchTrap, prShapedCard } from './prs.js';
 import type { PrIconState } from './prs.js';
 import { Button } from './button.js';
 import { Dialog } from './dialog.js';
@@ -280,7 +280,7 @@ export function reviewPerson(r: GlassReview): CardPerson {
 const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?? r.requestedBy ?? r.author}>
   ${r.askerAvatarUrl && html`<${Avatar} url=${r.askerAvatarUrl} name=${r.askerName ?? r.asker ?? r.requestedBy ?? r.author} />`}
   <span>${r.askerName ?? r.asker ?? r.requestedBy ?? r.author}</span>
-  ${r.automatic && html`<span class="badge dim" title="A bot re-requested this review">automatic</span>`}
+  ${r.automatic && html`${StatusChip('automatic', 'dim', 'A bot re-requested this review')}`}
 </span>`;
 
 const staged = (r: GlassReview) =>

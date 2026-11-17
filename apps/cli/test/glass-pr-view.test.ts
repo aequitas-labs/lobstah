@@ -58,7 +58,7 @@ describe('the PR view', () => {
     expect(send().hasAttribute('disabled')).toBe(true);
     expect(text(g).indexOf('Your calls')).toBeLessThan(text(g).indexOf('Findings'));
     expect(g.$$('fieldset input:checked')).toHaveLength(0);
-    expect(g.$$('fieldset .badge').map(badge => badge.textContent)).toEqual(['Recommended', 'Recommended']);
+    expect(g.$$('fieldset .gchip').map(badge => badge.textContent)).toEqual(['Recommended', 'Recommended']);
     const radio = g.$('[data-review-decision="rollout-owner"] input')!;
     (radio as unknown as HTMLElement).click(); await g.settle();
     expect(send().hasAttribute('disabled')).toBe(true);

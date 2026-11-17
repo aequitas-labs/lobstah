@@ -26,7 +26,7 @@ export function SettingsBody({ prefs }: { prefs: GlassPrefs }) {
   const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<${Button} pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}<//>`)}</span>`;
   return html`<div class="settings"><div class="row"><span class="lbl">view<${MetaLine} class="hint" items=${['this device', 'cards or table']} /></span>${viewOptions}</div><div class="row"><span class="lbl">lobs<${MetaLine} class="hint" items=${['this device', 'crawling lobsters']} /></span>${lobOptions}</div></div>${
     visibleTabs().includes('settings') &&
-    html`<p class="dim settings-config">Daemon and grounds settings are in <a href="#settings" onClick=${closeModal}>${TAB_ICON.settings}Configuration</a></p>`
+    html`<${MetaLine} class="dim settings-config" separator=${false} items=${['Daemon and grounds settings are in', html`<a href="#settings" onClick=${closeModal}>${TAB_ICON.settings}Configuration</a>`]} />`
   }`;
 }
 

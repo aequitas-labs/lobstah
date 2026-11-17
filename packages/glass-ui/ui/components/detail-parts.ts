@@ -7,10 +7,18 @@ import { LinkedText } from './links.js';
 export const Ago = (at: string | undefined): Children => at && html`${Age(at)} ago`;
 
 /** Metadata shares centered items and separators wherever it appears. */
-export function MetaLine({ items, class: cls = 'view-meta' }: { items: Children[]; class?: string }): Children {
+export function MetaLine({
+  items,
+  class: cls = 'view-meta',
+  separator = true,
+}: {
+  items: Children[];
+  class?: string;
+  separator?: boolean;
+}): Children {
   const parts = items.filter(Boolean);
   return html`<span class=${'meta-line ' + cls}>${parts.flatMap((part, index) => [
-    index > 0 && html`<span class="meta-separator" aria-hidden="true"> · </span>`,
+    index > 0 && (separator ? html`<span class="meta-separator" aria-hidden="true"> · </span>` : ' '),
     html`<span class="meta-item">${part}</span>`,
   ])}</span>`;
 }

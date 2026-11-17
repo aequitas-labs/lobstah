@@ -390,7 +390,7 @@ describe('the Reviews tab', () => {
     expect(label).toContain('Maya Maintainer');
     expect(label).not.toContain('github-actions');
     expect(person?.querySelector('img')?.getAttribute('src')).toBe('https://avatars.githubusercontent.com/u/9?v=4');
-    if (view === 'table') expect(person?.querySelector('.badge')?.getAttribute('title')).toBe('A bot re-requested this review');
+    if (view === 'table') expect(person?.querySelector('.gchip')?.getAttribute('title')).toBe('A bot re-requested this review');
   });
   it('the repo filter scopes the settings chip and row labels use each repo policy', async () => {
     const g = await loadGlass(GLASS_PAGE, {
