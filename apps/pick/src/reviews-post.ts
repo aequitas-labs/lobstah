@@ -5,6 +5,7 @@ import {
   dispatchWasCancelled,
   loadConfig,
   reviewCanPublish,
+  reviewDraftCoversHead,
   latestRound,
   markReviewPosted,
   readReview,
@@ -96,16 +97,46 @@ function receipt(key: string, roundId: string, name: string, by: string, at: str
 
 /** The draft's inline comments, each ending with the round's marker: lobstah wrote them, so feedback pickup never reads them as the owner's. */
 function inlineComments(comments: ReviewComment[], r: ReviewRound) {
-  return comments.map((x) => ({ path: x.path, line: x.line, side: x.side ?? 'RIGHT', body: `${x.body.trimEnd()}\n\n${reviewMarker(r.id)}` }));
+  return comments.map((x) => ({ path: x.path, line: x.line, side: x.side ?? 'RIGHT', body: `${publishableBody(x.body)}\n\n${reviewMarker(r.id)}` }));
 }
 
+/** Remove draft receipts from text that will be visible in a submitted review. */
+function publishableBody(body: string): string {
+  return body.replace(/(?:\*\*|__|\*)?draft only\s*[;:.—–-]\s*nothing (?:was|has been) posted(?: to github)?\.?(?:\*\*|__|\*)?/gi, '').trim();
+}
+
+/** Match explicit finding identities or a substantially repeated explanation at one anchor. */
+function sameFinding(left: ReviewComment, right: ReviewComment): boolean {
+  if (left.path !== right.path || left.line !== right.line || (left.side ?? 'RIGHT') !== (right.side ?? 'RIGHT')) return false;
+  if (left.findingId && right.findingId) return left.findingId === right.findingId;
+  const normalize = (body: string): string => publishableBody(body).toLowerCase()
+    .replace(/\[(?:p[0-3]|blocking)\]|\bblocking\s*:/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const a = normalize(left.body), b = normalize(right.body);
+  if (a === b) return true;
+  // A shared descriptive title is stronger evidence than a shared line.
+  // Distinct titles stay separate even if the explanations use similar terms.
+  const title = (body: string): string | undefined => /^\s*(?:\*\*|#+\s+)([^\n]+?)(?:\*\*|\n|$)/.exec(body)?.[1];
+  const leftTitle = title(left.body), rightTitle = title(right.body);
+  if (leftTitle && rightTitle) {
+    const description = normalize(leftTitle);
+    return description.length >= 24 && description.split(' ').length >= 4 && description === normalize(rightTitle);
+  }
+  if (Math.min(a.length, b.length) >= 40 && (a.includes(b) || b.includes(a))) return true;
+  return false;
+}
+
+/** Keep one marked blocker for a duplicated finding; unrelated points at the same line survive. */
 function draftComments(draft: { comments: ReviewComment[]; blocking: ReviewComment[] }): ReviewComment[] {
-  return [...draft.comments, ...draft.blocking.filter(b => !draft.comments.some(c => c.path === b.path && c.line === b.line && c.body === b.body))];
+  return [
+    ...draft.comments.filter(comment => !draft.blocking.some(blocker => sameFinding(comment, blocker))),
+    ...draft.blocking.filter((blocker, index) => !draft.blocking.slice(0, index).some(previous => sameFinding(previous, blocker)))
+      .map(blocker => ({ ...blocker, body: `**Blocking:** ${publishableBody(blocker.body)}` })),
+  ];
 }
 
 function reviewBody(body: string, r: ReviewRound, decisions: ReviewDecision[]): string {
   const staleLine = r.state === 'stale' ? `\n\n_Drafted at ${r.headSha.slice(0, 7)}; the PR has moved since._` : '';
-  return `${[body.trimEnd(), reviewDecisionBody(decisions, r.decisionAnswers)].filter(Boolean).join('\n\n')}${staleLine}\n\n${reviewMarker(r.id)}`;
+  return `${[publishableBody(body), reviewDecisionBody(decisions, r.decisionAnswers)].filter(Boolean).join('\n\n')}${staleLine}\n\n${reviewMarker(r.id)}`;
 }
 
 /**
@@ -140,7 +171,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
       ? prior.id
       : (
           await github<{ id: number }>(f, token(), 'POST', base, {
-            commit_id: r.headSha,
+            commit_id: readReview(key)!.pr.headSha,
             body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions),
             comments: inlineComments(draftComments(draft), r),
           })
@@ -168,10 +199,11 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
 function postRefusal(key: string, round: ReviewRound, by: PostBy): string | undefined {
   const item = readReview(key);
   const current = item && latestRound(item);
-  if (!item || !current || current.id !== round.id || current.state !== 'drafted' || current.headSha !== item.pr.headSha)
+  if (!item || !current || current.id !== round.id || current.state !== 'drafted')
     return `${key}: this round is no longer ready to publish`;
   const draft = readRoundDraft(key, current.id);
   if ('error' in draft) return `${key}: ${draft.error}`;
+  if (!reviewDraftCoversHead(item, current, draft)) return `${key}: this round is no longer ready to publish`;
   if (unansweredReviewDecisions({ ...current, decisions: draft.decisions }).length) return 'Answer every decision before posting this review.';
   if (by === 'auto' && item.mutedAt) return `${key}: automatic posting is disabled while this PR is muted`;
   if (current.dispatch && dispatchWasCancelled(current.dispatch, 'chore')) return `${key}: the review job was cancelled`;
@@ -248,12 +280,15 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   if (typeof c === 'string') return { posted: false, why: c };
   const { r, token, f, at, base } = c;
   if (r.state === 'posted') return { posted: false, why: `${key}: this round is already posted` };
-  if (r.state === 'stale' || r.headSha !== readReview(key)?.pr.headSha) return { posted: false, why: `${key}: the draft is stale; re-draft it before publishing` };
+  if (r.state === 'stale') return { posted: false, why: `${key}: the draft is stale; re-draft it before publishing` };
   if (r.state !== 'drafted') return { posted: false, why: `${key}: the newest round is ${r.state}; there is no draft to post` };
   const refused = postRefusal(key, r, opts.by);
   if (refused) return { posted: false, why: refused };
   const draft = readRoundDraft(key, r.id);
   if ('error' in draft) return { posted: false, why: `${key}: ${draft.error}` };
+  const item = readReview(key)!;
+  if (!reviewDraftCoversHead(item, r, draft)) return { posted: false, why: `${key}: the draft is stale; re-draft it before publishing` };
+  const targetHead = item.pr.headSha;
   const event = opts.event ?? (opts.by === 'auto' && draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
   if (!['COMMENT', 'REQUEST_CHANGES', 'APPROVE'].includes(event)) return { posted: false, why: 'invalid review event' };
   const expected = draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT';
@@ -285,7 +320,7 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
     // A push can land between the search and this write. Verify the head
     // immediately before publishing, including a staged pending review.
     const current = await github<{ head?: { sha?: string }; state?: string }>(f, token(), 'GET', base.replace(/\/reviews$/, ''));
-    if (current.head?.sha !== r.headSha || (current.state !== undefined && current.state !== 'open')) {
+    if (current.head?.sha !== targetHead || (current.state !== undefined && current.state !== 'open')) {
       fs.rmSync(lock, { force: true });
       saveRound(key, r.id, (x) => { x.state = 'stale'; x.reason = 'the PR head changed or closed before publishing; re-draft it'; }, at);
       return { posted: false, why: `${key}: the PR head changed or closed before publishing; re-draft it` };
@@ -298,7 +333,7 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
     const posted = r.staged
       ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions) })
       : await github<{ id: number }>(f, token(), 'POST', base, {
-          commit_id: r.headSha,
+          commit_id: targetHead,
           event,
           body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions),
           comments: inlineComments(draftComments(draft), r),

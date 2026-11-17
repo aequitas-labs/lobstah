@@ -679,6 +679,13 @@ describe('merge policy — monotone by construction', () => {
   it('an approval on a stale head does not qualify', () => {
     expect(qualifiedApproval(policy, pr({ reviews: [{ id: 10, author: 'chris', state: 'APPROVED', sha: 'old' }] }))).toBeUndefined();
   });
+  it('keeps a verified unchanged-patch approval valid without re-requesting it', () => {
+    const candidate = pr({ reviews: [{ id: 10, author: 'chris', state: 'APPROVED', sha: 'old', unchanged: true }] });
+    expect(qualifiedApproval(policy, candidate)?.id).toBe(10);
+    expect(staleApprovals(policy, candidate)).toEqual([]);
+    candidate.reviews.push({ id: 11, author: 'bob', state: 'CHANGES_REQUESTED', sha: 'abc' });
+    expect(qualifiedApproval(policy, candidate)).toBeUndefined();
+  });
   it('finds only qualifying stale approvers and never the author', () => {
     expect(staleApprovals(policy, pr({ reviews: [
       { id: 10, author: 'chris', state: 'APPROVED', sha: 'old' },

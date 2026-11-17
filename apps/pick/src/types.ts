@@ -88,7 +88,9 @@ export interface PrCandidate {
   labels: string[];
   assignees: string[];
   /** Latest review per author. */
-  reviews: Array<{ id: number; author: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | string; sha: string }>;
+  reviews: Array<{ id: number; author: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | string; sha: string;
+    /** The forge adapter verified that this review's PR patch matches the current head. */
+    unchanged?: boolean }>;
   /** GitHub mergeable_state: clean | unstable | behind | dirty | blocked | ... */
   mergeableState: string;
 }

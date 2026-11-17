@@ -4,6 +4,7 @@ import { loadConfig, markRepliesRule, withBriefHooks } from '@lobstah/core';
 import { MARKER, lobstahWrote, marker } from '../types.js';
 import type { AsyncMergeResult, MergeSource, PollContext, PrCandidate, PrRun, Source, TrackedItem, WorkItem } from '../types.js';
 import { prEvidenceIndex, prUrlKey } from '../pr-evidence.js';
+import { reviewDiffId } from '../reviews-diff.js';
 
 export interface GithubConfig {
   /** "owner/name" of the forge repo. */
@@ -66,6 +67,8 @@ export class GithubSource implements Source, MergeSource {
   name: string;
   /** Share a missing-default lookup within a tick, and refresh it next tick. */
   private defaultBranchRead?: Promise<string>;
+  /** Immutable SHA pairs share comparisons across polls; failures remain retryable. */
+  private reviewDiffs = new Map<string, string>();
   constructor(private cfg: GithubConfig) {
     this.name = `gh:${cfg.repo}`;
   }
@@ -279,12 +282,35 @@ export class GithubSource implements Source, MergeSource {
     return [...latest.values()];
   }
 
+  /** Reuse successful comparisons only; a changed base gets a fresh comparison. */
+  private async reviewedChanges(base: string, head: string): Promise<string | undefined> {
+    const key = `${base}...${head}`;
+    const cached = this.reviewDiffs.get(key);
+    if (cached) return cached;
+    const fingerprint = await reviewDiffId(this.cfg.repo, base, head,
+      { token: this.cfg.token, now: Date.now(), log: (_message: string): void => {} });
+    if (fingerprint) {
+      if (this.reviewDiffs.size >= 200) this.reviewDiffs.clear();
+      this.reviewDiffs.set(key, fingerprint);
+    }
+    return fingerprint;
+  }
+
   private async toCandidate(pr: GhPull): Promise<PrCandidate> {
     const eligible = (pr.user.login === this.cfg.identity || pr.head.ref.startsWith('lobstah/')) && (!pr.head.repo?.full_name || pr.head.repo.full_name.toLowerCase() === this.cfg.repo.toLowerCase());
     const reviews = eligible ? await this.latestReviews(pr.number) : [];
     const defaultBranch = pr.base?.repo?.default_branch ?? await (this.defaultBranchRead ??=
       this.api<{ default_branch: string }>('GET', `/repos/${this.cfg.repo}`).then((repository) => repository.default_branch));
     if (!defaultBranch) throw new Error('GitHub did not return the default branch.');
+    const unchangedHeads = new Set<string>();
+    const previousApprovals = reviews.filter(review => review.state === 'APPROVED' && review.commit_id !== pr.head.sha);
+    if (pr.base?.sha && previousApprovals.length) {
+      const currentDiff = await this.reviewedChanges(pr.base.sha, pr.head.sha);
+      if (currentDiff) for (const head of new Set(previousApprovals.map(review => review.commit_id))) {
+        const reviewedDiff = await this.reviewedChanges(pr.base.sha, head);
+        if (reviewedDiff === currentDiff) unchangedHeads.add(head);
+      }
+    }
     return {
       number: pr.number,
       url: pr.html_url,
@@ -297,7 +323,8 @@ export class GithubSource implements Source, MergeSource {
       eligible,
       labels: pr.labels.map((l) => l.name),
       assignees: pr.assignees.map((a) => a.login),
-      reviews: reviews.map((r) => ({ id: r.id, author: r.user.login, state: r.state, sha: r.commit_id })),
+      reviews: reviews.map((r) => ({ id: r.id, author: r.user.login, state: r.state, sha: r.commit_id,
+        ...(unchangedHeads.has(r.commit_id) ? { unchanged: true } : {}) })),
       mergeableState: pr.draft ? 'draft' : (pr.mergeable_state ?? 'unknown'),
     };
   }

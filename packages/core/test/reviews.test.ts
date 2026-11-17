@@ -125,6 +125,28 @@ describe('review rounds', () => {
     expect(observeReviewRequest(repeated, T0 + 2).opened).toBe(false);
   });
 
+  it('opens one same-head round when the author asks after a completed review', () => {
+    const item = observeReviewRequest(seen(), T0).item;
+    Object.assign(item.rounds[0]!, { state: 'posted', verdict: 'approve', postedAt: new Date(T0).toISOString() });
+    writeReview(item);
+    const request = seen({ id: 'author-again' });
+    request.round.requestedAt = new Date(T0 + 1000).toISOString();
+    expect(observeReviewRequest(request, T0 + 1000).opened).toBe(true);
+    expect(observeReviewRequest(request, T0 + 2000).opened).toBe(false);
+    expect(readReview(item.key)!.rounds).toHaveLength(2);
+  });
+
+  it('coalesces successive pushes into the requested round before drafting', () => {
+    const item = observeReviewRequest(seen(), T0).item;
+    Object.assign(item.rounds[0]!, { state: 'posted', verdict: 'approve' });
+    writeReview(item);
+    observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1000);
+    observeReviewRequest(seen({ head: 'ccccccc3' }), T0 + 2000);
+    const after = readReview(item.key)!;
+    expect(after.rounds).toHaveLength(2);
+    expect(latestRound(after)).toMatchObject({ headSha: 'ccccccc3', changesObservedAt: new Date(T0 + 2000).toISOString() });
+  });
+
   it('the same standing request seen on three polls is one item with one round', () => {
     expect(observeReviewRequest(seen(), T0).opened).toBe(true);
     expect(observeReviewRequest(seen(), T0 + 45_000).opened).toBe(false);
@@ -192,8 +214,10 @@ describe('review rounds', () => {
 
   it('keeps separate draft paths when a force-push revisits a head', () => {
     const first = observeReviewRequest(seen(), T0).item;
-    observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1);
-    observeReviewRequest(seen(), T0 + 2);
+    const second = observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1).item;
+    latestRound(second)!.state = 'drafting'; writeReview(second);
+    const third = observeReviewRequest(seen(), T0 + 2).item;
+    latestRound(third)!.state = 'drafting'; writeReview(third);
     const last = observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 3).item;
     expect(new Set(last.rounds.map((round) => reviewRoundDir(first.key, round.id))).size).toBe(4);
   });
@@ -334,6 +358,41 @@ describe('drafts', () => {
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'verdict.json'), 'utf8')).verdict).toBe('comment');
   });
 
+  it('carries findings, verdicts, replies and the last reviewed head across rounds and redrafts', () => {
+    const item = observeReviewRequest(seen(), T0).item;
+    const dir = reviewRoundDir(item.key, 'RRE_1')!;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), 'One non-blocking suggestion.');
+    fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([{ path: 'a.ts', line: 4, findingId: 'retry', body: 'Consider bounded retries.' }]));
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [] }));
+    Object.assign(item.rounds[0]!, { state: 'drafted', verdict: 'comment', draftedAt: new Date(T0).toISOString() });
+    writeReview(item);
+    const next = observeReviewRequest(seen({ head: 'bbbbbbb2' }), T0 + 1000).item;
+    const round = latestRound(next)!;
+    round.openThreads = [{ id: 'thread', path: 'a.ts', line: 4, isOutdated: false, comments: [
+      { author: 'chris', body: 'Consider bounded retries.', url: 'thread/1' },
+      { author: 'dana', body: 'The caller already bounds retries.', url: 'thread/2' },
+    ] }];
+    const brief = reviewBrief(next, round, { identity: 'chris', id: 'job', outDir: '/x', checkout: '/x/checkout' });
+    expect(brief).toContain('Last reviewed head: aaaaaaa1');
+    expect(brief).toContain('aaaaaaa1...bbbbbbb2');
+    expect(brief).toContain('One non-blocking suggestion.');
+    expect(brief).toContain('The caller already bounds retries.');
+    expect(brief).toContain('Earlier non-blocking findings stay non-blocking unless the code they refer to changed');
+    expect(brief.indexOf('First check prior open threads')).toBeLessThan(brief.indexOf('1. Read the PR'));
+    const fallback = reviewBrief(item, item.rounds[0]!, { identity: 'chris', id: 'job', outDir: '/x', checkout: '/x/checkout' });
+    expect(fallback).toContain('gh api graphql --paginate');
+    expect(fallback).toContain('fetch its remaining replies');
+
+    // A redraft must capture the files before the next job overwrites them.
+    writeReview(item);
+    redraftReview(item.key, T0 + 2000);
+    const redraft = readReview(item.key)!;
+    expect(latestRound(redraft)!.previousReviews?.[0]).toMatchObject({ headSha: 'aaaaaaa1', verdict: 'comment' });
+    fs.writeFileSync(path.join(dir, 'review.md'), 'Overwritten');
+    expect(reviewBrief(redraft, latestRound(redraft)!, { identity: 'chris', id: 'job', outDir: '/x', checkout: '/x/checkout' })).toContain('One non-blocking suggestion.');
+  });
+
   it('the brief drafts into the round directory and forbids every write to the PR', () => {
     observeReviewRequest(seen(), T0);
     const item = readReview('review:acme/web#7')!;
@@ -376,7 +435,7 @@ describe('drafts', () => {
     item.pr.baseSha = 'new-base';
     writeReview(item);
     redraftReview('review:acme/web#7', T0);
-    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestEventId: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', baseSha: 'new-base', diffId: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true });
+    expect(readReview('review:acme/web#7')!.rounds[0]).toEqual({ id: 'RRE_1', requestEventId: 'RRE_1', requestedAt: '2026-10-15T09:00:00Z', requestedBy: 'dana', headSha: 'bbbbbbb2', baseSha: 'new-base', diffId: 'bbbbbbb2', state: 'requested', draftStarts: ['x'], byHand: true, previousReviews: [{ headSha: 'aaaaaaa1', body: '', comments: [], blocking: [] }] });
     expect(redraftReview('review:acme/web#9')).toBe('no review item review:acme/web#9');
   });
 });
