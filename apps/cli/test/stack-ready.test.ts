@@ -225,7 +225,7 @@ describe('stack watch discovery and shared presentation', () => {
   it.each(['rows', 'cards'])('uses the unchanged glass %s rendering with one stack state and one top-linked crawler', async (viewMode) => {
     [1, 2, 3].forEach((n) => put(n)); syncStackReadiness(undefined, now);
     const report = buildTendReport(now);
-    const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), attention: report.attention, notices: report.notices, now: new Date(now).toISOString() };
+    const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs(), {}, me), attention: report.attention, notices: report.notices, now: new Date(now).toISOString() };
     const g = await loadGlass(GLASS_PAGE, d, { now, prefs: { view: viewMode } });
     try {
       // PRs live on the PRs tab: the deck shows no stack.
@@ -247,7 +247,7 @@ describe('stack watch discovery and shared presentation', () => {
   describe('titles', () => {
     const titles: Record<number, string> = { 1: 'Add the heavy line', 2: 'Queue pushes through a hook', 3: 'Show it in tend and the glass' };
     const putTitled = (over: Partial<GhPrView> = {}) => [1, 2, 3].forEach((n) => put(n, { title: titles[n]!, ...over }));
-    const snapshot = () => ({ ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), notices: buildTendReport(now).notices, now: new Date(now).toISOString() });
+    const snapshot = () => ({ ...emptyFleet(), ...deriveGlassPrs([], [], readPrs(), {}, me), notices: buildTendReport(now).notices, now: new Date(now).toISOString() });
 
     it('tend heads the stack with its title and keeps each PR title under it', () => {
       putTitled(); syncStackReadiness(undefined, now);
@@ -332,7 +332,7 @@ describe('stack watch discovery and shared presentation', () => {
   });
   it('renders the shared readiness once in its existing PR group', async () => {
     put(1); put(2); put(3, { isDraft: true });
-    const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs()), now: new Date(now).toISOString() };
+    const d = { ...emptyFleet(), ...deriveGlassPrs([], [], readPrs(), {}, me), now: new Date(now).toISOString() };
     const g = await loadGlass(GLASS_PAGE, d, { now, hash: '#prs' });
     try {
       expect(g.$('#prs')?.textContent).toContain('2 of 3 ready');

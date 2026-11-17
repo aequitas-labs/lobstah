@@ -157,18 +157,15 @@ function startGlass(): Array<() => void> {
   const linkedTrap = trapFromHash(location.hash);
   if (linkedTrap) pendingOpen = { kind: 'trap', id: linkedTrap };
 
-  let paintedRoute: ReturnType<typeof currentRoute> | undefined;
   let hadSnapshot = false;
   let reviewScrolled: string | null = null;
   const paint = () => {
     const state = getState();
-    const enteredTab = state.route !== paintedRoute || (!hadSnapshot && !!state.snapshot);
+    const firstSnapshot = !hadSnapshot && !!state.snapshot;
     render(h(App, { state }), document.body);
-    paintedRoute = state.route;
     hadSnapshot ||= !!state.snapshot;
-    // Hash navigation can target a hidden tab before it renders. Reset only on
-    // entry, never on a poll that refreshes the tab someone is reading.
-    if (enteredTab) window.scrollTo(0, 0);
+    // Keep the initial page at the top; tab clicks own their scroll behavior.
+    if (firstSnapshot) window.scrollTo(0, 0);
     if (!state.focusDecision) scrolledTo = null;
     scrollToDecision(state.focusDecision);
     const match = /^#review-(.+)$/.exec(location.hash);

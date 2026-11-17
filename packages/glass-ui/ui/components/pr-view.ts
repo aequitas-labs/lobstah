@@ -8,8 +8,8 @@ import { Avatar, githubAvatarUrl } from './card.js';
 import { DetailFrame } from './detail-frame.js';
 import { Age, TrapName, reviewLink, stackNumbers } from './common.js';
 import { GitHubDescription, MarkdownElements } from './markdown.js';
-import { MergeIntent, MergeWhenGreen, PrStateIcon, StatusChip } from './prs.js';
-import { ReviewActions, markReviewOpened, reviewPrState, reviewStatus } from './reviews.js';
+import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, prBadgeTags, StatusChip } from './prs.js';
+import { ReviewActions, markReviewOpened, reviewPrState, ReviewTags } from './reviews.js';
 import { ReviewDecisions } from './review-decisions.js';
 import { LinkedText } from './links.js';
 
@@ -27,7 +27,7 @@ function Findings({ review }: { review: GlassReview }) {
   if (!review.summary && !blocking.length && !comments.length && !review.verdict) return null;
   return html`<section class="pr-findings"><h4>Findings <span class="dim">${review.verdict?.replaceAll('_', ' ')} · ${blocking.length} blocking</span></h4>
     ${review.summary && markdown(review.summary)}
-    ${[...blocking.map((finding) => ({ ...finding, severity: 'blocking' })), ...comments.map((finding) => ({ ...finding, severity: /^nit\b/i.test(finding.body) ? 'nit' : 'non-blocking' }))].map((finding) => html`<article class=${'pr-finding ' + (finding.severity === 'blocking' ? 'bad' : 'warn')}><div><span class="badge">${finding.severity}</span> <code>${finding.path}:${finding.line}</code></div>${markdown(finding.body)}</article>`)}
+    ${[...blocking.map((finding) => ({ ...finding, severity: 'blocking' })), ...comments.map((finding) => ({ ...finding, severity: /^nit\b/i.test(finding.body) ? 'nit' : 'non-blocking' }))].map((finding) => html`<article class=${'pr-finding ' + (finding.severity === 'blocking' ? 'bad' : 'warn')}><div>${StatusChip(finding.severity, finding.severity === 'blocking' ? 'bad' : 'warn')} <code>${finding.path}:${finding.line}</code></div>${markdown(finding.body)}</article>`)}
   </section>`;
 }
 
@@ -76,7 +76,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
   const title = data?.title ?? p?.title ?? review?.title;
   const state = data?.state ?? p?.state;
   const draft = data?.draft ?? p?.draft;
-  const status = review ? reviewStatus(review) : null;
+  const lifecycle = state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : draft ? 'draft' : 'open';
   const footer = review
     ? html`<${ReviewActions} r=${review} canDraft=${review.mode !== 'notify'} publish=${review.publish ?? false} decisionSaving=${decisionSaving} split inView />${p?.mergeRequest && html`<${MergeWhenGreen} p=${p} size="lg" />`}`
     : p && (p.mine || p.mergeRequest) && p.state === 'OPEN'
@@ -91,7 +91,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
           ? 'Review required'
           : '';
   return html`<${DetailFrame} identity=${identity} open=${open} footer=${footer}>
-    <header class="pr-view-head"><h2>${review && html`<${PrStateIcon} state=${reviewPrState(review, draft)} /> `}${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${state && StatusChip(draft ? 'Draft' : state === 'OPEN' ? 'Open' : state === 'MERGED' ? 'Merged' : 'Closed', state === 'OPEN' ? 'ok' : 'dim')}${p && StatusChip(p.badge.text, p.badge.tone ?? 'dim')}${p?.mine && StatusChip('yours', 'dim')}${p?.gate && StatusChip(p.gate, 'warn')}${status && StatusChip(status.word, status.tone)}${review?.needsYou && StatusChip('needs you', 'bad')}</div>
+    <header class="pr-view-head"><h2>${review && html`<${PrStateIcon} state=${reviewPrState(review, draft)} /> `}${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${review ? html`<${ReviewTags} r=${review} state=${state ? lifecycle : reviewPrState(review, draft)} />` : html`<${PrTags} state=${lifecycle} tags=${p ? prBadgeTags(p) : []} />`}${p?.state === 'OPEN' && p.gate && StatusChip(p.gate, 'warn')}</div>
     ${author && html`<div class=${'pr-view-person' + (asker === author ? ' rv-person' : '')}><${Avatar} url=${avatar} name=${authorName ?? author} size=${20} /><b>${authorName}</b></div>`}
     ${(data?.headRefName ?? p?.headRefName) && html`<div class="sub">${data?.headRefName ?? p?.headRefName} → ${data?.baseRefName ?? p?.baseRefName}${(data?.updatedAt ?? p?.updatedAt) && html` · updated ${Age(data?.updatedAt ?? p?.updatedAt)} ago`}</div>`}</header>
     ${p?.mergeRequest && html`<section><${MergeIntent} p=${p} /></section>`}
@@ -99,7 +99,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
     ${review && html`<${ReviewDecisions} key=${[review.key, review.roundId, review.headSha, review.draftedAt].join(':')} review=${review} onSaving=${setDecisionSaving} />`}
     ${review && html`<${Findings} review=${review} />`}
     <section><h4>Description</h4><div class="pr-description">${data ? (data.bodyHtml ? html`<${GitHubDescription} source=${data.bodyHtml} openImage=${openLightbox} />` : html`<span class="dim">No description.</span>`) : html`<span class="dim">${loaded.key === prKey && loaded.error ? loaded.error : 'Loading description…'}</span>`}</div></section>
-    ${p && html`<section><h4>Checks <span class="dim">${p.checks.passed} passed · ${p.checks.pending} pending</span></h4>${p.failingChecks?.map((check) => html`<div class="pr-check"><span class="badge bad">failed</span> ${check.detailsUrl ? html`<a href=${check.detailsUrl} target="_blank" rel="noopener">${check.name}</a>` : check.name}</div>`)}${!p.failingChecks?.length && p.checks.failed > 0 && html`<div class="bad">${p.checks.failed} failed</div>`}</section>`}
+    ${p && html`<section><h4>Checks <span class="dim">${p.checks.passed} passed · ${p.checks.pending} pending</span></h4>${p.failingChecks?.map((check) => html`<div class="pr-check">${StatusChip('failed', 'bad')} ${check.detailsUrl ? html`<a href=${check.detailsUrl} target="_blank" rel="noopener">${check.name}</a>` : check.name}</div>`)}${!p.failingChecks?.length && p.checks.failed > 0 && html`<div class="bad">${p.checks.failed} failed</div>`}</section>`}
     ${p && (decision || (p.review?.unresolvedThreads ?? 0) > 0) && html`<section><h4>Reviews</h4><div>${decision}${(p.review?.unresolvedThreads ?? 0) > 0 && ` · ${p.review?.unresolvedThreads ?? 0} unresolved threads`}${p.review && p.review.unresolvedThreads === 0 && ' · no unresolved threads'}</div></section>`}
     ${
       context?.chain.length

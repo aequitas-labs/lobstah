@@ -97,6 +97,7 @@ function dispatch(id: string, over: Partial<GlassDispatch> = {}): GlassDispatch 
 function glassPr(ev: PrEvidence, over: Partial<GlassPr> = {}): GlassPr {
   return {
     key: `pr:acme/web#${ev.number}`,
+    mine: true,
     url: ev.url,
     number: ev.number,
     repo: 'web',

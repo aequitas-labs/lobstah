@@ -25,6 +25,18 @@ afterEach(async () => { await Promise.all(opened.splice(0).map(g => g.close()));
 const text = (g: GlassDom) => g.$('.detail-frame')?.textContent ?? '';
 
 describe('the PR view', () => {
+  it('shows one Merged tag on both the PR card and view, without an ownership tag', async () => {
+    const d = acceptanceFleet();
+    const pr = { ...d.prs[0]!, state: 'MERGED' as const, draft: false, mine: true, badge: { state: 'merged' as const, text: 'merged', tone: 'ok' as const } };
+    d.prs = [pr];
+    d.stacks = [{ ...d.stacks[0]!, numbers: [pr.number], open: false }];
+    const g = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#prs', prefs: { view: 'cards' } });
+    opened.push(g);
+    expect(g.$$('#prs .gstate .gchip').map((tag) => tag.textContent)).toEqual(['Merged']);
+    (g.$('#prs .prcard') as unknown as HTMLElement).click(); await g.settle();
+    expect(g.$$('.pr-view-chips .gchip').map((tag) => tag.textContent)).toEqual(['Merged']);
+  });
+
   it.each(['approve', 'comment', 'request_changes'] as const)('saves option and free-text answers before enabling %s, and restores them on reload', async verdict => {
     let review: GlassReview = { ...draft, verdict, roundId: 'round1', draftedAt: ago(30), decisions: REVIEW_DECISIONS, seenAt: ago(10) };
     const snapshot = () => ({ ...emptyFleet(), reviews: [review], focusToken: 'tok' });
@@ -46,7 +58,7 @@ describe('the PR view', () => {
     expect(send().hasAttribute('disabled')).toBe(true);
     expect(text(g).indexOf('Your calls')).toBeLessThan(text(g).indexOf('Findings'));
     expect(g.$$('fieldset input:checked')).toHaveLength(0);
-    expect(g.$$('fieldset .badge').map(badge => badge.textContent)).toEqual(['Recommended', 'Recommended']);
+    expect(g.$$('fieldset .gchip').map(badge => badge.textContent)).toEqual(['Recommended', 'Recommended']);
     const radio = g.$('[data-review-decision="rollout-owner"] input')!;
     (radio as unknown as HTMLElement).click(); await g.settle();
     expect(send().hasAttribute('disabled')).toBe(true);

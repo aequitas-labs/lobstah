@@ -19,7 +19,7 @@ import {
   reviewLink,
 } from './common.js';
 import { DetailFrame } from './detail-frame.js';
-import { Ago, WorkerLine, ViewMessages } from './detail-parts.js';
+import { Ago, MetaLine, WorkerLine, ViewMessages } from './detail-parts.js';
 import { Dialog } from './dialog.js';
 import { LinkedText } from './links.js';
 import { MarkdownElements } from './markdown.js';
@@ -91,7 +91,7 @@ export function DispatchView({
     x.followUp
   );
   return html`<${DetailFrame} identity=${html`<span>${x.repo && `${x.repo} · `}<${Button} class="copy-id" action=${copy(x.id)} done="Dispatch ID copied" title=${x.id}>${x.id.slice(0, 8)}<//></span>`} open=${top}>
-    <header class="pr-view-head"><h2>${LinkedText(x.title || x.id.slice(0, 8))}</h2><div class="pr-view-chips">${StatusChip(x.verb, isIconVerb(x.verb) ? VERB_TONE[x.verb] : 'dim')}${StatusChip(x.lane, 'dim')}${x.waiting && StatusChip(`waiting on ${x.waiting.on}`, 'dim')}</div><div class="view-meta">${trapId && html`${TrapName(trapId)} · `}${worker && html`<${WorkerLine} worker=${worker} />`}${started && html` · started ${Ago(started)}`}</div></header>
+    <header class="pr-view-head"><h2>${LinkedText(x.title || x.id.slice(0, 8))}</h2><div class="pr-view-chips">${StatusChip(x.verb, isIconVerb(x.verb) ? VERB_TONE[x.verb] : 'dim')}${StatusChip(x.lane, 'dim')}${x.waiting && StatusChip(`waiting on ${x.waiting.on}`, 'dim')}</div><${MetaLine} items=${[trapId && TrapName(trapId), worker && html`<${WorkerLine} worker=${worker} />`, started && html`started ${Ago(started)}`]} /></header>
     ${(x.note || x.activity || x.waiting) && html`<section class="dispatch-now"><h4>Now <span class="dim">${Ago(x.note ? x.verbAt : (x.activity?.at ?? x.waiting?.since))}</span></h4>${x.note && html`<div class="loglines">${NamedText(x.note)}</div>`}${ActivityLine(x)}${WaitingLine(x, true)}</section>`}
     ${
       (prs.length > 0 || unobserved.length > 0) &&

@@ -6,9 +6,31 @@ import { LinkedText } from './links.js';
 
 export const Ago = (at: string | undefined): Children => at && html`${Age(at)} ago`;
 
+/** Metadata shares centered items and separators wherever it appears. */
+export function MetaLine({
+  items,
+  class: cls = 'view-meta',
+  separator = true,
+}: {
+  items: Children[];
+  class?: string;
+  separator?: boolean;
+}): Children {
+  const parts = items.filter(Boolean);
+  return html`<span class=${'meta-line ' + cls}>${parts.flatMap((part, index) => [
+    index > 0 && (separator ? html`<span class="meta-separator" aria-hidden="true"> · </span>` : ' '),
+    html`<span class="meta-item">${part}</span>`,
+  ])}</span>`;
+}
+
 /** Known harness, model and mode; older records omit fields they never observed. */
-export function WorkerLine({ worker }: { worker: Partial<WorkerMetadata> }) {
-  return html`<span class="view-worker">${worker.harness && html`<${HarnessIcon} harness=${worker.harness} /> ${harnessLabel(worker.harness)}`}${worker.model && ` · ${worker.model}`}${worker.config?.permissionMode && ` · ${worker.config.permissionMode}`}${worker.config?.effort && ` · ${worker.config.effort}`}</span>`;
+export function WorkerLine({ worker }: { worker: Partial<WorkerMetadata> }): Children {
+  return html`<${MetaLine} class="view-worker" items=${[
+    worker.harness && html`<${HarnessIcon} harness=${worker.harness} /> ${harnessLabel(worker.harness)}`,
+    worker.model,
+    worker.config?.permissionMode,
+    worker.config?.effort,
+  ]} />`;
 }
 
 /** Existing mail envelopes, with their delivery receipts and sender, newest first. */

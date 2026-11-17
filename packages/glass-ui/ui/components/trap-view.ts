@@ -16,7 +16,7 @@ import {
   trapStatus,
 } from './common.js';
 import { DetailFrame } from './detail-frame.js';
-import { Ago, ViewMessages, WorkerLine } from './detail-parts.js';
+import { Ago, MetaLine, ViewMessages, WorkerLine } from './detail-parts.js';
 import { dispatchCard } from './dispatches.js';
 import { LinkedText } from './links.js';
 import { StatusChip } from './prs.js';
@@ -35,7 +35,7 @@ export function TrapView({ trap: t, snapshot }: { trap: GlassTrapView; snapshot:
   const session = trapSessionRow(t);
   const lifecycle = [...t.notices].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return html`<${DetailFrame} identity=${html`<span>${trapScope(t)}${trapScope(t) && ' · '}<code>wt:${t.trapId}</code></span>`} open=${open}>
-    <header class="pr-view-head"><h2>🪤 ${trapDisplayName(t)}</h2><div class="pr-view-chips">${StatusChip(t.live ? 'live' : status.word, t.live ? 'ok' : status.tone)}${t.live && StatusChip(current ? status.word : t.listening ? 'listening' : 'idle', status.tone)}</div><div class="view-meta"><${WorkerLine} worker=${t} />${t.signedOnAt && html` · signed on ${Ago(t.signedOnAt)}`}${t.heartbeatAt && html` · heartbeat ${Ago(t.heartbeatAt)}`}${t.sessionId && html`<${GrantChip} session=${t.sessionId} grants=${snapshot.sessionGrants ?? []} />`}</div></header>
+    <header class="pr-view-head"><h2>🪤 ${trapDisplayName(t)}</h2><div class="pr-view-chips">${StatusChip(t.live ? 'live' : status.word, t.live ? 'ok' : status.tone)}${t.live && StatusChip(current ? status.word : t.listening ? 'listening' : 'idle', status.tone)}</div><${MetaLine} items=${[html`<${WorkerLine} worker=${t} />`, t.signedOnAt && html`signed on ${Ago(t.signedOnAt)}`, t.heartbeatAt && html`heartbeat ${Ago(t.heartbeatAt)}`, t.sessionId && html`<${GrantChip} session=${t.sessionId} grants=${snapshot.sessionGrants ?? []} />`]} /></header>
     ${t.starting || t.requested ? html`<section class="trap-start"><h4>${t.starting?.failedAt ? 'Start failed' : t.requested ? 'Requested' : 'Starting'}</h4>${t.starting?.reason && html`<p class="bad">${LinkedText(t.starting.reason)}</p>`}${t.starting?.reservedAt && html`<p class="dim">Reserved ${Ago(t.starting.reservedAt)}</p>`}${startCommands(t) ?? html`<p class="dim">Waiting for the helm to start this trap.</p>`}</section>` : current ? html`<section class="trap-current"><h4>Working on</h4>${dispatchCard(current)}</section>` : t.live && html`<section class="trap-current"><p class="dim">Listening for work</p></section>`}
     ${(catches.length > 0 || (t.totalCatches ?? 0) > 0) && html`<section class="trap-catches"><h4>🦞 Catches <span class="dim">${t.totalCatches ?? 0} all time</span></h4><div class="detail-cards">${catches.map(dispatchCard)}</div></section>`}
     <${ViewMessages} messages=${t.messages} file=${(name: string) => fileUrl({ kind: 'trap', trapId: t.trapId }, name)} />

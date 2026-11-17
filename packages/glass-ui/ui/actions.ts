@@ -619,7 +619,17 @@ export async function reviewRequest(kind: ReviewRequestKind, payload: Record<str
   // A source without review actions shows none; a view it records (review-seen) is skipped.
   if (!can('review-request') && !can('review-dismiss') && !can('review-mute') && !can('review-unmute'))
     return 'Reviews are read-only here.';
-  return glassRequest(kind, payload);
+  const key = typeof payload.key === 'string' ? payload.key : undefined;
+  if (!key || kind === 'review-seen' || kind === 'review-decision-answer') return glassRequest(kind, payload);
+  if (getState().reviewActions?.[key]) return 'A review action is already running.';
+  setState({ reviewActions: { ...getState().reviewActions, [key]: kind } });
+  try {
+    return await glassRequest(kind, payload);
+  } finally {
+    const reviewActions = { ...getState().reviewActions };
+    delete reviewActions[key];
+    setState({ reviewActions });
+  }
 }
 
 /** Set or move a todo's time from its row. Resolves to the parser's message, or undefined on success. */

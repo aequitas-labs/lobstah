@@ -66,7 +66,10 @@ export function App({ state }: { state: GlassState }) {
         html`<${Traps} inp=${inp.traps} grants=${d?.sessionGrants ?? []} />`,
       ];
     if (t === 'prs')
-      return [html`<${SectionHead} title="PRs" count=${inp.prs.prs.length} page />`, html`<${PRs} inp=${inp.prs} more=${more('prs')} />`];
+      return [
+        html`<${SectionHead} title="PRs" count=${inp.prs.prs.filter((pr) => pr.mine).length} page />`,
+        html`<${PRs} inp=${inp.prs} more=${more('prs')} />`,
+      ];
     if (t === 'reports')
       return [html`<${SectionHead} title="Reports" count=${inp.reports.list.length} page />`, html`<${Reports} inp=${inp.reports} />`];
     if (t === 'reviews')
