@@ -57,6 +57,8 @@ export interface ButtonProps {
   pendingTitle?: string;
   /** The caller owns error presentation when false. */
   showError?: boolean;
+  /** Handle action failures instead of showing an inline error. */
+  onError?: (message: string) => void;
   /** The success message to announce after `action` completes. */
   done?: string;
   onClick?: (event: Event) => void;
@@ -78,6 +80,7 @@ export function Button({
   preserveLabel = false,
   pendingTitle,
   showError = true,
+  onError,
   done,
   onClick,
   children,
@@ -90,6 +93,10 @@ export function Button({
   const cls = buttonClass(variant, size, [extra, pressed && 'on'].filter(Boolean).join(' ') || undefined);
   const named = label ? { 'aria-label': label, title: (rest.title as string | undefined) ?? label } : {};
   const toggle = pressed === undefined ? {} : { 'aria-pressed': pressed ? 'true' : 'false' };
+  const reportError = (message: string) => {
+    if (onError) onError(message);
+    else setError(message);
+  };
   const run = action
     ? async (event: Event) => {
         event.preventDefault();
@@ -98,10 +105,10 @@ export function Button({
         setError(undefined);
         try {
           const refusal = await action(event);
-          if (refusal) setError(refusal);
+          if (refusal) reportError(refusal);
           else if (done) showToast(done);
         } catch (error) {
-          setError(error instanceof Error ? error.message : 'The action could not be completed.');
+          reportError(error instanceof Error ? error.message : 'The action could not be completed.');
         } finally {
           setBusy(false);
         }

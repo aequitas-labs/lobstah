@@ -72,7 +72,7 @@ describe('a run card shows its state as an icon', () => {
     expect(i.className).toBe(`runicon run-${status} ${tone}`);
     expect([i.getAttribute('role'), i.getAttribute('aria-label'), i.getAttribute('title')]).toEqual(['img', label, label]);
     expect(i.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
-    expect(g.$('#doverlay .runstate')!.textContent!.trim()).toBe('');
+    expect(g.$('#doverlay .runstate')!.textContent!.trim()).toBe(status === 'stopped' ? 'Stopped by you' : '');
   });
 
   it('running: an amber spinner, with a still dot for reduced motion, named with when it started', async () => {
@@ -85,6 +85,35 @@ describe('a run card shows its state as an icon', () => {
     const css = fs.readFileSync(new URL('../../../packages/glass-ui/ui/glass.css', import.meta.url), 'utf8');
     expect(css).toMatch(/\.runicon \.runspin \{[^}]*animation: runspin/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.runicon \.runspin \{\s*display: none;\s*\}\s*\.runicon \.rundot \{\s*display: inline;/);
+  });
+
+  it('keeps elapsed time moving through silence, even when the output poll fails', async () => {
+    const last = { ...latest('running')!, startedAt: new Date(NOW - 161_000).toISOString() };
+    const g = await modal(glassRun(undefined, { inputs: [], latest: last }), () => ({ status: 500, body: { ok: false } }));
+    expect(g.$('#doverlay .runstate')!.textContent).toContain('Running · 2m 41s');
+    g.window.Date.now = () => NOW + 1000;
+    await g.poll();
+    expect(g.$('#doverlay .runstate')!.textContent).toContain('Running · 2m 42s');
+    expect(g.$('#doverlay .runlog')).toBeNull();
+  });
+
+  it.each(['scrubbed', 'exit'] as const)('shows the last six live lines only for scrubbed output (%s)', async (output) => {
+    const last = latest('running')!;
+    let polls = 0;
+    const raw = Array.from({ length: 12 }, (_, i) => `line-${i}`).join('\n');
+    const g = await modal(glassRun(undefined, { inputs: [], output, latest: last }), () => (++polls === 1
+      ? { status: 200, body: { ok: true, ...last, text: raw, next: raw.length } }
+      : { status: 500, body: { ok: false } }));
+    expect(g.$('#doverlay .runstate')!.textContent).toContain('Running · 1m 0s');
+    if (output === 'exit') expect(g.$('#doverlay .runlog')).toBeNull();
+    else expect(g.$('#doverlay .runlog')!.textContent).toBe('line-6\nline-7\nline-8\nline-9\nline-10\nline-11');
+  });
+
+  it('shows a stopped run and the captured output after a reload', async () => {
+    const last = latest('stopped', result({ stopped: true, exitCode: 130 }))!;
+    const g = await modal(glassRun(undefined, { inputs: [], latest: last }), () => ({ status: 200, body: { ok: true, ...last, text: 'finished 12 of 40 rows\n', next: 23 } }));
+    expect(g.$('#doverlay .runstate')!.textContent).toContain('Stopped by you');
+    expect(g.$('#doverlay .runlog')!.textContent).toBe('finished 12 of 40 rows');
   });
 
   it('the deck row shows the same icon, and a declined card the declined one', async () => {

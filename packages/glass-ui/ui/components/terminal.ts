@@ -23,7 +23,10 @@ function span(s: TerminalSpan, key: number) {
  * lines and cursor moves applied, colors kept as spans, and no escape
  * sequence shown. The raw stream stays in the run's output.log.
  */
-export function TerminalOutput({ text }: { text: string }) {
-  const lines = useMemo(() => renderTerminal(text), [text]);
+export function TerminalOutput({ text, lastLines }: { text: string; lastLines?: number }) {
+  const lines = useMemo(() => {
+    const rendered = renderTerminal(text);
+    return lastLines ? rendered.slice(-lastLines) : rendered;
+  }, [text, lastLines]);
   return lines.map((spans, i) => [i > 0 ? '\n' : '', ...spans.map((s, k) => span(s, k))]);
 }

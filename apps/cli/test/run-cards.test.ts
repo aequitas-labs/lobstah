@@ -269,6 +269,16 @@ describe('a run card in the glass', () => {
     expect(g.$('#doverlay .runbtn')).toBeNull();
     stop.click();
     await g.settle();
+    expect(requests).not.toContain('run-stop');
+    expect(g.$('#doverlay .runstop')!.textContent).toContain('Stop this run? It may be partway through.');
+    (g.$$('#doverlay .runstop button').find((button) => button.textContent === 'Keep running') as HTMLButtonElement).click();
+    await g.settle();
+    expect(g.$('#doverlay .runstop')).toBeNull();
+    expect(requests).not.toContain('run-stop');
+    (g.$$('#doverlay .runfoot button').find((button) => button.textContent === 'Stop') as HTMLButtonElement).click();
+    await g.settle();
+    (g.$$('#doverlay .runstop button').find((button) => button.textContent === 'Stop run') as HTMLButtonElement).click();
+    await g.settle();
     expect(requests).toContain('run-stop');
   });
 
