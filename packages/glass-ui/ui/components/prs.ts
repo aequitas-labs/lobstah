@@ -148,35 +148,12 @@ export function MergeStackWhenGreen({ s, prs }: { s: GlassStack; prs: GlassPr[] 
   return html`<span class="prmerge stackmerge" onClick=${(e: Event) => e.stopPropagation()}>${button}</span>`;
 }
 
-/** Local clock time today; include the day for earlier authorizations. */
-export function mergeIntentTime(at: string, now = Date.now()): string {
-  const date = new Date(at);
-  const today = new Date(now);
-  if (!Number.isFinite(date.getTime())) return 'Time unavailable';
-  const clock = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
-  if (date.toDateString() === today.toDateString()) return clock;
-  const days = Math.abs(today.getTime() - date.getTime()) / 86_400_000;
-  const day = date.toLocaleDateString(
-    undefined,
-    days < 7
-      ? { weekday: 'short' }
-      : { month: 'short', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) },
-  );
-  return `${day} ${clock}`;
-}
-
-const MERGE_METHOD_LABELS = { merge: 'merge commit', squash: 'squash', rebase: 'rebase' } as const;
-
-/** One visible authorization on PR cards, PR details, and matching review rows. */
-export function MergeIntent({ p }: { p?: GlassPr }) {
+/** The standing merge tag and its short waiting/merge state, shared by cards, rows and details. */
+export function MergeIntent({ p }: { p?: GlassPr }): Children {
   const request = p?.mergeRequest;
   if (!request) return null;
-  return html`<div class="merge-intent"><span class="mergenote">Merge when green</span> · ${request.summary ?? (p.state === 'MERGED' ? 'Merged' : 'Waiting on CI')}
-    <div class="dim">You · ${request.by === 'chat' ? 'chat' : 'merge card'} · <time datetime=${request.at} title=${new Date(request.at).toLocaleString()}>${mergeIntentTime(request.at)}</time></div>
-    <div class="dim">${MERGE_METHOD_LABELS[request.method]}</div>
-    ${request.hold && html`<div>On hold · ${request.hold}</div>`}${request.note && html`<div>${request.note}</div>`}
-    ${request.mergeSha && html`<div>Merge commit: <code>${request.mergeSha}</code></div>`}
-  </div>`;
+  const status = p.state === 'MERGED' ? 'Merged' : request.hold ? `On hold · ${request.hold}` : (request.summary ?? 'Waiting on CI');
+  return html`<div class="merge-intent">${StatusChip('Merge when green', 'warn')}<span> · ${status}</span></div>`;
 }
 
 const mergeNote = (p: GlassPr) => html`<${MergeIntent} p=${p} />`;

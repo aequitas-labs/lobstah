@@ -141,11 +141,13 @@ h2 {
   white-space: normal;
   text-align: left;
 }
-.mergenote {
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  padding: 0 7px;
-  color: var(--warn);
+.merge-intent {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 18px;
 }
 /* The PRs tab's Other PRs: its heading sits on the disclosure arrow's line. */
 .otherprs > summary {
