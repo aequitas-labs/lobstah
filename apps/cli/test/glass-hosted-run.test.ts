@@ -293,6 +293,9 @@ describe('Stop and Dismiss on the hosted glass', () => {
     expect(stop).toBeTruthy();
     stop.click();
     await h.g.settle();
+    expect(h.sent.map((s) => s.kind)).not.toContain('run-stop');
+    (h.g.$$('#doverlay .runstop button').find((b) => text(b) === 'Stop run') as HTMLButtonElement).click();
+    await h.g.settle();
     expect(h.sent.map((s) => s.kind)).toContain('run-stop');
 
     const done = hostedRun({

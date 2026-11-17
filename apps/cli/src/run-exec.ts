@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -23,7 +23,7 @@ import {
   writeRequest,
   writeRunAttempt,
 } from '@lobstah/core';
-import type { DecisionMeta, RunAttempt, RunCard, RunResult } from '@lobstah/core';
+import type { DecisionMeta, HarnessProcess, RunAttempt, RunCard, RunResult } from '@lobstah/core';
 export type { RunResult } from '@lobstah/core';
 
 /**
@@ -148,7 +148,7 @@ export function runAnswerText(card: RunCard, result: RunResult, raw: string): st
     : result.timedOut
       ? `Ran: timed out after ${card.timeoutSecs}s and was stopped (exit ${RUN_TIMEOUT_EXIT}).`
       : result.stopped
-        ? `Run stopped (exit ${result.exitCode}).`
+        ? `Run stopped by the user (exit ${result.exitCode}).`
         : `Ran: exit ${result.exitCode} in ${elapsed(result.durationMs)}.`;
   if (card.output === 'exit') return `${head} Output withheld (--output exit).`;
   const output = terminalText(raw);
@@ -199,6 +199,30 @@ function withRunLock<T>(key: string, action: () => T): T {
     waitMs: 2000,
     busy: () => new Error('The run card is busy. Try again.'),
   });
+}
+
+/** Snapshot descendants before signalling: children can leave the script's process group. */
+function runDescendants(roots: number[]): HarnessProcess[] {
+  if (process.platform === 'win32') return []; // Run scripts require /bin/bash.
+  const table = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8', timeout: 5000 });
+  const children = new Map<number, number[]>();
+  for (const line of table.split('\n')) {
+    const row = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (!row) continue;
+    const parent = Number(row[2]);
+    children.set(parent, [...(children.get(parent) ?? []), Number(row[1])]);
+  }
+  const seen = new Set(roots);
+  const found: HarnessProcess[] = [];
+  for (const pid of seen) {
+    for (const child of children.get(pid) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      const startedAt = processStartedAt(child);
+      if (startedAt) found.push({ pid: child, startedAt });
+    }
+  }
+  return found;
 }
 
 /** Runs the glass started, by card key; one at a time per card. */
@@ -433,6 +457,8 @@ export class RunRegistry {
       let timedOut = false;
       let stopped = false;
       let killTimer: NodeJS.Timeout | undefined;
+      // Keep identities after the wrapper exits and its children are reparented.
+      const descendants = new Map<number, HarnessProcess>();
       const group = (signal: NodeJS.Signals) => {
         let terminal: number | undefined;
         if (card.interactive) {
@@ -442,7 +468,22 @@ export class RunRegistry {
             /* The relay has not spawned yet. */
           }
         }
-        for (const pid of [terminal, child.pid]) {
+        const roots = [terminal, child.pid].filter((pid): pid is number => !!pid && Number.isSafeInteger(pid) && pid > 1);
+        try {
+          const living = [...descendants.values()].filter(harnessProcessAlive).map((p) => p.pid);
+          for (const proc of runDescendants([...roots, ...living])) descendants.set(proc.pid, proc);
+        } catch (error) {
+          console.error(`Run ${meta.key}: descendants could not be inspected`, error);
+        }
+        for (const proc of [...descendants.values()].reverse()) {
+          if (!harnessProcessAlive(proc)) continue;
+          try {
+            process.kill(proc.pid, signal);
+          } catch {
+            /* Already gone. */
+          }
+        }
+        for (const pid of roots) {
           if (!pid || !Number.isSafeInteger(pid) || pid < 2) continue;
           try {
             process.kill(-pid, signal);
