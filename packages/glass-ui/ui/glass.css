@@ -3991,52 +3991,38 @@ footer .glass-brand {
   border-radius: var(--badge-radius);
 }
 .trap-buoy-status {
-  position: absolute;
-  left: 28px;
-  top: 28px;
-}
-.trap-buoy-status .btn,
-.trap-buoy-status .btn:hover {
-  background: transparent;
-  border-color: transparent;
-}
-.trap-buoy-status .btn:focus-visible {
-  outline: 2px solid var(--ok);
-}
-.trap-buoy-dot {
-  position: relative;
-  left: -8px;
-  width: 8px;
-  height: 8px;
-  border: 2px solid var(--bg);
-  border-radius: 50%;
-  background: currentColor;
+  margin-bottom: 4px;
 }
 .trap-buoy-name {
   max-width: 100%;
   overflow-wrap: anywhere;
   margin-top: 4px;
 }
+.trap-buoy-repo {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--dim);
+  font-size: 12px;
+  margin-top: 2px;
+}
 .trap-buoy-harness {
   position: absolute;
-  top: -8px;
+  top: 40px;
   left: 10px;
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  background: var(--bg);
   color: var(--fg);
   font-size: 16px;
 }
 .trap-buoy-art img,
 .trap-buoy-harness .harness-icon,
-.trap-buoy-dot {
+.trap-buoy-status .btn {
   animation: buoy-bob 3.5s ease-in-out infinite;
 }
 .trap-buoy:nth-child(even) .trap-buoy-art img,
 .trap-buoy:nth-child(even) .trap-buoy-harness .harness-icon,
-.trap-buoy:nth-child(even) .trap-buoy-dot {
+.trap-buoy:nth-child(even) .trap-buoy-status .btn {
   animation-delay: -1.5s;
 }
 @keyframes buoy-bob {
@@ -4051,7 +4037,7 @@ footer .glass-brand {
 @media (prefers-reduced-motion: reduce) {
   .trap-buoy-art img,
   .trap-buoy-harness .harness-icon,
-  .trap-buoy-dot {
+  .trap-buoy-status .btn {
     animation: none;
   }
 }

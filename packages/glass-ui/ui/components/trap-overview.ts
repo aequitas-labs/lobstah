@@ -5,7 +5,7 @@ import buoyBody from '../assets/buoy-body-160.webp';
 import buoyBodyRetina from '../assets/buoy-body-320.webp';
 import { Button } from './button.js';
 import { Harness, HoverInfo, opener, trapDisplayName } from './common.js';
-import { isIconVerb, VERB_TONE, type VerbIconVerb } from './run-status.js';
+import { isIconVerb, RunStatusIcon, VerbIcon, type VerbIconVerb } from './run-status.js';
 
 function trapBuoy(trap: GlassTrapView): Children {
   const current = trap.catches.find((dispatch) => dispatch.id === trap.claimed && dispatch.bucket === 'active');
@@ -54,18 +54,19 @@ function trapBuoy(trap: GlassTrapView): Children {
     }
   };
   return html`<div key=${trap.trapId} class="trap-buoy">
+    <${HoverInfo} cls="trap-buoy-status" text=${progress} focusable=${false}>
+      <${Button} variant="icon" label=${progress}><span aria-hidden="true">${!current && !trap.usageLimit && !trap.listening ? html`<${RunStatusIcon} status="stopped" />` : html`<${VerbIcon} verb=${verb} />`}</span><//>
+    <//>
     <div class="trap-buoy-figure">
-      <${HoverInfo} cls="trap-buoy-art" text=${repo} focusable=${false}>
+      <span class="trap-buoy-art">
         <a href=${trapPageUrl(trap.trapId)} aria-label=${`Open ${name} · ${repo}`} onClick=${open}>
           <img src=${buoyBody} srcset=${`${buoyBody} 1x, ${buoyBodyRetina} 2x`} alt="" width="40" height="81" />
         </a>
-      <//>
+      </span>
       <${Harness} worker=${trap} cls="trap-buoy-harness" compact />
-      <${HoverInfo} cls="trap-buoy-status" text=${progress} focusable=${false}>
-        <${Button} variant="icon" label=${progress}><span class=${`trap-buoy-dot ${VERB_TONE[verb]}`} aria-hidden="true"></span><//>
-      <//>
     </div>
     <b class="trap-buoy-name">${name}</b>
+    <small class="trap-buoy-repo">${repo}</small>
   </div>`;
 }
 

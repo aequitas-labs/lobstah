@@ -202,7 +202,7 @@ it('links each buoy to its own trap page and reopens the same route after closin
   expect(page.$('#modalbox')?.textContent).toContain('blocked-crab');
 });
 
-it('shows current work and last note by status tap or focus, repo by link focus and model by harness focus', async () => {
+it('shows current work by status tap or focus, the repo below the name and the model by harness focus', async () => {
   const snapshot = fleet();
   snapshot.dispatches.find((dispatch) => dispatch.id === 'busy')!.note = 'Checking the migration ' + 'details '.repeat(50);
   snapshot.traps.find((trap) => trap.trapId === 'busy')!.model = 'gpt-6.1-sol';
@@ -222,7 +222,8 @@ it('shows current work and last note by status tap or focus, repo by link focus 
   expect(buoy.querySelector('[role="tooltip"]')).toBeNull();
   (buoy.querySelector('a') as HTMLAnchorElement).focus();
   await page.settle();
-  expect(buoy.querySelector('[role="tooltip"]')?.textContent).toBe('web');
+  expect(buoy.querySelector('[role="tooltip"]')).toBeNull();
+  expect(buoy.querySelector('.trap-buoy-repo')?.textContent).toBe('web');
   (buoy.querySelector('.worker-harness') as HTMLElement).focus();
   await page.settle();
   expect(buoy.querySelector('[role="tooltip"]')?.textContent).toBe('gpt-6.1-sol');
