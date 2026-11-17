@@ -20,6 +20,7 @@ import {
   readTurnOwner,
   readSessionClaim,
   readTurnWaits,
+  readWatch,
   sendMessage,
   sendTrapMessage,
   storedDescriptor,
@@ -198,7 +199,7 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     const previous = existing ?? readTurnWaitRecords().find(record => record.dispatch === dispatch &&
       record.from === w.from && record.read === w.read && turnWaitOwnerId(record) === trap.trapId);
     const artifact = umeTurnArtifact(w);
-    const watchKey = artifact && dispatch ? addUmeWatch(artifact, { forId: dispatch, cwd, cursor: w.cursor }).key : undefined;
+    const watchKey = artifact && dispatch ? (readWatch(`ume:${artifact}`) ?? addUmeWatch(artifact, { forId: dispatch, cwd, cursor: w.cursor })).key : undefined;
     const parkContext = savedParkContext(dispatch, w.context ?? (previous?.dispatch === dispatch ? previous?.parkContext?.instructions : undefined));
     if (dispatch) {
       const lane = laneOf(dispatch);

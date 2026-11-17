@@ -38,10 +38,13 @@ export function addUmeWatch(artifact: string, opts: { forId?: string; cwd?: stri
   });
 }
 export function registerUmeReview(id: string, lane: Lane, entry: StatusEntry, env = process.env): Watch | undefined {
-  if (entry.verb !== 'paused') return undefined;
-  const artifact = umeArtifact(`${entry.link ?? ''} ${entry.note ?? ''}`);
-  const claim = readSessionClaim(id, lane);
-  return artifact && claim?.worktree ? addUmeWatch(artifact, { forId: id, cwd: claim.worktree, project: env.UME_PROJECT }) : undefined;
+  try {
+    if (entry.verb !== 'paused') return undefined;
+    const artifact = umeArtifact(`${entry.link ?? ''} ${entry.note ?? ''}`);
+    const claim = readSessionClaim(id, lane);
+    if (!artifact || !claim?.worktree || readWatch(`ume:${artifact}`)) return undefined;
+    return addUmeWatch(artifact, { forId: id, cwd: claim.worktree, project: env.UME_PROJECT });
+  } catch { return undefined; }
 }
 export function syncUmeWatches(): void {
   for (const lane of ['work', 'chore'] as Lane[]) for (const id of activeIds(lane)) {

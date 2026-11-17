@@ -67,6 +67,12 @@ it('registers the normal ume key with project context and a shipped check comman
   expect(w.check).toContain(`watch check-ume ${ARTIFACT} --cursor {cursor}`);
 });
 
+it('automatic registration preserves an existing watch, like PR registration', () => {
+  addWatch(`ume:${ARTIFACT}`, 'custom check', { owner: 'man', cursor: '7' });
+  expect(registerUmeReview(OWNER, 'work', { at: new Date().toISOString(), verb: 'paused', link: LINK })).toBeUndefined();
+  expect(listWatches()[0]).toMatchObject({ check: 'custom check', owner: 'man', cursor: '7' });
+});
+
 it('pick polls the preset with its context and wakes hookless Codex once for each new batch', async () => {
   const write = source();
   write(batch(1));
