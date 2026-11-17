@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import type { GlassDispatch, GlassFullSnapshot, GlassTrap, TendAttention } from '@lobstah/core';
-import { sectionInputs } from '../../../packages/glass-ui/src/glass-diff.js';
+import { isActiveTrap, sectionInputs } from '../../../packages/glass-ui/src/glass-diff.js';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass, type GlassDom } from './glass-dom.js';
 import { emptyFleet, NOW } from './fixtures/glass-snapshots.js';
@@ -114,12 +114,14 @@ it('moves the overview to On deck while the Traps page retains grouping and clos
   ];
   const page = await open(snapshot);
   const section = page.$('#deck .deck-traps')!;
-  expect(section.querySelector('.trap-overview')?.textContent).toContain('10/12');
+  expect(section.querySelectorAll('.trap-buoy')).toHaveLength(10);
+  expect(section.querySelector('.section-count')?.textContent).toContain('10');
   expect(section.querySelector('.section-head a')?.getAttribute('href')).toBe('#traps');
-  expect(section.querySelectorAll('.card, .trap-deckline, button')).toHaveLength(0);
-  expect(section.textContent).not.toMatch(/ghost|failed|free|in use/);
-  expect(section.querySelector('[role=img]')?.getAttribute('aria-label')).toBe('Codex');
-  expect(section.textContent).toContain('×10');
+  expect(section.querySelectorAll('.card, .trap-deckline')).toHaveLength(0);
+  expect(section.textContent).not.toMatch(/ghost-crab|failed-crab|stowed-crab/);
+  expect(section.textContent).toContain('free-crab');
+  expect(section.querySelector('.harness-icon')?.getAttribute('aria-label')).toBe('Codex');
+  expect(section.querySelector('.trap-buoy-harness')?.getAttribute('aria-label')).toContain('Codex');
   expect(section.querySelector('.startcmds')).toBeNull();
   expect(section.querySelector('.deckmore')).toBeNull();
   await page.go('#traps');
@@ -149,7 +151,7 @@ it('removes recovered attention cases on a live update and keeps the fleet overv
   snapshot.attention = [];
   page.serve(snapshot);
   await page.poll();
-  expect(page.$('#deck .deck-traps')?.textContent).toContain('10/12');
+  expect(page.$$('#deck .trap-buoy')).toHaveLength(10);
   expect(page.$('#deck .deck-traps .trap-overview')).not.toBeNull();
   expect(page.$$('#deck .deck-traps .card')).toHaveLength(0);
 });
@@ -172,4 +174,69 @@ it('drops stale waits once their dispatch is no longer active', () => {
       .deck.traps.map(({ x }) => x.trapId)
       .sort(),
   ).toEqual(['failed', 'ghost', 'oldghost']);
+});
+
+
+it('counts only live traps on both headings, including busy, parked and non-listening workers', async () => {
+  const snapshot = fleet();
+  snapshot.traps.find((trap) => trap.trapId === 'busy')!.listening = false;
+  snapshot.traps.push({ ...snapshot.traps[0]!, trapId: 'starting', starting: { reservedAt: new Date(NOW).toISOString(), deadline: new Date(NOW + 60000).toISOString() } });
+  expect(snapshot.traps.filter(isActiveTrap)).toHaveLength(10);
+  const page = await open(snapshot);
+  expect(page.$('#deck .deck-traps .section-count')?.textContent).toContain('10');
+  await page.go('#traps');
+  expect(page.$('#traps > .section-head .section-count')?.textContent).toContain('10');
+});
+
+it('links each buoy to its own trap page and reopens the same route after closing', async () => {
+  const page = await open();
+  const link = page.$('#deck .trap-buoy-art a[href="#trap/blocked"]') as HTMLAnchorElement;
+  expect(link.getAttribute('aria-label')).toBe('Open blocked-crab · web');
+  link.click();
+  await page.settle();
+  expect(page.$('#modalbox')?.textContent).toContain('blocked-crab');
+  page.document.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape' }));
+  await page.settle();
+  link.click();
+  await page.settle();
+  expect(page.$('#modalbox')?.textContent).toContain('blocked-crab');
+});
+
+it('shows current work by status tap or focus, the repo below the name and the model by harness focus', async () => {
+  const snapshot = fleet();
+  snapshot.dispatches.find((dispatch) => dispatch.id === 'busy')!.note = 'Checking the migration ' + 'details '.repeat(50);
+  snapshot.traps.find((trap) => trap.trapId === 'busy')!.model = 'gpt-6.1-sol';
+  const page = await open(snapshot);
+  const buoy = page.$('#deck a[href="#trap/busy"]')!.closest('.trap-buoy')!;
+  const status = buoy.querySelector('button') as HTMLButtonElement;
+  status.click();
+  await page.settle();
+  expect(page.$('#modalbox')?.textContent).not.toContain('busy-crab');
+  expect(buoy.querySelector('[role="tooltip"]')?.textContent).toContain('working · busy · Checking the migration');
+  expect(buoy.querySelector('[role="tooltip"]')!.textContent!.length).toBeLessThan(300);
+  status.focus();
+  await page.settle();
+  expect(buoy.querySelector('[role="tooltip"]')).not.toBeNull();
+  status.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await page.settle();
+  expect(buoy.querySelector('[role="tooltip"]')).toBeNull();
+  (buoy.querySelector('a') as HTMLAnchorElement).focus();
+  await page.settle();
+  expect(buoy.querySelector('[role="tooltip"]')).toBeNull();
+  expect(buoy.querySelector('.trap-buoy-repo')?.textContent).toBe('web');
+  (buoy.querySelector('.worker-harness') as HTMLElement).focus();
+  await page.settle();
+  expect(buoy.querySelector('[role="tooltip"]')?.textContent).toBe('gpt-6.1-sol');
+  expect(page.$('#deck a[href="#trap/free"]')!.closest('.trap-buoy')!.querySelector('button')?.getAttribute('aria-label')).toContain('idle');
+});
+
+it('removes departed buoys on a poll and welcomes an empty fleet', async () => {
+  const snapshot = fleet();
+  const page = await open(snapshot);
+  snapshot.traps = snapshot.traps.map((trap) => ({ ...trap, live: false }));
+  page.serve(snapshot);
+  await page.poll();
+  expect(page.$$('#deck .trap-buoy')).toHaveLength(0);
+  expect(page.$('#deck .deck-traps .section-count')?.textContent).toContain('0');
+  expect(page.$('#deck .deck-traps .empty')?.textContent).toContain('No buoys on the water');
 });

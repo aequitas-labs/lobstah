@@ -11,6 +11,7 @@ import { showToast } from './toast.js';
  * - `primary`: the one main action of a card, dialog or row, in the text's color.
  * - `danger`: filled red, for what can't be undone (Stop, Revoke).
  * - `icon`: an icon alone, a square, named by its label for screen readers and on hover.
+ * - `icon-flat`: the same icon hit target, without a background or border.
  *
  * Touch pointers keep `md` at 32px and `lg` at 40px. Fine pointers use 26px
  * and 32px. The pointer, not viewport width, selects the size.
@@ -18,7 +19,7 @@ import { showToast } from './toast.js';
  * control) are built from it and add only layout.
  */
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'icon';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'icon' | 'icon-flat';
 export type ButtonSize = 'md' | 'lg';
 
 export type ButtonAction = (event: Event) => Promise<string | undefined | void> | string | undefined | void;
@@ -29,7 +30,7 @@ export type ButtonAction = (event: Event) => Promise<string | undefined | void> 
  * picker's label, a button a ref must reach).
  */
 export const buttonClass = (variant: ButtonVariant = 'secondary', size: ButtonSize = 'md', extra?: string | false | null): string =>
-  ['btn', `btn-${variant}`, size === 'lg' && 'btn-lg', extra].filter(Boolean).join(' ');
+  ['btn', variant === 'icon-flat' && 'btn-icon', `btn-${variant}`, size === 'lg' && 'btn-lg', extra].filter(Boolean).join(' ');
 
 export interface ButtonProps {
   variant?: ButtonVariant;

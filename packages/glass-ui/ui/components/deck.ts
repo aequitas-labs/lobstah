@@ -135,10 +135,10 @@ function deckBlock(title: string, items: DeckItem[], tab: GlassTab, max: number,
   return html`<section><${SectionHead} title=${headTitle} count=${items.length} href=${'#' + tab} action=${headAction} />${body}${more(items.length - shown.length, tab)}</section>`;
 }
 
-/** On deck keeps only the configured repos' capacity and harness counts. */
-function trapBlock(repos: DeckInputs['repoTraps']): Children {
+/** On deck shows one buoy for each active trap. */
+function trapBlock(traps: DeckInputs['activeTraps']): Children {
   if (!visibleTabs().includes('traps')) return null;
-  return html`<section class="deck-traps"><${SectionHead} title="Traps" href="#traps" /><${TrapOverview} repos=${repos} /></section>`;
+  return html`<section class="deck-traps"><${SectionHead} title="Traps" count=${traps.length} href="#traps" /><${TrapOverview} traps=${traps} /></section>`;
 }
 
 export function Deck({
@@ -237,6 +237,6 @@ export function Deck({
             },
           )}</ol></section>`,
       )}</div>`,
-    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('In flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('Reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${trapBlock(inp.repoTraps)}</div>`,
+    html`<div class="deckgrid"><${DeckDecisions} cards=${inp.decisions} drafts=${drafts} focus=${focus} viewedHere=${viewedHere} unread=${unread} recentRuns=${inp.recentRuns} />${deckBlock('In flight', flight, 'dispatches', INFLIGHT_MAX, view)}${deckBlock('Landed · 24h', landed, 'dispatches', LANDED_MAX, view)}${deckBlock('Reports', reports, 'reports', REPORTS_MAX, view)}<${Todos} passes=${passes} todos=${inp.todos} note=${inp.todoNote} preview />${trapBlock(inp.activeTraps)}</div>`,
   ];
 }

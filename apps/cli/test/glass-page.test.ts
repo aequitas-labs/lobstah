@@ -1187,7 +1187,7 @@ describe('glass page: On deck', () => {
 
   it('an empty fleet: every section says it is empty, the daemon is down', async () => {
     const g = await page(emptyFleet());
-    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet']);
+    expect(g.$$('#deck section .empty').map(text)).toEqual(['none', 'nothing in flight', 'none', 'no reports yet', 'No buoys on the water. Your traps are resting.']);
     expect(text(g.$('#chips'))).toBe('daemon down');
   });
 });
