@@ -302,8 +302,8 @@ function capture(g: GlassDom): Record<string, string> {
   if (tab === 'dispatches' && g.$('#dispatches .cards')) out.page = '(dispatch cards redrawn)';
   // So were PR cards (glass-page tests them); the PRs table is still compared.
   if (tab === 'prs' && g.$('#prs .cards')) out.page = '(PR cards redrawn)';
-  // The PRs tab now leads with Yours and folds the other PRs away (prs.ts); glass-prs-tab tests it.
-  if (tab === 'prs') out.page = '(PRs tab split into Yours and Other PRs)';
+  // The PRs tab lists only owned PRs (prs.ts); glass-prs-tab tests it.
+  if (tab === 'prs') out.page = '(PRs tab lists owned PRs)';
   // Shared page headings intentionally differ on these tabs; glass-sections.test.ts covers their labels and routes.
   if (tab === 'dispatches' || tab === 'notices') out.page = '(shared page heading changed)';
   if (text(g.$('#modalbox h3')).startsWith('🪤')) out.modalbox = '(trap window action changed)';
@@ -447,6 +447,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
         withoutNewTabs(g);
         const hidden = [...g.$$('.tabpage:not(.on)'), ...(g.$('#overlay')!.className === 'open' ? [] : [g.$('#modalbox')!])];
         g.$$('body *')
+          // PR status cells use shared tags now; behavioral coverage lives in glass-pr-view and glass-reviews.
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
@@ -455,7 +456,7 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           .filter(
             (el) =>
               !el.matches(
-                '.btn, .btn *, button, button *, .x, h1, h2, .page-head, .page-head *, .section-head, .section-head *, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *',
+                '.btn, .btn *, button, button *, .x, h1, h2, .page-head, .page-head *, .section-head, .section-head *, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *, #prs tr.rowhead td:nth-child(3) *, .prmerge, .prmerge *',
               ),
           )
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))

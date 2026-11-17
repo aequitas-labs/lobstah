@@ -45,6 +45,8 @@ export interface ButtonProps {
   type?: 'button' | 'submit';
   /** An async action: disables this button, shows progress and reports its result. */
   action?: ButtonAction;
+  /** Another surface is running this same action; share progress and prevent duplicate submissions. */
+  pending?: boolean;
   /** The short label to show while `action` is running. */
   sending?: string;
   /** Keep the action's normal label beside the progress icon while it runs. */
@@ -69,6 +71,7 @@ export function Button({
   class: extra,
   type = 'button',
   action,
+  pending = false,
   sending = 'Sending…',
   preserveLabel = false,
   pendingTitle,
@@ -78,7 +81,8 @@ export function Button({
   children,
   ...rest
 }: ButtonProps) {
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const busy = localBusy || pending;
   const [error, setError] = useState<string>();
   const { disabled, ...attributes } = rest;
   const cls = buttonClass(variant, size, [extra, pressed && 'on'].filter(Boolean).join(' ') || undefined);

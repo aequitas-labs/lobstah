@@ -11,6 +11,7 @@ import { DispatchView } from './dispatch-view.js';
 import { TrapView } from './trap-view.js';
 import { DetailFrame } from './detail-frame.js';
 import { Button } from './button.js';
+import { MetaLine } from './detail-parts.js';
 
 /** The overlay's one modal: dispatch, trap, helm, PR or report. */
 
@@ -23,7 +24,7 @@ import { Button } from './button.js';
 export function SettingsBody({ prefs }: { prefs: GlassPrefs }) {
   const viewOptions = html`<span class="seg" role="group" aria-label="view">${(['table', 'cards'] as const).map((view) => html`<${Button} pressed=${view === prefs.view} onClick=${() => setPrefs({ view })}>${view}<//>`)}</span>`;
   const lobOptions = html`<span class="seg" role="group" aria-label="lobs">${([true, false] as const).map((lobs) => html`<${Button} pressed=${lobs === prefs.lobs} onClick=${() => setPrefs({ lobs })}>${lobs ? 'on' : 'off'}<//>`)}</span>`;
-  return html`<div class="settings"><div class="row"><span class="lbl">view<span class="hint">this device · cards or table</span></span>${viewOptions}</div><div class="row"><span class="lbl">lobs<span class="hint">this device · crawling lobsters</span></span>${lobOptions}</div></div>${
+  return html`<div class="settings"><div class="row"><span class="lbl">view<${MetaLine} class="hint" items=${['this device', 'cards or table']} /></span>${viewOptions}</div><div class="row"><span class="lbl">lobs<${MetaLine} class="hint" items=${['this device', 'crawling lobsters']} /></span>${lobOptions}</div></div>${
     visibleTabs().includes('settings') &&
     html`<p class="dim settings-config">Daemon and grounds settings are in <a href="#settings" onClick=${closeModal}>${TAB_ICON.settings}Configuration</a></p>`
   }`;

@@ -101,8 +101,7 @@ describe('a PR card', () => {
     // One main action, a big button with its icon; no Ack: opening the card acks it.
     expect([...card(41).querySelectorAll('.gactions button')].map(text)).toEqual(['Merge when green']);
     expect(card(41).querySelector('.gactions .btn-primary svg.acticon')).toBeTruthy();
-    expect([...card(42).querySelectorAll('.gactions button')].map(text)).toEqual([]);
-    expect([...card(42).querySelectorAll('.gactions a')].map((a) => a.getAttribute('aria-label'))).toEqual(['Open']);
+    expect(card(42)).toBeUndefined();
     // ↗ Open sits at the bar's right on every card.
     expect(card(41).querySelector('.gactions')!.lastElementChild?.className).toContain('gopenbtn');
     // Merge when green asks the boat in one click, the repo's way, and a tap on the bar never opens the card.
@@ -117,7 +116,7 @@ describe('a PR card', () => {
     const acks = () => g.posts().filter((r) => r.body.includes('pr-ack'));
     expect(acks().map((r) => JSON.parse(r.body))).toEqual([{ kind: 'pr-ack', payload: { items: [{ key: p.key, stateHash: 'h41' }] } }]);
     // Opening a PR with nothing to ack sends nothing.
-    await click(g, card(42));
+    await click(g, card(43));
     expect(acks()).toHaveLength(1);
     g.window.document.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await g.settle();
@@ -208,7 +207,7 @@ describe('a review card', () => {
     // The PR card's four parts.
     expect(card(7).querySelector('.gtop')!.firstElementChild?.querySelector('.pricon')).toBeTruthy();
     expect(card(7).querySelector('.gtop .gword, .gtop .gchip')).toBeNull();
-    expect(chips(7)).toEqual(['● draft ready', 'needs you']);
+    expect(chips(7)).toEqual(['Open', '● draft ready']);
     expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #7 · 🪤 wt:t1');
     expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
@@ -219,10 +218,10 @@ describe('a review card', () => {
     expect(card(7).querySelector('.cmenulist')?.parentElement).toBe(card(7).querySelector('.split'));
     expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Approve anyway', 'Skip', 'Mute PR']);
     expect(g.$('#overlay')!.className).not.toBe('open');
-    expect(chips(8)).toEqual(['drafting']);
-    expect(chips(9)).toEqual(['approved']);
-    expect(chips(10)).toEqual(['changes requested']);
-    expect(chips(11)).toEqual(['posted']);
+    expect(chips(8)).toEqual(['Open', 'drafting']);
+    expect(chips(9)).toEqual(['Open', 'approved']);
+    expect(chips(10)).toEqual(['Open', 'changes requested']);
+    expect(chips(11)).toEqual(['Open', 'posted']);
     // No trap has a round that ran no job.
     expect(text(card(8).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #8');
     const draft = card(7).querySelector('.gactions a')!;

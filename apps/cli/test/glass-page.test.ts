@@ -705,7 +705,7 @@ describe('glass page: tabs and hash routing', () => {
     expect(g.$$('#prs tr.rowhead')).toHaveLength(3);
   });
 
-  it('opens a deep-linked PR tab and every switched tab at the top', async () => {
+  it('opens a deep-linked PR tab at the top and preserves scroll when switching tabs', async () => {
     const g = await page(acceptanceFleet(), { hash: '#prs', initialScroll: 600 });
     expect(g.$$('.tabpage.on').map((el) => el.id)).toEqual(['page-prs']);
     expect(g.window.scrollY).toBe(0);
@@ -713,7 +713,7 @@ describe('glass page: tabs and hash routing', () => {
       g.setScroll(600);
       await click(g, g.$(`#tabs a[data-tab="${tab}"]`));
       expect(g.$$('.tabpage.on').map((el) => el.id)).toEqual([`page-${tab}`]);
-      expect(g.window.scrollY).toBe(0);
+      expect(g.window.scrollY).toBe(600);
     }
   });
 
@@ -968,7 +968,7 @@ describe('glass page: modals', () => {
 const cardNumber = (c: Element) => /#\d+/.exec(text(c.querySelector('.gcontext')))?.[0] ?? '';
 
 describe('glass page: PRs', () => {
-  it("edges every PR card with its badge's tone, chips its GitHub state, and chips what a badge that is not green says", async () => {
+  it("chips each PR lifecycle and includes an actionable badge when it is not green", async () => {
     const d = everyAttentionFleet();
     const g = await page(d, { hash: '#prs', prefs: { view: 'cards' } });
     // The stack of #41–#43 is one card, closed, with no number chain or floor: its summary and how many PRs it holds.
@@ -981,7 +981,6 @@ describe('glass page: PRs', () => {
     expect(cards.map(cardNumber).sort()).toEqual(d.prs.map((p) => '#' + p.number).sort());
     for (const c of cards) {
       const p = d.prs.find((x) => '#' + x.number === cardNumber(c))!;
-      expect(c.className).toContain(`gcard-edge gedge-${p.badge.tone}`);
       const state = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' }[p.badge.state];
       const chips = [...c.querySelectorAll('.gstate .gchip')].map(text);
       expect(chips).toEqual(p.badge.state === 'open' && p.badge.tone !== 'ok' ? [state, p.badge.text.toLowerCase()] : [state]);
@@ -1032,12 +1031,12 @@ describe('glass page: PRs', () => {
     expect(g.$$('#prs th[colspan]').map((h) => text(heading(h)))).toEqual(['#41 → #42 → #43 · floor main · open']);
     const rows = g.$$('#prs tr.rowhead').map((tr) => [...tr.querySelectorAll('td')].map(text));
     expect(rows.map((r) => r[0])).toEqual(['#41', '#42', '#43']);
-    expect(rows[0]![5]).toBe('CLEAN · next mergeable');
-    expect(rows[1]![5]).toBe('CLEAN · blocked by #41');
+    expect(rows[0]![5]).toBe('CLEAN · next mergeable Merge when green');
+    expect(rows[1]![5]).toBe('CLEAN · blocked by #41 Merge when green');
     expect(rows[1]![6]).toBe('watching · 60s ago');
     expect(text(g.$('#prs'))).not.toContain('a-long-opaque-cursor');
-    // None of these PRs is the person's, so they sit under Other PRs; non-PR watches list below, cursor shortened.
-    expect(g.$$('#prs h2').map(text)).toEqual(['Yours · 0', 'Other PRs · 3', 'Other watches']);
+    // Non-PR watches follow the owned PRs, with shortened cursors.
+    expect(g.$$('#prs h2').map(text)).toEqual(['Other watches']);
     expect(text(g.$$('#prs table')[1]!)).toContain('ci-nightly');
   });
 

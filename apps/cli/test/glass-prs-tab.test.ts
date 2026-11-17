@@ -6,11 +6,7 @@ import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
 import { NOW, acceptanceFleet } from './fixtures/glass-snapshots.js';
 
-/**
- * The PRs tab leads with Yours: the stacks holding one of the person's own
- * PRs (GlassPr.mine). Every other watched PR sits under Other PRs, closed
- * until opened. Reviews stays its own tab.
- */
+/** The PRs tab lists owned PRs in both layouts; review requests stay on Reviews. */
 
 let open: GlassDom[] = [];
 afterEach(async () => {
@@ -40,32 +36,32 @@ function fleet(mine: number[]): GlassFullSnapshot {
 
 for (const view of ['cards', 'table'] as const) {
   describe(`the PRs tab, as ${view}`, () => {
-    it("leads with Yours, counting the person's PRs, and puts every other PR under Other PRs, closed", async () => {
-      const g = await page(fleet([50]), { hash: '#prs', prefs: { view } });
-      expect(text(g.$('#prs .yourshead'))).toBe('Yours · 1');
-      const others = g.$('#prs details.otherprs')!;
-      expect(text(others.querySelector('summary'))).toBe('Other PRs · 3');
-      expect(others.hasAttribute('open')).toBe(false);
-      // Yours comes before Other PRs, and holds only the lone PR's stack.
+    it('lists only owned PRs without an ownership section split', async () => {
+      const d = fleet([50]);
+      d.reviews = [{ key: 'review:acme/web#41', repo: 'acme/web', number: 41, title: 'A requested review', url: d.prs[0]!.url, reviewUrl: d.prs[0]!.url, author: 'dana', requestedAt: d.now, state: 'requested', stands: true }];
+      const g = await page(d, { hash: '#prs', prefs: { view } });
       await openStacks(g);
-      const yoursPart = text(g.$('#prs')).split('Other PRs')[0]!;
-      expect(yoursPart).toContain('A lone PR');
-      expect(yoursPart).not.toContain('#41');
-      expect(text(g.$('#prs details.otherprs'))).toContain('#41');
+      expect(text(g.$('#prs'))).toContain('A lone PR');
+      for (const number of ['#41', '#42', '#43']) expect(text(g.$('#prs'))).not.toContain(number);
+      expect(text(g.$('#prs'))).not.toMatch(/Yours|Other PRs/);
+      expect(text(g.$('#prs .section-head'))).toContain('1');
+      await g.go('#reviews');
+      expect(text(g.$('#reviews'))).toContain('A requested review');
     });
 
-    it('keeps a whole stack under Yours when any of its PRs is the person’s', async () => {
+    it('filters non-owned members out of a mixed stack', async () => {
       const g = await page(fleet([42]), { hash: '#prs', prefs: { view } });
       await openStacks(g);
-      const yoursPart = text(g.$('#prs')).split('Other PRs')[0]!;
-      for (const n of ['#41', '#42', '#43']) expect(yoursPart).toContain(n);
-      expect(text(g.$('#prs .yourshead'))).toBe('Yours · 1');
+      expect(text(g.$('#prs'))).toContain('#42');
+      const listed = view === 'table' ? g.$$('#prs tr.rowhead td:first-child').map(text) : g.$$('#prs .prcard .gcontext').map(text);
+      expect(listed).toHaveLength(1);
+      expect(listed[0]).toContain('#42');
     });
 
-    it('says how a PR gets into Yours when none of the watched PRs is the person’s', async () => {
+    it('explains how to add an owned PR when none is watched', async () => {
       const g = await page(fleet([]), { hash: '#prs', prefs: { view } });
-      expect(text(g.$('#prs .yourshead'))).toBe('Yours · 0');
       expect(text(g.$('#prs'))).toContain('lobstah watch add <url>');
+      expect(text(g.$('#prs'))).not.toMatch(/Yours|Other PRs|#41/);
     });
   });
 }

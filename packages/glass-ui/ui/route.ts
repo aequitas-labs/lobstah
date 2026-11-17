@@ -20,3 +20,18 @@ export const onRoute = (fn: (tab: GlassRoute) => void): (() => void) => {
     window.removeEventListener('popstate', changed);
   };
 };
+
+/** A tab switches without an anchor jump; selecting the active tab scrolls to its content. */
+export function navigateTab(event: MouseEvent, target: GlassTab): void {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
+  event.preventDefault();
+  if (currentRoute() === target) {
+    history.replaceState(history.state, '', '#' + target);
+    const section = document.getElementById(target);
+    if (section) window.scrollTo(0, window.scrollY + section.getBoundingClientRect().top);
+    return;
+  }
+  const { glassOverlay: _overlay, ...state } = history.state ?? {};
+  history.pushState(state, '', '#' + target);
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+}

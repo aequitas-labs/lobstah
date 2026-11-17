@@ -32,28 +32,30 @@ import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
 import type { CardPerson, CardTone } from './card.js';
 import { Button, type ButtonSize } from './button.js';
 
-/**
- * The PRs tab: Yours first (the stacks holding a PR of the person's own,
- * `GlassPr.mine`), then every other watched PR in a section that starts
- * closed, then the watches that are not PR watches. Each group is by stack.
- * Every stack group and PR row is keyed, so a poll patches rows in place and
- * never re-creates the list.
- */
-
+/** The PRs tab groups only owned PRs: authored by the viewer or opened by a trap. */
 export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: GlassStack; prs: GlassPr[] }> {
   const byStack = new Map<string, GlassPr[]>();
   for (const p of inp.prs) {
-    const a = byStack.get(p.stackId) || [];
-    a.push(p);
-    byStack.set(p.stackId, a);
+    if (!p.mine) continue;
+    const members = byStack.get(p.stackId) ?? [];
+    members.push(p);
+    byStack.set(p.stackId, members);
   }
-  return inp.stacks.map((s) => ({ s, prs: byStack.get(s.id) || [] })).filter((g) => g.prs.length);
-}
-
-/** The stack groups split in two: those holding one of the person's own PRs, and the rest. */
-export function splitMine(groups: Array<{ s: GlassStack; prs: GlassPr[] }>): { yours: typeof groups; others: typeof groups } {
-  const yours = groups.filter((g) => g.prs.some((p) => p.mine));
-  return { yours, others: groups.filter((g) => !yours.includes(g)) };
+  return inp.stacks.flatMap((s) => {
+    const prs = byStack.get(s.id);
+    return prs?.length
+      ? [
+          {
+            s: {
+              ...s,
+              open: prs.some((pr) => pr.state === 'OPEN'),
+              numbers: s.numbers.filter((number) => prs.some((p) => p.number === number)),
+            },
+            prs,
+          },
+        ]
+      : [];
+  });
 }
 
 /** How many of the person's own open PRs need them: failed checks, a conflict, or a repair that stopped (a bad badge). */
@@ -61,14 +63,7 @@ export function prsNeedingYou(prs: readonly GlassPr[]): number {
   return prs.filter((p) => p.mine && p.state === 'OPEN' && p.badge.tone === 'bad').length;
 }
 
-/** The section after Yours: every other watched PR, closed until opened. */
-const othersSection = (count: number, body: unknown) =>
-  count > 0 && html`<details class="otherprs"><summary><h2>Other PRs · ${count}</h2></summary>${body}</details>`;
-
 const chainText = (s: GlassStack, prs: GlassPr[]) => stackNumbers(s.numbers, new Map(prs.map((p) => [p.number, p.title])));
-const stateText = (p: GlassPr): string =>
-  p.state + (p.draft ? ' · draft' : '') + (p.state === 'MERGED' && p.mergedAt ? ' · ' + p.mergedAt : '');
-
 function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
   const short = (c: unknown): string => {
     const s = String(c ?? '');
@@ -82,28 +77,21 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
 }
 
 function prTable(inp: PrsInputs, older: unknown) {
-  const { yours, others } = splitMine(prGroups(inp));
-  const rowsOf = (groups: typeof yours) =>
+  const groups = prGroups(inp);
+  const rowsOf = (groups: ReturnType<typeof prGroups>) =>
     groups.flatMap(({ s, prs }) => [
       html`<tr key=${'stack:' + s.id}><th colspan="8">${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}</th></tr>`,
       ...prs.map(
         (p) =>
-          html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td>${stateText(p)}</td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}${p.mergeRequest && [' · ', mergeNote(p)]} <${MergeWhenGreen} p=${p} /></td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
+          html`<tr key=${p.key} class="rowhead" onClick=${opener('pr', p.key)}><td>${prLink(p)}</td><td class="grow">${LinkedText(p.title)}</td><td><${PrTags} state=${p.badge.state} tags=${prBadgeTags(p)} /></td><td>${prChecks(p)}</td><td>${prReview(p)}</td><td>${prMerge(p)}${p.mergeRequest && [' · ', mergeNote(p)]} <${MergeWhenGreen} p=${p} /></td><td>${watchCell(p.watch)}</td><td>${p.gate || ''}</td></tr>`,
       ),
     ]);
   const cols = ['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'];
-  const otherCount = others.reduce((n, g) => n + g.prs.length, 0);
-  return [
-    html`<h2 class="yourshead">Yours · ${yours.reduce((n, g) => n + g.prs.filter((p) => p.mine).length, 0)}</h2>`,
-    Table(cols, rowsOf(yours), YOURS_EMPTY),
-    othersSection(otherCount, Table(cols, rowsOf(others), '')),
-    older,
-    otherWatches(inp),
-  ];
+  return [Table(cols, rowsOf(groups), PRS_EMPTY), older, otherWatches(inp)];
 }
 
-/** What Yours says when it is empty: how a PR gets there. */
-const YOURS_EMPTY = 'no PRs of yours are watched: a trap’s PR shows here, and `lobstah watch add <url>` adds one you opened';
+/** How an owned PR gets onto the PRs page. */
+const PRS_EMPTY = 'no PRs of yours are watched: a trap’s PR shows here, and `lobstah watch add <url>` adds one you opened';
 
 const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', rebase: 'rebased commits' } as const;
 
@@ -221,7 +209,7 @@ export interface PrCardParts {
   prState?: PrIconState;
   /** The status chips under the title. */
   status: Children;
-  /** The colored edge: red when it waits on you, amber in progress, green done. */
+  /** The edge on actionable PRs: red when waiting on you, amber in progress, green when ready. */
   tone: CardTone;
   repo: string;
   number: number;
@@ -246,7 +234,7 @@ export interface PrCardParts {
  * or a word in a tone. A long one may shrink and carries itself as a title;
  * `hover` replaces that title with more than the word says.
  */
-export const StatusChip = (word: string, cls: string, hover?: string) =>
+export const StatusChip = (word: string, cls: string, hover?: string): Children =>
   html`<span class=${'gchip ' + cls + (word.length > 12 ? ' long' : '')} title=${hover ?? (word.length > 12 ? word : undefined)}>${word}</span>`;
 
 /**
@@ -270,7 +258,7 @@ export function prShapedCard(c: PrCardParts) {
     titleAttr=${c.titleAttr}
     icon=${html`<${PrStateIcon} state=${c.prState} />`}
     iconFirst
-    state=${{ word: '', tone: c.tone, mark: 'edge' }}
+    state=${c.prState === 'merged' || c.prState === 'closed' ? undefined : { word: '', tone: c.tone, mark: 'edge' }}
     status=${[c.status, c.tail]}
     context=${meta}
     contextTitle=${text}
@@ -291,6 +279,34 @@ export function prAuthor(p: Pick<GlassPr, 'author'>): CardPerson | undefined {
 }
 
 const PR_STATE_WORD = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' } as const;
+
+/** An additional status beside a PR's lifecycle tag, shared by cards, rows and details. */
+export interface PrStatusTag {
+  word: string;
+  tone: CardTone;
+  hover?: string;
+  unread?: boolean;
+}
+
+/** The shared lifecycle and status tags for PRs, stacks and reviews. */
+export function PrTags({ state, tags = [] }: { state?: PrIconState; tags?: readonly PrStatusTag[] }): Children {
+  return [
+    state && StatusChip(PR_STATE_WORD[state], 'pr-' + state),
+    ...tags
+      .filter((tag) => tag.word.toLowerCase() !== state)
+      .map(
+        (tag) =>
+          html`<span data-review-unread=${tag.unread || undefined} aria-label=${tag.unread ? 'Needs attention' : undefined}>${StatusChip((tag.unread ? '● ' : '') + tag.word, tag.tone, tag.hover)}</span>`,
+      ),
+  ];
+}
+
+/** Actionable PR badges supplement the lifecycle tag; completed PRs need no duplicate status. */
+export function prBadgeTags(p: GlassPr): PrStatusTag[] {
+  return p.state === 'OPEN' && !p.draft && p.badge.tone !== 'ok'
+    ? [{ word: p.badge.text.toLowerCase(), tone: p.badge.tone, hover: /^checks\b/.test(p.badge.text) ? prChecks(p) : undefined }]
+    : [];
+}
 
 /** What a PR card's Ack acks: its own unacknowledged attention, and its stack's when it is the stack's only PR. */
 export function prCardPending(p: GlassPr, attention: readonly DeckAttention[], stack?: GlassStack): DeckAttention[] {
@@ -315,13 +331,7 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
     title: p.title ? LinkedText(p.title) : '#' + p.number,
     titleAttr: p.title || undefined,
     prState: state,
-    status: [
-      StatusChip(PR_STATE_WORD[state] ?? state, 'pr-' + state),
-      // A checks chip ("checks 3/4") carries the breakdown as its hover; the meta line no longer repeats it.
-      state === 'open' &&
-        p.badge.tone !== 'ok' &&
-        StatusChip(p.badge.text.toLowerCase(), p.badge.tone, /^checks\b/.test(p.badge.text) ? prChecks(p) : undefined),
-    ],
+    status: html`<${PrTags} state=${state} tags=${prBadgeTags(p)} />`,
     tail: mergeNote(p),
     tone: p.badge.tone,
     repo: p.repo,
@@ -397,6 +407,12 @@ export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]
   const members = stackMembers(s, prs);
   const top = members.at(-1)!;
   const summary = stackSummary(s, prs);
+  const prState: PrIconState = prs.some((pr) => pr.state === 'OPEN')
+    ? 'open'
+    : prs.some((pr) => pr.state === 'MERGED')
+      ? 'merged'
+      : 'closed';
+  const actionable = prState === 'open';
   const at = stackUpdatedAt(prs);
   const open = stackOpen(s.id);
   const title = s.title || top.title || `#${top.number}`;
@@ -410,12 +426,12 @@ export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]
     // A stack with a title of its own carries it as the stack title, as the table and the deck do.
     title: s.title ? html`<span class="stacktitle">${LinkedText(s.title)}</span>` : LinkedText(title),
     titleAttr: title,
-    icon: html`<span class="prstate pr-open">${StackIcon}</span>`,
+    icon: html`<span class=${'prstate pr-' + prState}>${StackIcon}</span>`,
     iconFirst: true,
-    state: { word: '', tone: summary.tone, mark: 'edge' },
+    state: actionable ? { word: '', tone: summary.tone, mark: 'edge' } : undefined,
     status: [
       s.mergeRequest && StatusChip(s.mergeRequest.merging ? 'merging' : 'merges when green', s.mergeRequest.merging ? 'warn' : 'dim'),
-      StatusChip(summary.text, summary.tone),
+      html`<${PrTags} state=${!actionable ? prState : undefined} tags=${actionable ? [{ word: summary.text, tone: summary.tone }] : []} />`,
       StatusChip(`${members.length} PRs`, 'dim'),
     ],
     context: [RepoName(s.repo), at && [' · updated ', Age(at), ' ago']],
@@ -447,22 +463,15 @@ export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]
 }
 
 function prCards(inp: PrsInputs, older: unknown) {
-  const { yours, others } = splitMine(prGroups(inp));
+  const groups = prGroups(inp);
   // A stack of several PRs is one card; a lone PR is its own card, whose Ack acks its stack too.
-  const stacksOf = (groups: typeof yours) =>
+  const stacksOf = (groups: ReturnType<typeof prGroups>) =>
     html`<div class="cards">${groups.map(({ s, prs }) =>
       prs.length > 1
         ? html`<${StackCard} key=${'stack:' + s.id} s=${s} prs=${prs} attention=${inp.prAttention} />`
         : prCard(prs[0]!, { attention: inp.prAttention, stack: s }),
     )}</div>`;
-  const otherCount = others.reduce((n, g) => n + g.prs.length, 0);
-  return [
-    html`<h2 class="yourshead">Yours · ${yours.reduce((n, g) => n + g.prs.filter((p) => p.mine).length, 0)}</h2>`,
-    yours.length ? stacksOf(yours) : html`<div class="empty">${YOURS_EMPTY}</div>`,
-    othersSection(otherCount, stacksOf(others)),
-    older,
-    otherWatches(inp),
-  ];
+  return [groups.length ? stacksOf(groups) : html`<div class="empty">${PRS_EMPTY}</div>`, older, otherWatches(inp)];
 }
 
 /**

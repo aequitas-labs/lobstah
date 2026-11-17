@@ -76,6 +76,18 @@ describe('TODO preview and page', () => {
 });
 
 describe('the tab bar and More', () => {
+  it.each(['#tabs a[data-tab="reviews"]', '.bbitem[href="#reviews"]'])('switches first and scrolls only when the active tab is clicked: %s', async (selector) => {
+    const { g } = await page();
+    g.setScroll(240);
+    const scrolls = g.scrolls();
+    await click(g, selector);
+    expect(g.window.location.hash).toBe('#reviews');
+    expect(g.$('.tabpage.on')?.id).toBe('page-reviews');
+    expect(g.scrolls()).toEqual(scrolls);
+    await click(g, selector);
+    expect(g.scrolls()).toHaveLength(scrolls.length + 1);
+  });
+
   it('keeps On deck, Reviews and PRs in the bar; More lists the rest, opens with focus, navigates, restores focus and marks where you are', async () => {
     const { g } = await page();
     expect(g.$('#tabs a[data-tab="deck"] .dbadge')?.textContent).toBe('1');

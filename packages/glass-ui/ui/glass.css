@@ -1118,8 +1118,13 @@ tr.rowhead:hover {
 }
 .harness-icon {
   display: inline-flex;
-  vertical-align: -3px;
+  align-items: center;
+  vertical-align: middle;
   flex: 0 0 auto;
+}
+.harness-icon svg {
+  width: 1em;
+  height: 1em;
 }
 .worker-compact {
   display: inline-flex;
@@ -1816,7 +1821,7 @@ a.lob {
   font-size: 12px;
 }
 .settings .hint {
-  display: block;
+  display: flex;
   color: var(--dim);
   font-size: 11px;
   margin-top: 2px;
@@ -3892,11 +3897,15 @@ footer .glass-brand {
   font-size: 12px;
   line-height: 1.8;
 }
-.view-worker {
+.meta-line,
+.meta-item {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+}
+.meta-separator {
+  align-self: center;
 }
 .detail-cards {
   display: grid;

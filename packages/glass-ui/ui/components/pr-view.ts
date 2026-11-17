@@ -8,8 +8,8 @@ import { Avatar, githubAvatarUrl } from './card.js';
 import { DetailFrame } from './detail-frame.js';
 import { Age, TrapName, reviewLink, stackNumbers } from './common.js';
 import { GitHubDescription, MarkdownElements } from './markdown.js';
-import { MergeIntent, MergeWhenGreen, PrStateIcon, StatusChip } from './prs.js';
-import { ReviewActions, markReviewOpened, reviewPrState, reviewStatus } from './reviews.js';
+import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, prBadgeTags, StatusChip } from './prs.js';
+import { ReviewActions, markReviewOpened, reviewPrState, ReviewTags } from './reviews.js';
 import { ReviewDecisions } from './review-decisions.js';
 import { LinkedText } from './links.js';
 
@@ -76,7 +76,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
   const title = data?.title ?? p?.title ?? review?.title;
   const state = data?.state ?? p?.state;
   const draft = data?.draft ?? p?.draft;
-  const status = review ? reviewStatus(review) : null;
+  const lifecycle = state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : draft ? 'draft' : 'open';
   const footer = review
     ? html`<${ReviewActions} r=${review} canDraft=${review.mode !== 'notify'} publish=${review.publish ?? false} decisionSaving=${decisionSaving} split inView />${p?.mergeRequest && html`<${MergeWhenGreen} p=${p} size="lg" />`}`
     : p && (p.mine || p.mergeRequest) && p.state === 'OPEN'
@@ -91,7 +91,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
           ? 'Review required'
           : '';
   return html`<${DetailFrame} identity=${identity} open=${open} footer=${footer}>
-    <header class="pr-view-head"><h2>${review && html`<${PrStateIcon} state=${reviewPrState(review, draft)} /> `}${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${state && StatusChip(draft ? 'Draft' : state === 'OPEN' ? 'Open' : state === 'MERGED' ? 'Merged' : 'Closed', state === 'OPEN' ? 'ok' : 'dim')}${p && StatusChip(p.badge.text, p.badge.tone ?? 'dim')}${p?.mine && StatusChip('yours', 'dim')}${p?.gate && StatusChip(p.gate, 'warn')}${status && StatusChip(status.word, status.tone)}${review?.needsYou && StatusChip('needs you', 'bad')}</div>
+    <header class="pr-view-head"><h2>${review && html`<${PrStateIcon} state=${reviewPrState(review, draft)} /> `}${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${review ? html`<${ReviewTags} r=${review} state=${state ? lifecycle : reviewPrState(review, draft)} />` : html`<${PrTags} state=${lifecycle} tags=${p ? prBadgeTags(p) : []} />`}${p?.state === 'OPEN' && p.gate && StatusChip(p.gate, 'warn')}</div>
     ${author && html`<div class=${'pr-view-person' + (asker === author ? ' rv-person' : '')}><${Avatar} url=${avatar} name=${authorName ?? author} size=${20} /><b>${authorName}</b></div>`}
     ${(data?.headRefName ?? p?.headRefName) && html`<div class="sub">${data?.headRefName ?? p?.headRefName} → ${data?.baseRefName ?? p?.baseRefName}${(data?.updatedAt ?? p?.updatedAt) && html` · updated ${Age(data?.updatedAt ?? p?.updatedAt)} ago`}</div>`}</header>
     ${p?.mergeRequest && html`<section><${MergeIntent} p=${p} /></section>`}

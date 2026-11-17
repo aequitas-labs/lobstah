@@ -11,6 +11,7 @@ import { LinkedText } from './links.js';
 import { capabilities, visibleTabs } from '../backend.js';
 import { host } from '../host.js';
 import { getState } from '../store.js';
+import { navigateTab } from '../route.js';
 import { prsNeedingYou } from './prs.js';
 import { Dialog } from './dialog.js';
 import { Button } from './button.js';
@@ -203,7 +204,12 @@ function Navigation({ d, tab, unread, reviewCount }: { d?: GlassSnapshot; tab: G
     return count > 0 && html`<span class="dbadge" aria-label=${badgeLabel(t, count)}>${count}</span>`;
   };
   const link = (t: GlassTab, inMenu = false) =>
-    html`<a key=${t} href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${inMenu ? close : undefined}>${TAB_ICON[t]}${TAB_LABEL[t]}${badge(t)}</a>`;
+    html`<a key=${t} href=${'#' + t} data-tab=${t} class=${d ? (t === tab ? 'on' : '') : undefined} aria-current=${inMenu && t === tab ? 'page' : undefined} onClick=${(
+      event: MouseEvent,
+    ) => {
+      navigateTab(event, t);
+      if (inMenu) close();
+    }}>${TAB_ICON[t]}${TAB_LABEL[t]}${badge(t)}</a>`;
   // With the active tab behind More, More carries the active tab's underline.
   const here = moreTabs.includes(tab);
   return html`<div class="navbar" ref=${root}>
@@ -282,18 +288,17 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
   const tabs = visibleTabs();
   const link = (t: GlassTab, icon: unknown, badge: unknown) =>
     tabs.includes(t) &&
-    html`<a href=${'#' + t} class=${'bbitem' + (t === tab ? ' on' : '')} aria-current=${t === tab ? 'page' : undefined}><span class="bbicon">${icon}${badge}</span><span class="bblabel">${TAB_LABEL[t]}</span></a>`;
+    html`<a href=${'#' + t} class=${'bbitem' + (t === tab ? ' on' : '')} aria-current=${t === tab ? 'page' : undefined} onClick=${(event: MouseEvent) => navigateTab(event, t)}><span class="bbicon">${icon}${badge}</span><span class="bblabel">${TAB_LABEL[t]}</span></a>`;
   const fleet = d && inp && [capabilities().daemon && chips(d, inp.chips)[0], host().fleet?.()];
   const navigate = (event: MouseEvent, target: GlassTab): void => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
     event.preventDefault();
-    // Replace the menu's Back entry with the chosen page before closing it.
-    // Otherwise the sheet's cleanup can undo the link's hash navigation.
+    // Replace the sheet entry before routing, so closing it keeps the selected page.
     if (history.state?.glassOverlay) {
       const { glassOverlay: _overlay, ...state } = history.state;
-      history.replaceState(state, '', '#' + target);
-      window.dispatchEvent(new HashChangeEvent('hashchange'));
-    } else location.hash = target;
+      history.replaceState(state, '', location.href);
+    }
+    navigateTab(event, target);
     setMode('bar');
   };
   return html`<div class="bottombar" ref=${root}>

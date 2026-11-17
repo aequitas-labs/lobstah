@@ -147,6 +147,8 @@ export interface MenuAction {
   disabled?: boolean;
   action?: (event: Event) => Promise<string | undefined | void> | string | undefined | void;
   sending?: string;
+  /** The matching review action is running in another surface. */
+  pending?: boolean;
   done?: string;
   onClick?: (e: Event) => void;
 }
@@ -176,6 +178,8 @@ export function SplitButton({ main, more }: { main?: Children; more: MenuAction[
   }, [open]);
   if (!more.length) return main;
   return html`<span class=${'split' + (main ? '' : ' split-menu-only')} ref=${box} onClick=${(e: Event) => e.stopPropagation()}>${main}<${Button} variant="icon" class=${main ? 'splitcaret' : 'splitmore'}
+        pending=${more.some((action) => action.pending)}
+        sending=""
         aria-haspopup="menu"
         aria-expanded=${open ? 'true' : 'false'}
         aria-label="More actions"
@@ -185,15 +189,19 @@ export function SplitButton({ main, more }: { main?: Children; more: MenuAction[
         open &&
         html`<span class="cmenulist" role="menu">${more.map((m) =>
           m.action
-            ? html`<${Button} class="cmenuitem" role="menuitem" title=${m.title} disabled=${m.disabled} action=${async (e: Event) => {
+            ? html`<${Button} class="cmenuitem" role="menuitem" title=${m.title} disabled=${m.disabled} pending=${m.pending} action=${async (
+                e: Event,
+              ) => {
                 const refusal = await m.action?.(e);
                 if (!refusal) setOpen(false);
                 return refusal;
               }} sending=${m.sending} done=${m.done}>${m.icon}<span>${m.label}</span><//>`
-            : html`<button type="button" role="menuitem" class="cmenuitem" title=${m.title} disabled=${m.disabled} onClick=${(e: Event) => {
+            : html`<${Button} role="menuitem" class="cmenuitem" title=${m.title} disabled=${m.disabled} pending=${m.pending} sending=${m.sending} onClick=${(
+                e: Event,
+              ) => {
                 setOpen(false);
                 m.onClick?.(e);
-              }}>${m.icon}<span>${m.label}</span></button>`,
+              }}>${m.icon}<span>${m.label}</span><//>`,
         )}</span>`
       }</span>`;
 }

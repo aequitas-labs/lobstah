@@ -86,7 +86,7 @@ describe('the Reviews tab', () => {
     expect(g.$('.bbitem[href="#reviews"] .dbadge')?.textContent).toBe('3');
     expect(g.$$('#reviews [data-review-unread]')).toHaveLength(3);
     expect(g.$('#reviews [data-review="review:acme/web#2919"] [data-review-unread]')).toBeNull();
-    expect(g.$('#reviews [data-review="review:acme/web#7"] [data-review-unread]')?.textContent).toContain('New draft');
+    expect(g.$('#reviews [data-review="review:acme/web#7"] [data-review-unread]')?.textContent).toContain('draft ready');
     (g.$('#reviews [data-review="review:acme/web#7"]') as unknown as HTMLElement).click(); await g.settle();
     expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
     (g.$('.detail-close') as unknown as HTMLElement).click(); await g.settle();
@@ -146,12 +146,12 @@ describe('the Reviews tab', () => {
     const r = review(7, { state: 'drafted', verdict, needsYou: verdict === 'approve', summary: 'Reviewed summary', blocking: verdict === 'request_changes' ? [{ path: 'src/a.ts', line: 12, body: 'Race condition' }] : [] });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, { now: NOW, prefs: { view: 'cards' }, post: () => ({ status: 200, body: { ok: true } }) });
     open.push(g); await g.go('#reviews');
-    if (verdict === 'approve') expect(g.$$('#reviews .gstate .gchip').map((c) => c.textContent)).toEqual(['● draft ready', 'needs you']);
+    if (verdict === 'approve') expect(g.$$('#reviews .gstate .gchip').map((c) => c.textContent)).toEqual(['Open', '● draft ready']);
     const box = await openCard(g, 7);
     expect(box.textContent).toContain(label);
     expect(box.textContent).toContain('Reviewed summary');
     if (verdict === 'request_changes') expect(box.textContent).toContain('src/a.ts:12');
-    if (verdict === 'approve') expect(box.textContent).toContain('needs you');
+    if (verdict === 'approve') expect(box.textContent).toContain('draft ready');
     ([...box.querySelectorAll('button')].find(b => b.textContent === label) as unknown as HTMLElement).click();
     await g.settle();
     expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind, payload: { key: r.key } });
@@ -185,6 +185,71 @@ describe('the Reviews tab', () => {
     expect(g.posts().map(post => JSON.parse(post.body))).toContainEqual({ kind: 'review-approve-anyway', payload: { key: r.key } });
   });
 
+  for (const source of ['card', 'view'] as const) {
+    for (const outcome of ['success', 'refusal', 'network error'] as const) {
+      it.each([
+        ['approve', 'Approve', 'review-approve'],
+        ['request_changes', 'Request changes', 'review-request-changes'],
+        ['comment', 'Publish comment', 'review-comment'],
+      ] as const)(`shares %s progress from the ${source} and clears it after ${outcome}`, async (verdict, label, kind) => {
+        let finish!: () => void;
+        const pending = new Promise<void>((resolve) => { finish = resolve; });
+        const r = review(7, { state: 'drafted', verdict });
+        const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r, review(8, { state: 'drafted', verdict })] }, {
+          now: NOW, hash: '#reviews', prefs: { view: 'cards' },
+          post: async (_url, init) => {
+            if (JSON.parse(init.body).kind !== kind) return { status: 200, body: { ok: true } };
+            await pending;
+            if (outcome === 'network error') throw new Error('Offline');
+            return outcome === 'success' ? { status: 200, body: { ok: true } } : { status: 409, body: { ok: false, reason: 'Try again.' } };
+          },
+        });
+        open.push(g);
+        await openCard(g, 7);
+        const scopes = ['#reviews [data-review="review:acme/web#7"]', '.detail-actions'];
+        const buttons = () => scopes.map((scope) => g.$$(scope + ' button').find((button) => button.textContent === label || button.getAttribute('aria-busy') === 'true')!);
+        (buttons()[source === 'card' ? 0 : 1] as unknown as HTMLElement).click();
+        await g.settle();
+        for (const button of buttons()) {
+          expect(button.getAttribute('aria-busy')).toBe('true');
+          expect(button.hasAttribute('disabled')).toBe(true);
+        }
+        expect(g.$('#reviews [data-review="review:acme/web#8"] [aria-busy="true"]')).toBeNull();
+        finish(); await g.settle();
+        for (const button of buttons()) {
+          expect(button.getAttribute('aria-busy')).toBeNull();
+          expect(button.hasAttribute('disabled')).toBe(false);
+        }
+        expect(g.posts().filter((post) => JSON.parse(post.body).kind === kind)).toHaveLength(1);
+      });
+    }
+  }
+
+  it.each(['review-skip', 'review-approve-anyway'] as const)('shares menu progress for %s between the PR view and card', async (kind) => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const r = review(7, { state: 'drafted', verdict: 'request_changes' });
+    const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
+      now: NOW, hash: '#reviews', prefs: { view: 'cards' },
+      post: async (_url, init) => {
+        if (JSON.parse(init.body).kind === kind) await pending;
+        return { status: 200, body: { ok: true } };
+      },
+    });
+    open.push(g);
+    await openCard(g, 7);
+    (g.$('.detail-actions .splitcaret') as unknown as HTMLElement).click(); await g.settle();
+    const label = kind === 'review-skip' ? 'Dismiss' : 'Approve anyway';
+    (g.$$('.detail-actions [role="menuitem"]').find((button) => button.textContent === label) as unknown as HTMLElement).click(); await g.settle();
+    if (kind === 'review-approve-anyway') {
+      (g.$$('.dialog-actions button').find((button) => button.textContent === label) as unknown as HTMLElement).click(); await g.settle();
+    }
+    for (const scope of ['#reviews [data-review]', '.detail-actions']) expect(g.$(scope + ' .splitcaret')?.getAttribute('aria-busy')).toBe('true');
+    finish(); await g.settle();
+    expect(g.$('#reviews [aria-busy="true"], .detail-actions [aria-busy="true"]')).toBeNull();
+    expect(g.posts().filter((post) => JSON.parse(post.body).kind === kind)).toHaveLength(1);
+  });
+
   it('posts a drafted verdict from the card in one click and shows its success message', async () => {
     const r = review(7, { state: 'drafted', staged: true, verdict: 'approve' });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
@@ -210,7 +275,7 @@ describe('the Reviews tab', () => {
     open.push(g); await g.go('#review-review%3Aacme%2Fweb%237');
     expect(g.$('#tabs a[data-tab="reviews"]')?.classList.contains('on')).toBe(true);
     expect(g.$('[data-review]')?.classList.contains('seen')).toBe(true);
-    expect(g.$('#reviews')?.textContent).toContain('needs you');
+    expect(g.$('#reviews')?.textContent).toContain('draft ready');
     expect(g.posts()).toEqual([]);
     expect(g.$('#tabs a[data-tab="reviews"] .dbadge')).toBeNull();
   });
@@ -259,7 +324,7 @@ describe('the Reviews tab', () => {
     await g.go('#reviews');
     // A drafted round's chip says its draft is ready; every other state says itself.
     const chips = g.$$('#reviews .gstate .gchip').map((b) => b.textContent?.replace(/^● /, ''));
-    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'draft ready' : state);
+    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'draft ready' : state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : state);
     // The drafted round's card links its pending review; the others open the review tool.
     const drafted = 20 + REVIEW_ROUND_STATES.indexOf('drafted');
     const draftLink = g.$(`#reviews [data-review="review:acme/web#${drafted}"] .gactions a`)!;
@@ -350,7 +415,7 @@ describe('the Reviews tab', () => {
     expect(g.$('#tabs a[data-tab="reviews"]')?.textContent).toContain('Reviews');
     const rows = g.$$('#reviews tr.rowhead');
     expect(rows.map((r) => r.querySelector('td')?.textContent?.trim())).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
-    expect(rows[1]!.textContent).toContain('drafted');
+    expect(rows[1]!.textContent).toContain('draft ready');
     expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Publish comment', 'More actions', 'Mute this PR', 'Dismiss']);
     expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Redraft', 'More actions', 'Mute this PR', 'Dismiss']);
     expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['More actions', 'Mute this PR']);
