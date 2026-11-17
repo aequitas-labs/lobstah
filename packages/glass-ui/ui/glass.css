@@ -3974,24 +3974,26 @@ footer .glass-brand {
 .trap-buoy-figure {
   position: relative;
   width: 44px;
-  height: 81px;
+  height: 57px;
 }
 .trap-buoy-art,
 .trap-buoy-art a {
   display: block;
   width: 44px;
-  height: 81px;
+  height: 57px;
+}
+.trap-buoy-art a {
+  position: relative;
+  overflow: hidden;
 }
 .trap-buoy-art img {
   position: absolute;
+  top: -24px;
   left: 12px;
 }
 .trap-buoy-art a:focus-visible {
   outline: 2px solid var(--ok);
   border-radius: var(--badge-radius);
-}
-.trap-buoy-status {
-  margin-bottom: 4px;
 }
 .trap-buoy-status .btn,
 .trap-buoy-status .btn:hover {
@@ -4018,7 +4020,7 @@ footer .glass-brand {
 }
 .trap-buoy-harness {
   position: absolute;
-  top: 40px;
+  top: 16px;
   left: 10px;
   justify-content: center;
   width: 24px;
