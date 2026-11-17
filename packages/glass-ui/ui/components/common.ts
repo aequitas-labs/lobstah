@@ -36,6 +36,39 @@ export function lastPassText(at: string | undefined): string {
   return at ? `last pass ${Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 60000))} min ago` : 'No pass recorded';
 }
 
+/** The shared harness tooltip, also used by buoy links and status controls on hover, focus or tap. */
+export function HoverInfo({
+  text,
+  label = text,
+  title,
+  cls = '',
+  focusable = true,
+  children,
+}: {
+  text: string;
+  label?: string;
+  title?: string;
+  cls?: string;
+  focusable?: boolean;
+  children?: Children;
+}): Children {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const show = (event: Event): void => {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    setPos({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 280)), top: rect.bottom + 6 });
+  };
+  return html`<span class=${cls} tabindex=${focusable ? '0' : undefined} aria-label=${focusable ? label : undefined} title=${title}
+    onMouseEnter=${show} onFocus=${show} onClick=${show} onBlur=${() => setPos(null)}
+    onMouseLeave=${(event: Event): void => {
+      if (!(event.currentTarget as HTMLElement).contains(document.activeElement)) setPos(null);
+    }}
+    onKeyDown=${(event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setPos(null);
+    }}>
+    ${children}${pos && !getState().modal && html`<span class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
+  </span>`;
+}
+
 type WorkerInfo = { harness?: string | null; model?: string | null; config?: WorkerConfig; observedAt?: string };
 
 /** Only the existing harness indicator at rest; model/effort on hover or focus. */
@@ -44,29 +77,20 @@ export function Harness({
   label,
   cls = 'badge',
   compact = false,
+  withIcon = false,
 }: {
   worker: WorkerInfo;
   label?: Children;
   cls?: string;
   compact?: boolean;
+  /** Show the harness name beside its icon, with both included in its accessible name. */
+  withIcon?: boolean;
 }): Children {
   const w = workerMetadata(worker);
   const text = [w.model ?? 'model unknown', w.config.effort].filter(Boolean).join(' · ');
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const show = (e: Event) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 280)), top: r.bottom + 6 });
-  };
-  return html`<span class=${cls + ' worker-harness' + (compact ? ' worker-compact' : '')} tabindex="0" aria-label=${compact ? harnessLabel(w.harness) + ' · ' + text : text} title=${compact ? harnessLabel(w.harness) + ' · ' + text : undefined}
-    onMouseEnter=${show} onFocus=${show} onBlur=${() => setPos(null)}
-    onMouseLeave=${(e: Event) => {
-      if (document.activeElement !== e.currentTarget) setPos(null);
-    }}
-    onKeyDown=${(e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPos(null);
-    }}>
-    ${compact ? html`<${HarnessIcon} harness=${w.harness} />` : (label ?? w.harness ?? 'unknown harness')}${pos && !getState().modal && html`<span class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
-  </span>`;
+  return html`<${HoverInfo} cls=${cls + ' worker-harness' + (compact ? ' worker-compact' : '')} text=${text} label=${compact || withIcon ? harnessLabel(w.harness) + ' · ' + text : text} title=${compact ? harnessLabel(w.harness) + ' · ' + text : undefined}>
+    ${compact ? html`<${HarnessIcon} harness=${w.harness} />` : withIcon ? html`<${HarnessIcon} harness=${w.harness} /> ${harnessLabel(w.harness)}` : (label ?? w.harness ?? 'unknown harness')}
+  <//>`;
 }
 export const WorkerIndicator = (x: Pick<GlassDispatchSummary, 'worker'>) => x.worker && html`<${Harness} worker=${x.worker} />`;
 

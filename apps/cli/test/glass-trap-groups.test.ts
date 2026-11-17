@@ -171,14 +171,12 @@ it('falls back for an invalid stored choice and still works when storage is unav
   expect(groups(unavailable).map(([name]) => name)).toContain('working');
 });
 
-it('shows repo capacity, available workers and the accessible harness mix, including an empty repo', async () => {
+it('shows one named buoy per live trap with the accessible harness name', async () => {
   const page = await open({ hash: '#deck' });
-  const rows = page.$$('#deck .trap-overview-row');
-  expect(rows[0]?.textContent).toContain('web3/10');
-  expect(rows[1]?.textContent).toContain('api2/∞');
-  expect(rows[2]?.textContent).toContain('empty0/4');
-  expect(rows[0]?.querySelector('[aria-label="Codex"]')?.parentElement?.textContent).toContain('2');
-  expect(rows[0]?.querySelector('[aria-label="Claude"]')?.parentElement?.textContent).toContain('1');
+  const buoys = page.$$('#deck .trap-buoy');
+  expect(buoys.map(buoy => buoy.querySelector('.trap-buoy-name')?.textContent)).toEqual(['alpha-crab', 'bravo-crab', 'charlie-crab']);
+  expect(buoys[0]?.querySelector('.harness-icon')?.getAttribute('aria-label')).toBe('Codex');
+  expect(buoys[1]?.querySelector('.harness-icon')?.getAttribute('aria-label')).toBe('Claude');
 });
 
 it('keeps grouping and history controls on the Traps page while the overview is on deck', async () => {

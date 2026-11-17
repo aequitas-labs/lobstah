@@ -63,7 +63,7 @@ async function referencePage(entry: string): Promise<string> {
     format: 'iife',
     platform: 'browser',
     target: 'es2020',
-    loader: { '.png': 'dataurl' },
+    loader: { '.png': 'dataurl', '.webp': 'dataurl' },
     logLevel: 'silent',
   });
   const script = result.outputFiles[0]!.text.replace(/<\/(script)/gi, '<\\/$1');

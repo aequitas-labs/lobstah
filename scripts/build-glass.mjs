@@ -42,7 +42,7 @@ export async function buildGlass({ minify: min = minify } = {}) {
     minify: min,
     legalComments: 'none',
     write: false,
-    loader: { '.png': 'dataurl' },
+    loader: { '.png': 'dataurl', '.webp': 'dataurl' },
     logLevel: 'silent',
   });
   // Line endings are the checkout's (CRLF on Windows); the page is the same bytes everywhere.

@@ -1,4 +1,4 @@
-import { olderLeft, sectionInputs } from '../../src/glass-diff.js';
+import { isActiveTrap, olderLeft, sectionInputs } from '../../src/glass-diff.js';
 import { visibleTabs } from '../backend.js';
 import type { GlassOlderKind } from '@lobstah/core';
 import type { GlassTab } from '../../src/glass-diff.js';
@@ -62,7 +62,7 @@ export function App({ state }: { state: GlassState }) {
       ];
     if (t === 'traps')
       return [
-        html`<${SectionHead} title="Traps" count=${inp.traps.list.length} action=${html`<${NewTrap} />`} page />`,
+        html`<${SectionHead} title="Traps" count=${inp.traps.list.filter(({ x }) => isActiveTrap(x)).length} action=${html`<${NewTrap} />`} page />`,
         html`<${Traps} inp=${inp.traps} grants=${d?.sessionGrants ?? []} />`,
       ];
     if (t === 'prs')

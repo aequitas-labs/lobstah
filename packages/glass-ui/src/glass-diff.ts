@@ -53,6 +53,11 @@ export const STALE_SEAT_MS = 1800000;
 /** A trap's catch count as its badge shows it: capped at 999+. */
 export const catchCount = (count: number): string => (count > 999 ? '999+' : String(count));
 
+/** Signed-on traps are active, whether working, parked, listening or idle; reservations and history are not. */
+export function isActiveTrap(trap: Pick<GlassTrap, 'live'>): boolean {
+  return trap.live;
+}
+
 /** The Traps page's grouping, shared with its stored browser preference. */
 export type TrapGrouping = 'repo' | 'harness' | 'status';
 
@@ -585,6 +590,8 @@ export interface DeckInputs {
   reviews: GlassReview[];
   inflight: GlassDispatchSummary[];
   traps: Seat<GlassTrapView>[];
+  /** Every live trap matching the current repo and search, for the buoy overview. */
+  activeTraps: GlassTrapView[];
   repoTraps?: GlassSnapshot['repoTraps'];
   stacks: GlassStack[];
   prs: GlassPr[];
@@ -693,6 +700,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       reviews: [],
       inflight: d.dispatches.filter((x) => x.bucket !== 'done' && matches(x, { ...st, lane: '', verb: '' })),
       traps: deckTraps.map(seat),
+      activeTraps: traps.filter(isActiveTrap).map((trap) => trapView(d, trap)),
       repoTraps: d.repoTraps?.filter((row) => matchesRepo(row.repo, st)),
       stacks: stacks.filter((s) => s.open && hasQuery(s.repo, s.numbers.join(' '))),
       prs: prs.filter((p) => p.state === 'OPEN'),
