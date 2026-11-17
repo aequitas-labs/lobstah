@@ -233,6 +233,46 @@ printf '%s' "$S" | base64
     expect(readDecisionAnswer(c.key)).toBeUndefined();
   });
 
+  it('scrubs split secrets and encoded secrets from both streams before live polls can read them', async () => {
+    const gate = path.join(outside, 'continue');
+    const c = card(`IFS= read -r K
+printf 'starting\\n%s' "\${K:0:6}"
+touch "${outside}/partial"
+while [ ! -f "${gate}" ]; do sleep 0.05; done
+printf '%s\\n' "\${K:6}"
+printf '%s' "$K" | base64
+printf '%s\\n' "$K" >&2
+printf '%080d\\n' 0
+printf '%080d\\n' 0 >&2
+touch "${outside}/printed"
+sleep 30
+`, { inputs: ['K'] });
+    await run(c, { K: SECRET });
+    try {
+      await vi.waitFor(() => expect(fs.existsSync(path.join(outside, 'partial'))).toBe(true));
+      const partial = await post('run-output', { key: c.key });
+      expect(partial.json.state).toBe('running');
+      expect(partial.json.result).toBeUndefined();
+      expect(partial.json.text).not.toContain(SECRET.slice(0, 6));
+      fs.writeFileSync(gate, '');
+      await vi.waitFor(() => expect(fs.existsSync(path.join(outside, 'printed'))).toBe(true));
+      const live = await post('run-output', { key: c.key });
+      expect(live.json.state).toBe('running');
+      expect(live.json.result).toBeUndefined();
+      expect(String(live.json.text).match(/‹K›/g)).toHaveLength(3);
+      expect(live.json.text).not.toContain(SECRET);
+      expect(live.json.text).not.toContain(Buffer.from(SECRET).toString('base64'));
+    } finally {
+      runs.stop(c.key);
+      await runs.settled();
+    }
+    const stopped = await post('run-output', { key: c.key });
+    expect(stopped.json).toMatchObject({ state: 'stopped', result: { stopped: true } });
+    expect(stopped.json.text).toContain('starting');
+    expect(stopped.json.text).not.toContain(SECRET);
+    expect(await answer(c.key)).toContain('stopped by the user');
+  });
+
   it('persists a failed attempt and its local output while withholding exit-mode output from the helm', async () => {
     const c = card('#!/bin/bash\nprintf "local-%s-detail\\n" failure\nexit 3\n', { output: 'exit' });
     await run(c);
@@ -283,6 +323,35 @@ printf '%s' "$S" | base64
     const childPid = Number(fs.readFileSync(path.join(outside, 'child.pid'), 'utf8'));
     expect(processStartedAt(childPid)).toBeUndefined();
     expect(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run).toMatchObject({ state: 'stopped', exitCode: 130 });
+  });
+
+  it('kills a TERM-resistant child in another process group even after the wrapper closes its output', async () => {
+    const pidFile = path.join(outside, 'separate-group.pid');
+    const grandchildFile = path.join(outside, 'grandchild.pid');
+    const c = card(`set -m
+(trap '' TERM; while :; do sleep 30 & echo "$!" > "${grandchildFile}"; touch "${outside}/ready"; wait; done) >/dev/null 2>&1 &
+echo "$!" > "${pidFile}"
+echo captured-before-stop
+wait
+`);
+    await run(c);
+    let pid: number | undefined;
+    try {
+      await vi.waitFor(() => expect(fs.existsSync(path.join(outside, 'ready'))).toBe(true));
+      pid = Number(fs.readFileSync(pidFile, 'utf8'));
+      const grandchild = Number(fs.readFileSync(grandchildFile, 'utf8'));
+      expect(processStartedAt(pid)).toBeDefined();
+      expect(processStartedAt(grandchild)).toBeDefined();
+      expect((await post('run-stop', { key: c.key })).status).toBe(202);
+      await runs.settled();
+      expect(readRunAttempt(c.key)).toMatchObject({ state: 'stopped', result: { exitCode: 130 } });
+      await vi.waitFor(() => expect(processStartedAt(pid!)).toBeUndefined());
+      await vi.waitFor(() => expect(processStartedAt(grandchild)).toBeUndefined());
+      expect((await post('run-output', { key: c.key })).json.text).toContain('captured-before-stop');
+    } finally {
+      runs.stop(c.key);
+      if (pid) try { process.kill(-pid, 'SIGKILL'); } catch { /* Already gone. */ }
+    }
   });
 
   it('records completion and delivers an event even if the helm withdraws the card during the run', async () => {

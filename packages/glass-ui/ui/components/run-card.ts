@@ -164,9 +164,26 @@ function ConsoleLine({ cardKey, onSent }: { cardKey: string; onSent: (secret: st
 }
 
 /** The run's scrubbed output on the card, how it ended, the secret lines sent from this tab, and the console line while an interactive run waits. */
-function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; cardKey: string; interactive: boolean }) {
+function RunOutput({
+  view,
+  cardKey,
+  interactive,
+  output,
+}: {
+  view: RunView | undefined;
+  cardKey: string;
+  interactive: boolean;
+  output: GlassRunCard['output'];
+}) {
   // Re-render when a secret line is sent: the list lives outside the store, in sentSecrets.
   const [, setSentCount] = useState(0);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!view?.busy) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [view?.busy, view?.startedAt]);
   if (!view || (!view.busy && !view.output && !view.result && !view.error)) return null;
   const sent = sentSecrets.get(cardKey) ?? [];
   const onSent = (value: string) => {
@@ -174,11 +191,14 @@ function RunOutput({ view, cardKey, interactive }: { view: RunView | undefined; 
     setSentCount((n) => n + 1);
   };
   const status = runStatus(view.state, view.result, view.busy);
+  const seconds = Math.max(0, Math.floor((now - Date.parse(view.startedAt ?? new Date(now).toISOString())) / 1000));
+  const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const withheld = view.busy && output === 'exit';
   return html`<div class="runout">
-    <div class="runstate">${status && html`<${RunStatusIcon} status=${status} result=${view.busy ? undefined : view.result} startedAt=${view.startedAt} />`}${view.result?.scrubbed ? html`<span class="dim">${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
-    ${view.startedAt && html`<div class="dim">Started ${new Date(view.startedAt).toLocaleString()}</div>`}
+    <div class="runstate">${status && html`<${RunStatusIcon} status=${status} result=${view.busy ? undefined : view.result} startedAt=${view.startedAt} />`}${view.busy ? html`<span class="warn">Running · ${elapsed}</span>` : view.result?.stopped && html`<span class="dim">Stopped by you</span>`}${view.result?.scrubbed ? html`<span class="dim">${view.result.scrubbed} value${view.result.scrubbed === 1 ? '' : 's'} scrubbed</span>` : null}</div>
+    ${!view.busy && view.startedAt && html`<div class="dim">Started ${new Date(view.startedAt).toLocaleString()}</div>`}
     ${view.finishedAt && html`<div class="dim">Finished ${new Date(view.finishedAt).toLocaleString()}</div>`}
-    ${(view.output || (interactive && view.busy)) && html`<pre class="runscript runlog"><code><${TerminalOutput} text=${view.output} /></code></pre>`}
+    ${!withheld && (view.output || (interactive && view.busy)) && html`<pre class="runscript runlog"><code><${TerminalOutput} text=${view.output} lastLines=${view.busy ? 6 : undefined} /></code></pre>`}
     ${sent.length > 0 && html`<ul class="runsent" aria-label="Secret lines sent from this tab">${sent.map((value, i) => html`<${SentSecret} key=${i} value=${value} n=${i + 1} />`)}</ul>`}
     ${interactive && view.busy && html`<${ConsoleLine} cardKey=${cardKey} onSent=${onSent} />`}
     ${view.error && html`<div class="bad">${view.error}</div>`}
@@ -251,6 +271,7 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
   const locked = readOnly || !!blocked || !!view?.busy;
   return html`<div class="runcard" data-run=${cardKey}>
     <div class="runhead"><span class="badge warn">runs on ${run.boat ?? (getState().snapshot?.viewer?.machine || 'this machine')}</span>${run.proposedBy && html`<span class="dim"> proposed by ${run.proposedBy}</span>`}</div>
+    <${RunOutput} view=${view} cardKey=${cardKey} interactive=${!!run.interactive} output=${run.output} />
     <${Script} run=${run} />
     <${Warnings} warnings=${run.warnings} />
     <div class="runmeta dim">
@@ -278,7 +299,6 @@ export function RunCardBody({ cardKey, run, readOnly = false }: { cardKey: strin
       )}</div>`
     }
     ${!view && html`<div class="runstate dim">Ready</div>`}
-    <${RunOutput} view=${view} cardKey=${cardKey} interactive=${!!run.interactive} />
   </div>`;
 }
 
@@ -302,14 +322,18 @@ export function RunActions({
   decline?: unknown;
 }) {
   const [values, setValues] = useTyped(cardKey);
+  const [stopFor, setStopFor] = useState<string | undefined>();
   const blocked = runBlocked(run);
   const view = runViewOf(cardKey, run);
+  const attempt = `${cardKey}:${view?.id ?? run.latest?.id ?? ''}`;
+  const confirmStop = stopFor === attempt;
   const hosted = run.boat !== undefined;
   const here = passkeysWorkHere(hosted);
   const confirmed = runWindowMinutes(run.boat ?? '');
   const missing = run.inputs.filter((i) => !values[i.name]).map((i) => i.name);
   const locked = readOnly || !!blocked || !!view?.busy;
   const start = async () => {
+    setStopFor(undefined);
     const inputs = values;
     setValues({});
     sentSecrets.delete(cardKey);
@@ -321,7 +345,7 @@ export function RunActions({
     (view?.busy
       ? html`<${Button} variant="danger" size="lg" action=${(e: Event) => {
           e.stopPropagation();
-          return stopRunCard(cardKey);
+          setStopFor(attempt);
         }} showError=${false}>Stop<//>`
       : here || blocked || hosted
         ? html`<${Button} variant="primary" size="lg" class="runbtn" disabled=${locked || missing.length > 0 || !here} title=${blocked ?? (missing.length ? `Fill in ${missing.join(', ')}` : confirmed ? 'Run' : 'Confirm with your passkey and run')} action=${start} showError=${false}>${view?.result ? 'Run again' : 'Run'}<//>`
@@ -344,7 +368,19 @@ export function RunActions({
             : 'Passkeys work from the glass at localhost.');
   if (!primary && !second) return null;
   return html`<div class="runfoot">
+    ${
+      view?.busy &&
+      confirmStop &&
+      html`<div class="runstop" role="group" aria-label="Stop this run?">
+      <div class="runnote">Stop this run? It may be partway through.</div>
+        <div class="runactions"><${Button} size="lg" onClick=${() => setStopFor(undefined)}>Keep running<//><${Button} variant="danger" size="lg" action=${async () => {
+          const error = await stopRunCard(cardKey);
+          if (!error) setStopFor(undefined);
+          return error;
+        }} showError=${false}>Stop run<//></div>
+    </div>`
+    }
     ${note && html`<div class="runnote dim">${note}</div>`}
-    <div class="runactions">${primary}${second}</div>
+    ${!(view?.busy && confirmStop) && html`<div class="runactions">${primary}${second}</div>`}
   </div>`;
 }
