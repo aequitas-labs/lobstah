@@ -57,6 +57,14 @@ export function HoverInfo({
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     setPos({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 280)), top: rect.bottom + 6 });
   };
+  const fit = (tooltip: HTMLSpanElement | null): void => {
+    if (!tooltip) return;
+    const bounds = tooltip.getBoundingClientRect();
+    if (bounds.bottom > window.innerHeight - 8) {
+      const trigger = tooltip.parentElement!.getBoundingClientRect();
+      tooltip.style.top = `${Math.max(8, trigger.top - bounds.height - 6)}px`;
+    }
+  };
   return html`<span class=${cls} tabindex=${focusable ? '0' : undefined} aria-label=${focusable ? label : undefined} title=${title}
     onMouseEnter=${show} onFocus=${show} onClick=${show} onBlur=${() => setPos(null)}
     onMouseLeave=${(event: Event): void => {
@@ -65,7 +73,7 @@ export function HoverInfo({
     onKeyDown=${(event: KeyboardEvent): void => {
       if (event.key === 'Escape') setPos(null);
     }}>
-    ${children}${pos && !getState().modal && html`<span class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
+    ${children}${pos && !getState().modal && html`<span ref=${fit} class="worker-tooltip" role="tooltip" aria-hidden="true" style=${pos}>${text}</span>`}
   </span>`;
 }
 
