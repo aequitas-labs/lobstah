@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.13 — 2026-11-17
+
+### Glass actions and views
+
+- The PRs tab shows PRs opened by you or traps, with shared PR and review tags
+  and one purple Merged tag. Review actions share progress across views, and
+  switching tabs keeps the page position. (#523)
+- Merge when green shows its short state or active hold reason on PR cards,
+  review rows and the PR view. Cancel merge stays available. (#524)
+- On deck shows active traps as compact buoys with harness marks, status icons
+  and repo names. Hover, focus or touch shows work and model details; Traps
+  counts signed-on workers. (#525)
+- Dropdown actions center their icons and labels together, with consistent row
+  sizes and full-width hover and focus highlights. (#527)
+
+### Reviews
+
+- Later review rounds keep unresolved threads, replies, earlier findings and
+  verdicts. Explicit author re-requests can open a round at the same head;
+  equivalent patches retain approvals, and push bursts wait for a quiet period.
+  Stable finding IDs prevent duplicate blocking and inline comments. (#526)
+
 ## 0.8.12 — 2026-11-16
 
 ### Glass actions and views
