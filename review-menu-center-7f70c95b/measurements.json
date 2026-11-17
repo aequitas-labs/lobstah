@@ -1,0 +1,116 @@
+[
+  {
+    "device": "desktop",
+    "rows": [
+      {
+        "text": "Approve anyway",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 658.421875,
+        "labelX": 680.421875,
+        "groupCenter": 720,
+        "rowCenter": 720,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      },
+      {
+        "text": "Dismiss",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 683.703125,
+        "labelX": 705.703125,
+        "groupCenter": 719.9921875,
+        "rowCenter": 720,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      },
+      {
+        "text": "Redraft",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 683.703125,
+        "labelX": 705.703125,
+        "groupCenter": 719.9921875,
+        "rowCenter": 720,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      },
+      {
+        "text": "Mute PR",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 683.703125,
+        "labelX": 705.703125,
+        "groupCenter": 719.9921875,
+        "rowCenter": 720,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      }
+    ]
+  },
+  {
+    "device": "phone",
+    "rows": [
+      {
+        "text": "Approve anyway",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 133.421875,
+        "labelX": 155.421875,
+        "groupCenter": 195,
+        "rowCenter": 195,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      },
+      {
+        "text": "Dismiss",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 158.703125,
+        "labelX": 180.703125,
+        "groupCenter": 194.9921875,
+        "rowCenter": 195,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      },
+      {
+        "text": "Redraft",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 158.703125,
+        "labelX": 180.703125,
+        "groupCenter": 194.9921875,
+        "rowCenter": 195,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      },
+      {
+        "text": "Mute PR",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 158.703125,
+        "labelX": 180.703125,
+        "groupCenter": 194.9921875,
+        "rowCenter": 195,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "center"
+      }
+    ]
+  }
+]
