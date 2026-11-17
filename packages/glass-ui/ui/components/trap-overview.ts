@@ -55,7 +55,7 @@ function trapBuoy(trap: GlassTrapView): Children {
   };
   return html`<div key=${trap.trapId} class="trap-buoy">
     <${HoverInfo} cls="trap-buoy-status" text=${progress} focusable=${false}>
-      <${Button} variant="icon" label=${progress}><span aria-hidden="true">${!current && !trap.usageLimit && !trap.listening ? html`<${RunStatusIcon} status="stopped" />` : html`<${VerbIcon} verb=${verb} />`}</span><//>
+      <${Button} variant="icon-flat" label=${progress}><span aria-hidden="true">${!current && !trap.usageLimit && !trap.listening ? html`<${RunStatusIcon} status="stopped" />` : html`<${VerbIcon} verb=${verb} />`}</span><//>
     <//>
     <div class="trap-buoy-figure">
       <span class="trap-buoy-art">

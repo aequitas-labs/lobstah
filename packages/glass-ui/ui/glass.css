@@ -1338,6 +1338,11 @@ tr.rowhead:hover {
   color: var(--fg);
   border-color: var(--line-hover);
 }
+.btn-icon-flat,
+.btn-icon-flat:hover {
+  background: transparent;
+  border-color: transparent;
+}
 .badge {
   border-radius: var(--badge-radius);
   padding: var(--badge-pad);
@@ -3994,11 +3999,6 @@ footer .glass-brand {
 .trap-buoy-art a:focus-visible {
   outline: 2px solid var(--ok);
   border-radius: var(--badge-radius);
-}
-.trap-buoy-status .btn,
-.trap-buoy-status .btn:hover {
-  background: transparent;
-  border-color: transparent;
 }
 .trap-buoy-status .verbicon {
   background: transparent;
