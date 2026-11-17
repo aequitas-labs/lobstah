@@ -3993,6 +3993,17 @@ footer .glass-brand {
 .trap-buoy-status {
   margin-bottom: 4px;
 }
+.trap-buoy-status .btn,
+.trap-buoy-status .btn:hover {
+  background: transparent;
+  border-color: transparent;
+}
+.trap-buoy-status .verbicon {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
 .trap-buoy-name {
   max-width: 100%;
   overflow-wrap: anywhere;
