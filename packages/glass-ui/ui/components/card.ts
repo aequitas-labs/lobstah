@@ -189,14 +189,14 @@ export function SplitButton({ main, more }: { main?: Children; more: MenuAction[
         open &&
         html`<span class="cmenulist" role="menu">${more.map((m) =>
           m.action
-            ? html`<${Button} class="cmenuitem" role="menuitem" title=${m.title} disabled=${m.disabled} pending=${m.pending} action=${async (
+            ? html`<${Button} variant="menu" class="cmenuitem" role="menuitem" title=${m.title} disabled=${m.disabled} pending=${m.pending} action=${async (
                 e: Event,
               ) => {
                 const refusal = await m.action?.(e);
                 if (!refusal) setOpen(false);
                 return refusal;
               }} sending=${m.sending} done=${m.done}>${m.icon}<span>${m.label}</span><//>`
-            : html`<${Button} role="menuitem" class="cmenuitem" title=${m.title} disabled=${m.disabled} pending=${m.pending} sending=${m.sending} onClick=${(
+            : html`<${Button} variant="menu" role="menuitem" class="cmenuitem" title=${m.title} disabled=${m.disabled} pending=${m.pending} sending=${m.sending} onClick=${(
                 e: Event,
               ) => {
                 setOpen(false);
