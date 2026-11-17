@@ -137,7 +137,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '<uuid> <verb> [note...]',
   },
   watch: {
-    subverbs: ['add', 'rm', 'ls', 'check-pr', 'backfill', 'hold', 'release'],
+    subverbs: ['add', 'rm', 'ls', 'check-pr', 'check-ume', 'backfill', 'hold', 'release'],
     flags: {
       '--check': { value: '<cmd>' },
       '--for': { value: '<uuid>' },
@@ -404,7 +404,7 @@ acked. \`lobstah attention ack <key>\` acks one.`,
 A draft is staged on the PR as your pending review: edit and send it in your review tool.
 post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
 pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
-  watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
+  watch: `Stand watch on something external; bare \`watch\` lists. \`watch add ume:<artifact>\` stores its project context and checks feedback without consuming it. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
 \`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.

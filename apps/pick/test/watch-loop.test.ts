@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, appendWatchEvents, ensureLayout, laneDirs, listNotices, listWatches, readWatch, releaseHeldWatches, signOnTrap } from '@lobstah/core';
+import { addWatch, appendStatus, appendWatchEvents, ensureLayout, laneDirs, listNotices, listWatches, readWatch, releaseHeldWatches, signOnTrap, unhandled } from '@lobstah/core';
 import type { Descriptor } from '@lobstah/core';
 import { watchLoop } from '../src/loops/watch.js';
 import type { ReportNotification } from '../src/loops/report.js';
@@ -61,13 +61,25 @@ describe('watchLoop', () => {
     await watchLoop(45, () => {});
     const queued = queuedDescriptors();
     expect(queued.find((d) => d.followUp === pr)?.brief).toBe('Fix pr:acme/web#9: - review: CHANGES_REQUESTED\n\nRun the CI refresh.');
-    expect(queued.find((d) => d.followUp === other)?.brief).not.toContain('Run the CI refresh.');
+    expect(unhandled(other, 'work')[0]?.text).toContain('feedback batch');
+    expect(unhandled(other, 'work')[0]?.text).not.toContain('Run the CI refresh.');
+  });
+
+  it.each(['pr:acme/web#12', 'ci:run'])('uses the shared inbox path for active owners of %s', async key => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nautoRepair = false\n');
+    const owner = '11111111-1111-1111-1111-111111111111';
+    makeOwnerDispatch(owner);
+    appendStatus(owner, 'work', 'paused', 'waiting on the source');
+    addWatch(key, eventCheck([{ seq: 1, summary: 'new feedback' }], '1'), { owner: `dispatch:${owner}` });
+    await watchLoop(45, () => {});
+    expect(queuedDescriptors()).toHaveLength(0);
+    expect(unhandled(owner, 'work')[0]?.text).toContain('new feedback');
   });
 
   it('dispatch-owned events fork one continuation of the owning chain', async () => {
     const owner = '11111111-1111-1111-1111-111111111111';
     makeOwnerDispatch(owner);
-    appendStatus(owner, 'work', 'paused', 'awaiting review');
+    appendStatus(owner, 'work', 'done', 'finished earlier work');
     addWatch('ume:abc', eventCheck([{ seq: 1, summary: 'feedback batch' }], '1'), { owner: `dispatch:${owner}` });
 
     await watchLoop(45, () => {});
@@ -119,7 +131,7 @@ describe('watchLoop', () => {
     expect(listWatches()).toHaveLength(1); // stays standing for man wait to consume
   });
 
-  it('addresses the continuation to the live trap claiming the chain', async () => {
+  it('delivers events to the active owner inbox for its live trap', async () => {
     const owner = '44444444-4444-4444-4444-444444444444';
     makeOwnerDispatch(owner);
     appendStatus(owner, 'work', 'paused', 'awaiting review');
@@ -135,12 +147,11 @@ describe('watchLoop', () => {
 
     await watchLoop(45, () => {});
     const queued = queuedDescriptors();
-    expect(queued).toHaveLength(1);
-    expect(queued[0]!.for).toBe(`wt:${trapId}`);
-    expect(queued[0]!.followUp).toBe(owner);
+    expect(queued).toHaveLength(0);
+    expect(unhandled(owner, 'work')[0]?.text).toContain('round');
   });
 
-  it('forks headless when the claiming trap is no longer signed on', async () => {
+  it('keeps events in the active owner inbox when the claiming trap is gone', async () => {
     const owner = '55555555-5555-5555-5555-555555555555';
     makeOwnerDispatch(owner);
     appendStatus(owner, 'work', 'paused', 'awaiting review');
@@ -152,8 +163,8 @@ describe('watchLoop', () => {
 
     await watchLoop(45, () => {});
     const queued = queuedDescriptors();
-    expect(queued).toHaveLength(1);
-    expect(queued[0]!.for).toBeUndefined();
+    expect(queued).toHaveLength(0);
+    expect(unhandled(owner, 'work')[0]?.text).toContain('round');
   });
 
   it('drops a dispatch-owned watch whose owner is gone', async () => {

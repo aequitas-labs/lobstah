@@ -36,8 +36,8 @@ export interface Watch {
   /** Who the events belong to: an interactive session or a dispatch to fork. */
   owner: 'man' | `dispatch:${string}`;
   check: string;
-  /** A dispatch review resumes its owner through the inbox, without forking. */
-  umeReview?: { artifact: string; cwd: string; project?: string };
+  /** The source's working directory and environment, reused by every check. */
+  context?: { cwd?: string; env?: Record<string, string>; org?: string };
   /**
    * Optional held-stream command: a long-running process (spawned with
    * {cursor} substituted) that emits the same event objects as NDJSON lines,
@@ -176,7 +176,7 @@ export function listWatches(): Watch[] {
 export function addWatch(
   key: string,
   check: string,
-  opts: { owner?: Watch['owner']; cursor?: string; everySecs?: number; brief?: string; stream?: string; umeReview?: Watch['umeReview'] } = {},
+  opts: { owner?: Watch['owner']; cursor?: string; everySecs?: number; brief?: string; stream?: string; context?: Watch['context'] } = {},
 ): Watch {
   if (!key || !check) throw new Error('watch add requires a key and a --check command');
   const existing = readWatch(key);
@@ -184,7 +184,7 @@ export function addWatch(
     key,
     owner: opts.owner ?? existing?.owner ?? 'man',
     check,
-    umeReview: opts.umeReview ?? existing?.umeReview,
+    context: opts.context ?? existing?.context,
     stream: opts.stream ?? existing?.stream,
     cursor: existing?.cursor ?? opts.cursor ?? '0',
     everySecs: opts.everySecs ?? existing?.everySecs,
@@ -331,11 +331,13 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
     encoding: 'utf8',
     timeout: CHECK_TIMEOUT_MS,
     maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, ...(isPrPresetWatch(w) ? { LOBSTAH_PR_BATCH: '1' } : {}) },
+    cwd: w.context?.cwd,
+    env: { ...process.env, ...w.context?.env, ...(isPrPresetWatch(w) ? { LOBSTAH_PR_BATCH: '1' } : {}) },
   });
   return withWatchLock(w.key, (deadline) => {
     // A terminal PR or an explicit removal can retire this watch during the exec.
     if (!currentWatch(w)) return { watch: w, fresh: [] };
+    w.context = readWatch(w.key)?.context ?? w.context;
     if (res.status !== 0 || res.error) {
       // lobstah's own commands print `error: ...` on stdout (axi.md P6); gh prints to stderr.
       const toonError = /^error:.*$/m.exec(res.stdout ?? '')?.[0];

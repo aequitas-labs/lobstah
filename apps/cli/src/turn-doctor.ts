@@ -3,7 +3,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import { readTrap, readWatch, trapLabel } from '@lobstah/core';
-import { isUmeReviewWait, umeReadArtifact } from './ume-review-watch.js';
 import { readSeenTurnTools, readTurnWaitRecords } from './turn-waits.js';
 
 /**
@@ -130,10 +129,10 @@ export function turnWaitsRow(opts: Opts = {}): { check: string; status: 'ok' | '
   for (const r of records) {
     const trap = readTrap(r.trapId);
     const who = trap ? trapLabel(trap) : `${r.trapId.slice(0, 8)} (gone)`;
-    const review = r.dispatch && isUmeReviewWait(r) ? readWatch(`ume:${r.dispatch}:${umeReadArtifact(r.read)}`) : undefined;
+    const review = r.watchKey ? readWatch(r.watchKey) : undefined;
     const failures = review ? review.failures : r.failures;
     const lastError = review ? review.lastError : r.lastError;
-    const state = failures ? `failing ${failures}x: ${lastError ?? 'no output'}` : review ? 'polling feedback' : 'running';
+    const state = failures ? `failing ${failures}x: ${lastError ?? 'no output'}` : review ? 'watched' : 'running';
     if ((failures ?? 0) >= FAILING_AFTER) failing.push(`${r.from} for ${who}`);
     parts.push(`wait ${r.from} for ${who}${r.dispatch ? ` on ${r.dispatch.slice(0, 8)}` : ''}: ${state}`);
   }

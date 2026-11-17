@@ -203,11 +203,14 @@ helm: that tool shows it to the person and wakes the worker. A paused
 headless worker is never counted as wedged and its wall clock stops.
 
 For an `app.ume.so/a/<artifact>` review, `ume park` or a paused report naming
-that artifact registers a dispatch-owned watch. The daemon peeks at feedback
+that artifact registers a dispatch-owned `ume:<artifact>` watch. Pickup’s normal
+watch loop runs its `check-ume` preset with the project and organization stored
+on the watch, peeking at feedback
 without consuming the worker's read cursor, then sends an inbox pointer for
 new comments, thread changes, picks, or approval. It preserves the project's
 context and searches accessible projects across organizations for older parks
-that did not record it. Codex traps receive the same daemon wake as an unread
+that did not record it. Active owners receive events through the shared watch inbox path. Codex traps
+receive the same daemon wake as an unread
 send, including without a Stop hook; park listeners deliver the pointer in
 both harnesses. The watch ends when the dispatch finishes. Doctor's
 `listeners` row warns when a paused trap has no park listener; its

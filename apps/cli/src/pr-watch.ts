@@ -60,7 +60,7 @@ import type { FetchStackLink } from './pr-stack-watch.js';
 const shq = (s: string) => (process.platform === 'win32' ? `"${s.replaceAll('"', '""')}"` : `'${s.replace(/'/g, `'\\''`)}'`);
 
 /** How this process re-invokes itself from a shell — node layout or compiled binary. */
-function selfCommand(): string {
+export function watchSelfCommand(): string {
   if (COMPILED_BINARY) return shq(process.execPath);
   const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : 'lobstah';
   return `${shq(process.execPath)} ${shq(entry)}`;
@@ -68,7 +68,7 @@ function selfCommand(): string {
 
 /** The shipped check command for a PR watch; `{cursor}` is the watch's own placeholder. */
 export function prCheckCommand(ref: PrRef, forId?: string): string {
-  return `${selfCommand()} watch check-pr ${shq(ref.key)}${forId ? ` --for ${shq(forId)}` : ''} --cursor {cursor}`;
+  return `${watchSelfCommand()} watch check-pr ${shq(ref.key)}${forId ? ` --for ${shq(forId)}` : ''} --cursor {cursor}`;
 }
 
 /** Sugar over addWatch: install the shipped check (and the fix brief when a chain owns it). */

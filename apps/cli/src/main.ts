@@ -249,7 +249,7 @@ import { createUsageLimitWatch } from './usage-limit-watch.js';
 import { compactDispatchSession, compactTrapSession } from './trap-compact.js';
 import { swapTrapCatch } from './trap-swap.js';
 import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
-import { registerUmeReview, clearFinishedUmeReviews } from './ume-review-watch.js';
+import { registerUmeReview, clearFinishedUmeWatches, syncUmeWatches, addUmeWatch, runUmeCheck } from './ume-watch.js';
 import { createTurnWaits } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
@@ -1725,7 +1725,7 @@ async function mainCli(): Promise<void> {
             ? registerWaitWatches(id, lane, entry)
             : [];
       registerUmeReview(id, lane, entry);
-      clearFinishedUmeReviews();
+      clearFinishedUmeWatches();
       const warnings = [waitWarning(id, lane, entry), filed && unattachedWarning(filed)].filter((w): w is string => !!w);
       let permissionCard: string | undefined;
       if (permCommand !== undefined || permPath !== undefined) {
@@ -3928,6 +3928,7 @@ async function mainCli(): Promise<void> {
           trapStarts: createTrapDispatchScheduler(),
           culler: cliCuller,
           prWatches: (now, log) => {
+            syncUmeWatches();
             syncPrWatches(now);
             observeWaitedPrs({ everySecs: pollSecs(), now });
             // Before the cull pass: a merged PR's release needs the chain finished.
@@ -4117,6 +4118,10 @@ async function mainCli(): Promise<void> {
     }
     case 'watch': {
       const sub = pos[0];
+      if (sub === 'check-ume') {
+        console.log(runUmeCheck(pos[1] ?? '', opt('--cursor')));
+        break;
+      }
       if (sub === 'check-pr') {
         // The shipped check behind pr: watches — contract JSON, not TOON.
         const ref = pos[1];
@@ -4142,6 +4147,11 @@ async function mainCli(): Promise<void> {
               'lobstah watch   (list watches)',
             ]),
           );
+          break;
+        }
+        if (!check && key?.startsWith('ume:')) {
+          const w = addUmeWatch(key.slice(4), { forId, everySecs: every ? Number(every) : undefined, cursor: opt('--cursor') });
+          console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
           break;
         }
         if (!key || !check) throw new Error('watch add requires a key and --check <command>');

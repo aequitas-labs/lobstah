@@ -30,7 +30,7 @@ import {
   unhandled,
 } from '@lobstah/core';
 import type { Lane, StatusEntry, TrapRegistration, TurnWait } from '@lobstah/core';
-import { createUmeReviewWatch, isUmeReviewWait, type UmeRead } from './ume-review-watch.js';
+import { addUmeWatch, umeTurnArtifact } from './ume-watch.js';
 import { throwTrap } from './throw.js';
 
 /**
@@ -75,6 +75,8 @@ export interface TurnWaitRecord {
   dispatch?: string;
   from: string;
   wait: string;
+  /** A tool wait bridged to the normal watch loop. */
+  watchKey?: string;
   read: string;
   cwd: string;
   cursor?: string;
@@ -195,13 +197,15 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     const dispatch = retargeted ? (hasOpenCatch(trap) ? trap.claimed : existing.dispatch) : existing?.dispatch ?? (hasOpenCatch(trap) ? trap.claimed : undefined);
     const previous = existing ?? readTurnWaitRecords().find(record => record.dispatch === dispatch &&
       record.from === w.from && record.read === w.read && turnWaitOwnerId(record) === trap.trapId);
+    const artifact = umeTurnArtifact(w);
+    const watchKey = artifact && dispatch ? addUmeWatch(artifact, { forId: dispatch, cwd, cursor: w.cursor }).key : undefined;
     const parkContext = savedParkContext(dispatch, w.context ?? (previous?.dispatch === dispatch ? previous?.parkContext?.instructions : undefined));
     if (dispatch) {
       const lane = laneOf(dispatch);
       if (lane && trap.claimed === dispatch) pinTrapCatch(dispatch, lane, trap.trapId, dispatchParkContextText({ dispatch, cwd, read: w.read, parkContext }));
     }
     const changed = !existing || existing.wait !== w.wait || existing.read !== w.read || existing.dispatch !== dispatch ||
-      existing.cwd !== cwd || JSON.stringify(existing.parkContext) !== JSON.stringify(parkContext);
+      existing.cwd !== cwd || existing.watchKey !== watchKey || JSON.stringify(existing.parkContext) !== JSON.stringify(parkContext);
     if (!changed) continue;
     writeRecord({
       ...(previous ?? {}),
@@ -211,6 +215,7 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
       ...(dispatch ? { dispatch } : {}),
       from: w.from,
       wait: w.wait,
+      watchKey,
       read: w.read,
       cwd,
       ...(previous?.cursor ?? w.cursor ? { cursor: previous?.cursor ?? w.cursor } : {}),
@@ -228,7 +233,7 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     const finished = r.dispatch ? dispatchEnded(r.dispatch) : liveTrap(r) === undefined;
     if (superseded || withdrawn || finished) {
       // A completed review must not be inherited by the trap's next catch.
-      if (finished && r.dispatch && isUmeReviewWait(r)) {
+      if (finished && r.watchKey) {
         const registration = registered.get(r.key);
         if (registration) fs.rmSync(registration.file, { force: true });
       }
@@ -338,7 +343,6 @@ const rethrowTurnWaitTrap: RethrowTurnWaitTrap = async (trapId) => {
 /** Dependencies for restarting a missing owner; wait process injection remains separate. */
 export interface TurnWaitOptions {
   rethrow?: RethrowTurnWaitTrap;
-  umeRead?: UmeRead;
 }
 
 /**
@@ -347,14 +351,6 @@ export interface TurnWaitOptions {
  * pointers. `children` lives across passes.
  */
 export function createTurnWaits(start: SpawnWait = spawnWait, options: TurnWaitOptions = {}): { pass: (now: number, log: (m: string) => void) => void; children: Map<string, ChildProcess> } {
-  const reviews = createUmeReviewWatch(options.umeRead, (watch, lane, file, at) => {
-    // Keep generic wait recovery and unread-pointer notices for a stowed or ghosted owner.
-    for (const record of readTurnWaitRecords()) {
-      if (record.dispatch !== watch.owner.slice('dispatch:'.length) || !isUmeReviewWait(record) ||
-        record.read !== `ume feedback ${watch.umeReview!.artifact}`) continue;
-      writeRecord({ ...record, pointer: { inbox: record.dispatch, lane, file, at: new Date(at).toISOString() } });
-    }
-  }, key => readRecord(key)?.dispatch);
   const children = new Map<string, ChildProcess>();
   const restarting = new Set<string>();
   // A wait outlives no daemon: the next one starts it again.
@@ -367,12 +363,11 @@ export function createTurnWaits(start: SpawnWait = spawnWait, options: TurnWaitO
       children.delete(key);
       log(`turn wait ${key}: ended`);
     }
-    void reviews(now, log);
     for (const r of readTurnWaitRecords()) {
-      if (r.dispatch && isUmeReviewWait(r)) {
+      if (r.watchKey) {
         children.get(r.key)?.kill();
         children.delete(r.key);
-        continue; // The dispatch-owned feedback watch preserves project context.
+        continue; // A registered watch runs through pickup's normal watch loop.
       }
       if (children.has(r.key) || (r.nextRunAt && Date.parse(r.nextRunAt) > now)) continue;
       const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd);

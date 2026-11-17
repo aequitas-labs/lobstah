@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   appendWatchEvents,
   checkRoundKey,
@@ -28,6 +28,7 @@ import {
   removeWatch,
   runWatchCheck,
   setWatchCursor,
+  sendMessageOnce,
   watchDue,
   watchFailureLogLine,
   preparePrWatchBatch,
@@ -181,7 +182,7 @@ function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotifica
 }
 
 /**
- * Fork continuations for buffered dispatch-owned events, retire spent
+ * Deliver events to active owners through their inbox, or fork continuations for finished owners; retire spent
  * watches. One call is one cycle, and it forks at most
  * [watch].maxForksPerCycle continuations. Each watch over the cap is held:
  * its events stay buffered, tend lists it as held, one notice names it, and
@@ -193,7 +194,20 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
   const autoRepair = loadConfig().watch.autoRepair;
   const held: string[] = [];
   for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
-    if (watch.umeReview) continue; // The daemon delivers reviews to the owning dispatch inbox.
+    if (watch.heldAt) continue;
+    const owner = watch.owner.slice('dispatch:'.length);
+    const lane = laneOf(owner);
+    if (lane && readStatusLog(owner, lane).length && !isTerminal(owner)) {
+      const text = (watch.brief ?? DEFAULT_BRIEF)
+        .replaceAll('{key}', watch.key)
+        .replaceAll('{summaries}', events.map(e => `- ${e.summary ?? String(e.seq)}`).join('\n'))
+        .replaceAll('{events}', JSON.stringify(events, null, 2));
+      const receipt = createHash('sha256').update(JSON.stringify([watch.key, watch.createdAt, events.map(e => e.seq)])).digest('hex');
+      sendMessageOnce(owner, lane, receipt, text, `watch:${watch.key}`);
+      markWatchSeen(watch.key);
+      log(`watch ${watch.key}: ${events.length} event(s) → inbox ${owner}`);
+      continue;
+    }
     if (autoRepair && watch.key.startsWith('pr:') && readPr(watch.key)) {
       markWatchSeen(watch.key);
       continue;
@@ -243,7 +257,6 @@ export async function watchLoop(
   const autoRepair = loadConfig().watch.autoRepair;
   preparePrWatchBatch(defaultEverySecs);
   for (const w of listWatches()) {
-    if (w.umeReview) continue;
     // The daemon observes and repairs dispatch-owned PRs when auto-repair is on.
     if (autoRepair && w.key.startsWith('pr:') && w.owner.startsWith('dispatch:')) continue;
     if (watchDue(w, defaultEverySecs)) {
