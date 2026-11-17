@@ -99,7 +99,7 @@ export function ToastHost({ children }: { children?: Children }): Children {
       listeners.delete(receive);
     };
   }, []);
-  return html`<div class="glass-toasts">${children}<div class="toast-feedback">${toasts.map(
+  return html`<div class="glass-toasts">${children}</div><div class="glass-toasts toast-feedback-host"><div class="toast-feedback">${toasts.map(
     (toast) =>
       html`<${Toast} key=${toast.id} onDismiss=${() => setToasts((current) => current.filter((item) => item.id !== toast.id))}>${toast.message}<//>`,
   )}</div></div>`;
