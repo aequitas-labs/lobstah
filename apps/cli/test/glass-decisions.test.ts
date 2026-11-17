@@ -377,13 +377,12 @@ describe('glass: the decision modal', () => {
     expect(card(g, KEY)).toBeTruthy();
   });
 
-  it('a decision lob opens its decision over any tab and flashes its row', async () => {
+  it('a decision lob opens its decision over the selected tab', async () => {
     const g = await page(fleet(), { hash: '#prs', post: ok });
     const lob = g.$$('#lobs a.lob').find((l) => l.getAttribute('href') === `#decision/${encodeURIComponent(KEY)}`)!;
     expect(lob).toBeTruthy();
     await click(g, lob);
-    expect(g.$('.tabpage.on')!.id).toBe('page-deck');
-    expect(row(g, KEY)!.className).toContain('focus');
+    expect(g.$('.tabpage.on')!.id).toBe('page-prs');
     expect(card(g, KEY)).toBeTruthy();
     expect(g.$('#overlay')!.className).not.toBe('open');
   });
