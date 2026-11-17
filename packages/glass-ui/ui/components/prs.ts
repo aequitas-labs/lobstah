@@ -31,6 +31,7 @@ import type { Children } from '../html.js';
 import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
 import type { CardPerson, CardTone } from './card.js';
 import { Button, type ButtonSize } from './button.js';
+import { reviewStatus } from './reviews.js';
 
 /** The PRs tab groups only owned PRs: authored by the viewer or opened by a trap. */
 export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: GlassStack; prs: GlassPr[] }> {
@@ -280,9 +281,14 @@ export function PrTags({ state, tags = [] }: { state?: PrIconState; tags?: reado
 
 /** Actionable PR badges supplement the lifecycle tag; completed PRs need no duplicate status. */
 export function prBadgeTags(p: GlassPr): PrStatusTag[] {
+  const review = getState().snapshot?.reviews?.find((review) => review.key.replace(/^review:/, 'pr:') === p.key);
+  const reviewTags = review?.reReview || review?.autoReapproved ? [reviewStatus(review)] : [];
   return p.state === 'OPEN' && !p.draft && p.badge.tone !== 'ok'
-    ? [{ word: p.badge.text.toLowerCase(), tone: p.badge.tone, hover: /^checks\b/.test(p.badge.text) ? prChecks(p) : undefined }]
-    : [];
+    ? [
+        { word: p.badge.text.toLowerCase(), tone: p.badge.tone, hover: /^checks\b/.test(p.badge.text) ? prChecks(p) : undefined },
+        ...reviewTags,
+      ]
+    : reviewTags;
 }
 
 /** What a PR card's Ack acks: its own unacknowledged attention, and its stack's when it is the stack's only PR. */

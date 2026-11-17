@@ -37,6 +37,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const avatar = person.avatarUrl;
     const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
     out.push({
+      reReview: r.reReview, autoReapproved: r.autoReapprovals?.at(-1)?.headSha === item.pr.headSha,
       roundId: r.id, decisions: r.decisions, decisionAnswers: r.decisionAnswers,
       verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
       ...(draft && !('error' in draft) ? { summary: draft.body, comments: draft.comments, decisions: draft.decisions } : {}),

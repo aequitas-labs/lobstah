@@ -67,6 +67,18 @@ async function openCard(g: GlassDom, n: number) {
 }
 
 describe('the Reviews tab', () => {
+  it.each(['cards', 'table'])('shows stale approval attention and automatic re-approval links in %s', async view => {
+    const stale = review(7, { state: 'posted', verdict: 'approve', reReview: { headSha: 'bbbbbbb2', at: ago(30) }, stands: true });
+    const automatic = review(8, { state: 'posted', verdict: 'approve', autoReapproved: true, stands: false, postedAt: ago(10), postedReviewUrl: 'https://github.com/acme/web/pull/8#pullrequestreview-20' });
+    const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews: [stale, automatic] }, { now: NOW, hash: '#reviews', prefs: { view } }); open.push(g);
+    expect(g.$('#reviews [data-review="review:acme/web#7"]')?.textContent).toContain('re-review needed');
+    expect(g.$('#reviews [data-review="review:acme/web#8"]')?.textContent).toContain('automatically re-approved');
+    expect(g.$('#reviews a[href="https://github.com/acme/web/pull/8#pullrequestreview-20"]')).not.toBeNull();
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
+    await openCard(g, 7);
+    expect(g.$('.pr-view-chips')?.textContent).toContain('re-review needed');
+  });
+
   it.each(['cards', 'table'])('excludes the live #2919 withdrawn notification and marks every counted %s item until opened', async view => {
     const withdrawn = review(2919, { state: 'withdrawn', stands: false, title: 'Add the deterministic pricing aggregate node', notification: { kind: 'draft-ready', at: ago(30), text: 'Draft ready: #2919 Add the deterministic pricing aggregate node · request changes · 2 blocking' } });
     let rows = [withdrawn, review(7, { state: 'drafted', verdict: 'comment', notification: { kind: 'draft-ready', at: ago(30), text: 'Draft ready' } }), review(8, { state: 'failed' }), review(9, { state: 'stale' })];

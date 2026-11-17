@@ -50,6 +50,7 @@ import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview,
 import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
 import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
+import { reapproveBaseUpdate, verifiedBaseUpdate } from '../reviews-reapprove.js';
 import { currentReviewDiffId, reviewDiffId } from '../reviews-diff.js';
 
 /**
@@ -111,6 +112,7 @@ interface SubmittedReview {
 /** Lifecycle and reviewer evidence for a PR whose request disappeared from search. */
 interface ReviewPrSnapshot {
   state: NonNullable<ReviewItem['pr']['state']>;
+  headRefOid?: string; baseRefOid?: string; isDraft?: boolean;
   reviews?: SearchPr['reviews'];
 }
 
@@ -213,7 +215,7 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
       declarations.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
       Object.assign(variables, { [`owner${index}`]: item.pr.owner, [`repo${index}`]: item.pr.repo, [`number${index}`]: item.pr.number });
       fields.push(`pr${index}: repository(owner: $owner${index}, name: $repo${index}) { pullRequest(number: $number${index}) {
-        state reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
+        state headRefOid baseRefOid isDraft reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
           nodes { databaseId state submittedAt commit { oid } }
         }
       } }`);
@@ -221,13 +223,20 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
     const data = reviewQuery<ReviewPrBatch>(
       { query: `query(${declarations.join(', ')}) { rateLimit { cost } ${fields.join('\n')} }`, variables }, gh.token, run, gh.now, log, 'PR state check');
     if (!data) continue;
-    batch.forEach((item, index) => {
+    for (const [index, item] of batch.entries()) {
       const pr = data[`pr${index}`]?.pullRequest;
-      if (!pr || !['OPEN', 'MERGED', 'CLOSED'].includes(pr.state)) return;
+      if (!pr || !['OPEN', 'MERGED', 'CLOSED'].includes(pr.state)) continue;
       confirmed.add(item.key);
       if (item.pr.state !== pr.state) writeReview({ ...item, pr: { ...item.pr, state: pr.state }, updatedAt: new Date(gh.now).toISOString() });
       settleSubmittedReview(item, pr.reviews);
-    });
+      const submitted = [...(pr.reviews?.nodes ?? [])].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
+      if (pr.state === 'OPEN' && pr.headRefOid && pr.baseRefOid && submitted?.state === 'APPROVED' && submitted.commit?.oid !== pr.headRefOid) {
+        const fresh = readReview(item.key)!;
+        fresh.pr = { ...fresh.pr, headSha: pr.headRefOid, baseSha: pr.baseRefOid, diffId: undefined, draft: pr.isDraft };
+        writeReview(fresh);
+        await reapproveBaseUpdate(fresh, identity, { ...gh, log });
+      }
+    }
   }
   for (const item of listReviews()) {
     const r = latestRound(item);
@@ -408,6 +417,13 @@ async function searchReviews(identity: string, token: () => string, log: (m: str
       diffId ??= await reviewDiffId(nwo, pr.baseRefOid, pr.headRefOid, { token, fetch, now, log });
       if (round?.headSha === pr.headRefOid) previousDiffId ??= diffId;
     }
+    const submitted = [...(pr.reviews?.nodes ?? [])].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
+    // Absorbed stacked changes can leave the patch fingerprint smaller.
+    // Keep the round if Git proves those changes now come from the base.
+    if (prior && round && repoKey && settings.autoReapproveBaseOnly && pr.baseRefOid && diffId && previousDiffId && previousDiffId !== diffId &&
+        submitted?.state === 'APPROVED' && submitted.commit?.oid === round.headSha && Object.values(loadConfig().grounds).some(g => g.repos.includes(repoKey)) &&
+        await verifiedBaseUpdate({ ...prior, pr: { ...prior.pr, headSha: pr.headRefOid, baseSha: pr.baseRefOid } }, round.headSha, token()))
+      previousDiffId = diffId;
     const { item, opened } = observeReviewRequest(
       {
         pr: {
@@ -442,6 +458,8 @@ async function searchReviews(identity: string, token: () => string, log: (m: str
     );
     seen.add(item.key);
     settleSubmittedReview(item, pr.reviews);
+    if (latestRound(readReview(item.key)!)?.reReview || (submitted?.commit?.oid && submitted.commit.oid !== item.pr.headSha))
+      await reapproveBaseUpdate(readReview(item.key)!, identity, { token, fetch, now, log });
     if (opened) log(`${item.key}: review requested by ${reviewAsker(item, latestRound(item)!).login}${skip ? ` (${skip})` : ''}`);
   }
   // A truncated search cannot say a request is gone.
