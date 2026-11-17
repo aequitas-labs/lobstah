@@ -1,0 +1,100 @@
+[
+  {
+    "device": "desktop",
+    "rows": [
+      {
+        "text": "Approve anyway",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 370,
+        "labelX": 392,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      },
+      {
+        "text": "Dismiss",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 370,
+        "labelX": 392,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      },
+      {
+        "text": "Redraft",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 370,
+        "labelX": 392,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      },
+      {
+        "text": "Mute PR",
+        "x": 360,
+        "width": 720,
+        "height": 28,
+        "iconX": 370,
+        "labelX": 392,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      }
+    ]
+  },
+  {
+    "device": "phone",
+    "rows": [
+      {
+        "text": "Approve anyway",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 31,
+        "labelX": 53,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      },
+      {
+        "text": "Dismiss",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 31,
+        "labelX": 53,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      },
+      {
+        "text": "Redraft",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 31,
+        "labelX": 53,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      },
+      {
+        "text": "Mute PR",
+        "x": 21,
+        "width": 348,
+        "height": 32,
+        "iconX": 31,
+        "labelX": 53,
+        "padding": "0px 10px",
+        "gap": "8px",
+        "justify": "flex-start"
+      }
+    ]
+  }
+]
