@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as fs from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { appendStatus, claimNext, enqueue, ensureLayout, GB, laneDirs, prRecordFile, statusPath } from '@lobstah/core';
 import { cliCuller } from '../src/auto-cull.js';
-import { planCull, planPressureCull, runCull, sizing } from '../src/cull.js';
+import { applyCull, planCull, planPressureCull, runCull, sizing } from '../src/cull.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { writeAck } from '../src/acks.js';
 
 let home: string;
 let repo: string;
@@ -22,14 +24,14 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /** A finished work dispatch with a real git worktree on branch lobstah/<id>. */
-function finished(id: string, days: number, verb: 'done' | 'failed' = 'done'): string {
+function finished(id: string, days: number, verb: 'done' | 'failed' = 'done', lane: 'work' | 'chore' = 'work'): string {
   const wt = path.join(home, 'worktrees', id);
   git(repo, 'worktree', 'add', '-q', '-b', `lobstah/${id}`, wt);
-  const done = path.join(laneDirs('work').done, id);
+  const done = path.join(laneDirs(lane).done, id);
   fs.mkdirSync(done);
   fs.writeFileSync(path.join(done, 'descriptor.json'), JSON.stringify({ id, repo: 'r', brief: 'b' }));
-  appendStatus(id, 'work', verb, 'finished');
-  age(statusPath(id, 'work'), days);
+  appendStatus(id, lane, verb, 'finished');
+  age(statusPath(id, lane), days);
   age(wt, days);
   age(done, days);
   return wt;
@@ -56,15 +58,51 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  syncBuiltinESMExports();
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
 
 describe('retention cull (the daemon culler)', () => {
+  it('culls an old review chore and retains one inside the configured window', () => {
+    const old = finished('old-review', 4, 'done', 'chore');
+    const recent = finished('recent-review', 2, 'done', 'chore');
+    expect(cliCuller.retention(3, Date.now(), () => {})).toBe(1);
+    expect(fs.existsSync(old)).toBe(false);
+    expect(fs.existsSync(statusPath('old-review', 'chore'))).toBe(false);
+    expect(fs.existsSync(recent)).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('chore').done, 'recent-review'))).toBe(true);
+  });
+
+  it('removes worktrees before an older ack backlog, keeping each dispatch group together', () => {
+    const old = finished('old-checkout', 20);
+    const newer = finished('newer-checkout', 10);
+    for (let i = 0; i < 15; i++) {
+      writeAck({ key: `decision:gone-${i}`, kind: 'decision', stateHash: 'x', at: new Date(Date.now() - 40 * DAY).toISOString(), by: 'test' });
+    }
+    writeAck({ key: 'work:old-checkout', kind: 'landed', stateHash: 'x', at: new Date().toISOString(), by: 'test' });
+    const order: string[] = [];
+    const remove = fs.rmSync;
+    vi.spyOn(fs, 'rmSync').mockImplementation(((target, options) => {
+      if (String(target).includes(`${path.sep}acks${path.sep}`)) {
+        expect(fs.existsSync(old)).toBe(false);
+        expect(fs.existsSync(newer)).toBe(false);
+        order.push('ack');
+      }
+      return remove(target, options);
+    }) as typeof fs.rmSync);
+    syncBuiltinESMExports();
+    expect(cliCuller.retention(3, Date.now(), () => {})).toBe(2);
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'old-checkout'))).toBe(false);
+    expect(fs.existsSync(statusPath('old-checkout', 'work'))).toBe(false);
+    expect(fs.readdirSync(path.join(home, 'acks'))).toHaveLength(0);
+    expect(order).toHaveLength(16);
+  });
+
   it('removes a finished dispatch, its worktree, and its state, and keeps its branch', () => {
     const wt = finished('old-done', 20);
     const failedWt = finished('old-failed', 20, 'failed');
-    const n = cliCuller.retention(14, Date.now(), 10, () => {});
+    const n = cliCuller.retention(14, Date.now(), () => {});
     expect(n).toBe(2);
     for (const [id, dir] of [['old-done', wt], ['old-failed', failedWt]] as const) {
       expect(fs.existsSync(dir)).toBe(false);
@@ -76,14 +114,14 @@ describe('retention cull (the daemon culler)', () => {
 
   it('keeps a finished dispatch younger than the window', () => {
     const wt = finished('fresh', 2);
-    expect(cliCuller.retention(14, Date.now(), 10, () => {})).toBe(0);
+    expect(cliCuller.retention(14, Date.now(), () => {})).toBe(0);
     expect(fs.existsSync(wt)).toBe(true);
   });
 
   it('skips a dispatch whose PR record is still open', () => {
     const wt = finished('pr-open', 30);
     openPr('pr-open', 7);
-    expect(cliCuller.retention(14, Date.now(), 10, () => {})).toBe(0);
+    expect(cliCuller.retention(14, Date.now(), () => {})).toBe(0);
     expect(fs.existsSync(wt)).toBe(true);
     expect(fs.existsSync(path.join(laneDirs('work').done, 'pr-open'))).toBe(true);
     expect(fs.existsSync(statusPath('pr-open', 'work'))).toBe(true);
@@ -95,7 +133,7 @@ describe('retention cull (the daemon culler)', () => {
       path.join(laneDirs('work').state, 'ev-open.evidence'),
       JSON.stringify({ prUrl: 'https://github.com/o/r/pull/9', pr: { url: 'https://github.com/o/r/pull/9', number: 9, state: 'OPEN', observedAt: new Date().toISOString() } }),
     );
-    expect(cliCuller.retention(14, Date.now(), 10, () => {})).toBe(0);
+    expect(cliCuller.retention(14, Date.now(), () => {})).toBe(0);
     expect(fs.existsSync(wt)).toBe(true);
   });
 
@@ -111,31 +149,72 @@ describe('retention cull (the daemon culler)', () => {
     }
     age(path.join(laneDirs('work').queue, `${queued}.json`), 60);
     age(path.join(laneDirs('work').active, active), 60);
-    expect(cliCuller.retention(14, Date.now(), 10, () => {})).toBe(0);
+    expect(cliCuller.retention(14, Date.now(), () => {})).toBe(0);
     expect(fs.existsSync(path.join(home, 'worktrees', active))).toBe(true);
     expect(fs.existsSync(path.join(home, 'worktrees', queued))).toBe(true);
     expect(fs.existsSync(path.join(laneDirs('work').queue, `${queued}.json`))).toBe(true);
     expect(fs.existsSync(path.join(laneDirs('work').active, active))).toBe(true);
   });
 
-  it('culls at most one batch per pass, oldest first', () => {
-    finished('b-oldest', 40);
-    finished('b-middle', 30);
-    const newest = finished('b-newest', 20);
-    const log: string[] = [];
-    expect(cliCuller.retention(14, Date.now(), 2, (m) => log.push(m))).toBe(2);
-    expect(fs.existsSync(newest)).toBe(true);
-    expect(fs.existsSync(path.join(home, 'worktrees', 'b-oldest'))).toBe(false);
-    expect(log.join('\n')).toMatch(/left for the next pass/);
-    expect(cliCuller.retention(14, Date.now(), 2, () => {})).toBe(1);
-    expect(fs.existsSync(newest)).toBe(false);
+  it('clears a backlog larger than ten worktrees in one pass', () => {
+    const dirs = Array.from({ length: 25 }, (_, i) => finished(`backlog-${i}`, 20));
+    expect(cliCuller.retention(14, Date.now(), () => {})).toBe(25);
+    for (const dir of dirs) expect(fs.existsSync(dir)).toBe(false);
+    expect(fs.readdirSync(laneDirs('work').done)).toHaveLength(0);
+  });
+
+  it('keeps a checkout claimed by a follow-up after the background plan was made', () => {
+    const wt = finished('origin', 20);
+    const plan = planCull(3, Date.now(), { measure: false, keepOpenPrs: true });
+    enqueue({ id: 'followup', repo: 'r', brief: 'continue', followUp: 'origin' });
+    applyCull(plan);
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'origin'))).toBe(true);
+    expect(fs.existsSync(statusPath('origin', 'work'))).toBe(true);
+  });
+
+  it('keeps dirty or unpushed review checkouts and their records in later culls', () => {
+    const dirs = ['dirty-review', 'unpushed-review'].map((id) => {
+      const wt = finished(id, 20, 'done', 'chore');
+      const file = path.join(laneDirs('chore').done, id, 'descriptor.json');
+      fs.writeFileSync(file, JSON.stringify({ id, repo: 'r', brief: 'review', readOnly: true }));
+      age(path.dirname(file), 20);
+      return wt;
+    });
+    fs.writeFileSync(path.join(dirs[0]!, 'local.txt'), 'unsaved');
+    // No remote contains this repo's initial commit, so the other checkout is unpushed.
+    expect(planPressureCull()).toEqual([]);
+    expect(cliCuller.retention(1, Date.now(), () => {})).toBe(0);
+    for (const id of ['dirty-review', 'unpushed-review']) {
+      expect(fs.existsSync(path.join(laneDirs('chore').done, id))).toBe(true);
+      expect(fs.existsSync(statusPath(id, 'chore'))).toBe(true);
+      expect(fs.existsSync(path.join(home, 'worktrees', id))).toBe(true);
+    }
+  });
+
+  it('keeps newly dirty review work after a background plan was made', () => {
+    const wt = finished('review', 20, 'done', 'chore');
+    const origin = path.join(home, 'origin.git');
+    git(repo, 'clone', '-q', '--bare', repo, origin);
+    git(repo, 'remote', 'add', 'origin', origin);
+    git(repo, 'fetch', '-q', 'origin');
+    const done = path.join(laneDirs('chore').done, 'review');
+    fs.writeFileSync(path.join(done, 'descriptor.json'), JSON.stringify({ id: 'review', repo: 'r', brief: 'review', readOnly: true }));
+    age(done, 20);
+    const plan = planCull(1, Date.now(), { measure: false });
+    expect(plan.some((item) => item.kind === 'worktree')).toBe(true);
+    fs.writeFileSync(path.join(wt, 'new-findings.txt'), 'keep');
+    applyCull(plan);
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(fs.existsSync(done)).toBe(true);
+    expect(fs.existsSync(statusPath('review', 'chore'))).toBe(true);
   });
 
   it('makes no size calls', () => {
     finished('unsized', 20);
     const walk = vi.spyOn(sizing, 'walk');
     const worktree = vi.spyOn(sizing, 'worktree');
-    cliCuller.retention(14, Date.now(), 10, () => {});
+    cliCuller.retention(14, Date.now(), () => {});
     expect(walk).not.toHaveBeenCalled();
     expect(worktree).not.toHaveBeenCalled();
   });
@@ -146,7 +225,7 @@ describe('pressure cull (the free-space guard)', () => {
     const oldest = finished('p-old', 3);
     const newer = finished('p-new', 1);
     let free = 1 * GB;
-    const removed = cliCuller.pressure(() => free >= 5 * GB, Date.now(), 10, () => {
+    const removed = cliCuller.pressure(() => free >= 5 * GB, Date.now(), () => {
       free += 5 * GB;
     });
     expect(removed).toBe(1);
@@ -172,7 +251,7 @@ describe('pressure cull (the free-space guard)', () => {
       JSON.stringify({ trapId: 'trap1', sessionId: 's1', worktree: wt, heartbeatAt: new Date().toISOString() }),
     );
     expect(planPressureCull()).toEqual([]);
-    cliCuller.retention(14, Date.now(), 10, () => {});
+    cliCuller.retention(14, Date.now(), () => {});
     expect(fs.existsSync(wt)).toBe(true);
   });
 });

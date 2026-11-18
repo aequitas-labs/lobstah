@@ -4,7 +4,7 @@ import { appendStatus, isFinished, laneDirs } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
 import { main } from './run.js';
 import { reapStarted } from './reap.js';
-import { warmPool } from '@lobstah/worktree';
+import { releaseReviewWorktree, warmPool } from '@lobstah/worktree';
 
 export { main } from './run.js';
 export type { RunnerDeps } from './run.js';
@@ -38,7 +38,8 @@ export function runRunner(activeDirArg: string, laneArg?: string): void {
       }
       process.exitCode = 1;
     })
-    .finally(() => {
+    .finally(async () => {
+      await releaseReviewWorktree(id, lane, console.log);
       setTimeout(() => process.exit(), EXIT_LINGER_MS).unref();
     });
 }
