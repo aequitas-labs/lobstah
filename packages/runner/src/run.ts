@@ -42,7 +42,7 @@ import {
 import type { ChainPr, Config, Descriptor, Lane, RepoConfig, RunnerInfo, Verb } from '@lobstah/core';
 import { loadAdapter } from '@lobstah/adapters';
 import type { Adapter, AdapterRun } from '@lobstah/adapters';
-import { allocate, chooseWorktree, claimPoolSlot, collectEvidence, prepareReuse, recoverWorktree, resetPoolWorktree, worktreePath } from '@lobstah/worktree';
+import { allocate, chooseWorktree, claimPoolSlot, collectEvidence, prepareReuse, recoverWorktree, resetPoolWorktree, releaseReviewWorktree, worktreePath } from '@lobstah/worktree';
 import type { ChooseInput, ClaimPoolInput, PoolClaim, WorktreeChoice } from '@lobstah/worktree';
 import { buildPrompt } from './contract.js';
 import { drive, settle } from './drive.js';
@@ -153,6 +153,14 @@ function coldNote(cold: NonNullable<StartPlan['cold']>, cwd: string, trunk: stri
 }
 
 export async function main(activeDir: string, lane: Lane, seams: Partial<RunnerDeps> = {}): Promise<void> {
+  try {
+    await runMain(activeDir, lane, seams);
+  } finally {
+    await releaseReviewWorktree(path.basename(activeDir), lane, console.log);
+  }
+}
+
+async function runMain(activeDir: string, lane: Lane, seams: Partial<RunnerDeps>): Promise<void> {
   const deps: RunnerDeps = { ...defaultDeps, ...seams };
   const id = path.basename(activeDir);
   // The daemon excludes trap catches from headless slots. A directly invoked

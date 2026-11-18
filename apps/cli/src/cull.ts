@@ -3,6 +3,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
+  acquireWorktreeLock,
+  releaseWorktreeLock,
+  worktreeGitDir,
   dispatchWorktree,
   followUpAncestors,
   formatGB,
@@ -19,6 +22,7 @@ import {
   parsePrRef,
   prRecordFile,
   readEvidence,
+  reviewDispatchIds,
   readPr,
   readPrs,
   removeHelmReport,
@@ -119,6 +123,19 @@ function orphanWorktreeSafe(dir: string): boolean {
   }
 }
 
+/** Review checkouts kept on finish must also survive later retention/pressure passes. */
+function reviewWorktreeUsers(): Map<string, Set<string>> {
+  const users = new Map<string, Set<string>>();
+  const reviews = reviewDispatchIds();
+  for (const id of idsIn(laneDirs('chore').done)) {
+    if (!storedDescriptor(id, 'chore')?.readOnly && !reviews.has(id)) continue;
+    const owner = dispatchWorktree(id, 'chore').owner;
+    if (!users.has(owner)) users.set(owner, new Set());
+    users.get(owner)!.add(id);
+  }
+  return users;
+}
+
 /**
  * Plan the sweep: aged catch (old done/ entries), lost gear (worktrees whose
  * dispatch is finished or gone), and stale state files for ids nothing knows.
@@ -158,6 +175,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
   const wtRoot = path.join(lobstahHome(), 'worktrees');
   const trapped = trapWorktreeIds(wtRoot);
   const usage = worktreeUsage(opts.keepOpenPrs ? openPr : undefined);
+  const reviews = reviewWorktreeUsers();
   const proofs = mergedCullProofs();
   const fetched = new Map<string, boolean>();
   const keptUsers = new Set<string>();
@@ -173,6 +191,11 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     const from = doneAt ?? fs.statSync(p).mtimeMs;
     if (from >= cutoff) continue; // recent catch or orphan — keep for attach/swap
     if (configuredFolderOverlaps(p)) continue;
+    const reviewUsers = reviews.get(id);
+    if (reviewUsers && !orphanWorktreeSafe(p)) {
+      for (const user of reviewUsers) { live.add(user); keptUsers.add(user); retainReferences(user, 'chore'); }
+      continue;
+    }
     const proof = proofs.get(id);
     if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) {
       for (const user of proof.users) { live.add(user); keptUsers.add(user); retainReferences(user, 'work'); retainReferences(user, 'chore'); }
@@ -345,13 +368,8 @@ function groupOf(item: CullItem): string {
   return item.id;
 }
 
-/**
- * Bound one pass: worktree groups first, oldest first within each tier (a
- * group is one dispatch id, one PR record, or one stray ack). Metadata must
- * not consume the whole disk-cleanup budget. An ack whose
- * dispatch is deferred to a later pass is deferred with it.
- */
-export function limitBatch(items: CullItem[], maxGroups: number): { batch: CullItem[]; deferred: number } {
+/** Worktree groups first, oldest first within each tier; keep dispatch records together. */
+export function orderCull(items: CullItem[]): CullItem[] {
   const oldest = new Map<string, number>();
   const worktrees = new Set<string>();
   for (const item of items) {
@@ -362,8 +380,8 @@ export function limitBatch(items: CullItem[], maxGroups: number): { batch: CullI
   const order = [...oldest.entries()].sort((a, b) =>
     Number(worktrees.has(b[0])) - Number(worktrees.has(a[0])) || a[1] - b[1] || a[0].localeCompare(b[0]),
   ).map(([g]) => g);
-  const keep = new Set(order.slice(0, maxGroups));
-  return { batch: items.filter((i) => keep.has(groupOf(i))), deferred: order.length - keep.size };
+  const ranks = new Map(order.map((g, i) => [g, i]));
+  return [...items].sort((a, b) => ranks.get(groupOf(a))! - ranks.get(groupOf(b))!);
 }
 
 /**
@@ -389,12 +407,14 @@ export function planPressureCull(now = Date.now()): CullItem[] {
   const wtRoot = path.join(lobstahHome(), 'worktrees');
   for (const id of trapWorktreeIds(wtRoot)) live.add(id);
   const usage = worktreeUsage(openPr);
+  const reviews = reviewWorktreeUsers();
   for (const id of usage.live) live.add(id);
   const items: CullItem[] = [];
   for (const id of idsIn(wtRoot)) {
     if (live.has(id)) continue;
     const p = path.join(wtRoot, id);
     if (configuredFolderOverlaps(p)) continue;
+    if (reviews.has(id) && !orphanWorktreeSafe(p)) continue;
     const proof = proofs.get(id);
     if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) continue;
     const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
@@ -418,6 +438,16 @@ export function removeWorktree(id: string, dir: string): void {
     // The trap's revision goes under its protected ref first; the roster records it.
     recordRosterRevision(anchor.trapId, removeGhostWorktree(dir).revision);
     return; // Never fall through to force removal of a trap checkout.
+  }
+  if (reviewWorktreeUsers().has(id) || !worktreeUsage().newest.has(id)) {
+    // Recheck reviews and orphans at removal. Git must refuse newly dirty
+    // work; never force or fall through to recursive removal when it does.
+    try {
+      if (!orphanWorktreeSafe(dir)) return;
+      const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      execFileSync('git', ['--git-dir', common, 'worktree', 'remove', dir], { stdio: 'ignore' });
+    } catch { /* leave it for the next cleanup attempt */ }
+    return;
   }
   for (const lane of ['work', 'chore'] as Lane[]) {
     const descFile = path.join(laneDirs(lane).done, id, 'descriptor.json');
@@ -459,11 +489,29 @@ function culledState(items: CullItem[]): CatchRef[] {
   });
 }
 
-export function applyCull(items: CullItem[]): void {
-  // Catches outlive their state: fold them into stats.json before anything goes.
+export function applyCull(items: CullItem[]): CullItem[] {
+  // A background pass may outlive its plan. A warm lock prevents a follow-up
+  // claiming the checkout while current liveness is checked and it is removed.
+  const blocked = new Set<string>();
+  for (const item of items.filter((i) => i.kind === 'worktree')) {
+    if (!fs.existsSync(item.target)) continue;
+    const lockId = `cull-${process.pid}-${item.id}`;
+    const locked = worktreeGitDir(item.target) !== undefined;
+    if (locked && acquireWorktreeLock(item.target, lockId, 'work', 'warm')) { blocked.add(item.id); continue; }
+    try {
+      if (trapWorktreeIds(worktreesDir()).has(item.id) || worktreeUsage(openPrDispatches()).live.has(item.id)) {
+        blocked.add(item.id);
+        continue;
+      }
+      removeWorktree(item.id, item.target);
+      if (fs.existsSync(item.target)) blocked.add(item.id);
+    } finally {
+      if (locked) releaseWorktreeLock(item.target, lockId);
+    }
+  }
+  items = items.filter((i) => !blocked.has(groupOf(i)));
+  // Catches outlive their state: fold them into stats.json before the state goes.
   foldCatches(culledState(items));
-  // Worktrees first: their done/ descriptors are needed to find the owning repo.
-  for (const item of items.filter((i) => i.kind === 'worktree')) removeWorktree(item.id, item.target);
   for (const item of items.filter((i) => i.kind === 'done')) fs.rmSync(item.target, { recursive: true, force: true });
   for (const item of items.filter((i) => i.kind === 'ack')) removeAck(item.target);
   for (const item of items.filter((i) => i.kind === 'pr')) removePr(item.target);
@@ -476,6 +524,7 @@ export function applyCull(items: CullItem[]): void {
       if (f === item.id || f.startsWith(`${item.id}.`)) fs.rmSync(path.join(dir, f), { recursive: true, force: true });
     }
   }
+  return items;
 }
 
 /**
@@ -507,9 +556,9 @@ export function runCull(days: number, apply: boolean, freeBytes: FreeBytesReader
     }
   };
   const before = read();
-  applyCull(plan);
+  const applied = applyCull(plan);
   const after = read();
   const freed = before !== undefined && after !== undefined ? Math.max(0, after - before) : undefined;
-  lines.push(`applied: ${plan.length} removed` + (freed !== undefined ? `, ${formatGB(freed)} freed (free-space change on the worktrees volume)` : ''));
+  lines.push(`applied: ${applied.length} removed` + (freed !== undefined ? `, ${formatGB(freed)} freed (free-space change on the worktrees volume)` : ''));
   return lines.join('\n');
 }

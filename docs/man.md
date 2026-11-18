@@ -1737,17 +1737,21 @@ dry run — pass --apply to remove
 The daemon can do this on its own. Two `[limits]` keys turn it on
 ([configuration](configuration.md#limits)); both are off by default:
 
-- `retentionDays` — once an hour at most, the daemon culls finished
-  dispatches older than this, 10 at a time. A dispatch whose PR is still open
-  is kept. Groups containing worktrees go before metadata-only groups, with
-  the oldest group first within each set, so old acks cannot delay disk cleanup.
+- `retentionDays` — once an hour at most, the daemon starts a background
+  worker that drains finished dispatches older than this, without a count
+  limit. A dispatch whose PR is still open is kept. Worktrees go before
+  metadata, oldest first within each set. Claims continue during removal.
 - `minFreeGB` — before it claims work (each claim creates a worktree), the
-  daemon reads free space on the worktrees volume. Below the limit it removes
-  finished worktrees, oldest first, until the limit is met. If space is still
+  daemon reads free space on the worktrees volume. Below the limit it schedules
+  the background worker to remove finished worktrees, oldest first, until the limit is met. If space is still
   short, the work stays queued. `man tend` shows it as
   `held (3.2 GB free, needs 10 GB)`, the glass shows the same reason in the
   note column, and one `disk-held` notice reaches the helm. When space
   returns, one `disk-cleared` notice follows and claiming resumes.
+
+Review chores release their own checkout on done or failed, when clean and
+published. Their reports, records, done entries and branches stay. Unsaved,
+shared and managed checkouts are kept, with the reason logged.
 
 A third key, `releaseOnMerge`, frees a worktree as soon as its PR merges
 instead of waiting out `retentionDays`. When a PR watch records `merged`, the

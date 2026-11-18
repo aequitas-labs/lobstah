@@ -788,3 +788,4 @@ export async function removeIfSafe(dir: string, opts: { ignore?: string[]; branc
 }
 
 export * from './pool.js';
+export { releaseReviewWorktree } from './review-cleanup.js';
