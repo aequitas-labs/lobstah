@@ -9,6 +9,7 @@ import { listRoster } from './roster.js';
 import { laneOf } from './worktrees.js';
 import { readStatusLog } from './status.js';
 import { postNotice } from './notices.js';
+import { lobstahHome } from './paths.js';
 
 export interface TrapCachePlan {
   trapId: string;
@@ -152,6 +153,7 @@ export function recoverTrapCaches(cfg: Config, volume: string, readFree: FreeByt
   if (!Object.values(cfg.repos).some((repo) => repo.cacheDirs?.length)) return 0;
   if (cfg.limits.cacheMinFreeGB === 0) return 0;
   const threshold = Math.max(cfg.limits.cacheMinFreeGB ?? 50, cfg.limits.minFreeGB ?? 0) * GB;
+  const floor = (cfg.limits.minFreeGB ?? 0) * GB;
   if (!(threshold > 0)) return 0;
   try {
     const before = readFree(volume);
@@ -160,18 +162,32 @@ export function recoverTrapCaches(cfg: Config, volume: string, readFree: FreeByt
     let traps = 0;
     const device = fs.statSync(volume).dev;
     for (const plan of planTrapCaches(cfg)) {
-      if (readFree(volume) >= threshold) break;
+      const free = readFree(volume);
+      if (free >= threshold) break;
       try {
         // A different volume cannot recover space for this guard's worktrees.
         if (fs.statSync(plan.worktree).dev !== device) continue;
-        const removed = clearTrapCaches(plan, cfg);
+        const removed = withTrapCacheLock(plan.trapId, () => {
+          // Persist the throttle across daemon restarts and other pressure-cleanup callers.
+          const dir = path.join(lobstahHome(), 'cache-pressure');
+          const stamp = path.join(dir, `trap-${encodeURIComponent(plan.trapId)}.json`);
+          let last = NaN;
+          try { last = Number(fs.readFileSync(stamp, 'utf8')); } catch { /* First pass. */ }
+          const now = Date.now();
+          if (free >= floor && now - last < 60 * 60 * 1000) return 0;
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(stamp, String(now));
+          return clearTrapCaches(plan, cfg);
+        });
         if (removed > 0) { bytes += removed; traps++; }
       } catch (error) { log(`cache cleanup kept trap ${plan.trapId}: ${error instanceof Error ? error.message : String(error)}`); }
     }
     if (bytes > 0) {
-      const recovered = Math.max(0, readFree(volume) - before);
+      const after = readFree(volume);
+      const recovered = Math.max(0, after - before);
       const text = `cache pressure cleanup: ${bytes} cache bytes cleared in ${traps} idle trap(s); ${recovered} free bytes recovered (${formatGB(recovered)})`;
-      postNotice({ kind: 'caches-cleared', text }); log(text);
+      if (recovered >= GB || before < floor || after < floor) postNotice({ kind: 'caches-cleared', text });
+      log(text);
     }
     return bytes;
   } catch (error) {
