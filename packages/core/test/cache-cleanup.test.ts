@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -46,7 +46,7 @@ beforeEach(() => {
   git(repo, 'add', '.gitignore'); git(repo, 'commit', '-m', 'init');
   config();
 });
-afterEach(() => { delete process.env.LOBSTAH_HOME; removeTempDir(home); });
+afterEach(() => { vi.restoreAllMocks(); delete process.env.LOBSTAH_HOME; removeTempDir(home); });
 
 describe('cache deletion safety', () => {
   it('keeps lock paths inside their dedicated directory even with a traversal-shaped trap id', () => {
@@ -151,7 +151,7 @@ describe('trap lifecycle and pressure cleanup', () => {
     expect(fs.existsSync(cache(cancelled))).toBe(false);
   });
 
-  it('clears biggest idle traps first, stops at the threshold, and announces recovered space', () => {
+  it('clears biggest idle traps first, stops at the threshold, and logs small recoveries', () => {
     config(undefined, 0.0004);
     const small = trap('small', 100_000), big = trap('big', 300_000), medium = trap('medium', 200_000);
     const busy = trap('busy', 900_000); working(busy);
@@ -161,11 +161,66 @@ describe('trap lifecycle and pressure cleanup', () => {
       return [big, medium, small].reduce((sum, reg) => sum + (fs.existsSync(cache(reg)) ? 0 : reg === big ? 300_000 : reg === medium ? 200_000 : 100_000), 0);
     };
     expect(planTrapCaches().map((plan) => plan.trapId)).toEqual([big.trapId, medium.trapId, small.trapId]);
-    expect(recoverTrapCaches(loadConfig(), home, read)).toBeGreaterThan(0);
+    const log = vi.fn();
+    expect(recoverTrapCaches(loadConfig(), home, read, log)).toBeGreaterThan(0);
     expect(order).toEqual(['big', 'medium']);
     expect(fs.existsSync(cache(small))).toBe(true);
     expect(fs.existsSync(cache(busy))).toBe(true);
-    expect(listNotices(30).find((notice) => notice.kind === 'caches-cleared')?.text).toContain('2 idle trap(s)');
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('2 idle trap(s)'));
+    expect(listNotices(30).some((notice) => notice.kind === 'caches-cleared')).toBe(false);
+  });
+
+  it.each([0, GB - 1, GB, GB + 1])('announces pressure cleanup only when at least 1 GB is recovered (%i bytes)', (recovered) => {
+    const reg = trap('notice-threshold');
+    const cfg = loadConfig(); cfg.limits.minFreeGB = 10;
+    const log = vi.fn();
+    const read = (): number => 28 * GB + (fs.existsSync(cache(reg)) ? 0 : recovered);
+    expect(recoverTrapCaches(cfg, home, read, log)).toBeGreaterThan(0);
+    expect(fs.existsSync(cache(reg))).toBe(false);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`${recovered} free bytes recovered`));
+    expect(listNotices(30).some((notice) => notice.kind === 'caches-cleared')).toBe(recovered >= GB);
+  });
+
+  it.each([
+    [10 * GB - 1, 10 * GB, true],
+    [10 * GB, 10 * GB - 1, true],
+    [10 * GB, 10 * GB, false],
+  ])('announces small cleanup when free space crosses the floor (%i → %i)', (before, after, announced) => {
+    const reg = trap('notice-floor');
+    const cfg = loadConfig(); cfg.limits.minFreeGB = 10;
+    expect(recoverTrapCaches(cfg, home, () => fs.existsSync(cache(reg)) ? before : after)).toBeGreaterThan(0);
+    expect(listNotices(30).some((notice) => notice.kind === 'caches-cleared')).toBe(announced);
+  });
+
+  it('cleans each trap at most once per hour above the floor, including at the floor', () => {
+    const reg = trap('hourly');
+    const cfg = loadConfig(); cfg.limits.minFreeGB = 10;
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    expect(recoverTrapCaches(cfg, home, () => 28 * GB)).toBeGreaterThan(0);
+    fs.mkdirSync(cache(reg), { recursive: true });
+    fs.writeFileSync(path.join(cache(reg), 'regrown.bin'), Buffer.alloc(8192, 1));
+    clock.mockReturnValue(now + 60 * 60 * 1000 - 1);
+    expect(recoverTrapCaches(loadConfig(), home, () => 10 * GB)).toBe(0);
+    expect(fs.existsSync(cache(reg))).toBe(true);
+    const other = trap('other-hourly');
+    expect(recoverTrapCaches(cfg, home, () => 28 * GB)).toBeGreaterThan(0);
+    expect(fs.existsSync(cache(other))).toBe(false);
+    expect(fs.existsSync(cache(reg))).toBe(true);
+    clock.mockReturnValue(now + 60 * 60 * 1000);
+    expect(recoverTrapCaches(cfg, home, () => 28 * GB)).toBeGreaterThan(0);
+    expect(fs.existsSync(cache(reg))).toBe(false);
+  });
+
+  it('bypasses the hourly limit below the free-space floor', () => {
+    const reg = trap('urgent');
+    const cfg = loadConfig(); cfg.limits.minFreeGB = 10;
+    expect(recoverTrapCaches(cfg, home, () => 28 * GB)).toBeGreaterThan(0);
+    fs.mkdirSync(cache(reg), { recursive: true });
+    fs.writeFileSync(path.join(cache(reg), 'regrown.bin'), Buffer.alloc(8192, 1));
+    expect(recoverTrapCaches(cfg, home, () => 10 * GB - 1)).toBeGreaterThan(0);
+    expect(fs.existsSync(cache(reg))).toBe(false);
+    expect(listNotices(30).some((notice) => notice.kind === 'caches-cleared')).toBe(true);
   });
 
   it('rechecks a preview when a trap starts working and leaves unconfigured repos unchanged', () => {
