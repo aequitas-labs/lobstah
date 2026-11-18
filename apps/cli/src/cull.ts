@@ -106,6 +106,19 @@ function idsIn(dir: string): Set<string> {
   }
 }
 
+/** Lost gear has no dispatch proof: keep it unless git proves it is published and clean. */
+function orphanWorktreeSafe(dir: string): boolean {
+  const git = (...args: string[]) => execFileSync('git', args, {
+    cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000,
+  }).trim();
+  try {
+    if (git('status', '--porcelain', '--untracked-files=all')) return false;
+    return git('rev-list', '--count', 'HEAD', '--not', '--remotes') === '0';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Plan the sweep: aged catch (old done/ entries), lost gear (worktrees whose
  * dispatch is finished or gone), and stale state files for ids nothing knows.
@@ -156,8 +169,9 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     if (live.has(id) || trapped.has(id) || usage.live.has(id)) continue;
     // A shared worktree ages from the newest dispatch that used it.
     const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
-    if (doneAt !== undefined && doneAt >= cutoff) continue; // recent catch — keep for attach/swap
     const p = path.join(wtRoot, id);
+    const from = doneAt ?? fs.statSync(p).mtimeMs;
+    if (from >= cutoff) continue; // recent catch or orphan — keep for attach/swap
     if (configuredFolderOverlaps(p)) continue;
     const proof = proofs.get(id);
     if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) {
@@ -165,8 +179,9 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
       for (const key of proof.keys) keptPrs.add(key);
       continue;
     }
-    if (readTrapAnchor(p)?.createdBy === 'soak' && inspectTrapWorktree(p).reason) continue;
-    const from = doneAt ?? fs.statSync(p).mtimeMs;
+    if (readTrapAnchor(p)?.createdBy === 'soak') {
+      if (inspectTrapWorktree(p).reason) continue;
+    } else if (doneAt === undefined && !orphanWorktreeSafe(p)) continue;
     items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: measure ? sizing.worktree(p) : 0, ageFrom: from });
   }
   for (let i = items.length - 1; i >= 0; i--) if (items[i]!.kind === 'done' && keptUsers.has(items[i]!.id)) items.splice(i, 1);
@@ -331,17 +346,22 @@ function groupOf(item: CullItem): string {
 }
 
 /**
- * Bound one pass: keep the items of the `maxGroups` oldest groups (a group
- * is one dispatch id, or one PR record, or one stray ack). An ack whose
+ * Bound one pass: worktree groups first, oldest first within each tier (a
+ * group is one dispatch id, one PR record, or one stray ack). Metadata must
+ * not consume the whole disk-cleanup budget. An ack whose
  * dispatch is deferred to a later pass is deferred with it.
  */
 export function limitBatch(items: CullItem[], maxGroups: number): { batch: CullItem[]; deferred: number } {
   const oldest = new Map<string, number>();
+  const worktrees = new Set<string>();
   for (const item of items) {
     const g = groupOf(item);
+    if (item.kind === 'worktree') worktrees.add(g);
     oldest.set(g, Math.min(oldest.get(g) ?? Infinity, item.ageFrom ?? Infinity));
   }
-  const order = [...oldest.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([g]) => g);
+  const order = [...oldest.entries()].sort((a, b) =>
+    Number(worktrees.has(b[0])) - Number(worktrees.has(a[0])) || a[1] - b[1] || a[0].localeCompare(b[0]),
+  ).map(([g]) => g);
   const keep = new Set(order.slice(0, maxGroups));
   return { batch: items.filter((i) => keep.has(groupOf(i))), deferred: order.length - keep.size };
 }
@@ -377,8 +397,11 @@ export function planPressureCull(now = Date.now()): CullItem[] {
     if (configuredFolderOverlaps(p)) continue;
     const proof = proofs.get(id);
     if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) continue;
-    if (readTrapAnchor(p)?.createdBy === 'soak' && inspectTrapWorktree(p).reason) continue;
-    const from = usage.newest.get(id) ?? doneMtimes.get(id) ?? fs.statSync(p).mtimeMs;
+    const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
+    if (readTrapAnchor(p)?.createdBy === 'soak') {
+      if (inspectTrapWorktree(p).reason) continue;
+    } else if (doneAt === undefined && !orphanWorktreeSafe(p)) continue;
+    const from = doneAt ?? fs.statSync(p).mtimeMs;
     items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: 0, ageFrom: from });
   }
   return items.sort((a, b) => a.ageFrom! - b.ageFrom! || a.id.localeCompare(b.id));

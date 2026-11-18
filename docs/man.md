@@ -1713,6 +1713,11 @@ used it. Pool worktrees (`~/.lobstah/pools/`) are never culled, by `lobstah
 cull` or by the daemon: a pool keeps its worktrees, and the dispatch records
 that used them age out as usual.
 
+A worktree with no dispatch record ages from its directory's modification
+time. Retention leaves it inside the window. Both retention and the
+free-space cull keep it unless Git can verify that it is clean and every
+commit is on a remote-tracking branch.
+
 Without `--apply` it is a dry run: it measures each target and prints the
 sizes. A worktree is measured with one `du -sk`; where `du` is missing
 (Windows) a file walk measures it instead. `--apply` measures nothing. It
@@ -1734,7 +1739,8 @@ The daemon can do this on its own. Two `[limits]` keys turn it on
 
 - `retentionDays` — once an hour at most, the daemon culls finished
   dispatches older than this, 10 at a time. A dispatch whose PR is still open
-  is kept.
+  is kept. Groups containing worktrees go before metadata-only groups, with
+  the oldest group first within each set, so old acks cannot delay disk cleanup.
 - `minFreeGB` — before it claims work (each claim creates a worktree), the
   daemon reads free space on the worktrees volume. Below the limit it removes
   finished worktrees, oldest first, until the limit is met. If space is still

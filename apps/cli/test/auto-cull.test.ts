@@ -7,6 +7,7 @@ import { appendStatus, claimNext, enqueue, ensureLayout, GB, laneDirs, prRecordF
 import { cliCuller } from '../src/auto-cull.js';
 import { planCull, planPressureCull, runCull, sizing } from '../src/cull.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { writeAck } from '../src/acks.js';
 
 let home: string;
 let repo: string;
@@ -22,14 +23,14 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /** A finished work dispatch with a real git worktree on branch lobstah/<id>. */
-function finished(id: string, days: number, verb: 'done' | 'failed' = 'done'): string {
+function finished(id: string, days: number, verb: 'done' | 'failed' = 'done', lane: 'work' | 'chore' = 'work'): string {
   const wt = path.join(home, 'worktrees', id);
   git(repo, 'worktree', 'add', '-q', '-b', `lobstah/${id}`, wt);
-  const done = path.join(laneDirs('work').done, id);
+  const done = path.join(laneDirs(lane).done, id);
   fs.mkdirSync(done);
   fs.writeFileSync(path.join(done, 'descriptor.json'), JSON.stringify({ id, repo: 'r', brief: 'b' }));
-  appendStatus(id, 'work', verb, 'finished');
-  age(statusPath(id, 'work'), days);
+  appendStatus(id, lane, verb, 'finished');
+  age(statusPath(id, lane), days);
   age(wt, days);
   age(done, days);
   return wt;
@@ -61,6 +62,35 @@ afterEach(() => {
 });
 
 describe('retention cull (the daemon culler)', () => {
+  it('culls an old review chore and retains one inside the configured window', () => {
+    const old = finished('old-review', 4, 'done', 'chore');
+    const recent = finished('recent-review', 2, 'done', 'chore');
+    expect(cliCuller.retention(3, Date.now(), 10, () => {})).toBe(1);
+    expect(fs.existsSync(old)).toBe(false);
+    expect(fs.existsSync(statusPath('old-review', 'chore'))).toBe(false);
+    expect(fs.existsSync(recent)).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('chore').done, 'recent-review'))).toBe(true);
+  });
+
+  it('removes worktrees before an older ack backlog, keeping each dispatch group together', () => {
+    const old = finished('old-checkout', 20);
+    const newer = finished('newer-checkout', 10);
+    for (let i = 0; i < 15; i++) {
+      writeAck({ key: `decision:gone-${i}`, kind: 'decision', stateHash: 'x', at: new Date(Date.now() - 40 * DAY).toISOString(), by: 'test' });
+    }
+    writeAck({ key: 'work:old-checkout', kind: 'landed', stateHash: 'x', at: new Date().toISOString(), by: 'test' });
+    expect(cliCuller.retention(3, Date.now(), 1, () => {})).toBe(1);
+    expect(fs.existsSync(old)).toBe(false);
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'old-checkout'))).toBe(false);
+    expect(fs.existsSync(statusPath('old-checkout', 'work'))).toBe(false);
+    expect(fs.existsSync(path.join(home, 'acks', 'work_old-checkout.json'))).toBe(false);
+    expect(fs.existsSync(newer)).toBe(true);
+    expect(cliCuller.retention(3, Date.now(), 1, () => {})).toBe(1);
+    expect(fs.existsSync(newer)).toBe(false);
+    cliCuller.retention(3, Date.now(), 10, () => {});
+    expect(fs.readdirSync(path.join(home, 'acks'))).toHaveLength(5);
+  });
+
   it('removes a finished dispatch, its worktree, and its state, and keeps its branch', () => {
     const wt = finished('old-done', 20);
     const failedWt = finished('old-failed', 20, 'failed');
