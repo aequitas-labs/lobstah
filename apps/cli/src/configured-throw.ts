@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { parse } from 'smol-toml';
 import { codexTrapHookArgs } from './codex-startup.js';
-import { listCodexHooks } from './codex-hook-list.js';
+import { listCodexHooks, type CodexHookList } from './codex-hook-list.js';
+import { planPluginReview, pluginReviewWatch, type PluginReviewPlan } from './codex-plugin-review.js';
+import type { TmuxRunner } from './tmux-terminal.js';
 import { configuredTrapSlots, harnessProcessAlive, sessionHolders, sessionHolderText, sessionClaimedElsewhere, listTraps, readRoster, readTrap, requestDesktopStart, withConfiguredTrapSlot, configPermissionMode, modelForHarness, shellQuote, type Config, type DesktopStartResult, type TrapRegistration } from '@lobstah/core';
 import { focusRegistration } from './focus.js';
 import { harnessCommand, macTerminalAdapter, tmuxTerminalAdapter, startTimeoutSecs, type TerminalAdapter } from './throw.js';
@@ -28,7 +30,7 @@ function configuredCodexFolderArgs(cwd: string): string[] {
 export type ConfiguredThrowResult = DesktopStartResult | { state: 'listening' | 'starting' | 'live'; profile: string; trapId: string; seconds: number; registration?: TrapRegistration };
 
 /** Start the profile's actual surface; a desktop returns a concrete app-start card for its next turn. */
-export async function throwConfiguredTrap(config: Config, name: string, by: string, options: { command?: string; adapter?: TerminalAdapter; timeoutSecs?: number; pollMs?: number } = {}): Promise<ConfiguredThrowResult> {
+export async function throwConfiguredTrap(config: Config, name: string, by: string, options: { command?: string; adapter?: TerminalAdapter; timeoutSecs?: number; pollMs?: number; listHooks?: (cwd: string) => Promise<CodexHookList | undefined>; tmux?: TmuxRunner } = {}): Promise<ConfiguredThrowResult> {
   const profile = config.traps?.[name];
   if (!profile) throw new Error(`unknown configured trap trap:${name}`);
   const live = listTraps().find((trap) => trap.configured?.profile === name && trap.configured.grounds === profile.grounds);
@@ -49,15 +51,23 @@ export async function throwConfiguredTrap(config: Config, name: string, by: stri
   const launch = harnessCommand({ harness: profile.harness, cwd: slot.cwd, model: modelForHarness(profile.harness, config.harness.model).model,
     config: { permissionMode, ...(config.harness.effort ? { effort: config.harness.effort } : {}) }, ...(resumeSession ? { resume: resumeSession } : {}),
     prompt: `Run ${command} soak --trap ${name} --grounds ${profile.grounds} --session <your own session id> --wait. Use the harness session id announced at session start.` });
-  if (profile.harness === 'codex') launch.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...configuredCodexFolderArgs(slot.cwd), ...codexTrapHookArgs({ listed: await listCodexHooks(slot.cwd) }));
   const terminal = profile.terminal ?? config.soak.terminal ?? 'terminal';
   const adapter = options.adapter ?? (terminal === 'tmux' ? tmuxTerminalAdapter(config) : macTerminalAdapter(terminal));
+  const pluginHooks = config.soak.codexPluginHooks;
+  let review: PluginReviewPlan | undefined;
+  if (profile.harness === 'codex') {
+    const listed = await (options.listHooks ?? listCodexHooks)(slot.cwd);
+    launch.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...configuredCodexFolderArgs(slot.cwd), ...codexTrapHookArgs({ listed, pluginHooks }));
+    review = planPluginReview(slot.cwd, { listed, pluginHooks, tmux: adapter.app === 'tmux' });
+  }
   const started = Date.now();
-  await adapter.launch({ ...launch, trap: `trap:${name}` });
+  const opened = await adapter.launch({ ...launch, trap: `trap:${name}` });
+  const reviewWatch = pluginReviewWatch(review, { label: name, trapId: slot.trapId, grounds: profile.grounds, pane: opened ? opened.tmuxPane : undefined, run: options.tmux, started });
   const deadline = started + startTimeoutSecs({ cfg: config, timeoutSecs: options.timeoutSecs }, profile.harness) * 1000;
   while (Date.now() < deadline) {
     const registration = readTrap(slot.trapId);
     if (registration?.firstParkedAt) return { state: 'listening', profile: name, trapId: slot.trapId, seconds: (Date.now() - started) / 1000, registration };
+    await reviewWatch.tick();
     await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 250));
   }
   return { state: 'starting', profile: name, trapId: slot.trapId, seconds: (Date.now() - started) / 1000 };

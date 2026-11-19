@@ -693,6 +693,70 @@ describe('the start command', () => {
     });
   });
 
+  describe("another plugin's hooks at Codex's hook review", () => {
+    const umeStop = 'ume@ume:hooks/hooks.json:stop:0:0';
+    const listed = async () => new Map([[umeStop, { key: umeStop, command: 'ume hook stop', currentHash: 'sha256:a/sha256:b', trustStatus: 'modified' }]]);
+    const review = '  Hooks need review ⏎  1 hook is new or changed.'.replace(' ⏎ ', '\n');
+    beforeEach(() => { process.env.CODEX_HOME = path.join(tmp, 'codex'); fs.mkdirSync(process.env.CODEX_HOME); });
+    afterEach(() => { delete process.env.CODEX_HOME; });
+    const pluginNotices = () => listNotices().filter((n) => n.kind === 'codex-plugin-hooks');
+
+    processTest('presses Esc in its tmux pane, then the trap signs on without those hooks and says so', async () => {
+      const seen: TerminalLaunch[] = [];
+      const keys: string[][] = [];
+      let escaped = false;
+      // Codex holds the session at the review until Esc; only then does the trap's prompt run.
+      const tmux = async (args: string[]) => {
+        if (args[0] !== 'send-keys') return escaped ? '› Ask Codex to do anything' : review;
+        keys.push(args);
+        escaped = true;
+        const launch = seen[0]!;
+        const ticket = /--ticket (\S+)/.exec(launch.argv.at(-1)!)![1]!;
+        expect(lobstah(launch.cwd, 'soak', '--ticket', ticket, '--session', OTHER, '--harness', 'codex').status).toBe(0);
+        lobstah(launch.cwd, 'soak', '--session', OTHER, '--wait', '--timeout', '0');
+        return '';
+      };
+      const adapter = (): TerminalAdapter => ({ app: 'tmux', launch: async (l) => { seen.push(l); return { tmuxPane: '%9' }; } });
+      const result = await throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', reason: 'test', adapter, tmux, listHooks: listed, pollMs: 50, timeoutSecs: 30 });
+      expect(result.registration.harness).toBe('codex');
+      expect(keys).toEqual([['send-keys', '-t', '%9', 'Escape']]);
+      // No trust for ume: the session flags carry none.
+      expect(seen[0]!.argv.join(' ')).not.toContain('ume@ume');
+      expect(pluginNotices()).toMatchObject([{ refId: result.registration.trapId, text: expect.stringMatching(/^Trap .* started without ume@ume's hooks/) }]);
+    });
+
+    it("ask: says the trap can't start and which plugin, sends no key, and names it again at the stall", async () => {
+      fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\ncodexPluginHooks = "ask"\n');
+      const cfg = loadConfig();
+      cfg.soak.codexStartSecs = 1;
+      const keys: string[][] = [];
+      const tmux = async (args: string[]) => { if (args[0] === 'send-keys') keys.push(args); return review; };
+      const adapter = (): TerminalAdapter => ({ app: 'tmux', launch: async () => ({ tmuxPane: '%9' }) });
+      await expect(throwNew({ cfg, repo: 'r', harness: 'codex', reason: 'test', adapter, tmux, listHooks: listed, pollMs: 50 }))
+        .rejects.toThrow(/Codex needs you to review ume@ume's hooks — in that session press Esc to start without them/);
+      expect(keys).toEqual([]);
+      expect(pluginNotices()).toMatchObject([{ text: expect.stringMatching(/^Codex needs you to review ume@ume's hooks; trap .* can't start until you do\. In its Codex window, press Esc/) }]);
+    });
+
+    it('trust (opt-in): the launch carries session trust for the plugin hook', async () => {
+      fs.appendFileSync(path.join(home, 'config.toml'), '\n[soak]\ncodexPluginHooks = "trust"\n');
+      const install = (name: string, version: string, hooks: string) => {
+        const root = path.join(process.env.CODEX_HOME!, 'plugins', 'cache', name, name, version);
+        fs.mkdirSync(path.join(root, '.codex-plugin'), { recursive: true });
+        fs.mkdirSync(path.join(root, 'hooks'));
+        fs.writeFileSync(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({ name, version }));
+        fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), hooks);
+      };
+      install('lobstah', '0.8.14', fs.readFileSync(new URL('../../../plugins/codex/hooks/hooks.json', import.meta.url), 'utf8'));
+      install('ume', '0.1.0', JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'ume hook stop' }] }] } }));
+      fs.writeFileSync(path.join(process.env.CODEX_HOME!, 'config.toml'), '[plugins."lobstah@lobstah"]\nenabled = true\n[plugins."ume@ume"]\nenabled = true\n');
+      const seen: TerminalLaunch[] = [];
+      const adapter = (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => { seen.push(l); throw new Error('stop here'); } });
+      await expect(throwNew({ cfg: loadConfig(), repo: 'r', harness: 'codex', reason: 'test', adapter, listHooks: async () => undefined })).rejects.toThrow('stop here');
+      expect(seen[0]!.argv.join(' ')).toContain(umeStop);
+    });
+  });
+
   describe('a Codex trap on the shared app-server', () => {
     const base = { cwd: '/w', ticket: 'T', harness: 'codex' };
 

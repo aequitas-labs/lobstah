@@ -36,6 +36,7 @@ export type NoticeKind =
   | 'trap-claim-released'
   | 'trap-not-receiving'
   | 'codex-hooks-stale'
+  | 'codex-plugin-hooks'
   | 'dispatch-progress'
   | 'trap-idle-working'
   | 'trap-stowed'

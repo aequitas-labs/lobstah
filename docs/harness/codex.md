@@ -39,29 +39,47 @@ the plugin's contents (`trusted_content_hash`). If Codex can't answer, lobstah
 computes the hook hash itself, which is enough only before 0.166.
 Thrown sessions also set `check_for_update_on_startup=false` for that
 invocation, so an interactive update picker cannot hold the launch.
+The launcher rejects a plugin definition containing another command; it
+never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
+disabled hook, or approves repo/user/other-plugin hooks. Those still require
+their normal review. Manually launched Codex sessions still use `/hooks`.
 
-The same `hooks.state` also covers every other plugin that
-`$CODEX_HOME/config.toml` enables and Codex has cached under
-`plugins/cache/<marketplace>/<plugin>/<version>/`, such as ume. Each hook in
-that plugin's `hooks/hooks.json` is trusted at its current hash, so updating
-the plugin doesn't hold a thrown trap at the picker. Lobstah uses Codex's
-`hooks/list` hash only when Codex reports the same command and hook hash as
-the installed file. A disabled plugin or hook, a plugin with no cached copy,
-and a hook Codex doesn't list get no trust.
+### Another plugin's hooks
 
-The launcher rejects a lobstah plugin definition containing another command;
-it never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
-disabled hook, or approves the user's `hooks.json` or uncommitted project
-hooks. Those still require their normal review. Manually launched Codex
-sessions still use `/hooks`.
+When another plugin's hooks are new or changed, such as ume's after an
+update, Codex stops a thrown trap at **Hooks need review**. Before launch,
+lobstah asks Codex's `hooks/list` which plugins' hooks it will list there.
+`[soak].codexPluginHooks` chooses what happens next:
 
-Doctor's `codex trap hooks` row names every hook that would still hold a
-thrown trap at that picker: the user's `hooks.json`, each repo's project
-hooks, and any other plugin hook lobstah can't trust, with the reason.
-Plugin hooks apply in every folder, so they're listed once. Their trust
-comes from Codex's own `hooks/list` answer; a disabled one doesn't count.
-When a thrown Codex trap doesn't sign on in time, the error names the same
-hooks and says to trust them in that session's `/hooks`.
+- `"skip"` (the default): lobstah presses Esc at the review in the trap's
+  tmux pane. Esc is Codex's "Continue without trusting (hooks won't run)": the
+  trap starts without those hooks, and Codex saves no trust. Lobstah's own
+  hooks keep their session trust, so they still run. Lobstah presses Esc only
+  when the review lists exactly those plugins' hooks. The helm gets a
+  `codex-plugin-hooks` notice naming each plugin. Trust the hooks once in any
+  Codex session's `/hooks` to run them in traps.
+- `"ask"`: lobstah sends no key. At launch, the helm gets a
+  `codex-plugin-hooks` notice: "Codex needs you to review ume@ume's hooks;
+  trap kind-crab can't start until you do. In its Codex window, press Esc to
+  start without them, or choose "Trust all and continue"." The same notice
+  goes out under `"trust"` for a plugin hook lobstah can't trust.
+- `"trust"`: lobstah supplies session trust for every hook in another
+  installed, enabled plugin's `hooks/hooks.json`, at its current hash. It
+  uses Codex's hash only when Codex reports the same command and hook hash as
+  the installed file. On Codex's shared server, this trust is saved in
+  `~/.codex/config.toml`.
+
+`"skip"` works only in tmux, where lobstah can read the pane. In Terminal and
+iTerm, or when the review also lists the user's or a project's hooks, lobstah
+sends the `"ask"` notice instead.
+
+Doctor's `codex trap hooks` row names every hook that would hold a thrown
+trap at that picker: the user's `hooks.json`, each repo's project hooks, and
+other plugins' hooks. Plugin hooks apply in every folder, so they're listed
+once. Their trust comes from Codex's own `hooks/list` answer; a disabled one
+doesn't count. Other plugins' hooks fail the row with `"ask"`, and warn with
+`"skip"`. When a thrown Codex trap doesn't sign on in time, the error names
+the same hooks and the one step that clears them.
 
 That trust covers the plugin as it was at launch. When the lobstah Codex
 plugin's contents change, a running session refuses lobstah's hooks: the

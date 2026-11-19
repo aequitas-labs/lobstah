@@ -36,7 +36,7 @@ function install(marketplace: string, name: string, version: string, hooks: unkn
 }
 
 const config = (text: string) => fs.writeFileSync(path.join(home, 'config.toml'), `[plugins."lobstah@lobstah"]\nenabled=true\n${text}`);
-const sessionState = (listed?: CodexHookList) => (parse(codexTrapHookArgs({ env: env(), cwd, listed })[1]!) as { hooks: { state: Record<string, Record<string, string>> } }).hooks.state;
+const sessionState = (listed?: CodexHookList, pluginHooks: 'skip' | 'trust' = 'trust') => (parse(codexTrapHookArgs({ env: env(), cwd, listed, pluginHooks })[1]!) as { hooks: { state: Record<string, Record<string, string>> } }).hooks.state;
 
 /** What Codex 0.166 reports for a hook declared in `hooks`, with a two-part hash. */
 function listedFor(key: string, event: string, handler: { command: string }, trustStatus: string, matcher?: string): [string, CodexListedHook] {
@@ -71,6 +71,13 @@ describe('installed Codex plugins', () => {
 });
 
 describe("a Codex trap's trust for other plugins' hooks", () => {
+  it('supplies none by default: only the opt-in trust choice does', () => {
+    const state = sessionState(undefined, 'skip');
+    expect(Object.keys(state).filter((k) => !k.startsWith('lobstah@lobstah:'))).toEqual([]);
+    expect(Object.keys(state).filter((k) => k.startsWith('lobstah@lobstah:'))).toHaveLength(7);
+    expect(codexTrapHookArgs({ env: env(), cwd })).toEqual(codexTrapHookArgs({ env: env(), cwd, pluginHooks: 'skip' }));
+  });
+
   it("computes each installed plugin's hook hashes from its files when Codex can't answer", () => {
     const state = sessionState();
     expect(state[umeStart]).toEqual({ trusted_hash: codexHookHash('SessionStart', undefined, ume.hooks.SessionStart[0]!.hooks[0] as never) });
@@ -115,25 +122,35 @@ describe('what still holds a Codex trap at hook review', () => {
     listedFor(umeStop, 'Stop', ume.hooks.Stop[0]!.hooks[0]!, 'modified'),
   ]);
 
-  it('a changed, installed plugin no longer holds it, and doctor says lobstah trusts it', () => {
-    expect(codexTrapHookBlockers(cwd, { env: env(), listed: changedUme() })).toEqual([]);
-    expect(codexStallReason(cwd, { env: env(), listed: changedUme() })).toBe("no hook would hold it at Codex's hook review");
-    expect(codexTrapHooksRow({ web: { path: cwd } }, { env: env(), listed: changedUme() })).toEqual({
+  it('by default a changed plugin still holds it at the review, named by plugin', () => {
+    expect(codexTrapHookBlockers(cwd, { env: env(), listed: changedUme() }).map((b) => [b.key, b.reason, b.plugin])).toEqual([
+      [umeStart, 'ume@ume changed since it was trusted', 'ume@ume'],
+      [umeStop, 'ume@ume changed since it was trusted', 'ume@ume'],
+    ]);
+    expect(codexTrapHooksRow({ web: { path: cwd } }, { env: env(), listed: changedUme() }).status).toBe('warn');
+  });
+
+  it('with the trust choice, a changed, installed plugin no longer holds it, and doctor says lobstah trusts it', () => {
+    const trust = { env: env(), listed: changedUme(), pluginHooks: 'trust' as const };
+    expect(codexTrapHookBlockers(cwd, trust)).toEqual([]);
+    expect(codexStallReason(cwd, trust)).toBe("no hook would hold it at Codex's hook review");
+    expect(codexTrapHooksRow({ web: { path: cwd } }, trust)).toEqual({
       check: 'codex trap hooks', status: 'ok', detail: 'no hook would hold a Codex trap at hook review (lobstah supplies session trust for 2 installed plugin hooks)',
     });
   });
 
-  it('names a plugin hook lobstah will not trust, why, and the one step that clears it', () => {
+  it('with the trust choice, names a plugin hook lobstah will not trust, why, and the one step that clears it', () => {
     const listed = changedUme();
     listed.set('ghost@acme:hooks/hooks.json:stop:0:0', { key: 'ghost@acme:hooks/hooks.json:stop:0:0', command: 'ghost stop', currentHash: `sha256:${'e'.repeat(64)}`, trustStatus: 'untrusted' });
     const [, stop] = listedFor(umeStop, 'Stop', ume.hooks.Stop[0]!.hooks[0]!, 'modified');
     listed.set(umeStop, { ...stop, command: 'ume hook stop --new' });
-    expect(codexTrapHookBlockers(cwd, { env: env(), listed }).map((b) => [b.key, b.reason])).toEqual([
+    const trust = { env: env(), listed, pluginHooks: 'trust' as const };
+    expect(codexTrapHookBlockers(cwd, trust).map((b) => [b.key, b.reason])).toEqual([
       [umeStop, `ume@ume changed since it was trusted; lobstah supplies no trust because Codex reports a different hook than ${path.join(home, 'plugins', 'cache', 'ume', 'ume', '0.1.0', 'hooks', 'hooks.json')} declares`],
       ['ghost@acme:hooks/hooks.json:stop:0:0', 'ghost@acme never trusted; lobstah supplies no trust because the plugin is not installed and enabled in this Codex home'],
     ]);
-    expect(codexStallReason(cwd, { env: env(), listed })).toMatch(/^Codex is likely waiting at "Hooks need review" for ume@ume:hooks\/hooks\.json:stop:0:0 \(`ume hook stop --new`, .*ghost@acme:hooks\/hooks\.json:stop:0:0 \(`ghost stop`, .* — trust them in that session's \/hooks$/);
-    const row = codexTrapHooksRow({ web: { path: cwd } }, { env: env(), listed });
+    expect(codexStallReason(cwd, trust)).toMatch(/^Codex is likely waiting at "Hooks need review" for ume@ume:hooks\/hooks\.json:stop:0:0 \(`ume hook stop --new`, .*ghost@acme:hooks\/hooks\.json:stop:0:0 \(`ghost stop`, .* — trust them in that session's \/hooks$/);
+    const row = codexTrapHooksRow({ web: { path: cwd } }, trust);
     expect(row.status).toBe('fail');
     expect(row.detail).toContain('every repo: ume@ume:hooks/hooks.json:stop:0:0');
     expect(row.detail).toContain('ghost@acme:hooks/hooks.json:stop:0:0');

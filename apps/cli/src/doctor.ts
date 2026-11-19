@@ -479,7 +479,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
     push(row.check, row.status, row.detail);
   }
   try {
-    const trapHooks = codexTrapHooksRow(loadConfig().repos, { listed });
+    const cfg = loadConfig();
+    const trapHooks = codexTrapHooksRow(cfg.repos, { listed, pluginHooks: cfg.soak.codexPluginHooks });
     push(trapHooks.check, trapHooks.status, trapHooks.detail);
   } catch {
     // an unloadable config is already its own row

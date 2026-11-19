@@ -383,6 +383,14 @@ export interface SoakConfig {
    * --remote-control` does for one: scheduled and batch throws too.
    */
   codexRemoteControl: boolean;
+  /**
+   * What a Codex trap does when another plugin's hooks are new or changed
+   * and Codex stops at "Hooks need review": `skip` presses Esc there, so the
+   * trap starts without those hooks; `ask` leaves the review to a person;
+   * `trust` trusts them at their current hash. Every choice posts a notice
+   * that names the plugin.
+   */
+  codexPluginHooks: CodexPluginHooks;
 }
 
 /** How lobstah's tmux server groups trap panes into windows. */
@@ -602,6 +610,10 @@ function parseAttentionKinds(raw: unknown): AttentionKind[] {
   return [...new Set(raw as AttentionKind[])];
 }
 
+/** `[soak].codexPluginHooks`: see SoakConfig. */
+export const CODEX_PLUGIN_HOOKS = ['skip', 'ask', 'trust'] as const;
+export type CodexPluginHooks = (typeof CODEX_PLUGIN_HOOKS)[number];
+
 function parseSoak(raw: unknown): SoakConfig {
   const soak: SoakConfig = { ...DEFAULT_SOAK, ...((raw as Partial<SoakConfig>) ?? {}) };
   if (!Number.isInteger(soak.idleStowMins) || soak.idleStowMins < 0) throw new Error('soak.idleStowMins must be a nonnegative whole number');
@@ -612,6 +624,9 @@ function parseSoak(raw: unknown): SoakConfig {
   if (typeof soak.acceptWharfStarts !== 'boolean') throw new Error('soak.acceptWharfStarts must be true or false');
   if (typeof soak.swapOnLimit !== 'boolean') throw new Error('soak.swapOnLimit must be true or false');
   if (typeof soak.codexRemoteControl !== 'boolean') throw new Error('soak.codexRemoteControl must be true or false');
+  if (!CODEX_PLUGIN_HOOKS.includes(soak.codexPluginHooks)) {
+    throw new Error(`soak.codexPluginHooks: unknown choice "${String(soak.codexPluginHooks)}" in ${configPath()} — use ${CODEX_PLUGIN_HOOKS.map((c) => `"${c}"`).join(', ')}`);
+  }
   if (soak.terminal !== undefined && soak.terminal !== 'terminal' && soak.terminal !== 'iterm' && soak.terminal !== 'tmux') {
     throw new Error(`soak.terminal: unknown terminal "${String(soak.terminal)}" in ${configPath()} — use "terminal", "iterm" or "tmux"`);
   }
@@ -667,6 +682,7 @@ export const DEFAULT_SOAK: SoakConfig = {
   tmuxPages: 'repo',
   tmuxPageSize: 6,
   codexRemoteControl: false,
+  codexPluginHooks: 'skip',
 };
 
 export const DEFAULT_HELM: HelmConfig = {
