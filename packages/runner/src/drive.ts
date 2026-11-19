@@ -15,6 +15,8 @@ import {
   unhandled,
   writeActivity,
   liveHeavyTickets,
+  parkQuestion,
+  questionPark,
 } from '@lobstah/core';
 import type { Lane, NormalizedEvent, Verb } from '@lobstah/core';
 import type { AdapterRun } from '@lobstah/adapters';
@@ -22,7 +24,7 @@ import type { AdapterRun } from '@lobstah/adapters';
 /**
  * Verbs a worker reports when it stops to wait on a human. A turn that ends
  * on `needs-decision` or `blocked` keeps the run open until the inbox
- * answers, a cancel, or the wall clock. A turn that ends on `paused` parks
+ * answers, a cancel, or the question-wait deadline. A turn that ends on `paused` parks
  * the dispatch: the runner ends the session and exits, and the daemon
  * resumes the session when the wait ends. The contract tells the worker it
  * will be resumed.
@@ -30,6 +32,8 @@ import type { AdapterRun } from '@lobstah/adapters';
 export const WAITING_VERBS: readonly Verb[] = ['needs-decision', 'blocked', 'paused'];
 
 export interface DriveOpts {
+  /** Unanswered person waits park after this duration; active-work limits stay stopped meanwhile. */
+  questionWaitMs?: number;
   id: string;
   lane: Lane;
   /** Inbox/cancel poll cadence while waiting; each poll also heartbeats. */
@@ -55,7 +59,7 @@ export interface DriveOpts {
   exitGraceMs?: number;
   /** Called once, when a turn ends on the worker's `done` or `failed`. */
   onFinal?: () => void;
-  /** Called once, when a turn ends on the worker's `paused` and the run parks. */
+  /** Called once when an external pause or expired person wait parks the run. */
   onPark?: () => void;
 }
 
@@ -199,7 +203,8 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
     if (park) {
       parked = true;
       const on = readStatusLog(id, lane).at(-1)?.waitingOn;
-      record({ at: new Date().toISOString(), type: 'runner', data: { parked: 'paused', ...(on ? { on } : {}) } });
+      const question = questionPark(id, lane);
+      record({ at: new Date().toISOString(), type: 'runner', data: { parked: question ? 'question' : 'paused', ...(question ? { note: question.note } : {}), ...(on ? { on } : {}) } });
       opts.onPark?.();
     } else {
       final = true;
@@ -232,6 +237,10 @@ export async function drive(run: AdapterRun, opts: DriveOpts): Promise<DriveResu
       if (stopped() || finished) return;
       if (cancelRequested(id, lane)) return cancel();
       if (deliver(run, id, lane) > 0) return answered(verb);
+      if (parkQuestion(id, lane, (opts.questionWaitMs ?? 86400_000) / 1000)) {
+        finish(true);
+        return;
+      }
       touchEvents(id, lane);
       await sleep(pollMs);
     }

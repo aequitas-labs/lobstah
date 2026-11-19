@@ -30,7 +30,7 @@ import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from '@lobstah/pick';
 import { codexTrapHooksRow } from './codex-startup.js';
 import { pickRunning } from './reviews-setup.js';
-import { planPressureCull } from './cull.js';
+import { keptWorktreeSummary, planPressureCull } from './cull.js';
 import { mirrorScope } from './wharf-mirror.js';
 import { parkedSummary } from './parked-view.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
@@ -109,12 +109,15 @@ export function pluginRows(cliVersion: string, opts: { env?: NodeJS.ProcessEnv; 
 }
 
 /** Runs `gh api <path>` (a GET) and returns the parsed body or gh's first error line. */
-export type GhApi = (apiPath: string) => { ok: true; out: string } | { ok: false; err: string };
+export type GhApi = (apiPath: string, token?: string) => { ok: true; out: string } | { ok: false; err: string };
 
-export const ghApi: GhApi = (apiPath) => {
-  const res = spawnSync('gh', ['api', '--method', 'GET', apiPath], { encoding: 'utf8', timeout: 30_000 });
-  if (res.error) return { ok: false, err: `gh: ${res.error.message}` };
-  if (res.status !== 0) return { ok: false, err: firstMeaningfulLine(res.stderr, res.stdout) ?? `gh exited ${res.status}` };
+export const ghApi: GhApi = (apiPath, token) => {
+  const res = spawnSync('gh', ['api', '--method', 'GET', apiPath], { encoding: 'utf8', timeout: 30_000,
+    ...(token ? { env: { ...process.env, GH_TOKEN: token } } : {}),
+  });
+  const redact = (text: string): string => token ? text.split(token).join('[redacted]') : text;
+  if (res.error) return { ok: false, err: redact(`gh: ${res.error.message}`) };
+  if (res.status !== 0) return { ok: false, err: redact(firstMeaningfulLine(res.stderr, res.stdout) ?? `gh exited ${res.status}`) };
   return { ok: true, out: res.stdout };
 };
 
@@ -127,6 +130,7 @@ export function githubRows(
   repos: Array<{ key: string; forgeRepo: string; trunk: string }>,
   api: GhApi = ghApi,
   hasGh = onPath('gh'),
+  authRemedy?: string,
 ): DoctorRow[] {
   // No GitHub repo configured: nothing to probe, and no network call to make.
   if (repos.length === 0) return [{ check: 'github', status: 'skip', detail: 'no configured repo has a GitHub origin' }];
@@ -154,7 +158,8 @@ export function githubRows(
       rows.push({ check: 'github', status: 'ok', detail: `gh runs as a GitHub App installation (${n} repos)` });
     } else {
       const cls = classifyGhError(user.err);
-      rows.push({ check: 'github', status: 'fail', detail: `gh identity unknown: ${user.err}${cls.remedy ? ` — ${cls.remedy}` : ''}` });
+      const remedy = cls.kind === 'auth' ? authRemedy ?? cls.remedy : cls.remedy;
+      rows.push({ check: 'github', status: 'fail', detail: `gh identity unknown: ${user.err}${remedy ? ` — ${remedy}` : ''}` });
       return rows;
     }
   }
@@ -176,13 +181,50 @@ export function githubRows(
     const cls = classifyGhError(err);
     // A forbidden read names the permission for that probe, not the generic Checks one.
     const forbidden = cls.kind === 'checks-permission' || cls.kind === 'permission' || /HTTP 403/.test(err);
-    const remedy = forbidden ? `grant the GitHub App \`${PROBE_PERMISSION[first.what]}: read\`; see docs/github.md` : cls.remedy;
+    const remedy = forbidden ? `grant the GitHub App \`${PROBE_PERMISSION[first.what]}: read\`; see docs/github.md` : cls.kind === 'auth' ? authRemedy ?? cls.remedy : cls.remedy;
     rows.push({
       check: `github ${r.key}`,
       status: 'warn',
       detail: `${r.forgeRepo}: ${detail} — ${first.what}: ${err}${remedy ? ` — ${remedy}` : ''}`,
     });
   }
+  return rows;
+}
+
+/** A token command keeps both output streams private, including when it fails. */
+export function doctorGithubToken(command: string): string {
+  const result = spawnSync(command, { shell: true, encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.error || result.status !== 0) throw new Error('GitHub token command failed. Check pickup.github.tokenCommand.');
+  const token = result.stdout.trim();
+  if (!token || /[\r\n]/.test(token)) throw new Error('GitHub token command must return one token. Check pickup.github.tokenCommand.');
+  return token;
+}
+
+/** Probe pickup's identity and permissions; a separate local gh login is informational. */
+export function configuredGithubRows(
+  repos: Array<{ key: string; forgeRepo: string; trunk: string }>,
+  tokenCommand?: string,
+  api: GhApi = ghApi,
+  readToken: (command: string) => string = doctorGithubToken,
+  hasGh = onPath('gh'),
+): DoctorRow[] {
+  if (!tokenCommand || !hasGh || repos.length === 0) return githubRows(repos, api, hasGh);
+  let token: string;
+  try { token = readToken(tokenCommand); }
+  catch {
+    return [{ check: 'github', status: 'fail', detail: 'GitHub token command failed. Check pickup.github.tokenCommand.' }];
+  }
+  if (!token.trim() || /[\r\n]/.test(token.trim())) {
+    return [{ check: 'github', status: 'fail', detail: 'GitHub token command must return one token. Check pickup.github.tokenCommand.' }];
+  }
+  token = token.trim();
+  const rows = githubRows(repos, (apiPath) => {
+    const result = api(apiPath, token);
+    return result.ok ? result : { ok: false, err: result.err.split(token).join('[redacted]') };
+  }, hasGh, 'check pickup.github.tokenCommand and refresh its GitHub credentials');
+  const login = api('user');
+  rows.push({ check: 'gh login', status: 'skip',
+    detail: `local gh login ${login.ok ? 'available' : 'unavailable'}; GitHub probes use pickup.github.tokenCommand` });
   return rows;
 }
 
@@ -221,6 +263,7 @@ export function diskRow(cfg: Config, freeBytes: FreeBytesReader = statfsFreeByte
     `retentionDays ${retentionDays > 0 ? retentionDays : 'off'}`,
     cullable.length > 0 ? `${cullable.length} cullable worktree(s), oldest ${oldest}d` : 'no cullable worktrees',
   ];
+  parts.push(...keptWorktreeSummary(new Set(cullable.map((item) => item.id))));
   parts.push(`releaseOnMerge ${cfg.limits.releaseOnMerge ? 'on' : 'off'}`);
   const kept = readKeptWorktrees();
   if (kept.length > 0) {
@@ -333,11 +376,15 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
     );
   }
 
-  for (const row of githubRows(githubRepos(cfg.repos))) push(row.check, row.status, row.detail);
+  const pickup = parsed.pickup as { github?: { tokenCommand?: unknown } } | undefined;
+  const tokenCommand = typeof pickup?.github?.tokenCommand === 'string' ? pickup.github.tokenCommand : undefined;
+  let doctorToken: string | undefined;
+  const tokenSource = tokenCommand ? () => doctorToken ??= doctorGithubToken(tokenCommand) : undefined;
+  for (const row of configuredGithubRows(githubRepos(cfg.repos), tokenCommand, ghApi, tokenSource)) push(row.check, row.status, row.detail);
 
   if (parsed.pickup || cfg.reviews.enabled) {
     try {
-      const pk = loadPickupConfig();
+      const pk = loadPickupConfig(tokenSource);
       push('pickup', pk.github.some((g) => g.issues || g.prFeedback) ? 'warn' : 'ok', pickupPlan(pk).join('; '));
       if (cfg.reviews.enabled) push('reviews', pickRunning(now) ? 'ok' : 'warn', `${pk.reviews?.identity ?? 'unknown identity'}; mode ${cfg.reviews.mode}; ${Object.keys(cfg.repos).map(key => { const r = reviewSettings(cfg.reviews, key); return `${key}: ${r.mode} (${r.publish ? 'publish COMMENT' : 'draft'})`; }).join('; ')}${Object.keys(cfg.repos).length ? '; ' : ''}pick ${pickRunning(now) ? 'running' : 'not running — lobstah setup reviews'}`);
     } catch (err) {
