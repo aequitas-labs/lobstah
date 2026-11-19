@@ -1764,6 +1764,19 @@ and a trap's worktree is never released. Branches and the dispatch record
 stay; `lobstah catch` says `worktree: released on merge (<time>)`. One
 `worktree-released` notice per pass lists what went.
 
+Under `minFreeGB` or `cacheMinFreeGB` pressure, cleanup first clears
+configured `cacheDirs` in finished checkouts whose PRs only await review,
+then in idle traps. If space remains short, clean, fully pushed review-wait
+checkouts may be removed. PR and dispatch records and branches stay; the
+next round allocates a checkout if the old one is gone. Clearing a reused
+checkout's caches makes its next round run setup again. Dirty work, unpushed
+commits, live traps, and queued or active chains stay protected.
+
+Doctor and cull previews group retained worktrees by reason and show their
+sizes, such as `5 kept for open PRs, 35 GB; 2 dirty, 4 GB`. A disk hold wakes
+the helm with elapsed wait time when it starts and every thirty minutes
+until space returns.
+
 `lobstah doctor` prints a `disk` row: free space on the worktrees volume, the
 limits, the count and age of the worktrees a cull could remove, and any
 merged PR's worktree that `releaseOnMerge` kept, with the reason:

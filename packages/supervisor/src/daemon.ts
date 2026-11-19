@@ -529,10 +529,18 @@ function liftHold(log: (m: string) => void, text: string): void {
  * false, and the work stays queued. One notice when a hold starts, one when
  * it clears. A failed read never blocks claiming.
  */
+/** A continuing disk hold asks for attention again every thirty minutes. */
+export const DISK_HOLD_NOTICE_INTERVAL_MS = 30 * 60_000;
+
 export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
   recoverTrapCaches(cfg, worktreesDir(), hooks.freeBytes ?? statfsFreeBytes, log);
   const need = (cfg.limits.minFreeGB ?? 0) * GB;
+  const cacheThreshold = (cfg.limits.cacheMinFreeGB ?? 0) * GB;
   if (!(need > 0)) {
+    if (cacheThreshold > 0 && hooks.culler?.start) {
+      try { if ((hooks.freeBytes ?? statfsFreeBytes)(worktreesDir()) < cacheThreshold) hooks.culler.start(log); }
+      catch { /* A failed read never blocks claiming. */ }
+    }
     liftHold(log, 'free-space hold cleared: [limits].minFreeGB is off');
     return true;
   }
@@ -546,7 +554,7 @@ export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => 
     log(`free-space check failed (${err instanceof Error ? err.message : String(err)}); claiming anyway`);
     return true;
   }
-  if (free < need && hooks.culler?.start) {
+  if (free < Math.max(need, cacheThreshold) && hooks.culler?.start) {
     hooks.culler.start(log);
   } else if (free < need && hooks.culler) {
     try {
@@ -563,10 +571,15 @@ export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => 
   }
   const prior = readHold();
   const at = new Date(now).toISOString();
-  writeHold({ since: prior?.since ?? at, checkedAt: at, freeBytes: free, needBytes: need, dir });
-  if (!prior) {
-    const text = `dispatches held: ${formatGB(free)} free on ${dir}, needs ${formatGB(need)} ([limits].minFreeGB) — queued work waits`;
-    postNotice({ kind: 'disk-held', text });
+  const since = prior?.since ?? at;
+  const lastNotice = Date.parse(prior?.lastNoticedAt ?? since);
+  const announce = !prior || now - lastNotice >= DISK_HOLD_NOTICE_INTERVAL_MS;
+  writeHold({ since, checkedAt: at, lastNoticedAt: announce ? at : prior?.lastNoticedAt ?? since, freeBytes: free, needBytes: need, dir });
+  if (announce) {
+    const minutes = Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
+    const count = pendingIds('work').length + pendingIds('chore').length;
+    const text = `${count} queued dispatch(es) held for ${minutes} min: ${formatGB(free)} free on ${dir}, needs ${formatGB(need)}. Free disk space to resume dispatches.`;
+    postNotice({ kind: 'disk-held', text, quiet: false });
     log(text);
   }
   return false;
