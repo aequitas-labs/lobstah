@@ -263,6 +263,7 @@ it("renders the wharf in the local glass's own views and tabs", async () => {
   const g = await page();
   expect(Array.from(g.doc.querySelectorAll('#tabs a')).map((a) => a.getAttribute('data-tab'))).toEqual([
     'deck',
+    'helm',
     'dispatches',
     'traps',
     'boats',

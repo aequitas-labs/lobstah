@@ -327,7 +327,7 @@ describe('an account with no mirror boat', () => {
   it('shows the tabs the wharf has always shown', async () => {
     const h = await hosted('#deck', { boats: [] });
     const tabs = Array.from(h.doc.querySelectorAll('#tabs a')).map((a) => a.getAttribute('data-tab'));
-    expect(tabs).toEqual(['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
+    expect(tabs).toEqual(['deck', 'helm', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
   });
 });
 
