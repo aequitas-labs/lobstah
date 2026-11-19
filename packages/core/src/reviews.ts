@@ -509,7 +509,7 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
   // Preserve its ownership receipt, but never carry automatic publishing into repair.
   const refreshPending = !authorAskedAgain && latest && latest.headSha !== seen.pr.headSha &&
     ['drafting', 'drafted', 'stale', 'failed', 'requested'].includes(latest.state) &&
-    (latest.staged || latest.draftedAt || latest.refresh || latest.state === 'drafting');
+    (latest.staged || latest.draftedAt || latest.refresh || ['drafting', 'drafted', 'stale'].includes(latest.state));
   // A drafting round is superseded too: pick cancels its job, then removes its checkout.
   for (const r of item.rounds) {
     if (OPEN_STATES.includes(r.state)) {

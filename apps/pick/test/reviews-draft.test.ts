@@ -24,7 +24,7 @@ import {
   redraftReview,
   withdrawUnseenReviews,
 } from '@lobstah/core';
-import { draftReviewOnDemand, draftReviews, requestNewReview } from '../src/loops/reviews.js';
+import { draftReviewOnDemand, draftReviews, requestNewReview, refreshReviewDrafts } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
 import { REVIEW_DECISIONS } from '../../../test/review-decisions.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -548,4 +548,68 @@ it('keeps a June request (#689) visible without drafting in notify mode, regardl
   expect(latestRound(readReview(key)!)).toMatchObject({ state: 'requested' });
   expect(latestRound(readReview(key)!)!.reason).toBeUndefined();
   expect(pendingIds('chore')).toEqual([]);
+});
+
+
+describe('automatic draft repair', () => {
+  it.each(['on-demand', 'auto-draft', 'auto-review'])('repairs stale and staging-failed drafts in %s without publishing permission', async mode => {
+    config(`mode = "${mode}"`, 'autoPostApprove = "auto-post"', 'autoPostRequestChanges = "auto-post"');
+    request();
+    const item = readReview(KEY)!;
+    Object.assign(item.rounds[0]!, { state: 'stale', dispatch: 'old', staged: { reviewId: '77', at: new Date(NOW).toISOString() } });
+    writeReview(item);
+    await refreshReviewDrafts({ now: NOW });
+    draftReviews('chris', () => {}, NOW);
+    expect(round()).toMatchObject({ state: 'drafting', manualPublishOnly: true, publish: false, draftOnly: true, autoPostApprove: 'ask', autoPostRequestChanges: 'ask' });
+    expect(round().dispatch).not.toBe('old');
+    expect(pendingIds('chore')).toHaveLength(1);
+    const failed = readReview(KEY)!;
+    Object.assign(failed.rounds[0]!, { state: 'drafted', reason: 'stage failed: invalid line' });
+    writeReview(failed);
+    await refreshReviewDrafts({ now: NOW + 1 });
+    expect(round().state).toBe('requested'); // repeated failures back off before starting another job
+    await refreshReviewDrafts({ now: NOW + 60_001 });
+    draftReviews('chris', () => {}, NOW + 60_001);
+    expect(round()).toMatchObject({ state: 'drafting', manualPublishOnly: true, draftOnly: true });
+    expect(round().reason).toBeUndefined();
+    expect(pendingIds('chore')).toHaveLength(1);
+  });
+
+  it('automatically replaces a ready on-demand draft after a push', () => {
+    config('mode = "on-demand"'); request();
+    const item = readReview(KEY)!;
+    item.rounds[0]!.state = 'drafted'; writeReview(item);
+    request({ head: 'bbbbbbb2' });
+    expect(round()).toMatchObject({ state: 'requested', manualPublishOnly: true, headSha: 'bbbbbbb2' });
+    draftReviews('chris', () => {}, NOW + 30_001);
+    expect(round()).toMatchObject({ state: 'drafting', draftOnly: true, publish: false });
+  });
+
+  it('repairs a cached ready draft whose inline anchors no longer cover the PR head', async () => {
+    config('mode = "on-demand"'); request();
+    const item = readReview(KEY)!;
+    item.pr.headSha = 'bbbbbbb2';
+    item.rounds[0]!.state = 'drafted'; writeReview(item);
+    const dir = reviewRoundDir(KEY, item.rounds[0]!.id)!;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), 'Check the changed line.');
+    fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([{ path: 'a.ts', line: 1, body: 'Check this.' }]));
+    await refreshReviewDrafts({ now: NOW });
+    draftReviews('chris', () => {}, NOW);
+    expect(round()).toMatchObject({ state: 'drafting', manualPublishOnly: true, headSha: 'bbbbbbb2' });
+  });
+
+  it('leaves muted drafts, closed PRs, and unrelated failures alone', async () => {
+    config(); request();
+    for (const over of [{ mutedAt: new Date(NOW).toISOString() }, { pr: { ...readReview(KEY)!.pr, state: 'CLOSED' as const } }, {}]) {
+      const item = readReview(KEY)!;
+      delete item.mutedAt; item.pr.state = 'OPEN';
+      Object.assign(item, over);
+      Object.assign(item.rounds[0]!, { state: Object.keys(over).length ? 'stale' : 'failed', reason: 'the review job was cancelled' });
+      writeReview(item);
+      await refreshReviewDrafts({ now: NOW });
+      expect(round().manualPublishOnly).toBeUndefined();
+      expect(pendingIds('chore')).toEqual([]);
+    }
+  });
 });

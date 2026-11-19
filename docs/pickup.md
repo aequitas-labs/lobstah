@@ -413,6 +413,11 @@ The loop's doctrine, in full:
   id. Later ticks poll the result; queued or pending does not mean merged.
   Missing, branching or out-of-scope members hold the stack.
   `method` remains per repo for both paths.
+- **Transient stack failures retry.** Network errors, server errors, and
+  409/422 merge conflicts get up to five attempts over about ten minutes.
+  Each retry refreshes the PR and stack state before sending another request,
+  because GitHub may have merged despite returning an error. Other client
+  errors stop immediately. Retry deadlines survive pickup restarts.
 - **`scope = "own"` is the safety default.** Pickup merges work it dispatched.
   Widening to human-authored PRs is a deliberate config change.
 
