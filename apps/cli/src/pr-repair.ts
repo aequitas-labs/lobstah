@@ -438,10 +438,10 @@ export function reconcilePrRepairs(log: (message: string) => void, cap = 3, opts
       };
       const stop = (reason: string, streak?: RepairStreak): void => {
         const stopped: PrRecord = { ...pr, ...(streak ? { repairStreak: streak } : {}),
-          repair: { headSha: pr.headSha, kind, attempts, maxAttempts: limit, status: 'gave-up', reason } };
+          repair: { headSha: pr.headSha, kind, attempts, maxAttempts: limit, status: 'gave-up', reason, stoppedAt: new Date(now).toISOString() } };
         writePr(stopped);
         postNotice({ kind: 'repair-stopped', text: `${prKeyLabel(pr.key, pr.title)}: repairs stopped — ${reason} (${pr.url})`,
-          refId: owner, repo: storedDescriptor(owner, 'work')?.repo, dedupeKey: `repair-stopped-${pr.key}-${pr.headSha}` });
+          refId: owner, repo: storedDescriptor(owner, 'work')?.repo, dedupeKey: `repair-stopped-${pr.key}-${pr.headSha}-${stopped.repair!.stoppedAt}` });
         alert(stopped);
         log(`repair ${watch.key}: stopped — ${reason}`);
       };

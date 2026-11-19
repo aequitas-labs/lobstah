@@ -19,6 +19,7 @@ import {
   mergeEvidence,
   readEvidence,
   readPr,
+  prStateHash,
   readWatch,
   recordPush,
   releaseHeldWatches,
@@ -324,6 +325,22 @@ describe('the repair circuit breaker', () => {
     upsertPr(observed(P, { headSha: sha('5'), review, observedAt: iso(later + step + 4000) }), P.owner);
     expect(repair(3, { now: later + 2 * step })).toBe(0);
     expect(readPr(key(1))?.repair?.status).toBe('gave-up');
+  });
+
+  it('raises a new alert and attention state if another review round stops at the same head', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nmaxRepairsWithoutProgress = 1\n');
+    stand(P);
+    repair();
+    repairedAt(P.sha, T0 + 100_000);
+    expect(repair(3, { now: later + step })).toBe(0);
+    const first = prStateHash(readPr(key(1))!);
+    upsertPr(observed(P, { review: { changesRequested: true, lastInlineCommentAt: iso(later + step) },
+      observedAt: iso(later + step + 1000) }), P.owner);
+    expect(repair(3, { now: later + step + 2000 })).toBe(1);
+    repairedAt(P.sha, later + step + 3000);
+    expect(repair(3, { now: later + 2 * step })).toBe(0);
+    expect(prStateHash(readPr(key(1))!)).not.toBe(first);
+    expect(listNotices(50).filter((n) => n.kind === 'repair-stopped')).toHaveLength(2);
   });
 
   it('allows successive reviewer rounds while unchanged reviews and approvals keep the streak', () => {
