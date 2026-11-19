@@ -14,14 +14,20 @@ export interface ReviewThreadCall {
   reply?: string;
 }
 
-/** An earlier thread the draft resolves on publish, unless the person unticks it. */
-export interface ReviewThreadToResolve {
+/** One of the reviewer's own threads that a draft found fully fixed at its head. */
+export interface FixedReviewThread {
   id: string;
   path: string;
   line: number | null;
   url: string;
   reason: string;
-  resolve: boolean;
+}
+
+/** A thread lobstah resolved, or tried to, when a draft found it fixed. */
+export interface ReviewThreadResolution extends FixedReviewThread {
+  at: string;
+  /** Why GitHub did not resolve it; the thread stays open. */
+  failed?: string;
 }
 
 const oneLine = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && !/[\r\n]/.test(value);
@@ -57,13 +63,11 @@ export function ownReviewThreads(threads: readonly ReviewThread[] | undefined, i
  * The draft's fully addressed calls on the identity's own open threads, as
  * observed when the job started. A call on any other thread is dropped.
  */
-export function reviewThreadsToResolve(round: { openThreads?: ReviewThread[]; threadsKeptOpen?: string[] }, calls: readonly ReviewThreadCall[] | undefined,
-  identity: string | undefined): ReviewThreadToResolve[] {
+export function fixedReviewThreads(round: { openThreads?: ReviewThread[] }, calls: readonly ReviewThreadCall[] | undefined, identity: string | undefined): FixedReviewThread[] {
   const own = new Map(ownReviewThreads(round.openThreads, identity).map(thread => [thread.id, thread]));
   return (calls ?? []).flatMap(call => {
     const thread = call.status === 'addressed' ? own.get(call.id) : undefined;
-    return thread ? [{ id: thread.id, path: thread.path, line: thread.line, url: thread.comments[0]!.url, reason: call.reason,
-      resolve: !round.threadsKeptOpen?.includes(thread.id) }] : [];
+    return thread ? [{ id: thread.id, path: thread.path, line: thread.line, url: thread.comments[0]!.url, reason: call.reason }] : [];
   });
 }
 

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { chooseReviewThread, latestRound, observeReviewRequest, readReview, readRoundDraft, reviewBrief, reviewRoundDir, writeReview } from '../src/reviews.js';
-import type { ReviewDraft, ReviewThread } from '../src/reviews.js';
-import { ownReviewThreads, parseReviewThreadCalls, reviewThreadReplies, reviewThreadsToResolve } from '../src/review-threads.js';
+import { latestRound, observeReviewRequest, readReview, readRoundDraft, reviewBrief, reviewRoundDir, writeReview } from '../src/reviews.js';
+import type { ReviewThread } from '../src/reviews.js';
+import { fixedReviewThreads, ownReviewThreads, parseReviewThreadCalls, reviewThreadReplies } from '../src/review-threads.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -76,11 +76,12 @@ describe('only the reviewer’s own threads', () => {
     expect(ownReviewThreads(OPEN, undefined)).toEqual([]);
   });
 
-  it('offers only addressed calls on own threads, with the reason and a link', () => {
+  it('treats only fully addressed calls on own threads as fixed, with the reason and a link', () => {
     const round = latestRound(readReview(key)!)!;
-    expect(reviewThreadsToResolve(round, CALLS as never, 'chris')).toEqual([
-      { id: 'mine-fixed', path: 'src/a.ts', line: 4, url: 'https://github.com/acme/web/pull/7#discussion_mine-fixed', reason: 'The retry now holds the lock.', resolve: true },
+    expect(fixedReviewThreads(round, CALLS as never, 'chris')).toEqual([
+      { id: 'mine-fixed', path: 'src/a.ts', line: 4, url: 'https://github.com/acme/web/pull/7#discussion_mine-fixed', reason: 'The retry now holds the lock.' },
     ]);
+    expect(fixedReviewThreads({}, CALLS as never, 'chris')).toEqual([]);
   });
 
   it('writes replies only for own threads that stay open', () => {
@@ -93,23 +94,8 @@ describe('only the reviewer’s own threads', () => {
     const item = readReview(key)!;
     const brief = reviewBrief(item, latestRound(item)!, { identity: 'chris', id: 'job', outDir: '/tmp/d', checkout: '/tmp/c' });
     expect(brief).toContain('Threads chris opened that are still unresolved (ids): ["mine-fixed","mine-partly"]');
+    expect(brief).toContain('lobstah resolves those threads as soon as this draft is done');
     const none = reviewBrief(item, { ...latestRound(item)!, openThreads: [thread('theirs', 'sam')] }, { identity: 'chris', id: 'job', outDir: '/tmp/d', checkout: '/tmp/c' });
     expect(none).not.toContain('Threads chris opened');
-  });
-});
-
-describe('unticking a thread', () => {
-  it('keeps an unticked thread open and ticks it again', () => {
-    expect(chooseReviewThread(key, draft, 'mine-fixed', false)).toBeUndefined();
-    expect(latestRound(readReview(key)!)!.threadsKeptOpen).toEqual(['mine-fixed']);
-    const calls = (readRoundDraft(key, draft.roundId) as ReviewDraft).threads;
-    expect(reviewThreadsToResolve(latestRound(readReview(key)!)!, calls, 'chris')).toMatchObject([{ id: 'mine-fixed', resolve: false }]);
-    expect(chooseReviewThread(key, draft, 'mine-fixed', true)).toBeUndefined();
-    expect(latestRound(readReview(key)!)!.threadsKeptOpen).toBeUndefined();
-  });
-
-  it('refuses a thread that is not offered, and a stale page', () => {
-    expect(chooseReviewThread(key, draft, 'theirs', false)).toBe('This thread is no longer in the draft. Reload it before choosing threads.');
-    expect(chooseReviewThread(key, { ...draft, headSha: 'old' }, 'mine-fixed', false)).toBe('This draft has changed. Reload it before choosing threads.');
   });
 });

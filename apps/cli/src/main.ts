@@ -2039,8 +2039,7 @@ async function mainCli(): Promise<void> {
         } else {
           const out = await postReview(key, { by: 'cli', event: 'COMMENT' });
           if (!out.posted) throw new Error(out.why);
-          console.log(toonKV({ key, state: 'posted', reviewId: out.reviewId, event: 'COMMENT',
-            ...(out.unresolved ? { unresolvedThreads: out.unresolved.map(thread => `${thread.url} (${thread.why})`).join('; ') } : {}) }));
+          console.log(toonKV({ key, state: 'posted', reviewId: out.reviewId, event: 'COMMENT' }));
         }
         break;
       }

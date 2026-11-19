@@ -9,8 +9,8 @@ import type { TendAttention } from './glass.js';
 import { carryReviewDecisionAnswers, isReviewDecisionAnswer, parseReviewDecisions, unansweredReviewDecisions } from './review-decisions.js';
 import type { ReviewDecision, ReviewDecisionAnswer, ReviewDecisionAnswers } from './review-decisions.js';
 export * from './review-decisions.js';
-import { ownReviewThreads, parseReviewThreadCalls, reviewThreadsToResolve } from './review-threads.js';
-import type { ReviewThreadCall } from './review-threads.js';
+import { ownReviewThreads, parseReviewThreadCalls } from './review-threads.js';
+import type { ReviewThreadCall, ReviewThreadResolution } from './review-threads.js';
 export * from './review-threads.js';
 
 /**
@@ -273,10 +273,8 @@ export interface ReviewRound {
   previousReviews?: ReviewMemory[];
   /** Fresh GitHub thread snapshot for this draft; absent means the job must fetch it. */
   openThreads?: ReviewThread[];
-  /** Threads the draft marked addressed that the person unticked: publishing leaves them open. */
-  threadsKeptOpen?: string[];
-  /** What publishing did to the ticked threads. */
-  threadResolution?: { resolved: string[]; failed: Array<{ id: string; path: string; line: number | null; url: string; why: string }> };
+  /** The reviewer's own threads this round's draft found fixed, and what resolving each did. */
+  threadResolutions?: ReviewThreadResolution[];
   /** Last observed push time; automatic drafts wait briefly to combine push bursts. */
   changesObservedAt?: string;
   state: ReviewRoundState;
@@ -759,27 +757,6 @@ export function answerReviewDecision(key: string, draft: { roundId: string; head
   return undefined;
 }
 
-/** Tick or untick one thread the exact draft shown would resolve, refusing stale pages and in-flight posts. */
-export function chooseReviewThread(key: string, draft: { roundId: string; headSha: string; draftedAt: string }, threadId: string, resolve: boolean, now = Date.now()): string | undefined {
-  const item = readReview(key);
-  const round = item && latestRound(item);
-  if (!item || !round) return 'This review is no longer available.';
-  if (round.id !== draft.roundId || round.headSha !== draft.headSha || round.draftedAt !== draft.draftedAt || round.state !== 'drafted')
-    return 'This draft has changed. Reload it before choosing threads.';
-  if (fs.existsSync(path.join(reviewRoundDir(key, round.id)!, 'posted.json'))) return 'This review is already being posted.';
-  const current = readRoundDraft(key, round.id);
-  if ('error' in current) return 'This draft could not be read. Redraft the review.';
-  if (!reviewThreadsToResolve(round, current.threads, loadConfig().reviews.identity).some(thread => thread.id === threadId))
-    return 'This thread is no longer in the draft. Reload it before choosing threads.';
-  const kept = new Set(round.threadsKeptOpen ?? []);
-  if (resolve) kept.delete(threadId);
-  else kept.add(threadId);
-  if (kept.size) round.threadsKeptOpen = [...kept];
-  else delete round.threadsKeptOpen;
-  writeReview({ ...item, updatedAt: new Date(now).toISOString() });
-  return undefined;
-}
-
 /** Read a draft before its files can be overwritten, retaining cached findings if files are gone. */
 function reviewMemory(item: ReviewItem, round: ReviewRound): ReviewMemory | undefined {
   if (!round.draftedAt && !round.postedAt && !round.verdict) return undefined;
@@ -818,7 +795,7 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
     'In verdict.json, also write "decisions": [] when no calls are needed, or [{"id":"stable-question-id","question":"<one-line question for Chris>","options":[{"id":"option-a","label":"<short option>","consequence":"<one-line consequence>"},{"id":"option-b","label":"<short option>","consequence":"<one-line consequence>"}],"recommendation":"option-a"}]. Only real product or ownership calls that Chris must make belong here. Code findings stay in the body, comments, and blocking findings. Never bury these questions or option lists in the review body. Free-text answers are always allowed. Use stable question and option ids across redrafts; change an id if its meaning changes. A recommendation is not an answer. Decisions alone may use a comment verdict with an empty review.md.',
     ...(round.decisions?.length ? [`Previous calls (preserve ids for the same question and option meanings): ${JSON.stringify(round.decisions)}`] : []),
     ...(ownReviewThreads(round.openThreads, opts.identity).length ? [
-      `Threads ${opts.identity} opened that are still unresolved (ids): ${JSON.stringify(ownReviewThreads(round.openThreads, opts.identity).map(thread => thread.id))}. For each one, judge against this head whether its concern is fully addressed, partly addressed, or not addressed. In verdict.json, also write "threads": [{"id":"<thread id>","status":"addressed|partly|not","reason":"<one line>","reply":"<short reply>"}] with one entry per listed thread. Use addressed only when the concern is fully fixed at this head; lobstah resolves those threads when the review is published. For partly or not, the thread stays open: add a short reply only when it tells the author something new, otherwise omit reply. Never list any other thread.`,
+      `Threads ${opts.identity} opened that are still unresolved (ids): ${JSON.stringify(ownReviewThreads(round.openThreads, opts.identity).map(thread => thread.id))}. For each one, judge against this head whether its concern is fully addressed, partly addressed, or not addressed. In verdict.json, also write "threads": [{"id":"<thread id>","status":"addressed|partly|not","reason":"<one line>","reply":"<short reply>"}] with one entry per listed thread. Use addressed only when the concern is fully fixed at this head; lobstah resolves those threads as soon as this draft is done. For partly or not, the thread stays open: add a short reply only when it tells the author something new, otherwise omit reply. Never list any other thread.`,
     ] : []),
     'Give each finding a stable findingId in comments.json and verdict.json blocking. If both entries describe the same problem, use the same findingId and write it only once if possible. Different problems on the same line need different ids. Write publishable review text; omit draft-only notices such as "Draft only; nothing was posted".',
     '7. Do not post, approve, request changes, comment on, push to, or edit the PR. If you cannot review it (too large, missing context), say so in review.md.',

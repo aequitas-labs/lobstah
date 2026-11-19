@@ -25,7 +25,6 @@ import {
   acknowledgeReview,
   markReviewSeen,
   answerReviewDecision,
-  chooseReviewThread,
   displayGrounds,
   codexDesktopThread,
   activeIds,
@@ -180,7 +179,6 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['review-dismiss', 1024],
   ...['review-skip', 'review-seen', 'review-approve', 'review-approve-anyway', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
   ['review-decision-answer', 12 * 1024],
-  ['review-thread-resolve', 1024],
   ['review-new', 1024],
   ['review-redraft', 1024],
   ['review-draft', 1024],
@@ -1225,15 +1223,6 @@ export function serveGlass(
                 (payload.answer !== null && (typeof payload.answer !== 'object' || !payload.answer)))
               return reply(400, { ok: false, reason: 'Choose a decision in the current draft.' });
             const why = answerReviewDecision(payload.key, { roundId: payload.roundId, headSha: payload.headSha, draftedAt: payload.draftedAt }, payload.decisionId, payload.answer as import('@lobstah/core').ReviewDecisionAnswer | null);
-            return why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key: payload.key });
-          }
-          case 'review-thread-resolve': {
-            const payload = body.payload as Record<string, unknown> | undefined;
-            if (!payload || typeof payload.key !== 'string' || payload.key.length > 200 ||
-                typeof payload.roundId !== 'string' || typeof payload.headSha !== 'string' || typeof payload.draftedAt !== 'string' ||
-                typeof payload.threadId !== 'string' || typeof payload.resolve !== 'boolean')
-              return reply(400, { ok: false, reason: 'Choose a thread in the current draft.' });
-            const why = chooseReviewThread(payload.key, { roundId: payload.roundId, headSha: payload.headSha, draftedAt: payload.draftedAt }, payload.threadId, payload.resolve);
             return why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key: payload.key });
           }
           case 'review-skip':
