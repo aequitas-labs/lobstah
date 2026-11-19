@@ -253,6 +253,8 @@ export interface LimitsConfig {
   wedgeThresholdSecs: number;
   maxRestartAttempts: number;
   wallClockSecs: number;
+  /** Unanswered person waits park after this many seconds, without failing (default 24 hours). */
+  questionWaitSecs?: number;
   /** Hard ceiling for progress-extended wall-clock time (default 4× wallClockSecs). */
   maxWallClockSecs?: number;
   pushEarly: boolean;
@@ -699,6 +701,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   wedgeThresholdSecs: 600,
   maxRestartAttempts: 2,
   wallClockSecs: 3600,
+  questionWaitSecs: 86400,
   pushEarly: true,
   draftPr: true,
   checkpointOnStop: true,
@@ -734,6 +737,8 @@ function expandHome(p: string): string {
 export function loadConfig(): Config {
   const file = configPath();
   const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  const questionWaitSecs = (raw.limits as Partial<LimitsConfig> | undefined)?.questionWaitSecs;
+  if (questionWaitSecs !== undefined && (typeof questionWaitSecs !== 'number' || !Number.isFinite(questionWaitSecs) || questionWaitSecs < 0)) throw new Error('[limits].questionWaitSecs must be a non-negative number');
   const cacheMinFreeGB = (raw.limits as Partial<LimitsConfig> | undefined)?.cacheMinFreeGB ?? DEFAULT_LIMITS.cacheMinFreeGB;
   if (typeof cacheMinFreeGB !== 'number' || !Number.isFinite(cacheMinFreeGB) || cacheMinFreeGB < 0)
     throw new Error('[limits].cacheMinFreeGB must be a non-negative number');

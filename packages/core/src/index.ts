@@ -83,6 +83,8 @@ export * from './dispatch-progress.js';
 export * from './session-watcher.js';
 export * from './trap-turn.js';
 export * from './slots.js';
+export * from './question-waits.js';
+export * from './pr-questions.js';
 export * from './worker-metadata.js';
 export * from './session-workers.js';
 export * from './telemetry.js';

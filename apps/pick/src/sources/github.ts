@@ -1,4 +1,5 @@
-import { dispatchPrLines } from '@lobstah/core';
+import { dispatchPrLines, parsePrRef, routePrQuestionReply, syncDispatchPrQuestions, laneOf } from '@lobstah/core';
+import type { PrQuestionReply, PrQuestionTransport, PrRef } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { loadConfig, markRepliesRule, withBriefHooks } from '@lobstah/core';
 import { MARKER, lobstahWrote, marker } from '../types.js';
@@ -44,8 +45,10 @@ interface GhReview {
 interface GhComment {
   id: number;
   body: string;
-  user: { login: string };
+  user: { login: string; type?: string };
   created_at: string;
+  html_url?: string;
+  in_reply_to_id?: number;
 }
 
 interface GhPull {
@@ -181,18 +184,23 @@ export class GithubSource implements Source, MergeSource {
    * held comments, in which case it is dropped.
    */
   private async latestFeedback(n: number, runs: readonly PrRun[]): Promise<{ tag: string; heldOnly: boolean } | undefined> {
+    const pr = parsePrRef(`https://github.com/${this.cfg.repo}/pull/${n}`)!;
     const events: Array<{ at: string; tag: string; own: boolean }> = [];
     const own = (login: string): boolean => login === this.cfg.identity;
+    // Filter answers before a submitted review can count its inline comments as feedback.
+    const comments = (await this.paged<GhComment>(`/repos/${this.cfg.repo}/pulls/${n}/comments`))
+      .filter((comment) => !routePrQuestionReply(pr, comment, this.cfg.identity, 'review'));
     const reviews = await this.paged<GhReview>(`/repos/${this.cfg.repo}/pulls/${n}/reviews`);
     for (const r of reviews) {
       if (lobstahWrote(r.body)) continue;
       const actionable = r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && (r.body ?? '').trim() !== '');
       if (actionable) events.push({ at: r.submitted_at, tag: `rv${r.id}`, own: own(r.user.login) });
     }
-    for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/pulls/${n}/comments`)) {
+    for (const c of comments) {
       if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `rc${c.id}`, own: own(c.user.login) });
     }
     for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${n}/comments`)) {
+      if (routePrQuestionReply(pr, c, this.cfg.identity)) continue;
       if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}`, own: own(c.user.login) });
     }
     return guardFeedback(events, runs);
@@ -219,11 +227,27 @@ export class GithubSource implements Source, MergeSource {
 
   async report(key: string, verb: Verb, evidence: Evidence & { uuid: string }): Promise<void> {
     const n = this.numberOf(key.replace(/@.*$/, '').replace('#pr', '#'));
+    if (key.includes('#pr') && verb === 'needs-decision') {
+      await syncDispatchPrQuestions(evidence.uuid, laneOf(evidence.uuid) ?? 'work', this.questionTransport(), parsePrRef(`https://github.com/${this.cfg.repo}/pull/${n}`)!);
+      return;
+    }
     const lines = [`${marker(evidence.uuid)} **${verb}**`];
     lines.push(...dispatchPrLines(evidence));
     if (evidence.branch) lines.push(`branch: \`${evidence.branch}\``);
     if (evidence.note) lines.push(evidence.note);
     await this.api('POST', `/repos/${this.cfg.repo}/issues/${n}/comments`, { body: lines.join('\n') });
+  }
+
+  /** Reuse pickup's authenticated API while keeping question writes separate from tracker comments. */
+  private questionTransport(): PrQuestionTransport {
+    const repo = (pr: PrRef) => `/repos/${pr.owner}/${pr.repo}`;
+    return {
+      identity: this.cfg.identity,
+      comments: (pr) => this.paged<PrQuestionReply>(`${repo(pr)}/issues/${pr.number}/comments`),
+      reviewComments: (pr) => this.paged<PrQuestionReply>(`${repo(pr)}/pulls/${pr.number}/comments`),
+      post: (pr, body) => this.api('POST', `${repo(pr)}/issues/${pr.number}/comments`, { body }),
+      edit: (pr, id, body) => this.api('PATCH', `${repo(pr)}/issues/comments/${id}`, { body }),
+    };
   }
 
   async createLiveComment(key: string, body: string): Promise<string> {

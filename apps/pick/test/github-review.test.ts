@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, laneDirs } from '@lobstah/core';
+import { ensureLayout, laneDirs, appendStatus, capturePrQuestions, enqueue, claimNext, unhandled } from '@lobstah/core';
 import { GithubSource, guardFeedback } from '../src/sources/github.js';
 import type { GithubConfig } from '../src/sources/github.js';
 import { lobstahWrote, markedNote, marker } from '../src/types.js';
@@ -317,4 +317,27 @@ describe('review re-request', () => {
       { method: 'POST', path: '/repos/o/r/pulls/17/requested_reviewers', body: { reviewers: ['alice', 'bob'] } },
     ]);
   });
+});
+
+it('delivers a PR question quote reply as an answer, without opening or reopening a feedback round', async () => {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9' } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`, issueComments: [{ id: 201, login: 'reviewer', body: '> Which option should I use?\n\nUse option A.', at: '2026-11-02T00:00:00Z' }] }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option A.');
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+});
+
+it('ignores a bot question reply in feedback selection and leaves the person wait unanswered', async () => {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9' } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`, reviewComments: [{ id: 202, login: 'automation[bot]', body: '> Which option should I use?\n\nUse A.', at: '2026-11-02T00:00:00Z' }] }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toEqual([]);
 });

@@ -1,4 +1,5 @@
 import { prMergeStatus } from '@lobstah/core';
+import { questionParkNote } from '@lobstah/core';
 import { configuredTrapViews, orderedDispatchPrUrls, reviewAttention } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -782,7 +783,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     state,
     sessionMode: descriptor?.sessionMode ?? 'continue',
     ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
-    note: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : held ?? last?.note,
+    note: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : held ?? questionParkNote(id, lane, last) ?? last?.note,
     ...(bucket === 'queued' && descriptor ? { queueReason: dispatchQueueReason(descriptor, lane) } : {}),
     // Queued work has no log yet; its time is when it entered the queue.
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),
