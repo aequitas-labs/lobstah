@@ -152,14 +152,14 @@ export function retireTerminalPrWatches(): string[] {
 export function preparePrWatchBatch(
   defaultEverySecs: number,
   now = Date.now(),
-  opts: { run?: PrBatchRun; detail?: (ref: PrRef) => GhPrView } = {},
+  opts: { run?: PrBatchRun; detail?: (ref: PrRef) => GhPrView; watches?: readonly Watch[]; repositoryCount?: number } = {},
 ): void {
   clearWatchRateLimitFailures();
   retireTerminalPrWatches();
   const groups = new Map<string, PrRef[]>(),
     due = new Set<string>(),
     dueRefs = new Set<string>();
-  for (const w of listWatches()) {
+  for (const w of opts.watches ?? listWatches()) {
     if (!isPrPresetWatch(w) || w.done) continue;
     const ref = parsePrRef(w.key)!;
     const refs = groups.get(repoOf(ref)) ?? [];
@@ -214,7 +214,7 @@ export function preparePrWatchBatch(
       }
       const cycle: Cycle = {
         at: fetchedAt,
-        nextAt: now + githubPollIntervalSecs(defaultEverySecs, now, groups.size) * 1000,
+        nextAt: now + githubPollIntervalSecs(defaultEverySecs, now, opts.repositoryCount ?? groups.size) * 1000,
         snapshots: {},
         links: {},
       };

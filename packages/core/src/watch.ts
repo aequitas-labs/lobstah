@@ -1,16 +1,16 @@
 import { pendingJournalWatchEvents } from './watch-presentation.js';
-import type { WatchPresentation } from '@lobstah/watch-types';
+import type { WatchPresentation, WatchRegistry, WatchSnapshot } from '@lobstah/watch-types';
+import { WatchRuntime } from './watch-runtime.js';
+import { watchSourceType } from './watch-source-registry.js';
 import { restoreCommandWatch, commandWatchEvents, acknowledgeCommandWatch, commandWatchRuntime } from './watch-command-runtime.js';
 import fs from 'node:fs';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, lobstahHome, readDirIfPresent } from './paths.js';
 import { withDirLock } from './dir-lock.js';
 import { classifyGhError, firstMeaningfulLine, isBackoffKind } from './gh-errors.js';
 import type { GhErrorKind } from './gh-errors.js';
 import { postNotice } from './notices.js';
-import { isPrPresetWatch, prBatchInFlight } from './pr-poll.js';
 import { recordGitHubRateLimit } from './github-budget.js';
 
 /**
@@ -37,6 +37,8 @@ import { recordGitHubRateLimit } from './github-budget.js';
  */
 export interface Watch {
   key: string;
+  /** Persisted source identity; absent only on registrations from before the framework. */
+  typeId?: string;
   /** Distinguishes a removed/re-added watch even within one clock tick. */
   generation?: string;
   /** Who the events belong to: an interactive session or a dispatch to fork. */
@@ -182,13 +184,14 @@ export function listWatches(): Watch[] {
 export function addWatch(
   key: string,
   check: string,
-  opts: { owner?: Watch['owner']; grounds?: string; cursor?: string; everySecs?: number; brief?: string; stream?: string } = {},
+  opts: { typeId?: string; owner?: Watch['owner']; grounds?: string; cursor?: string; everySecs?: number; brief?: string; stream?: string } = {},
 ): Watch {
   if (!key || !check) throw new Error('watch add requires a key and a --check command');
   const existing = readWatch(key);
   if (existing && opts.owner !== undefined && opts.owner !== existing.owner) throw new Error('Watch ownership requires an explicit transfer');
   const w: Watch = {
     key,
+    typeId: opts.typeId ?? existing?.typeId ?? watchSourceType({ key, check, cursor: existing?.cursor ?? opts.cursor ?? '0' }),
     generation: existing?.generation ?? randomUUID(),
     owner: opts.owner ?? existing?.owner ?? 'man',
     grounds: opts.grounds ?? existing?.grounds,
@@ -218,6 +221,9 @@ export function addWatch(
     checkRounds: existing?.checkRounds,
   };
   writeWatch(w, true);
+  // Explicit source registrations are durable immediately. Legacy command
+  // edits keep their cheap write path and import at their first observation.
+  if (opts.typeId !== undefined) restoreCommandWatch(w);
   return w;
 }
 
@@ -323,76 +329,35 @@ export function watchDue(w: Watch, defaultEverySecs: number, now = Date.now()): 
   return now - last >= every;
 }
 
-const CHECK_TIMEOUT_MS = 90_000;
-
-/**
- * Run one check and persist the outcome. The lastCheckedAt stamp is written
- * BEFORE the exec as a soft claim, so pick and an inline `man wait` never
- * double-poll the same watch inside one cadence window.
- */
-export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh: WatchEvent[] } {
-  if (!isPrPresetWatch(w)) return runCommandWatchCheck(w, now);
-  // Another feeder is fetching this repository; it owns this window.
-  if (isPrPresetWatch(w) && prBatchInFlight(w.key)) return { watch: w, fresh: [] };
-  w.lastCheckedAt = now.toISOString();
-  if (!writeWatch(w)) return { watch: w, fresh: [] };
-  const cmd = w.check.replaceAll('{cursor}', w.cursor);
-  const res = spawnSync(cmd, {
-    shell: true,
-    encoding: 'utf8',
-    timeout: CHECK_TIMEOUT_MS,
-    maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, ...(isPrPresetWatch(w) ? { LOBSTAH_PR_BATCH: '1' } : {}) },
-  });
-  return withWatchLock(w.key, (deadline) => {
-    // A terminal PR or an explicit removal can retire this watch during the exec.
-    if (!currentWatch(w)) return { watch: w, fresh: [] };
-    if (res.status !== 0 || res.error) {
-      // lobstah's own commands print `error: ...` on stdout (axi.md P6); gh prints to stderr.
-      const toonError = /^error:.*$/m.exec(res.stdout ?? '')?.[0];
-      const reason = res.error?.message || firstMeaningfulLine(toonError, res.stderr, res.stdout) || 'no output';
-      recordWatchFailure(w, reason, res.status ?? undefined, now);
-      writeWatchUnlocked(w, deadline);
-      return { watch: w, fresh: [] };
-    }
-    let parsed: { cursor?: unknown; events?: unknown; done?: unknown; error?: unknown };
-    try {
-      parsed = JSON.parse(res.stdout) as typeof parsed;
-    } catch {
-      recordWatchFailure(w, `unparseable check output: ${res.stdout.slice(0, 200).trim()}`, undefined, now);
-      writeWatchUnlocked(w, deadline);
-      return { watch: w, fresh: [] };
-    }
-    if (typeof parsed.error === 'string' && parsed.error) recordWatchFailure(w, parsed.error, undefined, now);
-    else recordWatchSuccess(w);
-    const events: WatchEvent[] = Array.isArray(parsed.events)
-      ? (parsed.events as Array<Record<string, unknown>>).map((e) => ({
-          seq: (e.seq ?? w.cursor) as number | string,
-          summary: e.summary !== undefined ? String(e.summary) : undefined,
-          ...e,
-          at: now.toISOString(),
-        }))
-      : [];
-    const fresh = appendWatchEvents(w.key, events);
-    if (parsed.cursor !== undefined) w.cursor = String(parsed.cursor);
-    if (parsed.done === true) w.done = true;
-    writeWatchUnlocked(w, deadline);
-    return { watch: w, fresh };
-  });
+/** Run a single explicit check through the installed source contract. */
+export function runWatchCheck(watch: Watch, now = new Date()): { watch: Watch; fresh: WatchEvent[] } {
+  if (!currentWatch(watch)) return { watch, fresh: [] };
+  const runtime = restoreCommandWatch(watch);
+  const snapshot = runtime.checkSync(watch.key, { now: now.getTime(), everySecs: 0 });
+  return projectWatchSnapshot(watch, snapshot, now, runtime);
 }
 
-/** Custom commands migrate first; PR presets retain their observer until its slice. */
-function runCommandWatchCheck(w: Watch, now: Date): { watch: Watch; fresh: WatchEvent[] } {
-  if (!currentWatch(w)) return { watch: w, fresh: [] };
-  const runtime = restoreCommandWatch(w);
-  const snapshot = runtime.checkSync(w.key, { now: now.getTime(), everySecs: 0 });
-  if (!snapshot) return { watch: w, fresh: [] };
-  return withWatchLock(w.key, (deadline) => {
-    if (!currentWatch(w)) { runtime.retire(w.key); return { watch: w, fresh: [] }; }
-    const latest = readWatch(w.key)!;
+/** Every feeder uses this provider-free batch pass; adapters own grouping and IO. */
+export function runWatchCycle(defaultEverySecs: number, now = new Date(), options: { registry?: WatchRegistry; include?: (watch: Watch) => boolean } = {}): Array<{ watch: Watch; fresh: WatchEvent[] }> {
+  const runtime = options.registry ? new WatchRuntime(options.registry) : commandWatchRuntime();
+  const due = listWatches().filter((watch) => !watch.done && (!options.include || options.include(watch)) && watchDue(watch, defaultEverySecs, now.getTime()));
+  for (const watch of due) restoreCommandWatch(watch, runtime);
+  const snapshots = runtime.checkManySync(due.map((watch) => watch.key), { now: now.getTime(), everySecs: defaultEverySecs, force: true });
+  return due.map((watch) => projectWatchSnapshot(watch, snapshots.get(watch.key), now, runtime));
+}
+
+/** Keep the legacy delivery/evidence wire projection until its policy slice cuts over. */
+function projectWatchSnapshot(watch: Watch, snapshot: WatchSnapshot | undefined, now: Date, runtime: WatchRuntime): { watch: Watch; fresh: WatchEvent[] } {
+  if (!snapshot) return { watch, fresh: [] };
+  return withWatchLock(watch.key, (deadline) => {
+    if (!currentWatch(watch)) { runtime.retire(watch.key); return { watch, fresh: [] }; }
+    const latest = readWatch(watch.key)!;
+    // A deferred adapter did not observe anything, so it must not count a prior error twice.
+    if (snapshot.checkedAt !== now.toISOString()) return { watch: latest, fresh: [] };
+    latest.typeId = snapshot.type.id;
     latest.lastCheckedAt = snapshot.checkedAt;
     latest.presentation = snapshot.presentation;
-    const fresh = appendWatchEvents(w.key, commandWatchEvents(snapshot));
+    const fresh = appendWatchEvents(watch.key, commandWatchEvents(snapshot));
     latest.cursor = String(snapshot.cursor);
     if (snapshot.status === 'draining') latest.done = true;
     if (snapshot.failure) recordWatchFailure(latest, firstMeaningfulLine(snapshot.failure.message) ?? snapshot.failure.message, snapshot.failure.exitCode, now);

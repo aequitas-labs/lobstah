@@ -26,7 +26,11 @@ export interface WatchTypeDescriptor {
 
 /** Registration is data interpreted by the registry, never a consumer prefix branch. */
 export interface WatchRegistrationBinding {
-  event: 'explicit' | 'report' | 'turn-wait' | 'local';
+  event: 'explicit' | 'report' | 'turn-wait' | 'local' | 'legacy-command';
+  /** Trusted adapter pattern used only for the one-time legacy command import. */
+  pattern?: string;
+  /** A matching legacy binding may import this transport type without dropping receipts. */
+  importsType?: string;
   field: string;
 }
 
@@ -45,10 +49,14 @@ export interface WatchObservationBatch<Cursor> {
   events: WatchObservation[];
   done?: boolean;
   failure?: WatchFailure;
+  /** A shared provider claim or budget prevented observation; progress stays untouched. */
+  deferred?: boolean;
 }
 
 /** Source-independent retry advice; provider budgets remain adapter-owned. */
 export interface WatchFailure {
+  /** A provider-wide outage is reported without a per-watch failure streak. */
+  shared?: boolean;
   kind: string;
   message: string;
   remedy?: string;
@@ -135,6 +143,8 @@ export interface WatchSnapshot<Reference = WatchValue, State = WatchValue, Curso
 export interface WatchContext<Reference, State, Cursor, Options> {
   snapshot: WatchSnapshot<Reference, State, Cursor, Options>;
   now: string;
+  /** Runtime cadence is available to provider batch budget calculations. */
+  everySecs?: number;
   signal?: AbortSignal;
 }
 

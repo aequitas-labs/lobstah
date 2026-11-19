@@ -30,14 +30,18 @@ import {
   readPrs,
   readStatusLog,
   readWatch,
+  readWatchEvents,
   removeWatch,
   runWatchCheck,
   setPrTitle,
   storedDescriptor,
   upsertPr,
   watchDue,
+  watchErrorText,
   syncStackReadiness,
-  preparePrWatchBatch,
+  builtinWatchRegistry,
+  watchSourceType,
+  runWatchCycle,
 } from '@lobstah/core';
 import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch, PrBatchRun } from '@lobstah/core';
 import { githubRepoFromOrigin } from '@lobstah/pick';
@@ -74,6 +78,7 @@ export function prCheckCommand(ref: PrRef, forId?: string): string {
 /** Sugar over addWatch: install the shipped check (and the fix brief when a chain owns it). */
 export function addPrWatch(ref: PrRef, opts: { forId?: string; everySecs?: number } = {}): Watch {
   return addWatch(ref.key, prCheckCommand(ref, opts.forId), {
+    typeId: 'pr',
     owner: opts.forId ? `dispatch:${opts.forId}` : 'man',
     everySecs: opts.everySecs,
     brief: opts.forId ? prFixBrief(ref) : undefined,
@@ -288,14 +293,11 @@ export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}):
   let refreshed = 0;
   const every = pollSecs();
   const now = new Date(at);
-  preparePrWatchBatch(every, at, opts);
-  for (const w of listWatches()) {
-    if (!w.key.startsWith('pr:') || !watchDue(w, every, now.getTime())) continue;
-    const before = readPr(w.key)?.observedAt;
-    const { watch } = runWatchCheck(w, now);
-    const after = readPr(w.key)?.observedAt;
-    if (!watch.lastError && after && after !== before) refreshed++;
-    if (watch.done) removeWatch(w.key);
+  const before = new Map(listWatches().map((watch) => [watch.key, readPr(watch.key)?.observedAt]));
+  for (const { watch } of runWatchCycle(every, now, { registry: builtinWatchRegistry(opts), include: (watch) => watchSourceType(watch) === 'pr' })) {
+    const after = readPr(watch.key)?.observedAt;
+    if (!watch.lastError && after && after !== before.get(watch.key)) refreshed++;
+    if (watch.done) removeWatch(watch.key);
   }
   syncStackReadiness(loadConfig(), at);
   return { refreshed };
@@ -305,10 +307,13 @@ export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}):
 export function runDueManWatches(log: (message: string) => void = (m) => console.error(m)): void {
   try {
     const every = pollSecs();
-    syncPrWatches();
-    for (const w of listWatches()) {
-      if (w.owner === 'man' && !w.key.startsWith('pr:') && watchDue(w, every)) runWatchCheck(w);
+    // The source registry supplies batches for every due source. Ownership
+    // affects delivery, not whether this observation-only pass can read it.
+    for (const { watch } of runWatchCycle(every)) {
+      if (watch.lastError) log(`lobstah: watch poll failed: ${watchErrorText(watch)}; still waiting`);
+      if (watch.done && readWatchEvents(watch.key).length <= watch.seen) removeWatch(watch.key);
     }
+    syncStackReadiness(loadConfig());
   } catch (err) {
     log(`lobstah: watch poll failed: ${err instanceof Error ? err.message : String(err)}; still waiting`);
   }
@@ -497,10 +502,8 @@ export function removePrWatch(ref: PrRef, view: (ref: PrRef) => GhPrView = ghPrV
 }
 
 /** Poll cadence: [pickup].pollSecs, the same default as pick's. */
-export function pollSecs(): number {
-  const n = Number(((rawConfig().pickup ?? {}) as Record<string, unknown>).pollSecs ?? 45);
-  return Number.isFinite(n) && n > 0 ? n : 45;
-}
+export { watchPollSecs as pollSecs } from './watch-observation.js';
+import { watchPollSecs as pollSecs } from './watch-observation.js';
 
 /**
  * The daemon's pass over dispatch-owned PR watches. It keeps state badges

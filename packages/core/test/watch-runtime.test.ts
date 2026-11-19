@@ -6,6 +6,7 @@ import {
   BaseWatchType,
   CommandWatchType,
   WatchRegistry,
+  type WatchContext,
   type CommandWatchOptions,
   type CommandWatchReference,
   type CommandWatchState,
@@ -266,4 +267,62 @@ it('imports undelivered legacy observations into the journal before resuming a c
   expect(journal.cursor).toBe('7');
   expect(journal.events.map((event) => event.summary)).toEqual(['waiting before upgrade']);
   expect(journal.deliveries[0].eventIds).toEqual(['6']);
+});
+
+it('adapter grouping, partial batch failures and deferral remain source-independent', () => {
+  const groups: string[][] = [];
+  class GroupedWatch extends CommandWatchType {
+    readonly batchObserver = {
+      group: (context: WatchContext<CommandWatchReference, Record<string, never>, string, CommandWatchOptions>) =>
+        context.snapshot.key.split('/')[0]!,
+      pollBatch: (contexts: readonly WatchContext<CommandWatchReference, Record<string, never>, string, CommandWatchOptions>[]) => {
+        groups.push(contexts.map((context) => context.snapshot.key));
+        return Object.fromEntries(
+          contexts
+            .filter((context) => !context.snapshot.key.endsWith('missing'))
+            .map((context) => [
+              context.snapshot.key,
+              context.snapshot.key.endsWith('failure')
+                ? { kind: 'provider', message: 'Temporarily unavailable', retryAfterSecs: 30 }
+                : context.snapshot.key.endsWith('deferred')
+                  ? { cursor: context.snapshot.cursor, events: [], deferred: true }
+                  : { cursor: 'next', events: [] },
+            ]),
+        );
+      },
+    };
+  }
+  const instance = runtime(new GroupedWatch());
+  for (const key of ['one/ok', 'one/missing', 'one/failure', 'two/ok', 'two/deferred'])
+    instance.register('command', key, { check: 'unused' }, owner);
+  const results = instance.checkManySync(['one/ok', 'one/missing', 'one/failure', 'two/ok', 'two/deferred'], { now: Date.now() });
+  expect(groups).toEqual([
+    ['one/ok', 'one/missing', 'one/failure'],
+    ['two/ok', 'two/deferred'],
+  ]);
+  expect(results.get('one/ok')?.cursor).toBe('next');
+  expect(results.get('two/ok')?.cursor).toBe('next');
+  expect(results.get('one/missing')).toMatchObject({ cursor: '0', failures: 1, failure: { message: 'Watch batch omitted one/missing' } });
+  expect(results.get('one/failure')).toMatchObject({
+    cursor: '0',
+    failures: 1,
+    failure: { kind: 'provider', message: 'Temporarily unavailable' },
+  });
+  expect(results.get('two/deferred')).toMatchObject({ cursor: '0', failures: 0 });
+  expect(results.get('two/deferred')?.checkedAt).toBeUndefined();
+  expect(results.get('two/deferred')?.lease).toBeUndefined();
+});
+
+it('the synchronous batch boundary reports an async source without an unhandled rejection', async () => {
+  const adapter = new FixtureWatch();
+  adapter.read = () => Promise.reject(new Error('provider failed asynchronously'));
+  const instance = runtime(adapter);
+  instance.register('fixture', 'async:one', { check: 'unused' }, owner);
+  const result = instance.checkManySync(['async:one']);
+  expect(result.get('async:one')).toMatchObject({
+    cursor: '0',
+    failures: 1,
+    failure: { message: 'An asynchronous watch requires the asynchronous runtime' },
+  });
+  await Promise.resolve();
 });

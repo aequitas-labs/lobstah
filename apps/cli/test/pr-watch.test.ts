@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   appendStatus,
+  WatchJournal,
   derivePrEvents,
   enqueue,
   ensureLayout,
@@ -59,6 +60,7 @@ describe('report done --pr registers the PR watch', () => {
     expect(res.stdout).toContain('watch: pr:acme/web#7');
     const w = readWatch('pr:acme/web#7')!;
     expect(w.owner).toBe(`dispatch:${ID}`);
+    expect(new WatchJournal().read(w.key)).toMatchObject({ type: { id: 'pr' }, owner: { kind: 'dispatch', chainId: ID } });
     const quote = process.platform === 'win32' ? '"' : "'";
     expect(w.check).toContain(`watch check-pr ${quote}pr:acme/web#7${quote} --for ${quote}${ID}${quote} --cursor {cursor}`);
     expect(w.brief).toContain(URL_);
@@ -293,7 +295,8 @@ ${mode === 'all-forbidden' ? `echo 'GraphQL: Resource not accessible by integrat
 
 describe("man wait's poll", () => {
   it('logs a poller failure and returns, so the wait keeps waiting', () => {
-    // The batch cannot make its folder: every poll throws inside.
+    addPrWatch(parsePrRef('pr:acme/web#7')!);
+    // The source batch cannot make its folder; its durable failure reaches the poll log.
     fs.rmSync(path.join(home, 'pr-polls'), { recursive: true, force: true });
     fs.writeFileSync(path.join(home, 'pr-polls'), '');
     const logged: string[] = [];

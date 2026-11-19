@@ -71,7 +71,7 @@ describe('PR watch repairs', () => {
     upsertPr(pr(), OWNER);
     const daemonTick = () =>
       tick(() => {}, {
-        prWatches: (now, log) => {
+        watches: (now, log) => {
           deliverPrRepairs(log, 3);
           stampRepairerBeat(now);
         },
@@ -114,7 +114,7 @@ describe('PR watch repairs', () => {
       const daemonTick = () =>
         tick(() => {}, {
           now: () => now,
-          prWatches: (at, log) => {
+          watches: (at, log) => {
             observeDispatchPrWatches(45, at);
             deliverPrRepairs(log, 3);
             stampRepairerBeat(at);

@@ -91,22 +91,8 @@ export { statusStateHash };
  * A ready PR hashes only its head SHA: a same-head flap or another passing
  * check does not re-stand it. Other kinds still hash their evidence as before.
  */
-export function prStateHash(pr: PrEvidence): string {
-  if (prStandingKinds(pr).includes('pr:ready')) return prReadyStateHash(pr.headSha);
-  return sha({
-    headSha: pr.headSha,
-    state: pr.state,
-    draft: pr.draft,
-    reviewDecision: pr.reviewDecision,
-    mergeStateStatus: pr.mergeStateStatus,
-    checks: pr.checks,
-    unresolvedThreads: pr.review?.unresolvedThreads,
-    changesRequested: pr.review?.changesRequested ?? false,
-    repair: pr.repair ? { headSha: pr.repair.headSha, kind: pr.repair.kind, status: pr.repair.status, reason: pr.repair.reason } : undefined,
-  });
-}
-
-const prReadyStateHash = (headSha: string) => sha({ 'pr:ready': headSha });
+export { prStateHash } from '@lobstah/core';
+import { prStateHash, prReadyStateHash } from '@lobstah/core';
 
 /** The ack an item currently has: only one whose stateHash still matches. */
 export function currentAck(key: string, stateHash: string): Ack | undefined {

@@ -6,6 +6,7 @@ import type {
   WatchCloseReason,
   WatchContext,
   WatchDelivery,
+  WatchFailure,
   WatchObservation,
   WatchObservationBatch,
   WatchOwner,
@@ -41,6 +42,8 @@ interface Execution {
   adapter: InstalledWatchType;
   token: string;
   now: number;
+  everySecs: number;
+  previousCheckedAt?: string;
 }
 
 /** Provider-free orchestration: identity, leases, atomic progress and durable delivery. */
@@ -122,8 +125,67 @@ export class WatchRuntime {
     }
   }
 
+  /** Group due work by adapter capability; a source failure cannot skip its peers. */
+  checkManySync(
+    keys: readonly string[],
+    options: { now?: number; everySecs?: number; force?: boolean } = {},
+  ): Map<string, WatchSnapshot | undefined> {
+    const now = options.now ?? Date.now(),
+      everySecs = options.everySecs ?? 45;
+    const result = new Map<string, WatchSnapshot | undefined>(),
+      groups = new Map<string, Execution[]>();
+    for (const key of new Set(keys)) {
+      const execution = this.begin(key, now, everySecs, options.force);
+      if (!execution) {
+        result.set(key, this.journal.read(key));
+        continue;
+      }
+      try {
+        const group = `${execution.adapter.descriptor.id}:${execution.adapter.batchObserver?.group(this.context(execution)) ?? execution.token}`;
+        const peers = groups.get(group) ?? [];
+        peers.push(execution);
+        groups.set(group, peers);
+      } catch (error) {
+        result.set(key, this.failed(execution, error));
+      }
+    }
+    for (const executions of groups.values()) {
+      const first = executions[0]!;
+      let batches: Record<string, WatchObservationBatch<WatchValue> | WatchFailure>;
+      try {
+        const polled = first.adapter.batchObserver
+          ? first.adapter.batchObserver.pollBatch(executions.map((execution) => this.context(execution)))
+          : { [first.snapshot.key]: first.adapter.poll(this.context(first)) };
+        if (isPromise(polled)) {
+          void polled.catch(() => {});
+          throw new Error('An asynchronous watch requires the asynchronous runtime');
+        }
+        const asynchronous = Object.values(polled).filter(isPromise);
+        for (const pending of asynchronous) void pending.catch(() => {});
+        if (asynchronous.length) throw new Error('An asynchronous watch requires the asynchronous runtime');
+        batches = polled as Record<string, WatchObservationBatch<WatchValue> | WatchFailure>;
+      } catch (error) {
+        for (const execution of executions) result.set(execution.snapshot.key, this.failed(execution, error));
+        continue;
+      }
+      for (const execution of executions) {
+        try {
+          const batch = batches[execution.snapshot.key];
+          if (!batch) throw new Error(`Watch batch omitted ${execution.snapshot.key}`);
+          result.set(
+            execution.snapshot.key,
+            this.complete(execution, 'events' in batch ? batch : { cursor: execution.snapshot.cursor, events: [], failure: batch }),
+          );
+        } catch (error) {
+          result.set(execution.snapshot.key, this.failed(execution, error));
+        }
+      }
+    }
+    return result;
+  }
+
   private context(execution: Execution): RuntimeContext {
-    return { snapshot: structuredClone(execution.snapshot), now: new Date(execution.now).toISOString() };
+    return { snapshot: structuredClone(execution.snapshot), now: new Date(execution.now).toISOString(), everySecs: execution.everySecs };
   }
 
   /** Explicit removal cancels delivery and invalidates outstanding observation leases. */
@@ -138,11 +200,11 @@ export class WatchRuntime {
     });
   }
 
-  private begin(key: string, now: number, everySecs: number): Execution | undefined {
+  private begin(key: string, now: number, everySecs: number, force = false): Execution | undefined {
     return this.journal.update<Execution | undefined>(key, (stored) => {
       if (!stored || stored.status !== 'watching' || (stored.lease && stored.lease.until > now)) return { result: undefined };
       const delay = Math.max(everySecs, stored.failure?.retryAfterSecs ?? 0) * 1000;
-      if (stored.checkedAt && Date.parse(stored.checkedAt) + delay > now) return { result: undefined };
+      if (!force && stored.checkedAt && Date.parse(stored.checkedAt) + delay > now) return { result: undefined };
       let snapshot: WatchSnapshot, adapter: InstalledWatchType;
       try {
         adapter = this.registry.get(stored.type.id);
@@ -157,10 +219,11 @@ export class WatchRuntime {
         };
         return { snapshot: stored, result: undefined };
       }
-      const token = randomUUID();
+      const token = randomUUID(),
+        previousCheckedAt = snapshot.checkedAt;
       snapshot.checkedAt = new Date(now).toISOString();
       snapshot.lease = { token, until: now + 120_000 };
-      return { snapshot, result: { snapshot, adapter, token, now } };
+      return { snapshot, result: { snapshot, adapter, token, now, everySecs, previousCheckedAt } };
     });
   }
 
@@ -185,6 +248,13 @@ export class WatchRuntime {
     }
     return this.journal.update<WatchSnapshot | undefined>(execution.snapshot.key, (snapshot) => {
       if (!this.owns(snapshot, execution)) return { result: snapshot };
+      if (batch.deferred) {
+        if (batch.events.length || batch.done || JSON.stringify(batch.cursor) !== JSON.stringify(snapshot.cursor))
+          throw new Error('A deferred watch batch cannot advance progress');
+        snapshot.checkedAt = execution.previousCheckedAt;
+        snapshot.lease = undefined;
+        return { snapshot, result: snapshot };
+      }
       const plan = execution.adapter.reduce(structuredClone(snapshot), structuredClone(batch));
       const known = new Set(snapshot.events.map((event) => event.id));
       const fresh = batch.events.filter((event) => {
@@ -197,11 +267,15 @@ export class WatchRuntime {
       snapshot.events.push(...fresh);
       if (fresh.length) snapshot.deliveries.push({ id: randomUUID(), eventIds: fresh.map((event) => event.id), status: 'pending' });
       snapshot.failure = batch.failure;
-      snapshot.failures = batch.failure ? snapshot.failures + 1 : 0;
+      snapshot.failures = batch.failure?.shared ? snapshot.failures : batch.failure ? snapshot.failures + 1 : 0;
       if (plan.done) snapshot.status = 'draining';
       if (batch.failure?.hold) snapshot.status = 'held';
       snapshot.lease = undefined;
-      snapshot.presentation = retainWatchConditionTimes(execution.adapter.present(structuredClone(snapshot)), snapshot.presentation, new Date(execution.now).toISOString());
+      snapshot.presentation = retainWatchConditionTimes(
+        execution.adapter.present(structuredClone(snapshot)),
+        snapshot.presentation,
+        new Date(execution.now).toISOString(),
+      );
       return { snapshot, result: snapshot };
     });
   }
@@ -210,10 +284,14 @@ export class WatchRuntime {
     return this.journal.update<WatchSnapshot | undefined>(execution.snapshot.key, (snapshot) => {
       if (!this.owns(snapshot, execution)) return { result: snapshot };
       snapshot.failure = execution.adapter.failure(error);
-      snapshot.failures++;
+      if (!snapshot.failure.shared) snapshot.failures++;
       snapshot.lease = undefined;
       if (snapshot.failure.hold) snapshot.status = 'held';
-      snapshot.presentation = retainWatchConditionTimes(execution.adapter.present(structuredClone(snapshot)), snapshot.presentation, new Date(execution.now).toISOString());
+      snapshot.presentation = retainWatchConditionTimes(
+        execution.adapter.present(structuredClone(snapshot)),
+        snapshot.presentation,
+        new Date(execution.now).toISOString(),
+      );
       return { snapshot, result: snapshot };
     });
   }

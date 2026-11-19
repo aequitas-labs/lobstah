@@ -1,15 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { readWatch, readWatchEvents } from './watch.js';
-import { CommandWatchType, WatchRegistry } from '@lobstah/watch-types';
+import { builtinWatchRegistry, watchSourceType } from './watch-source-registry.js';
 import type { WatchOwner, WatchSnapshot } from '@lobstah/watch-types';
 import { WatchRuntime } from './watch-runtime.js';
 import type { Watch, WatchEvent } from './watch.js';
 
-/** The legacy CLI and typed runtime share the shipped command adapter. */
+/** Legacy CLI registrations use the same installed source registry as typed watches. */
 export function commandWatchRuntime(): WatchRuntime {
-  const registry = new WatchRegistry();
-  registry.register(new CommandWatchType());
-  return new WatchRuntime(registry);
+  return new WatchRuntime(builtinWatchRegistry());
 }
 
 /** Import a legacy key without resetting progress or leaking a session identity. */
@@ -20,14 +18,41 @@ export function commandWatchOwner(watch: Watch): WatchOwner {
   return { kind: 'helm', grounds };
 }
 
-/** Re-registration updates command options while preserving all journal receipts. */
-export function restoreCommandWatch(watch: Watch): WatchRuntime {
-  const runtime = commandWatchRuntime();
+/** Re-registration updates source options while preserving all journal receipts. */
+export function restoreCommandWatch(watch: Watch, runtime = commandWatchRuntime()): WatchRuntime {
   const previous = runtime.journal.read(watch.key);
   const origin = watch.generation ?? watch.createdAt;
-  if (previous?.originGeneration && previous.originGeneration !== origin) runtime.retire(watch.key);
+  const replaced = previous?.originGeneration !== undefined && previous.originGeneration !== origin;
+  if (replaced) runtime.retire(watch.key);
+  const typeId = watchSourceType(watch, runtime.registry),
+    source = runtime.registry.get(typeId);
+  const options = { check: watch.check, cursor: watch.cursor, ...(watch.brief ? { brief: watch.brief } : {}) };
+  if (!replaced && previous && previous.status !== 'retired' && previous.type.id !== typeId) {
+    const binding = source.bindings.find(
+      (entry) =>
+        entry.event === 'legacy-command' &&
+        entry.importsType === previous.type.id &&
+        entry.pattern &&
+        new RegExp(entry.pattern).test(watch.check),
+    );
+    if (!binding) throw new Error(`Watch type transfer requires an explicit import: ${previous.type.id} to ${typeId}`);
+    const identified = source.identify(watch.key, options);
+    if (!identified) throw new Error('Watch source rejected its legacy reference');
+    runtime.journal.update(watch.key, (snapshot) => {
+      if (!snapshot || snapshot.generation !== previous.generation) throw new Error('Watch changed during source import');
+      // The source validates the previous checkpoint; deliveries and their reserved IDs stay intact.
+      const imported = source.restore({
+        ...snapshot,
+        type: source.descriptor,
+        reference: identified.reference,
+        state: identified.state,
+        options: identified.options,
+      });
+      return { snapshot: imported, result: undefined };
+    });
+  }
   runtime.register(
-    'command',
+    typeId,
     watch.key,
     { check: watch.check, cursor: watch.cursor, ...(watch.brief ? { brief: watch.brief } : {}) },
     commandWatchOwner(watch),
@@ -71,7 +96,7 @@ export function commandWatchEvents(snapshot: WatchSnapshot): WatchEvent[] {
 export function acknowledgeCommandWatch(key: string, events: WatchEvent[], seen: number): void {
   const runtime = commandWatchRuntime(),
     snapshot = runtime.journal.read(key);
-  if (!snapshot || snapshot.type.id !== 'command') return;
+  if (!snapshot) return;
   const consumed = new Set(events.slice(0, seen).map((event) => String(event.seq)));
   for (const delivery of snapshot.deliveries)
     if (delivery.status === 'pending' && delivery.eventIds.every((id) => consumed.has(id))) runtime.acknowledge(key, delivery.id);

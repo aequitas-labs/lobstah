@@ -120,7 +120,7 @@ function daemonTick(): { spawned: Array<{ id: string; wake?: string; resume?: st
   tick((m) => log.push(m), {
     culler: cliCuller,
     now: () => now,
-    prWatches: (_at, l) => {
+    watches: (_at, l) => {
       finishResolvedWaits(l);
     },
     spawnRunner: (st: ActiveState, opts) => {

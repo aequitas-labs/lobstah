@@ -444,9 +444,9 @@ export interface DaemonHooks {
   spawnRunner?: typeof spawnRunner;
   /** Test seam for the pool warm-up process; production uses spawnPoolWarm. */
   spawnPoolWarm?: (name: string) => void;
-  /** Dispatch-owned PR observer and repairer, provided by the CLI daemon entry. */
-  prWatches?: (now: number, log: (message: string) => void) => void;
-  /** Records todo firings, provided by the CLI daemon entry. Runs after `prWatches`, so PR records are fresh. */
+  /** Installed watch observation and effect pass, provided by the CLI composition root. */
+  watches?: (now: number, log: (message: string) => void) => void;
+  /** Records todo firings, provided by the CLI daemon entry. Runs after `watches`, so PR records are fresh. */
   todoFiring?: (now: number, log: (message: string) => void) => void;
   /** Withdraws finished run cards past their grace period and prunes old run history (see run-cleanup). */
   runCleanup?: (now: number, log: (message: string) => void) => void;
@@ -604,10 +604,10 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   try { hooks.usageLimits?.(now, log); }
   catch (error) { log(`usage limits: ${error instanceof Error ? error.message : String(error)}`); }
   try {
-    hooks.prWatches?.(hooks.now?.() ?? Date.now(), log);
+    hooks.watches?.(hooks.now?.() ?? Date.now(), log);
   } catch (err) {
-    // A failed PR poll must not skip the rest of the tick (ghost sweeps, claims).
-    log(`pr watches: ${err instanceof Error ? err.message : String(err)}`);
+    // A failed source poll must not skip the rest of the tick (ghost sweeps, claims).
+    log(`watches: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
     hooks.todoFiring?.(hooks.now?.() ?? Date.now(), log);

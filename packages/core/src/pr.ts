@@ -13,14 +13,9 @@ import { cachedPrView } from './pr-poll.js';
  * client, as in pick, and the check never writes to GitHub.
  */
 
-export interface PrRef {
-  owner: string;
-  repo: string;
-  number: number;
-  /** The watch key: `pr:<owner>/<repo>#<n>`. */
-  key: string;
-  url: string;
-}
+export type { PrWatchReference as PrRef } from '@lobstah/watch-types';
+import { parsePrWatchReference } from '@lobstah/watch-types';
+import type { PrWatchReference as PrRef } from '@lobstah/watch-types';
 
 /**
  * Every PR a dispatch owns, one per PR: its `prUrl`, then its `prUrls`,
@@ -63,15 +58,7 @@ export function dispatchPrLines(evidence: import('./types.js').Evidence): string
 }
 
 /** `pr:o/r#n`, `o/r#n`, or a github.com PR URL (any trailing path) → the ref. */
-export function parsePrRef(s: string): PrRef | undefined {
-  const m =
-    /^(?:pr:)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/.exec(s.trim()) ??
-    /^https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/.exec(s.trim());
-  if (!m) return undefined;
-  const [, owner, repo, n] = m as unknown as [string, string, string, string];
-  const number = Number(n);
-  return { owner, repo, number, key: `pr:${owner}/${repo}#${number}`, url: `https://github.com/${owner}/${repo}/pull/${number}` };
-}
+export const parsePrRef = parsePrWatchReference;
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
@@ -727,3 +714,23 @@ Then report done with the same PR: \`lobstah report <id> done "<note>" --pr ${re
 Raw events:
 {events}`;
 }
+
+/** Stable attention hashes exclude observation times so polling does not re-stand an ack. */
+const prAttentionHash = (value: unknown): string => createHash('sha1').update(JSON.stringify(value)).digest('hex').slice(0, 16);
+
+export function prStateHash(pr: PrEvidence): string {
+  if (prStandingKinds(pr).includes('pr:ready')) return prReadyStateHash(pr.headSha);
+  return prAttentionHash({
+    headSha: pr.headSha,
+    state: pr.state,
+    draft: pr.draft,
+    reviewDecision: pr.reviewDecision,
+    mergeStateStatus: pr.mergeStateStatus,
+    checks: pr.checks,
+    unresolvedThreads: pr.review?.unresolvedThreads,
+    changesRequested: pr.review?.changesRequested ?? false,
+    repair: pr.repair ? { headSha: pr.repair.headSha, kind: pr.repair.kind, status: pr.repair.status, reason: pr.repair.reason } : undefined,
+  });
+}
+
+export const prReadyStateHash = (headSha: string) => prAttentionHash({ 'pr:ready': headSha });

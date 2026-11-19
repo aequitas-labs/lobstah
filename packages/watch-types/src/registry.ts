@@ -11,12 +11,14 @@ import type {
   WatchPresentation,
   WatchFailure,
   WatchResult,
+  WatchBatchObserver,
 } from './model.js';
 
 /** Runtime type erasure happens only after each adapter validates its own schemas. */
 export interface InstalledWatchType {
   descriptor: WatchTypeDescriptor;
   bindings: readonly WatchRegistrationBinding[];
+  batchObserver?: WatchBatchObserver<WatchValue, WatchValue, WatchValue, WatchValue>;
   identify(
     input: string,
     options: unknown,
@@ -55,7 +57,8 @@ export class WatchRegistry {
     }
     const kindNames = new Set(this.attentionKinds().map((kind) => kind.kind));
     for (const kind of adapter.descriptor.attentionKinds ?? []) {
-      if (!kind.kind || !kind.label || typeof kind.defaultEnabled !== 'boolean' || kindNames.has(kind.kind)) throw new Error(`Invalid or duplicate watch attention kind: ${kind.kind}`);
+      if (!kind.kind || !kind.label || typeof kind.defaultEnabled !== 'boolean' || kindNames.has(kind.kind))
+        throw new Error(`Invalid or duplicate watch attention kind: ${kind.kind}`);
       kindNames.add(kind.kind);
     }
     if (this.types.has(id)) throw new Error(`Watch type already installed: ${id}`);
@@ -69,6 +72,20 @@ export class WatchRegistry {
     this.types.set(id, {
       descriptor: { ...adapter.descriptor },
       bindings: adapter.bindings,
+      ...(adapter.batchObserver
+        ? {
+            batchObserver: {
+              group(context) {
+                return adapter.batchObserver!.group({ ...context, snapshot: restore(context.snapshot) });
+              },
+              pollBatch(contexts) {
+                return adapter.batchObserver!.pollBatch(
+                  contexts.map((context) => ({ ...context, snapshot: restore(context.snapshot) })),
+                ) as WatchResult<Record<string, WatchObservationBatch<WatchValue>>>;
+              },
+            },
+          }
+        : {}),
       identify(input, options) {
         const parsed = adapter.optionsSchema.parse(options);
         const identified = adapter.identify(input, parsed);
@@ -111,7 +128,9 @@ export class WatchRegistry {
 
   /** Sources register their attention names; callers never extend a global union. */
   attentionKinds(): Array<{ typeId: string; kind: string; label: string; defaultEnabled: boolean }> {
-    return [...this.types.values()].flatMap((adapter) => (adapter.descriptor.attentionKinds ?? []).map((kind) => ({ typeId: adapter.descriptor.id, ...kind })));
+    return [...this.types.values()].flatMap((adapter) =>
+      (adapter.descriptor.attentionKinds ?? []).map((kind) => ({ typeId: adapter.descriptor.id, ...kind })),
+    );
   }
 
   /** Missing adapters are held by the runtime; their durable records remain intact. */

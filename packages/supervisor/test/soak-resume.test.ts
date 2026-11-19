@@ -97,7 +97,7 @@ it('a throwing todo firing hook is logged, and the ghost sweep still runs', () =
 
 it('the todo firing hook runs after the PR watches, so PR records are fresh', () => {
   const order: string[] = [];
-  tick(() => {}, { prWatches: () => order.push('pr'), todoFiring: () => order.push('todo') });
+  tick(() => {}, { watches: () => order.push('pr'), todoFiring: () => order.push('todo') });
   expect(order).toEqual(['pr', 'todo']);
 });
 

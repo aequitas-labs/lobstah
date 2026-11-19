@@ -125,3 +125,5 @@ export type { WatchAttentionDisplay, WatchPresentation } from '@lobstah/watch-ty
 export * from './watch-presentation.js';
 export * from './watch-presentation.js';
 export * from './watch-type-descriptors.js';
+
+export { builtinWatchRegistry, watchSourceType } from './watch-source-registry.js';

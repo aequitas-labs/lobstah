@@ -174,7 +174,7 @@ describe('reconcileOne — a runner paused on something external is not a wedge'
   });
 });
 
-describe('tick — a failed PR poll', () => {
+describe('tick — a failed watch poll', () => {
   it('is logged, and the rest of the tick still runs', () => {
     const st = claimed('t1');
     fs.writeFileSync(
@@ -185,7 +185,7 @@ describe('tick — a failed PR poll', () => {
     const log: string[] = [];
     expect(() =>
       tick((m) => log.push(m), {
-        prWatches: () => {
+        watches: () => {
           throw new Error("ENOENT: no such file or directory, rmdir 'acme_web.json.lock'");
         },
         spawnRunner: () => {
@@ -193,7 +193,7 @@ describe('tick — a failed PR poll', () => {
         },
       }),
     ).not.toThrow();
-    expect(log).toContain("pr watches: ENOENT: no such file or directory, rmdir 'acme_web.json.lock'");
+    expect(log).toContain("watches: ENOENT: no such file or directory, rmdir 'acme_web.json.lock'");
     // Reconciliation, after the poll, still finalized the cancelled dispatch.
     expect(fs.existsSync(path.join(laneDirs('work').done, 't1'))).toBe(true);
   });
