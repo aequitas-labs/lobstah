@@ -3,6 +3,7 @@ import { parseConfiguredTraps, type ConfiguredTrapProfile } from './configured-t
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
+import { prepareConfigurationUpgrade, applyConfigurationUpgrade, type WatchConfiguration, type WatchTypeConfiguration } from './config-upgrade.js';
 import { parseBackendLocation } from './backend.js';
 import type { Descriptor, DispatchLimits } from './types.js';
 import { lobstahHome } from './paths.js';
@@ -491,6 +492,9 @@ export interface Config {
   glass: GlassConfig;
   pet: PetConfig;
   watch: WatchConfig;
+  /** Versioned runtime settings and adapter options from the replacement format. */
+  watches?: WatchConfiguration;
+  watchTypes?: Record<string, WatchTypeConfiguration>;
   grounds: Record<string, GroundsConfig>;
   wharves?: Record<string, import('./backend-model.js').BackendLocation>;
   /**
@@ -731,15 +735,18 @@ function expandHome(p: string): string {
   return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
 }
 
-export function loadConfig(): Config {
+export function loadConfig(options: { upgrade?: boolean } = {}): Config {
   const file = configPath();
-  const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
+  const upgrade = prepareConfigurationUpgrade(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+  const raw = upgrade.raw;
+  const watches = (raw.watches ?? {}) as WatchConfiguration;
+  const watchTypes = (raw.watchTypes ?? {}) as Record<string, WatchTypeConfiguration>;
   const cacheMinFreeGB = (raw.limits as Partial<LimitsConfig> | undefined)?.cacheMinFreeGB ?? DEFAULT_LIMITS.cacheMinFreeGB;
   if (typeof cacheMinFreeGB !== 'number' || !Number.isFinite(cacheMinFreeGB) || cacheMinFreeGB < 0)
     throw new Error('[limits].cacheMinFreeGB must be a non-negative number');
   const petOpen = (raw.pet as Partial<PetConfig> | undefined)?.open ?? 'tab';
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
-  const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
+  const watch = { ...DEFAULT_WATCH, ...watchTypes.pr, ...(watches.maxForksPerCycle === undefined ? {} : { maxForksPerCycle: watches.maxForksPerCycle }) } as WatchConfig;
   const helm = { ...DEFAULT_HELM, ...((raw.helm as Partial<HelmConfig>) ?? {}) };
   if (helm.chat !== 'full' && helm.chat !== 'brief') throw new Error('[helm].chat must be "full" or "brief"');
   for (const key of ['briefTodoLimit', 'goalsNudgeSecs', 'passIntervalSecs'] as const) {
@@ -763,9 +770,9 @@ export function loadConfig(): Config {
     }
   }
   if (typeof watch.repairCooldownSecs !== 'number' || !Number.isFinite(watch.repairCooldownSecs) || watch.repairCooldownSecs < 0) {
-    throw new Error(`[watch].repairCooldownSecs must be a non-negative number in ${configPath()}`);
+    throw new Error(`[watchTypes.pr].repairCooldownSecs must be a non-negative number in ${configPath()}`);
   }
-  const readySettleSecs = raw.readySettleSecs ?? 600;
+  const readySettleSecs = watchTypes.pr?.readySettleSecs ?? 600;
   if (typeof readySettleSecs !== 'number' || !Number.isFinite(readySettleSecs) || readySettleSecs < 0) {
     throw new Error(`readySettleSecs must be a non-negative number in ${configPath()}`);
   }
@@ -816,7 +823,7 @@ export function loadConfig(): Config {
     if (g.wharf !== undefined && (typeof g.wharf !== 'string' || !wharves[g.wharf])) throw new Error(`grounds ${key}: unknown wharf`);
     grounds[key] = { repos: Array.isArray(g.repos) ? g.repos.map(String) : [], ...(g.wharf ? { wharf: String(g.wharf) } : {}) };
   }
-  return {
+  const config: Config = {
     repos,
     harness: parseHarness(raw.harness, '[harness]') ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
@@ -827,6 +834,8 @@ export function loadConfig(): Config {
     glass: glassConfig(raw.glass, wharves),
     pet: { open: petOpen },
     watch,
+    watches,
+    watchTypes,
     grounds,
     wharves,
     wharfRemoteAnswers,
@@ -835,10 +844,12 @@ export function loadConfig(): Config {
     hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
-    attentionKinds: parseAttentionKinds(raw.attentionKinds ?? ((raw.reviews as { enabled?: boolean } | undefined)?.enabled ? [...DEFAULT_ATTENTION_KINDS, 'review'] : undefined)),
+    attentionKinds: parseAttentionKinds(watches.attention?.enabledKinds ?? ((raw.reviews as { enabled?: boolean } | undefined)?.enabled ? [...DEFAULT_ATTENTION_KINDS, 'review'] : undefined)),
     reviews: withConfigPath(() => parseReviews(raw.reviews, reposRaw)),
     permissions: withConfigPath(() => parsePermissions(raw.permissions)),
   };
+  if (options.upgrade === true) applyConfigurationUpgrade(file, upgrade);
+  return config;
 }
 
 export interface ResolvedDispatch {

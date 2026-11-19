@@ -115,3 +115,8 @@ export * from './permission-cards.js';
 export * from './review-automation.js';
 export * from './turn-owner.js';
 export * from './codex-idle-recovery.js';
+
+export * from './watch-runtime.js';
+export * from './watch-journal.js';
+export * from './config-upgrade.js';
+export { claimCommandWatchContinuation } from './watch-command-runtime.js';

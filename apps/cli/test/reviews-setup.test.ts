@@ -130,3 +130,21 @@ it('records setup enable and repo automatic-mode times, retaining an explicit cu
     expect(reviewAutomationCutoff(loadConfig().reviews, 'web')).toBe('2026-01-01T00:00:00.000Z');
   } finally { vi.useRealTimers(); }
 });
+
+it('updates attention in an upgraded configuration without reintroducing old-format keys', () => {
+  write('schemaVersion=2\n[watches.attention]\nenabledKinds=["question"]\n');
+  writeReviewMode('notify', 'chris');
+  expect(loadConfig().attentionKinds).toEqual(['question', 'review']);
+  expect(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')).toContain('[watches.attention]');
+  expect(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')).not.toContain('attentionKinds =');
+});
+
+it('review setup updates schema-2 attention selection without reintroducing old root keys', () => {
+  write('schemaVersion=2\n[watches.attention]\nenabledKinds=["question"]\n' + auth);
+  writeReviewMode('notify', 'chris');
+  expect(loadConfig().attentionKinds).toEqual(['question', 'review']);
+  const contents = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
+  expect(contents).not.toMatch(/^attentionKinds\s*=/m);
+  expect(contents).toContain('[watches.attention]');
+  expect(() => loadConfig({ upgrade: true })).not.toThrow();
+});

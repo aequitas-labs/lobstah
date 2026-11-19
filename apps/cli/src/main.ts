@@ -425,10 +425,10 @@ work (humans and agents):
                                   hold PR repairs for one PR; with --for the
                                   hold ends when that dispatch ends
   watch release <key>|--all       end a hold: a watch held by the per-cycle
-                                  fork cap ([watch].maxForksPerCycle), by
+                                  fork cap ([watches].maxForksPerCycle), by
                                   watch hold, or by a cancelled repair;
                                   resume repairs stopped by
-                                  [watch].maxRepairsWithoutProgress
+                                  [watchTypes.pr].maxRepairsWithoutProgress
 
 host processes:
   daemon [--interval <ms>]        the supervisor: claims, worktrees, liveness,
@@ -594,6 +594,7 @@ setup:
                                   marks them pickable by [pickup.github])
   repos [add <path> [--pickup] [--key <k>]]
                                   list configured repos, or detect + append one
+  config upgrade [--preview]      upgrade watch configuration to schema 2
   doctor                          check binaries, config, repos, harnesses, and
                                   the daemon heartbeat; exit 1 on failures
   version | --version             the installed lobstah version
@@ -1066,6 +1067,16 @@ async function mainCli(): Promise<void> {
   };
 
   switch (cmd) {
+    case 'config': {
+      if (pos[0] !== 'upgrade' || pos.length !== 1) throw new UsageError('Use lobstah config upgrade [--preview]');
+      const { prepareConfigurationUpgrade, configPath } = await import('@lobstah/core');
+      const file = configPath();
+      const upgrade = prepareConfigurationUpgrade(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+      loadConfig({ upgrade: !has('--preview') });
+      console.log(toonKV({ schema: 2, changed: upgrade.changed, preview: has('--preview'), file }));
+      if (has('--preview') && upgrade.changed) console.log(upgrade.document);
+      break;
+    }
     case 'run': {
       if (pos[0] !== 'passkey' || pos[1] !== 'add' || !has('--hosted')) throw new UsageError(usageFor('run')!);
       const { readMirrorStatus, wharfFor } = await import('@lobstah/core');
@@ -3874,6 +3885,7 @@ async function mainCli(): Promise<void> {
         if (!hb) process.exitCode = 1;
         break;
       }
+      loadConfig({ upgrade: true });
       let hostedBroker: Awaited<ReturnType<typeof import('./wharf-trap-broker.js').startWharfBroker>> | undefined;
       if (kind === 'daemon') {
         // An upgrade restarts the daemon; the detached glass would keep serving the old build.
@@ -4114,6 +4126,7 @@ async function mainCli(): Promise<void> {
     }
     case 'watch': {
       const sub = pos[0];
+      if (['add', 'check-pr'].includes(sub ?? '')) loadConfig({ upgrade: true });
       if (sub === 'check-pr') {
         // The shipped check behind pr: watches — contract JSON, not TOON.
         const ref = pos[1];

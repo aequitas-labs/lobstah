@@ -32,6 +32,7 @@ export interface CommandSpec {
 const HARNESS = 'claude|codex';
 
 export const COMMANDS: Record<string, CommandSpec> = {
+  config: { subverbs: ['upgrade'], flags: { '--preview': {} }, maxPositionals: 1 },
   setup: { subverbs: ['reviews'], flags: { '--identity': { value: '<github-login>' } }, maxPositionals: 1 },
   wharf: {
     subverbs: ['login', 'logout', 'whoami', 'requests', 'request-receipt', 'request-execute', 'request-respond', 'renew', 'heartbeat', 'receipt', 'upload', 'recover', 'recoveries'],
@@ -327,6 +328,8 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 
 /** Hand-written prose under each generated synopsis. */
 export const PROSE: Record<string, string> = {
+  config: `Upgrade watch settings to schema 2 with an original-file backup.
+--preview validates and prints the replacement without writing.`,
   setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
 enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
   dispatch: `Queue work; prints id. --for is sticky; --trap-any waits for a free suitable trap, then starts a stowed/new trap within the repo cap. Never headless. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait.

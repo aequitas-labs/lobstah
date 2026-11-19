@@ -214,7 +214,7 @@ export function glassSettings(now = Date.now()): GlassSettings {
   const file = configPath();
   const versions = settingsVersions(now);
   try {
-    const cfg = loadConfig();
+    const cfg = loadConfig({ upgrade: false });
     const raw: unknown = fs.existsSync(file) ? parse(fs.readFileSync(file, 'utf8')) : {};
     return {
       file,

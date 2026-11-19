@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, appendWatchEvents, ensureLayout, laneDirs, listNotices, listWatches, readWatch, releaseHeldWatches, signOnTrap } from '@lobstah/core';
+import { addWatch, appendStatus, appendWatchEvents, ensureLayout, laneDirs, listNotices, listWatches, readWatch, runWatchCheck, claimCommandWatchContinuation, enqueue, releaseHeldWatches, signOnTrap } from '@lobstah/core';
 import type { Descriptor } from '@lobstah/core';
-import { watchLoop } from '../src/loops/watch.js';
+import { watchLoop, deliverDispatchOwned } from '../src/loops/watch.js';
 import type { ReportNotification } from '../src/loops/report.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -233,4 +233,22 @@ describe.skipIf(process.platform === 'win32')('watchLoop failure logging', () =>
     await watchLoop(45, (m) => lines.push(m));
     expect(lines).toHaveLength(1);
   });
+});
+
+// A crash can occur after enqueue but before markFollowUp records its receipt.
+it('replays a reserved continuation without filing a second dispatch after restart', () => {
+  const owner = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  makeOwnerDispatch(owner); appendStatus(owner, 'work', 'done', 'source ready');
+  const watch = addWatch('custom:restart', eventCheck([{ seq: 1, summary: 'resume once' }], '1'), { owner: `dispatch:${owner}` });
+  runWatchCheck(watch);
+  const reserved = claimCommandWatchContinuation(watch.key)!.id;
+  enqueue({ id: reserved, repo: 'myrepo', brief: 'already filed before the crash', followUp: owner });
+  // A later event must survive replay of the earlier, already queued brief.
+  appendWatchEvents(watch.key, [{ seq: 2, summary: 'arrived after the crash', at: new Date().toISOString() }]);
+  runWatchCheck(readWatch(watch.key)!);
+  // The restart sees an unacknowledged outbox but the same committed ID.
+  deliverDispatchOwned(() => {});
+  expect(queuedDescriptors().map((descriptor) => descriptor.id)).toEqual([reserved]);
+  expect(readWatch(watch.key)?.lastFollowUpId).toBe(reserved);
+  expect(readWatch(watch.key)?.seen).toBe(1);
 });

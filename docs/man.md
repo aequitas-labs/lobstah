@@ -337,7 +337,16 @@ The first check of a new watch is a baseline:
   `pr-merged` / `pr-closed` notice is posted once only when the PR ended in
   the last 24 hours.
 
-One watch cycle forks at most `[watch].maxForksPerCycle` continuations
+Watch configuration uses `schemaVersion = 2`, `[watches]` for runtime settings,
+`[watchTypes.<type>]` for source options, and `[watches.attention].enabledKinds`
+for attention selection. Before daemon, pickup, or watch registration starts, lobstah upgrades old watch settings,
+saves `config.toml.schema-1.bak`, and replaces the file atomically. Existing
+values and unrelated settings carry over. `lobstah config upgrade --preview`
+validates and prints the replacement without writing; `lobstah config upgrade`
+applies it. A repeated upgrade leaves the file unchanged. Mixed or unmappable
+settings leave the original file intact and report what needs correcting.
+
+One watch cycle forks at most `[watches].maxForksPerCycle` continuations
 (default 3). Generic watches over the cap are held and listed as `held` in
 `man tend` and `lobstah watch`. PR repairs wait for the next cycle.
 `lobstah watch release <key>` (or `--all`) releases held watches.
@@ -346,7 +355,7 @@ For a dispatch-owned PR, the watch repairs conflicts, failed current checks,
 and requested review changes. It follows up the newest dispatch in the PR's
 chain. A conflict brief names the PR's base branch, including a stacked
 base. A check brief names each failed check and its details URL. The watch
-records each attempt and stops at `[watch].maxRepairsPerPr` per head SHA.
+records each attempt and stops at `[watchTypes.pr].maxRepairsPerPr` per head SHA.
 Each failing check gets at most one repair round per PR and head SHA; the
 PR record's `repair.checks` lists the checks that had their round. The
 same rule holds for CI-fix continuations from `lobstah pick`.
@@ -362,11 +371,11 @@ only failing checks are human gates shows `repair.status: waiting` with
 `heldBy: human-gate`.
 It does not repair a PR with a person's newer commits or uncertain commit
 ownership, a terminal PR, or a PR whose chain already has queued or active
-work. `[watch].autoRepair`, `conflicts`, and `checks` control this behavior.
+work. `[watchTypes.pr].autoRepair`, `conflicts`, and `checks` control this behavior.
 
 Daemon repairs run in the `chore` lane and use `[limits].choreConcurrent`.
 A repair for a trap-built PR is addressed to its owning live trap. If the
-trap is busy, the chore waits for up to `[watch].repairTrapWaitSecs`
+trap is busy, the chore waits for up to `[watchTypes.pr].repairTrapWaitSecs`
 (default 600). It then runs headless in its own checkout of the PR branch.
 A repair for a headless-built PR runs headless and reuses its origin
 worktree when that checkout is clean and free. A headless chore never uses
@@ -387,9 +396,9 @@ and the glass show the repair's PR, chore lane, worker, and trap wait.
   same stack. The stack is the one the glass shows: a PR's parent is the
   PR whose head branch is its base branch.
 - The PR's head, its base branch's head, or its failing checks changed less
-  than `[watch].repairSettleSecs` ago (default 600).
+  than `[watchTypes.pr].repairSettleSecs` ago (default 600).
 - For a conflict repair: the PR was approved less than
-  `[watch].repairSettleSecs` ago.
+  `[watchTypes.pr].repairSettleSecs` ago.
 - For a checks repair: a fresh read of the latest run of each failing check
   shows that run in progress or passed.
 - The PR's watch is held. `lobstah cancel` on a repair dispatch holds its
@@ -405,12 +414,12 @@ with `heldBy` (`wt:<trap>`, `dispatch:<id8>`, `helm`, `hold`, `settle`, `stack`,
 failing check already had its round at this head; a new commit ends it.
 Unlike the other waits, `repaired` also raises `pr:checks` attention with
 its reason: the round did not fix the check. A wait is not an attempt: it does not count against
-`[watch].maxRepairsPerPr`. It raises no attention item. `man tend` lists it
+`[watchTypes.pr].maxRepairsPerPr`. It raises no attention item. `man tend` lists it
 in the `repairs waiting` table, the PR badge ends in `repair waits: <heldBy>`,
 the glass PR modal shows the reason, and `lobstah doctor` lists it. When the
 wait ends, the normal rules apply again.
 
-**Repairs stop** on a PR after `[watch].maxRepairsWithoutProgress`
+**Repairs stop** on a PR after `[watchTypes.pr].maxRepairsWithoutProgress`
 (default 2) repairs in a row that each ended `done` while the PR stayed at
 the head the repair pushed and did not merge. lobstah then queues no repair
 for that PR, marks its repair `gave-up`, raises `pr:conflict` (or

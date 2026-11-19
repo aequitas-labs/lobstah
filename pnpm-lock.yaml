@@ -97,6 +97,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@lobstah/watch-types':
+        specifier: workspace:*
+        version: link:../watch-types
       smol-toml:
         specifier: ^1.3.1
         version: 1.8.0
@@ -134,6 +137,8 @@ importers:
       '@lobstah/runner':
         specifier: workspace:*
         version: link:../runner
+
+  packages/watch-types: {}
 
   packages/worktree:
     dependencies:

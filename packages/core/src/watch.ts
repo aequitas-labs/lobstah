@@ -1,6 +1,8 @@
+import { restoreCommandWatch, commandWatchEvents, acknowledgeCommandWatch, commandWatchRuntime } from './watch-command-runtime.js';
 import fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { uniqueTempPath, atomicRenameSync, lobstahHome, readDirIfPresent } from './paths.js';
 import { withDirLock } from './dir-lock.js';
 import { classifyGhError, firstMeaningfulLine, isBackoffKind } from './gh-errors.js';
@@ -33,8 +35,12 @@ import { recordGitHubRateLimit } from './github-budget.js';
  */
 export interface Watch {
   key: string;
+  /** Distinguishes a removed/re-added watch even within one clock tick. */
+  generation?: string;
   /** Who the events belong to: an interactive session or a dispatch to fork. */
-  owner: 'man' | `dispatch:${string}`;
+  owner: 'man' | `dispatch:${string}` | `trap:${string}`;
+  /** Grounds scope for durable non-session owners. */
+  grounds?: string;
   check: string;
   /**
    * Optional held-stream command: a long-running process (spawned with
@@ -134,7 +140,8 @@ function writeWatchUnlocked(w: Watch, deadline: number): void {
 }
 
 function currentWatch(w: Watch): boolean {
-  return readWatch(w.key)?.createdAt === w.createdAt;
+  const current = readWatch(w.key);
+  return current !== undefined && (current.generation ?? current.createdAt) === (w.generation ?? w.createdAt);
 }
 
 /** A stale update is quiet: only watch add may create a missing record. */
@@ -171,13 +178,16 @@ export function listWatches(): Watch[] {
 export function addWatch(
   key: string,
   check: string,
-  opts: { owner?: Watch['owner']; cursor?: string; everySecs?: number; brief?: string; stream?: string } = {},
+  opts: { owner?: Watch['owner']; grounds?: string; cursor?: string; everySecs?: number; brief?: string; stream?: string } = {},
 ): Watch {
   if (!key || !check) throw new Error('watch add requires a key and a --check command');
   const existing = readWatch(key);
+  if (existing && opts.owner !== undefined && opts.owner !== existing.owner) throw new Error('Watch ownership requires an explicit transfer');
   const w: Watch = {
     key,
+    generation: existing?.generation ?? randomUUID(),
     owner: opts.owner ?? existing?.owner ?? 'man',
+    grounds: opts.grounds ?? existing?.grounds,
     check,
     stream: opts.stream ?? existing?.stream,
     cursor: existing?.cursor ?? opts.cursor ?? '0',
@@ -242,6 +252,7 @@ export function releaseHeldWatches(key?: string): string[] {
 export function removeWatch(key: string): boolean {
   return withWatchLock(key, () => {
     const existed = fs.existsSync(watchPath(key));
+    commandWatchRuntime().retire(key);
     fs.rmSync(watchPath(key), { force: true });
     fs.rmSync(eventsPath(key), { force: true });
     return existed;
@@ -267,7 +278,7 @@ export function readWatchEvents(key: string): WatchEvent[] {
  */
 export function appendWatchEvents(key: string, events: WatchEvent[]): WatchEvent[] {
   const seen = new Set(readWatchEvents(key).map((e) => String(e.seq)));
-  const fresh = events.filter((e) => !seen.has(String(e.seq)));
+  const fresh = events.filter((e) => { const id = String(e.seq); if (seen.has(id)) return false; seen.add(id); return true; });
   if (fresh.length > 0) {
     fs.appendFileSync(eventsPath(key), fresh.map((e) => JSON.stringify(e)).join('\n') + '\n');
   }
@@ -315,6 +326,7 @@ const CHECK_TIMEOUT_MS = 90_000;
  * double-poll the same watch inside one cadence window.
  */
 export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh: WatchEvent[] } {
+  if (!isPrPresetWatch(w)) return runCommandWatchCheck(w, now);
   // Another feeder is fetching this repository; it owns this window.
   if (isPrPresetWatch(w) && prBatchInFlight(w.key)) return { watch: w, fresh: [] };
   w.lastCheckedAt = now.toISOString();
@@ -361,6 +373,26 @@ export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh
     if (parsed.done === true) w.done = true;
     writeWatchUnlocked(w, deadline);
     return { watch: w, fresh };
+  });
+}
+
+/** Custom commands migrate first; PR presets retain their observer until its slice. */
+function runCommandWatchCheck(w: Watch, now: Date): { watch: Watch; fresh: WatchEvent[] } {
+  if (!currentWatch(w)) return { watch: w, fresh: [] };
+  const runtime = restoreCommandWatch(w);
+  const snapshot = runtime.checkSync(w.key, { now: now.getTime(), everySecs: 0 });
+  if (!snapshot) return { watch: w, fresh: [] };
+  return withWatchLock(w.key, (deadline) => {
+    if (!currentWatch(w)) { runtime.retire(w.key); return { watch: w, fresh: [] }; }
+    const latest = readWatch(w.key)!;
+    latest.lastCheckedAt = snapshot.checkedAt;
+    const fresh = appendWatchEvents(w.key, commandWatchEvents(snapshot));
+    latest.cursor = String(snapshot.cursor);
+    if (snapshot.status === 'draining') latest.done = true;
+    if (snapshot.failure) recordWatchFailure(latest, firstMeaningfulLine(snapshot.failure.message) ?? snapshot.failure.message, snapshot.failure.exitCode, now);
+    else recordWatchSuccess(latest);
+    writeWatchUnlocked(latest, deadline);
+    return { watch: latest, fresh };
   });
 }
 
@@ -457,7 +489,7 @@ export interface WatchAttention {
  */
 export function pendingWatchEvents(
   consume: boolean,
-  owner: 'man' | 'dispatch' = 'man',
+  owner: 'man' | 'dispatch' | `trap:${string}` = 'man',
   now = Date.now(),
   /** Events recorded before this (a helm's sign-on) are consumed without waking. */
   sinceMs = 0,
@@ -465,7 +497,7 @@ export function pendingWatchEvents(
   const out: WatchAttention[] = [];
   for (const w of listWatches()) {
     const isMan = w.owner === 'man';
-    if ((owner === 'man') !== isMan) continue;
+    if (owner === 'man' ? !isMan : owner === 'dispatch' ? !w.owner.startsWith('dispatch:') : w.owner !== owner) continue;
     const events = readWatchEvents(w.key);
     const unseen = events.slice(w.seen);
     if (unseen.length === 0) {
@@ -475,6 +507,7 @@ export function pendingWatchEvents(
     const fresh = sinceMs > 0 ? unseen.filter((e) => (Date.parse(e.at) || 0) >= sinceMs) : unseen;
     if (fresh.length > 0) out.push({ watch: w, events: fresh });
     if (consume) {
+      acknowledgeCommandWatch(w.key, events, events.length);
       w.seen = events.length;
       w.seenAt = now;
       if (w.done) removeWatch(w.key);
@@ -488,6 +521,7 @@ export function pendingWatchEvents(
 export function markFollowUp(key: string, followUpId: string, deliveredThrough: number): void {
   const w = readWatch(key);
   if (!w) return;
+  acknowledgeCommandWatch(key, readWatchEvents(key), deliveredThrough);
   w.lastFollowUpId = followUpId;
   w.seen = deliveredThrough;
   w.seenAt = Date.now();
@@ -499,7 +533,9 @@ export function markFollowUp(key: string, followUpId: string, deliveredThrough: 
 export function markWatchSeen(key: string): void {
   const w = readWatch(key);
   if (!w) return;
-  w.seen = readWatchEvents(key).length;
+  const events = readWatchEvents(key);
+  acknowledgeCommandWatch(key, events, events.length);
+  w.seen = events.length;
   w.seenAt = Date.now();
   writeWatch(w);
 }

@@ -15,6 +15,7 @@ export default defineConfig({
   test: {
     include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts', 'services/*/test/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['test/isolated-home.ts'],
     exclude: ['services/wharf/**', '**/node_modules/**'],
     // No test names or clears the tab of the terminal running the suite.
     // Sign-on writes a turn-end owner file (packages/core/src/turn-owner.ts):

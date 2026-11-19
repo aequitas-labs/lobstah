@@ -51,13 +51,29 @@ export function writeReviewMode(mode: string, identity?: string, opts: { repo?: 
           .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
           .join('\n')}\n`;
       if (identity !== undefined) {
-        const kinds = Array.isArray(raw.attentionKinds) ? raw.attentionKinds.map(String) : [...DEFAULT_ATTENTION_KINDS];
+        const watches = raw.watches as { attention?: { enabledKinds?: unknown } } | undefined;
+        const configured = raw.schemaVersion === 2 ? watches?.attention?.enabledKinds : raw.attentionKinds;
+        const kinds = Array.isArray(configured) ? configured.map(String) : [...DEFAULT_ATTENTION_KINDS];
         if (!kinds.includes('review')) kinds.push('review');
-        const attention = `attentionKinds = ${JSON.stringify(kinds)}`;
-        text =
-          raw.attentionKinds !== undefined
+        if (raw.schemaVersion === 2) {
+          const head = /^\[watches\.attention\][ \t]*(?:#.*)?$/m.exec(text);
+          const attention = `enabledKinds = ${JSON.stringify(kinds)}`;
+          if (head) {
+            const start = head.index + head[0].length;
+            const next = /^\s*\[/m.exec(text.slice(start));
+            const end = next ? start + next.index : text.length;
+            const body = text.slice(start, end);
+            const updated = /^[ \t]*enabledKinds[ \t]*=/m.test(body)
+              ? body.replace(/^[ \t]*enabledKinds[ \t]*=[ \t]*\[[\s\S]*?\]/m, attention)
+              : `${body.trimEnd()}\n${attention}\n`;
+            text = text.slice(0, start) + updated + '\n' + text.slice(end);
+          } else text += `\n[watches.attention]\n${attention}\n`;
+        } else {
+          const attention = `attentionKinds = ${JSON.stringify(kinds)}`;
+          text = configured !== undefined
             ? text.replace(/^[ \t]*attentionKinds[ \t]*=[ \t]*\[[\s\S]*?\]/m, attention)
             : `${attention}\n${text}`;
+        }
       }
       parse(text);
       const temp = uniqueTempPath(file);

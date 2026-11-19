@@ -3,6 +3,8 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   appendWatchEvents,
+  claimCommandWatchContinuation,
+  storedDescriptor,
   checkRoundKey,
   enqueue,
   humanGatesFor,
@@ -101,7 +103,13 @@ function spawnContinuation(
     removeWatch(w.key);
     return undefined;
   }
-  const id = randomUUID();
+  const reservation = claimCommandWatchContinuation(w.key, pending);
+  const id = reservation?.id ?? randomUUID();
+  const deliveredThrough = reservation?.deliveredThrough ?? readWatchEvents(w.key).length;
+  if (storedDescriptor(id, 'work')) {
+    markFollowUp(w.key, id, deliveredThrough);
+    return id;
+  }
   const filled = (fixedBrief ?? w.brief ?? DEFAULT_BRIEF)
     .replaceAll('{key}', w.key)
     .replaceAll('{summaries}', pending.map((e) => `- ${e.summary ?? `event ${String(e.seq)}`}`).join('\n'))
@@ -118,7 +126,7 @@ function spawnContinuation(
   const claimant = trapAddress?.slice('wt:'.length);
   const live = claimant !== undefined && readTrap(claimant) !== undefined;
   enqueue({ id, repo: descriptor.repo, brief, followUp: target, ...(live ? { for: trapAddress } : {}) }, 'work');
-  markFollowUp(w.key, id, readWatchEvents(w.key).length);
+  markFollowUp(w.key, id, deliveredThrough);
   log(
     `watch ${w.key}: ${pending.length} event(s) → continuation ${id} ` +
       (live ? `(addressed to soaking ${claimant!.slice(0, 8)})` : `(forks ${target})`),
