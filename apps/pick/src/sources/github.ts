@@ -95,7 +95,7 @@ export class GithubSource implements Source, MergeSource {
       if (existing.status === 'pending' && existing.details?.uuid &&
           existing.details.expected_head_sha === (body as { sha?: string })?.sha &&
           existing.details.merge_method === (body as { merge_method?: string })?.merge_method) return existing as T;
-      throw new Error('A different merge request is already pending.');
+      throw new Error('github merge-async: 409 A different merge request is already pending.');
     }
     if (!res.ok) throw new Error(`github ${method} ${url}: ${res.status} ${await res.text()}`);
     return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
