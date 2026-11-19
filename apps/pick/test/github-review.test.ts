@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, laneDirs } from '@lobstah/core';
+import { appendStatus, capturePrQuestions, claimNext, complete, enqueue, ensureLayout, laneDirs, pendingIds, readDescriptor, unhandled } from '@lobstah/core';
 import { GithubSource, guardFeedback } from '../src/sources/github.js';
 import type { GithubConfig } from '../src/sources/github.js';
 import { lobstahWrote, markedNote, marker } from '../src/types.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { dispatchLoop } from '../src/loops/dispatch.js';
+import { PickupState } from '../src/state.js';
 
 let home: string;
 beforeEach(() => {
@@ -16,6 +18,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   removeTempDir(home);
   delete process.env.LOBSTAH_HOME;
 });
@@ -38,14 +41,16 @@ function source(over: Partial<GithubConfig> = {}): GithubSource {
 interface PrFixture {
   number: number;
   branch: string;
+  author?: string;
   reviews?: Array<{ id: number; login: string; state: string; sha?: string; body?: string; at: string }>;
-  reviewComments?: Array<{ id: number; login: string; body: string; at: string }>;
+  reviewComments?: Array<{ id: number; login: string; body: string; at: string; reviewId?: number; replyTo?: number }>;
   issueComments?: Array<{ id: number; login: string; body: string; at: string }>;
+  threads?: Array<{ root: number; path: string; line: number | null; originalLine?: number; resolved?: boolean }>;
 }
 
 /** Stub the GitHub API with just the routes poll() walks. */
 function stubApi(prs: PrFixture[]): void {
-  vi.stubGlobal('fetch', async (input: string | URL) => {
+  vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const p = url.pathname;
     let body: unknown = [];
@@ -56,18 +61,32 @@ function stubApi(prs: PrFixture[]): void {
         title: `pr ${pr.number}`,
         state: 'open',
         html_url: `https://github.com/o/r/pull/${pr.number}`,
-        user: { login: IDENTITY },
+        user: { login: pr.author ?? IDENTITY },
         head: { ref: pr.branch, sha: 'headsha' },
         labels: [],
         assignees: [],
         draft: false,
       }));
+    } else if (p === '/graphql') {
+      const request = JSON.parse(String(init?.body)) as { variables: { number: number; cursor: string | null } };
+      const pr = prs.find((value) => value.number === request.variables.number)!;
+      const offset = Number(request.variables.cursor ?? 0);
+      const threads = pr.threads ?? [];
+      body = { data: { repository: { pullRequest: { reviewThreads: {
+        nodes: threads.slice(offset, offset + 100).map((thread) => ({
+          path: thread.path, line: thread.line, originalLine: thread.originalLine ?? thread.line,
+          isResolved: thread.resolved ?? false,
+          comments: { nodes: [{ id: `comment_${thread.root}`, url: `https://github.com/o/r/pull/${pr.number}#discussion_r${thread.root}` }] },
+        })),
+        pageInfo: { hasNextPage: offset + 100 < threads.length, endCursor: String(offset + 100) },
+      } } } } };
     } else {
       const m = /^\/repos\/o\/r\/(pulls|issues)\/(\d+)\/(reviews|comments)$/.exec(p);
       const pr = m ? prs.find((x) => x.number === Number(m[2])) : undefined;
-      if (m && pr && url.searchParams.get('page') === '1') {
+      if (m && pr) {
+        const offset = (Number(url.searchParams.get('page') ?? 1) - 1) * 100;
         if (m[1] === 'pulls' && m[3] === 'reviews') {
-          body = (pr.reviews ?? []).map((r) => ({
+          body = (pr.reviews ?? []).slice(offset, offset + 100).map((r) => ({
             id: r.id,
             user: { login: r.login },
             state: r.state,
@@ -77,7 +96,11 @@ function stubApi(prs: PrFixture[]): void {
           }));
         } else {
           const list = m[1] === 'pulls' ? pr.reviewComments : pr.issueComments;
-          body = (list ?? []).map((c) => ({ id: c.id, user: { login: c.login }, body: c.body, created_at: c.at }));
+          body = (list ?? []).slice(offset, offset + 100).map((c) => ({
+            id: c.id, node_id: `comment_${c.id}`, user: { login: c.login }, body: c.body, created_at: c.at,
+            ...('reviewId' in c ? { pull_request_review_id: c.reviewId } : {}),
+            ...('replyTo' in c ? { in_reply_to_id: c.replyTo } : {}),
+          }));
         }
       }
     }
@@ -131,6 +154,169 @@ describe('post-PR feedback pickup', () => {
     expect(items.map((i) => i.key)).toEqual(['gh:o/r#pr6@rv91']);
   });
 
+  it('claims one round for a requested-changes review and all its inline comments, across restarts', async () => {
+    const pr: PrFixture = {
+      number: 6, branch: `lobstah/${UUID}`,
+      reviews: [{ id: 91, login: 'reviewer', state: 'CHANGES_REQUESTED', body: 'Handle the race.', at: '2026-09-21T10:00:00Z' }],
+      reviewComments: [
+        { id: 40, login: 'reviewer', body: 'Lock here.', at: '2026-09-21T09:59:00Z', reviewId: 91 },
+        { id: 41, login: 'reviewer', body: 'Check this too.', at: '2026-09-21T10:00:00Z', reviewId: 91 },
+      ],
+    };
+    stubApi([pr]);
+    const state = new PickupState();
+    await dispatchLoop(source(), state);
+    const round = state.get('gh:o/r#pr6@rv91')!;
+    expect(round).toBeDefined();
+    expect(pendingIds('work')).toEqual([round.uuid]);
+    expect(claimNext('work')).toBe(round.uuid);
+    appendStatus(round.uuid, 'work', 'done', 'addressed');
+    complete(round.uuid, 'work');
+    // A later API response containing the same review's comments keeps rv91.
+    pr.reviewComments!.push({ id: 42, login: 'reviewer', body: 'Third finding.', at: '2026-09-21T09:59:30Z', reviewId: 91 });
+    await dispatchLoop(source(), new PickupState());
+    expect(pendingIds('work')).toEqual([]);
+    expect(new PickupState().entries()).toHaveLength(1);
+  });
+
+  it('wakes an inline-only COMMENTED review under the review id', async () => {
+    stubApi([{
+      number: 6, branch: `lobstah/${UUID}`,
+      reviews: [{ id: 91, login: 'reviewer', state: 'COMMENTED', at: '2026-09-21T10:00:00Z' }],
+      reviewComments: [{ id: 40, login: 'reviewer', body: 'Handle the empty case.', at: '2026-09-21T09:59:00Z', reviewId: 91 }],
+    }]);
+    expect((await source().poll()).map((item) => item.key)).toEqual(['gh:o/r#pr6@rv91']);
+  });
+
+  it('wakes standalone inline feedback and later replies, with a quiet interval for bursts', async () => {
+    let now = Date.parse('2026-09-21T10:00:00Z');
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const pr: PrFixture = {
+      number: 6, branch: `lobstah/${UUID}`,
+      reviewComments: [{ id: 40, login: 'reviewer', body: 'Handle empty input.', at: '2026-09-21T10:00:00Z' }],
+      threads: [{ root: 40, path: 'src/input.ts', line: 10 }],
+    };
+    stubApi([pr]);
+    const state = new PickupState();
+    await dispatchLoop(source(), state);
+    expect(state.entries()).toHaveLength(0);
+    now += 20_000;
+    pr.reviewComments!.push({ id: 41, login: 'reviewer', body: 'And null.', at: '2026-09-21T10:00:20Z' });
+    pr.threads!.push({ root: 41, path: 'src/input.ts', line: 11 });
+    await dispatchLoop(source(), state);
+    expect(state.entries()).toHaveLength(0);
+    now += 30_000;
+    await dispatchLoop(source(), state);
+    expect(state.entries()).toHaveLength(1);
+    const round = state.get('gh:o/r#pr6@rc41')!;
+    expect(claimNext('work')).toBe(round.uuid);
+    const brief = readDescriptor(round.uuid, 'work').brief;
+    expect(brief).toContain('Handle empty input.');
+    expect(brief).toContain('And null.');
+    appendStatus(round.uuid, 'work', 'done');
+    complete(round.uuid, 'work');
+    await dispatchLoop(source(), new PickupState());
+    expect(pendingIds('work')).toEqual([]);
+    pr.reviews = [{ id: 91, login: 'reviewer', state: 'COMMENTED', at: '2026-09-21T09:00:00Z' }];
+    pr.reviewComments!.push({ id: 42, login: 'reviewer', body: 'Still needs a check.', at: '2026-09-21T10:01:00Z', reviewId: 91, replyTo: 40 });
+    now += 40_000;
+    await dispatchLoop(source(), new PickupState());
+    expect(new PickupState().entries()).toHaveLength(2);
+    expect(new PickupState().get('gh:o/r#pr6@rc42')).toBeDefined();
+  });
+
+  it.each(['APPROVED', 'DISMISSED', 'PENDING'])('does not wake on a %s review or its inline comments', async (state) => {
+    stubApi([{
+      number: 6, branch: `lobstah/${UUID}`,
+      reviews: [{ id: 91, login: 'reviewer', state, body: 'Review body.', at: state === 'PENDING' ? '' : '2026-09-21T10:00:00Z' }],
+      reviewComments: [{ id: 40, login: 'reviewer', body: 'Inline.', at: '2026-09-21T09:59:00Z', reviewId: 91 }],
+    }]);
+    expect(await source().poll()).toEqual([]);
+  });
+
+  it.each([IDENTITY.toUpperCase(), 'worker'])('ignores reviews and inline comments by %s', async (login) => {
+    stubApi([{
+      number: 6, branch: `lobstah/${UUID}`, author: 'worker',
+      reviews: [{ id: 91, login, state: 'CHANGES_REQUESTED', at: '2026-09-21T10:00:00Z' }],
+      reviewComments: [
+        { id: 40, login, body: 'Own review.', at: '2026-09-21T09:59:00Z', reviewId: 91 },
+        { id: 41, login, body: 'Own standalone comment.', at: '2026-09-21T10:01:00Z' },
+      ],
+    }]);
+    expect(await source().poll()).toEqual([]);
+  });
+
+  it('puts the review body and unresolved discussions in the brief, with file, line and URL', async () => {
+    stubApi([{
+      number: 6, branch: `lobstah/${UUID}`,
+      reviews: [{ id: 91, login: 'reviewer', state: 'CHANGES_REQUESTED', body: 'Handle the race before merging.', at: '2026-09-21T10:00:00Z' }],
+      reviewComments: [
+        { id: 40, login: 'reviewer', body: 'Guard the write.', at: '2026-09-21T09:59:00Z', reviewId: 91 },
+        { id: 41, login: IDENTITY, body: 'The caller serializes it.', at: '2026-09-21T10:01:00Z', replyTo: 40 },
+        { id: 42, login: 'reviewer', body: 'Already resolved finding.', at: '2026-09-21T09:59:00Z', reviewId: 91 },
+      ],
+      threads: [
+        { root: 40, path: 'src/queue.ts', line: 27 },
+        { root: 42, path: 'src/old.ts', line: 4, resolved: true },
+      ],
+    }]);
+    const [item] = await source().poll();
+    expect(item!.brief).toContain('Handle the race before merging.');
+    expect(item!.brief).toContain('src/queue.ts:27');
+    expect(item!.brief).toContain('https://github.com/o/r/pull/6#discussion_r40');
+    expect(item!.brief).toContain('reviewer: Guard the write.');
+    expect(item!.brief).toContain(`${IDENTITY}: The caller serializes it.`);
+    expect(item!.brief).not.toContain('Already resolved finding.');
+    expect(item!.brief).not.toContain('src/old.ts');
+  });
+
+  it('reads every REST comment and thread page, including outdated and file-level anchors', async () => {
+    const reviewComments = Array.from({ length: 101 }, (_, id) => ({
+      id, login: 'reviewer', body: `Finding ${id}.`, at: '2026-09-21T09:59:00Z', reviewId: 91,
+    }));
+    stubApi([{
+      number: 6, branch: `lobstah/${UUID}`,
+      reviews: [{ id: 91, login: 'reviewer', state: 'COMMENTED', at: '2026-09-21T10:00:00Z' }],
+      reviewComments: [...reviewComments, { id: 101, login: IDENTITY, body: 'Last reply.', at: '2026-09-21T10:01:00Z', replyTo: 100 }],
+      threads: reviewComments.map(({ id }) => ({ root: id, path: `file${id}.ts`, line: id === 100 ? null : id, ...(id === 99 ? { line: null, originalLine: 19 } : {}) })),
+    }]);
+    const [item] = await source().poll();
+    expect(item!.key).toBe('gh:o/r#pr6@rv91');
+    expect(item!.brief).toContain('file99.ts:19');
+    expect(item!.brief).toContain('file100.ts — https://github.com/o/r/pull/6#discussion_r100');
+    expect(item!.brief).toContain('Finding 100.');
+    expect(item!.brief).toContain('Last reply.');
+  });
+
+  it('retries GraphQL failures without starting a round with incomplete context', async () => {
+    const fixture: PrFixture = {
+      number: 6, branch: `lobstah/${UUID}`,
+      reviews: [{ id: 91, login: 'reviewer', state: 'CHANGES_REQUESTED', body: 'Fix the race.', at: '2026-09-21T10:00:00Z' }],
+    };
+    stubApi([fixture]);
+    const fetcher = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname === '/graphql'
+        ? new Response(JSON.stringify({ data: null, errors: [{ message: 'Unavailable' }] }))
+        : fetcher(input, init));
+    const state = new PickupState();
+    await expect(dispatchLoop(source(), state)).rejects.toThrow('could not read complete review threads');
+    expect(state.entries()).toEqual([]);
+    stubApi([fixture]);
+    await dispatchLoop(source(), state);
+    expect(state.get('gh:o/r#pr6@rv91')).toBeDefined();
+  });
+
+  it('keeps bot conversation comments immediate while a review burst settles', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-21T10:00:01Z'));
+    stubApi([{
+      number: 6, branch: `lobstah/${UUID}`,
+      reviews: [{ id: 91, login: 'reviewer', state: 'CHANGES_REQUESTED', at: '2026-09-21T10:00:00Z' }],
+      issueComments: [{ id: 60, login: 'ci[bot]', body: 'CI failed.', at: '2026-09-21T10:00:01Z' }],
+    }]);
+    expect((await source().poll()).map((item) => item.key)).toEqual(['gh:o/r#pr6@ic60']);
+  });
+
   it('conversation and review-thread comments are feedback; marker comments are not', async () => {
     stubApi([
       {
@@ -163,7 +349,9 @@ describe('post-PR feedback pickup', () => {
         issueComments: [{ id: 52, login: 'chris', body: markedNote('reset'), at: '2026-09-21T13:00:00Z' }],
       },
     ]);
-    expect((await source().poll()).map((i) => i.key)).toEqual(['gh:o/r#pr12@rc42']);
+    const items = await source().poll();
+    expect(items.map((i) => i.key)).toEqual(['gh:o/r#pr12@rc42']);
+    expect(items[0]?.pr).toMatchObject({ url: 'https://github.com/o/r/pull/12', reviewThreadId: 42 });
   });
 
   it('the review-feedback brief tells the worker to mark its replies', async () => {
@@ -190,17 +378,17 @@ describe('post-PR feedback pickup', () => {
     const pr: PrFixture = {
       number: 14,
       branch: `lobstah/${UUID}`,
-      reviewComments: [{ id: 44, login: IDENTITY, body: 'fixed, see abc123', at: '2026-09-21T10:30:00Z' }],
+      issueComments: [{ id: 44, login: IDENTITY, body: 'fixed, see abc123', at: '2026-09-21T10:30:00Z' }],
     };
     stubApi([pr]);
     const runs = [{ start: '2026-09-21T10:00:00Z', end: '2026-09-21T11:00:00Z' }];
     const [held] = await source().poll({ runs: () => runs });
-    expect(held).toMatchObject({ key: 'gh:o/r#pr14@rc44', heldOnly: true });
+    expect(held).toMatchObject({ key: 'gh:o/r#pr14@ic44', heldOnly: true });
 
     runs.push({ start: '2026-09-21T11:05:00Z', end: '2026-09-21T11:30:00Z', heldOnly: true } as (typeof runs)[number]);
-    pr.issueComments = [{ id: 56, login: IDENTITY, body: 'nothing to change', at: '2026-09-21T11:10:00Z' }];
+    pr.issueComments!.push({ id: 56, login: IDENTITY, body: 'nothing to change', at: '2026-09-21T11:10:00Z' });
     stubApi([pr]);
-    expect((await source().poll({ runs: () => runs }))[0]).toMatchObject({ key: 'gh:o/r#pr14@rc44' });
+    expect((await source().poll({ runs: () => runs }))[0]).toMatchObject({ key: 'gh:o/r#pr14@ic44' });
   });
 
   it('a newer human event re-keys the round', async () => {
@@ -317,4 +505,94 @@ describe('review re-request', () => {
       { method: 'POST', path: '/repos/o/r/pulls/17/requested_reviewers', body: { reviewers: ['alice', 'bob'] } },
     ]);
   });
+});
+
+it('delivers a PR question quote reply as an answer, without opening or reopening a feedback round', async () => {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9' } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`, issueComments: [{ id: 201, login: 'reviewer', body: '> Which option should I use?\n\nUse option A.', at: '2026-11-02T00:00:00Z' }] }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option A.');
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+});
+
+it('ignores a bot question reply in feedback selection and leaves the person wait unanswered', async () => {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9' } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`, reviewComments: [{ id: 202, login: 'automation[bot]', body: '> Which option should I use?\n\nUse A.', at: '2026-11-02T00:00:00Z' }] }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toEqual([]);
+});
+
+/** A live question tied to one precise review thread, independent of feedback wake grouping. */
+function pendingThreadQuestion(threadId = 88): void {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9', reviewThreadId: threadId } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+}
+
+it('delivers an inline question answer without waking its bodyless submitted review as a feedback round', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 200, login: 'reviewer', state: 'COMMENTED', at: '2026-11-02T00:00:00Z' }],
+    reviewComments: [{ id: 201, login: 'reviewer', body: 'Use option A.', at: '2026-11-01T23:59:59Z', reviewId: 200, replyTo: 88 }],
+  }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option A.');
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+});
+
+it('delivers a later question answer in an approved review thread without waking an inline feedback event', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 190, login: 'reviewer', state: 'APPROVED', body: 'Looks good', at: '2026-10-31T00:00:00Z' }],
+    reviewComments: [
+      { id: 88, login: 'reviewer', body: 'Original thread', at: '2026-10-31T00:00:00Z', reviewId: 190 },
+      { id: 201, login: 'reviewer', body: 'Use option B.', at: '2026-11-02T00:00:00Z', reviewId: 190, replyTo: 88 },
+    ],
+  }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option B.');
+});
+
+it('keeps unrelated inline feedback actionable and its full discussion after routing a question answer', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 200, login: 'reviewer', state: 'COMMENTED', at: '2026-11-02T00:00:00Z' }],
+    reviewComments: [
+      { id: 88, login: IDENTITY, body: 'Question context', at: '2026-10-31T00:00:00Z' },
+      { id: 201, login: 'reviewer', body: 'Use option A.', at: '2026-11-01T23:59:58Z', reviewId: 200, replyTo: 88 },
+      { id: 202, login: 'reviewer', body: 'Fix pagination.', at: '2026-11-01T23:59:59Z', reviewId: 200 },
+    ],
+    threads: [{ root: 88, path: 'a.ts', line: 1 }, { root: 202, path: 'b.ts', line: 2 }],
+  }]);
+  const items = await source().poll();
+  expect(items.map((item) => item.key)).toEqual(['gh:o/r#pr9@rv200']);
+  expect(items[0]?.pr?.reviewThreadId).toBe(202);
+  expect(items[0]?.brief).toContain('Fix pagination.');
+  expect(items[0]?.brief).toContain('Use option A.');
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+});
+
+it('delivers the earlier conversation answer before a later inline answer in the same poll', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 205, login: 'reviewer', state: 'COMMENTED', at: '2026-11-02T00:00:02Z' }],
+    issueComments: [{ id: 200, login: 'reviewer', body: '> Which option should I use?\n\nUse option A.', at: '2026-11-02T00:00:00Z' }],
+    reviewComments: [{ id: 201, login: 'reviewer', body: 'Use option B.', at: '2026-11-02T00:00:01Z', reviewId: 205, replyTo: 88 }],
+  }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option A.');
+  expect(unhandled(UUID, 'work')[0]?.text).not.toContain('Use option B.');
 });

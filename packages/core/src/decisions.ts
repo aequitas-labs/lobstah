@@ -11,6 +11,8 @@ import type { DecisionAnswerPayload } from './requests.js';
 import type { Attachment, Lane } from './types.js';
 import { runScriptFile, type RunCard } from './run-cards.js';
 import { withDirLock } from './dir-lock.js';
+import { answeredAt, commitQuestionAnswer } from './inbox.js';
+import { questionEntry, readStatusLog } from './status.js';
 
 /**
  * Decisions: a question the helm puts to the human (`man ask`), answered in
@@ -98,6 +100,8 @@ export interface DecisionMeta {
   detailBytes: number;
   /** The dispatch it is about, when there is one. */
   dispatch?: string;
+  /** Exact worker question framed by this card; answers on another surface settle it too. */
+  questionAt?: string;
   lane?: Lane;
   repo?: string;
   /** The asking helm's grounds, when known. */
@@ -372,7 +376,12 @@ export function listDecisions(): DecisionMeta[] {
 
 /** Decisions not yet answered, newest first. */
 export function standingDecisions(now = Date.now()): DecisionMeta[] {
-  return listDecisions().filter((d) => readDecisionAnswer(d.key) === undefined && !runCardSettled(d, now));
+  return listDecisions().filter((d) => {
+    if (readDecisionAnswer(d.key) !== undefined || runCardSettled(d, now)) return false;
+    const question = d.dispatch && !d.permission ? questionEntry(readStatusLog(d.dispatch, d.lane ?? 'work')) : undefined;
+    const since = d.questionAt ?? (question && d.askedAt >= question.at ? question.at : undefined);
+    return !since || !answeredAt(d.dispatch!, d.lane ?? 'work', since);
+  });
 }
 
 /** A finished run's card stands this long after its run ends, so its result can be read; then it leaves. */
@@ -501,6 +510,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   // A link rewritten to a stored name must reach that file, not a rename of it.
   for (const name of images.linked) delete renamed[name];
   const askedAt = (opts.now ?? new Date()).toISOString();
+  const question = opts.dispatch && !opts.permission ? questionEntry(readStatusLog(opts.dispatch, opts.lane ?? 'work')) : undefined;
   const meta: DecisionMeta = {
     key,
     title,
@@ -511,6 +521,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     ...(Object.keys(renamed).length ? { renamed } : {}),
     detailBytes: Buffer.byteLength(detail),
     ...(opts.dispatch ? { dispatch: opts.dispatch } : {}),
+    ...(question ? { questionAt: question.at } : {}),
     ...(opts.lane ? { lane: opts.lane } : {}),
     ...(opts.repo ? { repo: opts.repo } : {}),
     ...(opts.grounds ? { grounds: opts.grounds } : {}),
@@ -604,10 +615,27 @@ export interface AnswerInput {
  * Answer a standing decision. The key, option, text, and every file are
  * checked before anything is written. Then the decision is marked answered,
  * the files are stored in the request's directory, and a `decision-answer`
- * request is written, which wakes the helm. It runs nothing and messages
- * nobody.
+ * request is written, which wakes the helm. An answer to a worker question
+ * is also delivered to its inbox under the shared first-answer lock.
  */
 export function answerDecision(input: AnswerInput): DecisionAnswer {
+  const decision = readDecision(input.key);
+  const lane = decision?.lane ?? 'work';
+  const question = decision?.dispatch && !decision.permission ? questionEntry(readStatusLog(decision.dispatch, lane)) : undefined;
+  const since = decision?.questionAt ?? (question && decision!.askedAt >= question.at ? question.at : undefined);
+  if (decision?.dispatch && since) {
+    const result = commitQuestionAnswer(decision.dispatch, lane, since, () => {
+      const answer = storeDecisionAnswer(input);
+      return { value: answer, text: [answer.option, answer.text, ...answer.attachments.map((file) => `${file.name}: ${file.path}`)].filter(Boolean).join('\n\n'), from: input.by, attachments: answer.attachments };
+    });
+    if (!result.accepted) throw new DecisionError('This question has already been answered.', 409);
+    return result.value;
+  }
+  return storeDecisionAnswer(input);
+}
+
+/** Store a validated decision answer; question decisions call this while owning the shared inbox lock. */
+function storeDecisionAnswer(input: AnswerInput): DecisionAnswer {
   const meta = readDecision(input.key);
   if (!meta) throw new DecisionError(`no decision ${input.key}`, 404);
   const previous = readDecisionAnswer(input.key);

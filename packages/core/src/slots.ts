@@ -6,6 +6,7 @@ import { readSessionClaim } from './soak.js';
 import { readStatusLog, waitingView } from './status.js';
 import type { WaitingView } from './status.js';
 import { TERMINAL_VERBS } from './types.js';
+import { questionPark } from './question-waits.js';
 import type { Lane, RunnerInfo } from './types.js';
 
 /** A trap is an interactive session, not a daemon-spawned runner. */
@@ -29,9 +30,10 @@ export function isFinished(id: string, lane: Lane): boolean {
  */
 export function isParked(id: string, lane: Lane): boolean {
   const last = readStatusLog(id, lane).at(-1);
-  if (last?.verb !== 'paused') return false;
+  const parked = questionPark(id, lane, last);
+  if (last?.verb !== 'paused' && !parked) return false;
   // A runner started after the pause is a wake: it holds a slot from its spawn.
-  return !(runnerStartedAt(id, lane) > last.at);
+  return !(runnerStartedAt(id, lane) > (parked?.parkedAt ?? last!.at));
 }
 
 function runnerStartedAt(id: string, lane: Lane): string {
@@ -56,8 +58,8 @@ export function slotUsage(lane: Lane): SlotUsage {
   let ids: string[];
   try { ids = activeIds(lane); } catch { return { headless: 0, traps: 0, parked: 0 }; }
   ids = ids.filter((id) => !isFinished(id, lane));
-  const traps = ids.filter((id) => isTrapCatch(id, lane)).length;
-  const parked = ids.filter((id) => !isTrapCatch(id, lane) && isParked(id, lane)).length;
+  const traps = ids.filter((id) => isTrapCatch(id, lane) && !questionPark(id, lane)).length;
+  const parked = ids.filter((id) => isParked(id, lane) && (!isTrapCatch(id, lane) || questionPark(id, lane))).length;
   return { headless: ids.length - traps - parked, traps, parked };
 }
 
@@ -84,15 +86,16 @@ export function parkedDispatches(now = Date.now()): ParkedDispatch[] {
     try { ids = activeIds(lane); } catch { continue; }
     for (const id of ids) {
       const last = readStatusLog(id, lane).at(-1);
-      if (last?.verb !== 'paused' || (!isTrapCatch(id, lane) && !isParked(id, lane))) continue;
+      const question = questionPark(id, lane, last);
+      if (!last || (last.verb !== 'paused' && !question) || (!isTrapCatch(id, lane) && !isParked(id, lane))) continue;
       const waiting = waitingView(last, now);
       out.push({
         id,
         lane,
         trap: isTrapCatch(id, lane),
-        since: last.at,
-        parkedSecs: Math.max(0, Math.round((now - (Date.parse(last.at) || now)) / 1000)),
-        ...(last.note ? { note: last.note } : {}),
+        since: question?.parkedAt ?? last.at,
+        parkedSecs: Math.max(0, Math.round((now - (Date.parse(question?.parkedAt ?? last.at) || now)) / 1000)),
+        ...(question?.note || last.note ? { note: question?.note ?? last.note } : {}),
         ...(waiting ? { waiting } : {}),
       });
     }

@@ -14,8 +14,8 @@ anything else. The status log is append-only; the last entry wins.
 | Verb | Meaning | Who acts next |
 | --- | --- | --- |
 | `working` | Making progress; nothing needed. | Nobody. |
-| `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. A headless worker waiting on a question stays alive until answered (`lobstah send`), cancelled, or the wall clock. | Human — re-fires every `remindSecs` until answered. |
-| `blocked` | Cannot proceed for an external reason (missing access, broken dependency). | Human. |
+| `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. Its active-work clock stops until answered through `lobstah send`, glass, or a matched human PR reply. After `questionWaitSecs` without an answer, the dispatch parks without failing and keeps its session resumable. | Human — re-fires every `remindSecs` until answered. |
+| `blocked` | Cannot proceed for an external reason (missing access, broken dependency). Its unanswered person wait stops the clock and parks after `questionWaitSecs`, like `needs-decision`. | Human. |
 | `paused` | Intentionally idle; resume is expected. With `--waiting-on`, the worker says what it waits on outside lobstah (see [Waiting on](#waiting-on)). A state, not a question: it raises no attention and does not walk the pet. A paused headless dispatch is **parked**: no process and no slot (see [Parked](#parked)). | Whoever paused it, or the thing it waits on. |
 | `done` | The brief is fulfilled. Terminal. Merging is never the dispatch's job. | Merge loop / reviewer. |
 | `failed` | Cannot fulfill the brief; work preserved in the worktree. Terminal. | Human. |
@@ -102,8 +102,10 @@ Source of truth: `WAITING_ON` in `packages/core/src/types.ts`.
 
 ## Parked
 
-A headless dispatch whose worker's last report is `paused`. At the end of
-that turn the runner ends the session, stops the processes the harness
+A headless dispatch whose worker's last report is `paused`, or whose
+unanswered `needs-decision` / `blocked` question reached `questionWaitSecs`
+(default 24 hours). The question keeps its verb, attention, and text, with
+`parked: no answer in 24h` in status, tend, and glass. The runner ends the session, stops the processes the harness
 started, and exits without adding a verb. The dispatch stays in `active/`
 and keeps its worktree lock.
 
@@ -122,7 +124,8 @@ and keeps its worktree lock.
   glass header show it too.
 
 A trap's paused catch keeps its session: a trap never holds a headless
-slot.
+slot. An expired question releases the trap's claim while retaining the
+dispatch and session. A late answer reacquires the claim when the trap is free.
 
 Source of truth: `isParked` and `parkedDispatches` in
 `packages/core/src/slots.ts`; the runner's park in
@@ -213,7 +216,7 @@ daemon — it never reaches a tracker.
 | `busy` | Runner alive, activity within the wedge threshold. | Nothing. |
 | `terminal` | Terminal verb logged. | Finalize once the process is gone. A runner still alive `exitGraceSecs` + `wedgeThresholdSecs` after the report: stop its group (SIGTERM, then SIGKILL past twice that). Never restart. |
 | `dead` | Pid verified gone (pid + process-start-time, so pid reuse can't lie). | Respawn with session resume, bounded by `maxRestartAttempts`; then `failed`. |
-| `wedged` | Alive but no activity past `wedgeThresholdSecs`. Never a worker whose last report is `paused` with `--waiting-on` (that is `busy`). | SIGKILL the group, fork the session with a nudge, same bound. |
+| `wedged` | Alive but no activity past `wedgeThresholdSecs`. Never a worker paused with `--waiting-on`, or waiting on an unanswered `needs-decision` / `blocked` report (that is `busy`). | SIGKILL the group, fork the session with a nudge, same bound. |
 | `unknown` | Contradictory or missing evidence. | Touch nothing; log it. |
 
 Dead and wedged get opposite treatment on purpose: a dead process is safe to
@@ -592,7 +595,12 @@ its review or check item. A blocked or exhausted repair raises attention
 with its reason. A waiting repair raises none. `pr:draft` is opt-in; an explicit `attentionKinds` list is
 used unchanged.
 
-**Answered questions.** A `question` stands only while no message to the
+**Answered questions.** The first answer wins across terminal, glass, and PR.
+PR question comments carry `<!-- lobstah:question <dispatch> <n> -->`; a
+matched human reply is delivered to the existing inbox and excluded from
+feedback-round selection. Bots and the configured identity never answer.
+An answer marks the PR comment answered and removes the glass card.
+A `question` stands only while no message to the
 dispatch is newer than its latest `needs-decision` / `blocked` entry. A
 message counts when it carries provenance: `sendMessage` writes a
 `NNN.meta.json` sidecar `{ from, at }` beside each `NNN.msg` (`from` is

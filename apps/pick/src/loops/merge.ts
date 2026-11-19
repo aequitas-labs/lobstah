@@ -1,4 +1,5 @@
 import { runMergePolicyWatch } from '../watch-merge-policy.js';
+import { stackAttemptReady, stackAttemptFailed, hasStackRetryPolicy } from '../stack-retry.js';
 import { prepareStackMerges } from '../stack-merge.js';
 import { randomUUID } from 'node:crypto';
 import { conflictUpdate, enqueue, postNotice, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, storedDescriptor, withBriefHooks } from '@lobstah/core';
@@ -192,76 +193,96 @@ export async function reconcileMergePolicy(
       continue;
     }
 
-    // Re-validate at the moment of merge, never on the poll tick's view.
-    const pr = await ms.refresh(candidate.number);
-    if (!pr) continue; // left the open set mid-tick; disposition records it next tick
-    const approval = qualifiedApproval(policy, pr);
-    if (!approval) {
-      log(`${prKey}: gate no longer holds on fresh fetch — skipping`);
-      await holdForApproval(pr, prKey);
-      continue;
+    const retryKey = `${prKey}:merge:${candidate.headSha}`;
+    const stackMember = stack.members.has(candidate.number);
+    if (stackMember && !stackAttemptReady(state, retryKey, log)) {
+      observe(candidate, 'stack-retry'); continue;
     }
-    const dedupKey = approvalDedupKey(pr, approval);
-    if (state.approvalConsumed(dedupKey)) {
-      observe(pr, 'waiting-approval');
-      continue;
-    }
-
-    if (stack.members.has(pr.number)) {
-      const checks = await ms.checks?.(pr.number, pr.headSha);
-      if (pr.mergeableState === 'dirty' || checks === 'red') {
-        const message = `Stack stopped at #${pr.number}: ${pr.mergeableState === 'dirty' ? 'resolve the conflict and push normally.' : 'fix the failing checks.'}`;
-        if (state.newStackHold(prKey, `${pr.headSha}:${message}`)) {
-          log(message); postNotice({ kind: 'stack-stopped', repo: ms.repoKey(), url: pr.url, text: message });
-        }
-        observe(pr, 'stack-stopped'); continue;
-      }
-      if (pr.baseRef !== pr.defaultBranch || checks !== 'green' || pr.mergeableState !== 'clean') {
-        observe(pr, 'stack-checks'); continue;
-      }
-    }
-
-    // Trust the forge's rollup: blocked means a required check failed;
-    // unstable means only non-required checks failed and the forge itself
-    // would allow the merge.
-    switch (pr.mergeableState) {
-      case 'blocked':
-      case 'draft':
-        log(`${prKey}: ${pr.mergeableState} — not merging`);
-        observe(pr, pr.mergeableState);
-        break;
-      case 'behind':
-        await ms.updateBranch(pr.number);
-        log(`${prKey}: behind base, updated branch — gate re-enters next tick`);
-        observe(pr, 'behind-updated');
-        break;
-      case 'dirty': {
-        const uuid = randomUUID();
-        enqueue(
-          {
-            id: uuid,
-            repo: ms.repoKey(),
-            brief: withBriefHooks(rebaseBrief(pr, uuid, loadConfig().repos[ms.repoKey()]?.trunk), loadConfig(), ms.repoKey(), 'rebase'),
-            // The chore works on this PR: the runner pushes no other branch and opens no PR.
-            pr: { url: pr.url, headRefName: pr.headRef, headSha: pr.headSha },
-          },
-          'chore',
-        );
-        state.setRebase(prKey, uuid);
-        log(`${prKey}: real conflict — wrote rebase chore ${uuid}`);
-        observe(pr, `conflict-chore:${uuid}`);
-        break;
-      }
-      default: {
-        const child = stack.children.get(pr.number);
-        if (child) state.setStackAdvance(`${ms.name}#${child.number}`, { parent: pr.number, from: pr.headRef });
-        state.setMergeSubmission(prKey, { number: pr.number, headSha: pr.headSha, approval: dedupKey });
-        await ms.merge(pr.number, policy.method, pr.headSha);
+    try {
+      // A failed merge response may have committed the merge on GitHub.
+      if (stackMember && state.stackRetry(retryKey) && await ms.disposition(candidate.number) !== 'open') {
+        state.consumeApproval(approvalDedupKey(candidate, provisional));
         state.clearStackAdvance(prKey);
-        state.consumeApproval(dedupKey);
-        state.clearMergeSubmission(prKey);
-        log(`${prKey}: merged (${policy.method}) on approval by ${approval.author}`);
+        state.clearStackRetry(retryKey); continue;
+
       }
+      // Re-validate at the moment of merge, never on the poll tick's view.
+      const pr = await ms.refresh(candidate.number);
+      if (!pr) continue; // left the open set mid-tick; disposition records it next tick
+      const approval = qualifiedApproval(policy, pr);
+      if (!approval) {
+        log(`${prKey}: gate no longer holds on fresh fetch — skipping`);
+        await holdForApproval(pr, prKey);
+        continue;
+      }
+      const dedupKey = approvalDedupKey(pr, approval);
+      if (state.approvalConsumed(dedupKey)) {
+        observe(pr, 'waiting-approval');
+        continue;
+      }
+
+      if (stack.members.has(pr.number)) {
+        const checks = await ms.checks?.(pr.number, pr.headSha);
+        if (pr.mergeableState === 'dirty' || checks === 'red') {
+          const message = `Stack stopped at #${pr.number}: ${pr.mergeableState === 'dirty' ? 'resolve the conflict and push normally.' : 'fix the failing checks.'}`;
+          if (state.newStackHold(prKey, `${pr.headSha}:${message}`)) {
+            log(message); postNotice({ kind: 'stack-stopped', repo: ms.repoKey(), url: pr.url, text: message });
+          }
+          observe(pr, 'stack-stopped'); continue;
+        }
+        if (pr.baseRef !== pr.defaultBranch || checks !== 'green' || pr.mergeableState !== 'clean') {
+          observe(pr, 'stack-checks'); continue;
+        }
+      }
+
+      // Trust the forge's rollup: blocked means a required check failed;
+      // unstable means only non-required checks failed and the forge itself
+      // would allow the merge.
+      switch (pr.mergeableState) {
+        case 'blocked':
+        case 'draft':
+          log(`${prKey}: ${pr.mergeableState} — not merging`);
+          observe(pr, pr.mergeableState);
+          break;
+        case 'behind':
+          await ms.updateBranch(pr.number);
+          log(`${prKey}: behind base, updated branch — gate re-enters next tick`);
+          observe(pr, 'behind-updated');
+          break;
+        case 'dirty': {
+          const uuid = randomUUID();
+          enqueue(
+            {
+              id: uuid,
+              repo: ms.repoKey(),
+              brief: withBriefHooks(rebaseBrief(pr, uuid, loadConfig().repos[ms.repoKey()]?.trunk), loadConfig(), ms.repoKey(), 'rebase'),
+              // The chore works on this PR: the runner pushes no other branch and opens no PR.
+              pr: { url: pr.url, headRefName: pr.headRef, headSha: pr.headSha },
+            },
+            'chore',
+          );
+          state.setRebase(prKey, uuid);
+          log(`${prKey}: real conflict — wrote rebase chore ${uuid}`);
+          observe(pr, `conflict-chore:${uuid}`);
+          break;
+        }
+        default: {
+          const child = stack.children.get(pr.number);
+          if (child) state.setStackAdvance(`${ms.name}#${child.number}`, { parent: pr.number, from: pr.headRef });
+          state.setMergeSubmission(prKey, { number: pr.number, headSha: pr.headSha, approval: dedupKey });
+          await ms.merge(pr.number, policy.method, pr.headSha);
+          state.clearStackAdvance(prKey);
+          state.consumeApproval(dedupKey);
+          state.clearMergeSubmission(prKey);
+          log(`${prKey}: merged (${policy.method}) on approval by ${approval.author}`);
+        }
+      }
+      if (stackMember) state.clearStackRetry(retryKey);
+    } catch (error) {
+      if (hasStackRetryPolicy(error)) state.clearMergeSubmission(prKey);
+      if (!stackMember) throw error;
+      stackAttemptFailed(ms, state, retryKey, error, log);
+      observe(candidate, 'stack-retry');
     }
   }
 

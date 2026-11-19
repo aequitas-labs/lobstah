@@ -40,6 +40,11 @@ App installation. The repo rows probe pull requests, contents, and check
 runs on the trunk. Every probe is a read-only `GET`. With no GitHub repo configured, the
 row reads `skip` and doctor makes no GitHub call.
 
+When `[pickup.github].tokenCommand` is set, doctor runs it once and uses its
+output as `GH_TOKEN` for the identity and permission probes. The separate
+local `gh` login is informational; it can be stale while the configured
+GitHub App credentials work. Doctor never prints the command output.
+
 ## When a PR watch fails
 
 A failing watch keeps the reason. For each failed check lobstah:

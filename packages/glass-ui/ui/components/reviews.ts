@@ -2,38 +2,48 @@ import { useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
-import { dismissReview, hideLob, muteReviewPr, reviewRequest, showModal, unmuteReviewPr } from '../actions.js';
+import { dismissReview, hideLob, muteReviewPr, reviewRequest, setPrefs, showModal, unmuteReviewPr } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html, type Children } from '../html.js';
 import { Age, Table, ageText } from './common.js';
 import { can } from '../backend.js';
-import { getState } from '../store.js';
+import { getState, setState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone, MenuAction } from './card.js';
-import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, dispatchTrap, prShapedCard } from './prs.js';
+import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, StackCard, dispatchTrap, prShapedCard } from './prs.js';
 import type { PrIconState } from './prs.js';
 import { Button } from './button.js';
 import { showToast } from './toast.js';
 import { Dialog } from './dialog.js';
 import { unansweredReviewDecisions } from '../../../core/src/review-decisions.js';
-import { reviewUnreadReason } from '../review-attention.js';
+import { reviewUnreadReason, reviewUpdating } from '../review-attention.js';
 
 /** Review failures use the shared toast without exposing CLI keys or diagnostics. */
 function showReviewError(reason: string): void {
   const why = reason.replace(/^review:[^\s]+:\s*/, '');
-  const message = /draft is stale|PR head changed|re-draft it before publishing/i.test(why)
-    ? 'This draft is out of date. Re-draft it before publishing.'
-    : /newest round is drafting/i.test(why)
-      ? 'This draft is being prepared. Wait for it to finish before publishing.'
-      : /already posted|already sent/i.test(why)
-        ? 'This review has already been published.'
-        : /there is no draft to post/i.test(why)
-          ? 'There is no draft to publish. Request a new draft first.'
-          : /does not match the draft verdict/i.test(why)
-            ? 'The draft verdict has changed. Refresh the page before publishing.'
-            : /requires blocking findings/i.test(why)
-              ? 'This draft has no blocking findings. Re-draft it before requesting changes.'
-              : 'This review could not be changed. Try again.';
+  if (/draft is stale|PR head changed|re-draft it before publishing/i.test(why)) {
+    const key = /^(review:[^\s]+):\s/.exec(reason)?.[1];
+    const snapshot = getState().snapshot;
+    if (snapshot && key)
+      setState({
+        snapshot: {
+          ...snapshot,
+          reviews: (snapshot.reviews ?? []).map((review) => (review.key === key ? { ...review, updating: true } : review)),
+        },
+      });
+    return;
+  }
+  const message = /newest round is drafting/i.test(why)
+    ? 'This draft is being prepared. Wait for it to finish before publishing.'
+    : /already posted|already sent/i.test(why)
+      ? 'This review has already been published.'
+      : /there is no draft to post/i.test(why)
+        ? 'There is no draft to publish. Request a new draft first.'
+        : /does not match the draft verdict/i.test(why)
+          ? 'The draft verdict has changed. Refresh the page before publishing.'
+          : /requires blocking findings/i.test(why)
+            ? 'This draft has no blocking findings. Re-draft it before requesting changes.'
+            : 'This review could not be changed. Try again.';
   showToast(message);
 }
 
@@ -50,6 +60,8 @@ const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
 /** The state as a person reads it: a staged draft is waiting in the review tool. */
 export const reviewState = (r: Pick<GlassReview, 'state' | 'decisions' | 'decisionAnswers'>): string =>
   r.state === 'drafted' && unansweredReviewDecisions(r).length ? 'needs your call' : r.state;
+
+export { reviewUpdating } from '../review-attention.js';
 
 /** Prefer the PR lifecycle over round status; older payloads retain merged/closed and otherwise use open. */
 export function reviewPrState(r: Pick<GlassReview, 'prState' | 'prDraft' | 'state'>, draft = false): PrIconState {
@@ -68,8 +80,20 @@ export function reviewMeta(r: GlassReview): { nodes: unknown[]; text: string } {
       ? `asked by ${r.askerName ?? r.asker ?? r.requestedBy}${r.automatic ? ' (automatic)' : ''}`
       : 'review requested';
   return {
-    nodes: [r.repo, '#', String(r.number), ' · ', asked, ' · ', Age(r.requestedAt), ' ago', r.reason ? ` · ${r.reason}` : ''],
-    text: [`${r.repo}#${r.number}`, asked, `${ageText(r.requestedAt)} ago`, r.reason ?? ''].filter(Boolean).join(' · '),
+    nodes: [
+      r.repo,
+      '#',
+      String(r.number),
+      ' · ',
+      asked,
+      ' · ',
+      Age(r.requestedAt),
+      ' ago',
+      r.reason && !reviewUpdating(r) ? ` · ${r.reason}` : '',
+    ],
+    text: [`${r.repo}#${r.number}`, asked, `${ageText(r.requestedAt)} ago`, reviewUpdating(r) ? '' : (r.reason ?? '')]
+      .filter(Boolean)
+      .join(' · '),
   };
 }
 
@@ -114,9 +138,9 @@ function muteMenuAction(r: GlassReview): MenuAction | undefined {
 
 /** Sending a drafted review: the request, the button, and what a card's second tap says it posts. */
 const SEND = {
-  approve: { kind: 'review-approve', label: 'Approve', posts: 'approval' },
-  request_changes: { kind: 'review-request-changes', label: 'Request changes', posts: 'changes request' },
-  comment: { kind: 'review-comment', label: 'Publish comment', posts: 'comment' },
+  approve: { kind: 'review-approve', label: 'Publish', posts: 'approval' },
+  request_changes: { kind: 'review-request-changes', label: 'Publish', posts: 'changes request' },
+  comment: { kind: 'review-comment', label: 'Publish', posts: 'comment' },
 } as const satisfies Record<string, { kind: ReviewRequestKind; label: string; posts: string }>;
 
 /** The icon beside each verdict's send button: approve, request changes, publish a comment. */
@@ -183,7 +207,9 @@ export function ReviewActions({
       setConfirmApproval(true);
     },
   };
-  const drafting = r.state === 'drafting';
+  const updating = reviewUpdating(r);
+  const drafting = r.state === 'drafting' || updating;
+  const preparing = updating ? 'Updating…' : 'Preparing draft…';
   const canApprove = !drafting && ['open', 'draft'].includes(reviewPrState(r));
   const approvalMenu = canApprove ? [approve] : [];
   const confirmation =
@@ -234,14 +260,14 @@ export function ReviewActions({
   const draftKind = r.state === 'stale' ? 'review-redraft' : 'review-draft';
   const sendButton =
     hasPublishAction &&
-    html`<${Button} onError=${showReviewError} disabled=${drafting || postBlocked || !!pending} title=${drafting ? 'Preparing draft…' : undefined} pending=${pending === send.kind} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${drafting ? 'Preparing draft…' : send.label}<//>`;
+    html`<${Button} onError=${showReviewError} disabled=${drafting || postBlocked || !!pending} title=${drafting ? preparing : `Publish ${send.posts}`}  pending=${pending === send.kind} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${drafting ? preparing : send.label}<//>`;
   if (split) {
     const drafts = (canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale';
     const skips = OPEN.has(r.state) || !!r.notification;
     const skipTitle =
       "Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.";
     const main = hasPublishAction
-      ? html`<${Button} onError=${showReviewError} size=${inView ? 'lg' : 'md'} variant="primary" disabled=${drafting || postBlocked || !!pending} title=${drafting ? 'Preparing draft…' : undefined} pending=${pending === send.kind} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${SEND_ICON[r.verdict ?? 'comment']}${drafting ? 'Preparing draft…' : send.label}<//>`
+      ? html`<${Button} onError=${showReviewError} size=${inView ? 'lg' : 'md'} variant="primary" disabled=${drafting || postBlocked || !!pending} title=${drafting ? preparing : `Publish ${send.posts}`}  pending=${pending === send.kind} action=${act(send.kind)} sending=${sending(send.kind)} done=${done(send.kind)}>${SEND_ICON[r.verdict ?? 'comment']}${drafting ? preparing : send.label}<//>`
       : drafts
         ? html`<${Button} onError=${showReviewError} size=${inView ? 'lg' : 'md'} variant="primary" pending=${pending === draftKind} disabled=${!!pending} action=${act(draftKind)} done=${done(draftKind)} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Re-draft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`
         : null;
@@ -259,16 +285,16 @@ export function ReviewActions({
         sending: sending('review-skip'),
         done: done('review-skip'),
       });
-    if (r.state === 'drafted')
+    if (r.state === 'drafted' && !updating)
       more.push({ label: 'Re-draft', icon: ActionIcon.draft, action: act('review-redraft'), done: 'Draft requested' });
     const mute = muteMenuAction(r);
     if (mute) more.push(mute);
     return html`<span class=${'rv-actions' + (!main && more.length ? ' rv-menu-only' : '')}>${(main || more.length) && html`<${SplitButton} main=${main} more=${more.map((action) => ({ ...action, onError: showReviewError }))} />`}${confirmation}</span>`;
   }
   return html`<span class="rv-actions">
-    ${((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} onError=${showReviewError} pending=${pending === draftKind} disabled=${!!pending} action=${act(draftKind)} done=${done(draftKind)} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Re-draft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}
+    ${!updating && ((canDraft && ['requested', 'failed'].includes(r.state)) || r.state === 'stale') && html`<${Button} onError=${showReviewError} pending=${pending === draftKind} disabled=${!!pending} action=${act(draftKind)} done=${done(draftKind)} title=${publish ? 'Review this round and publish by verdict if fresh; approve needs your click; respects the daily limit' : 'Draft this round as your pending review; respects the daily limit'}>${ActionIcon.draft}${r.state === 'stale' ? 'Re-draft' : publish ? 'Review (publish)' : 'Review (draft)'}<//>`}
     ${sendButton}
-    ${r.state === 'drafted' && html`<${Button} onError=${showReviewError} pending=${pending === 'review-redraft'} disabled=${!!pending} action=${act('review-redraft')} done="Draft requested">Re-draft<//>`}
+    ${r.state === 'drafted' && !updating && html`<${Button} onError=${showReviewError} pending=${pending === 'review-redraft'} disabled=${!!pending} action=${act('review-redraft')} done="Draft requested">Re-draft<//>`}
     <${SplitButton} more=${approvalMenu} />${confirmation}
     <${MuteAction} r=${r} />
     ${(OPEN.has(r.state) || r.notification) && html`<${Button} onError=${showReviewError} pending=${pending === 'review-skip'} disabled=${!!pending} sending=${sending('review-skip')} action=${act('review-skip')} done=${done('review-skip')} title="Handle it yourself; removes lobstah's draft. Deletes its staged pending review; does not decline the review on GitHub.">Dismiss<//>`}
@@ -279,7 +305,7 @@ export function ReviewActions({
 export function ReviewTags({ r, state = reviewPrState(r) }: { r: GlassReview; state?: PrIconState }): Children {
   const status = reviewStatus(r);
   return html`<${PrTags} state=${state} tags=${[
-    { ...status, unread: !!reviewUnreadReason(r) },
+    { ...status, unread: !reviewUpdating(r) && !!reviewUnreadReason(r) },
     ...(r.mutedAt ? [{ word: 'muted', tone: 'dim' as const }] : []),
   ]} />`;
 }
@@ -309,10 +335,7 @@ const asker = (r: GlassReview) => html`<span class="rv-person" title=${r.asker ?
 
 const staged = (r: GlassReview) =>
   r.staged &&
-  html`<a class="rv-staged" href=${r.stagedReviewUrl ?? r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => {
-    e.stopPropagation();
-    void reviewRequest('review-seen', { key: r.key });
-  }}>Open pending review</a>`;
+  html`<a class="rv-staged" href=${r.stagedReviewUrl ?? r.reviewUrl} target="_blank" rel="noopener" onClick=${(event: Event) => event.stopPropagation()}>Open draft</a>`;
 
 /** Read the same PR authorization that the PRs page renders. */
 const mergePr = (r: GlassReview) => getState().snapshot?.prs.find((p) => p.key === r.key.replace(/^review:/, 'pr:'));
@@ -328,7 +351,7 @@ function row(r: GlassReview, canDraft: boolean, publish: boolean) {
     <td>${r.author}</td>
     <td>${asker(r)}</td>
     <td>${Age(r.requestedAt)}</td>
-    <td>${badge(r)} ${staged(r)} ${posted(r)}<${MergeIntent} p=${mergePr(r)} />${mergePr(r)?.mergeRequest && html`<${MergeWhenGreen} p=${mergePr(r)} />`}</td>
+    <td>${badge(r)} ${posted(r)}<${MergeIntent} p=${mergePr(r)} />${mergePr(r)?.mergeRequest && html`<${MergeWhenGreen} p=${mergePr(r)} />`}</td>
     <td><${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} /></td>
   </tr>`;
 }
@@ -345,15 +368,19 @@ const posted = (r: GlassReview) =>
  * "posted"; otherwise its round's state (requested, drafting, stale, failed).
  */
 export function reviewStatus(
-  r: Pick<GlassReview, 'state' | 'staged' | 'verdict' | 'decisions' | 'decisionAnswers' | 'reReview' | 'autoReapproved'>,
+  r: Pick<
+    GlassReview,
+    'state' | 'staged' | 'verdict' | 'decisions' | 'decisionAnswers' | 'reReview' | 'autoReapproved' | 'updating' | 'reason'
+  >,
 ): {
   word: string;
   tone: CardTone;
 } {
+  if (reviewUpdating(r)) return { word: 'Updating', tone: 'dim' };
   if (r.reReview) return { word: 're-review needed', tone: 'bad' };
   if (r.autoReapproved) return { word: 'automatically re-approved', tone: 'ok' };
   if (reviewState(r) === 'needs your call') return { word: 'needs your call', tone: 'bad' };
-  if (r.state === 'drafted') return { word: 'draft ready', tone: 'ok' };
+  if (r.state === 'drafted') return { word: 'Ready to post', tone: 'ok' };
   if (r.state === 'posted')
     return { word: (r.verdict && POSTED[r.verdict]) || 'posted', tone: r.verdict === 'request_changes' ? 'warn' : 'ok' };
   if (r.state === 'failed') return { word: 'failed', tone: 'bad' };
@@ -363,6 +390,7 @@ export function reviewStatus(
 
 /** Red when it waits on you or failed, amber while lobstah works on it, green once posted, grey once closed another way. */
 function reviewTone(r: GlassReview): CardTone {
+  if (reviewUpdating(r)) return 'dim';
   if (r.reReview) return 'bad';
   if (r.state === 'posted') return 'ok';
   if (['dismissed', 'withdrawn', 'merged', 'closed'].includes(r.state)) return 'dim';
@@ -462,14 +490,104 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
     setup?.enabled
       ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
-    !inp.list.length
-      ? html`<div class="empty">no review requests</div>`
-      : inp.view === 'cards'
-        ? html`<div class="cards">${inp.list.map((r) => card(r, canDraft, publish))}</div>`
-        : Table(
-            ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
-            inp.list.map((r) => row(r, canDraft, publish)),
-            'no review requests match',
-          ),
+    ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
+      const contents = groups.map(
+        ({ stack, reviews }) =>
+          html`<section class="rv-group">${
+            stack
+              ? html`<${StackCard}
+              id=${`review-stack:${stack.id}`}
+              prState=${reviews.some((review) => ['open', 'draft'].includes(reviewPrState(review))) ? 'open' : reviews.some((review) => reviewPrState(review) === 'merged') ? 'merged' : 'closed'}
+              repo=${reviews[0]!.repoKey ?? reviews[0]!.repo}
+              updatedAt=${reviews
+                .map((review) => review.updatedAt ?? review.postedAt ?? review.draftedAt ?? review.requestedAt)
+                .sort()
+                .at(-1)}
+              range=${reviews.length === 1 ? `#${reviews[0]!.number}` : `#${reviews[0]!.number} → #${reviews.at(-1)!.number}`}
+              header=${{
+                title: stack.title ?? reviews.at(-1)!.title,
+                titleAttr: stack.title ?? reviews.at(-1)!.title,
+                attrs: { 'data-review-stack': stack.id, 'aria-label': stack.title ?? reviews.at(-1)!.title },
+              }}
+              members=${() => reviews.map((review) => card(review, canDraft, publish))}
+            />`
+              : inp.view === 'cards'
+                ? html`<div class="cards">${reviews.map((review) => card(review, canDraft, publish))}</div>`
+                : Table(
+                    ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
+                    reviews.map((review) => row(review, canDraft, publish)),
+                    'no review requests match',
+                  )
+          }</section>`,
+      );
+      return id === 'needs'
+        ? html`<section class="rv-section" data-review-section=${id}><h2>${title} (${count})</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
+        : html`<details class="rv-section" data-review-section=${id} open=${inp.expanded?.[id] === true} onToggle=${(event: Event) => {
+            const expanded = (event.currentTarget as HTMLDetailsElement).open;
+            if ((getState().prefs.reviewSections?.[id] === true) !== expanded)
+              setPrefs({ reviewSections: { ...getState().prefs.reviewSections, [id]: expanded } });
+          }}><summary>${title} (${count})</summary>${contents}</details>`;
+    }),
   ];
+}
+
+/** Group visible reviews using the watch detector's order; standalone PRs retain their layout. */
+export function reviewGroups(reviews: readonly GlassReview[]): Array<{ stack?: GlassReview['stack']; reviews: GlassReview[] }> {
+  const groups: Array<{ stack?: GlassReview['stack']; reviews: GlassReview[] }> = [];
+  const seen = new Set<string>();
+  for (const review of reviews) {
+    if (seen.has(review.key)) continue;
+    const members = review.stack ? review.stack.keys.flatMap((key) => reviews.filter((candidate) => candidate.key === key)) : [review];
+    members.forEach((member) => seen.add(member.key));
+    const previous = groups.at(-1);
+    if (!review.stack && previous && !previous.stack) previous.reviews.push(review);
+    else groups.push({ stack: review.stack, reviews: members });
+  }
+  return groups;
+}
+
+/** Actionable reviews stay counted after opening; automatic work and waiting rounds do not. */
+export function reviewNeedsViewer(review: GlassReview): boolean {
+  if (
+    review.mutedAt ||
+    reviewUpdating(review) ||
+    ['MERGED', 'CLOSED'].includes(review.prState ?? '') ||
+    ['merged', 'closed'].includes(review.state)
+  )
+    return false;
+  if (review.reReview) return true;
+  return review.state === 'drafted' || review.state === 'failed' || (review.state === 'requested' && !!(review.stands || review.needsYou));
+}
+
+/** A whole stack follows its most urgent PR, so its review order stays intact. */
+export function reviewSections(reviews: readonly GlassReview[]): Array<{
+  id: 'needs' | 'waiting' | 'done';
+  title: string;
+  groups: ReturnType<typeof reviewGroups>;
+  count: number;
+}> {
+  const sections = [
+    { id: 'needs' as const, title: 'Needs your review', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
+    { id: 'waiting' as const, title: 'Waiting on response', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
+    { id: 'done' as const, title: 'Done', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
+  ];
+  const urgency = (review: GlassReview): number => {
+    if (['MERGED', 'CLOSED'].includes(review.prState ?? '') || ['merged', 'closed'].includes(review.state)) return 2;
+    return review.state === 'posted' && !review.reReview ? 1 : 0;
+  };
+  const recent = (review: GlassReview): string => review.updatedAt ?? review.postedAt ?? review.requestedAt;
+  // Keep standalone reviews independent while assigning urgency, then coalesce their layouts.
+  const groups = reviewGroups(reviews).flatMap((group) => (group.stack ? [group] : group.reviews.map((review) => ({ reviews: [review] }))));
+  groups.sort((left, right) => {
+    const latest = (group: { reviews: GlassReview[] }): string => group.reviews.map(recent).sort().at(-1) ?? '';
+    return latest(right).localeCompare(latest(left));
+  });
+  for (const group of groups) {
+    const section = sections[Math.min(...group.reviews.map(urgency))]!;
+    const previous = section.groups.at(-1);
+    if (!('stack' in group && group.stack) && previous && !previous.stack) previous.reviews.push(...group.reviews);
+    else section.groups.push(group);
+    section.count += group.reviews.filter(reviewNeedsViewer).length;
+  }
+  return sections;
 }
