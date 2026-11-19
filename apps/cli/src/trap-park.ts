@@ -1,6 +1,6 @@
 import {
   IdleWait, acknowledgeTrapMessage, baitBrief, cancelRequested, claimBait,
-  hasOpenCatch, heartbeatTrap, laneOf, loadConfig, needsFreshTrapSession,
+  pendingWatchEvents, watchInstructionLines, hasOpenCatch, heartbeatTrap, laneOf, loadConfig, needsFreshTrapSession,
   readTrap, resumeTrapTurn, stowTrap, toonHelp, toonKV, trapSessionTitle,
   TRAP_INSTRUCTION_RULE, unhandled, unhandledTrapMessages, unreportedTrapBait,
 } from '@lobstah/core';
@@ -50,6 +50,19 @@ export async function soakPark(trapId: string, timeout: string | undefined, plai
         console.log(toonHelp([`${rearm}   (when you finish handling this, run this here to keep listening)`]));
       }
     : (reason: string) => { idle.woke(); const trap = readTrap(trapId); if (trap) resumeTrapTurn(trap, true); console.log(JSON.stringify({ decision: 'block', reason })); };
+  const wakeWatchInbox = (): boolean => {
+    const watches = pendingWatchEvents(false, `trap:${trapId}`);
+    if (watches.length) {
+      block([
+        `Watched events for trap wt:${trapId}:`,
+        ...watches.flatMap(({ watch, events }) => [watch.key, ...events.map((event) => `- ${event.summary ?? String(event.seq)}`), ...watchInstructionLines(watch.presentation, 'worker')]),
+        `Read and consume them with \`lobstah watch inbox --owner wt:${trapId}\`, act on the supplied instructions, then park again.`,
+        TRAP_INSTRUCTION_RULE,
+      ].join('\n\n'));
+      return true;
+    }
+    return false;
+  };
   while (true) {
     if (readTrap(trapId)?.sessionId !== sessionId) return 'gone';
     const reg = heartbeatTrap(trapId, { parked: true });
@@ -97,7 +110,9 @@ export async function soakPark(trapId: string, timeout: string | undefined, plai
         block([instruction, pending ? baitBrief(id, pending.descriptor) : undefined].filter(Boolean).join('\n\n'));
         return 'woke';
       }
+      if (wakeWatchInbox()) return 'woke';
     } else {
+      if (wakeWatchInbox()) return 'woke';
       if (reg.one && reg.claimed) {
         stowTrap(trapId, 'signed off after its one catch', reg.sessionId);
         return 'gone'; // one catch was the deal — the trap comes out of the water

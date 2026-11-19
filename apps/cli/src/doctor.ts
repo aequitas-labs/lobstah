@@ -40,6 +40,7 @@ import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import { petRow } from './pet.js';
 import { listCodexHooks } from './codex-hook-list.js';
 import { claudeHooks, codexHooks, hookRow, listenerRow } from './hook-readiness.js';
+import { watchDoctorRow } from './watch-doctor.js';
 import { turnWaitsRow } from './turn-doctor.js';
 import { permissionsRow } from './permissions.js';
 import { codexPermissionsRow } from './codex-permissions.js';
@@ -439,6 +440,8 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   }
   const listeners = listenerRow(now);
   push(listeners.check, listeners.status, listeners.detail);
+  const watches = watchDoctorRow();
+  push(watches.check, watches.status, watches.detail);
   const turnWaits = turnWaitsRow();
   push(turnWaits.check, turnWaits.status, turnWaits.detail);
   try {

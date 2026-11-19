@@ -366,6 +366,19 @@ wake delivers the same instructions and recorded read context. New types
 register attention kinds through their descriptors, so the helm and glass
 can render them without source-specific instructions or label tables.
 
+Local notice, status, decision, report, progress and review-request adapters
+use the same presentation contract. They keep existing public keys, grounds
+filters, wake cursors and acknowledgment hashes. Quiet notices remain listed
+without waking the helm. `doctor` and `man tend` show adapter versions and
+held-state remedies when an installed adapter cannot restore its checkpoint.
+
+A watch can belong directly to a stable trap ID. Its events stay buffered
+while the trap is stowed. Re-soaking the same trap exposes that tail through
+the Stop hook and `soak --wait`, without creating a headless dispatch. Read
+and consume it with `lobstah watch inbox --owner wt:<id>`; add `--peek` to leave
+it buffered. Assigned dispatch instructions keep their existing inbox and
+are delivered before direct watch feedback.
+
 One watch cycle forks at most `[watches].maxForksPerCycle` continuations
 (default 3). Generic watches over the cap are held and listed as `held` in
 `man tend` and `lobstah watch`. PR repairs wait for the next cycle.
@@ -582,7 +595,7 @@ mergeable, non-draft PR with no failed, pending, or unknown current checks.
 blocked, or exhausted; their notes say why. Requested review changes on an
 owned PR follow the same repair rule. Unresolved review questions remain
 `pr:review` attention. Drafts are not attention by default; users can add
-`pr:draft` to `attentionKinds`. The glass and desktop pet use the same list.
+`pr:draft` to `[watches.attention].enabledKinds`. The glass and desktop pet use the same list.
 See the [attention contract](vocabulary.md#attention-contract). A PR is
 something to look at, not a stall: it never flips the verdict to
 `needs-attention` and stays out of the digest.
@@ -787,11 +800,11 @@ the helm files to keep.
   attachment images read-only, by basename, from their own attachments
   directories. Missing files, malformed names, and symlinks are not served.
 - **Attention.** A filed report with no ack stands as the `report` attention
-  kind. Add `report` to `attentionKinds` to walk it. The desktop pet shows
+  kind. Add `report` to `[watches.attention].enabledKinds` to walk it. The desktop pet shows
   the report's title; a pet click opens the item and acks it through
   `lobstah attention ack <key> --by pet`. The pet's Acknowledge menu entry
   acks without opening, and `lobstah attention ack <key>` acks a report
-  whether or not `report` is in `attentionKinds`. Opening a report in the
+  whether or not `report` is in `[watches.attention].enabledKinds`. Opening a report in the
   glass acks it, and `man tend`'s `viewed` column shows when; refiling it
   stands it again until it is opened again. A report filed by a follow-up dispatch acks the report
   of each dispatch before it in the chain.
@@ -829,7 +842,7 @@ the same rule.
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
   standing decision; a key that is not standing is refused.
 - **Attention.** A standing decision is attention of kind `decision`, in
-  the default `attentionKinds`. It makes the verdict `needs-attention`. A
+  the default `[watches.attention].enabledKinds`. It makes the verdict `needs-attention`. A
   worker's raw `needs-decision` or `blocked` stays a `question` until the
   helm frames it. While a decision on the same dispatch, asked at or after
   the question, is on disk, the `question` item is hidden: the decision

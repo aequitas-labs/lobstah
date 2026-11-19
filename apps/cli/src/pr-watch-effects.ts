@@ -5,8 +5,8 @@ import { pollSecs } from './pr-watch.js';
 import { stampRepairerBeat } from './pr-repair.js';
 import { deliverMergeWatchActions } from './watch-sources/merge.js';
 
-/** Existing PR effects stay source-owned while their policy and authority slices migrate. */
-export function legacyPrWatchEffects(now: number, log: (message: string) => void): void {
+/** PR observation projections, wait completion and authorized actions are source-owned. */
+export function prWatchEffects(now: number, log: (message: string) => void): void {
   retireTerminalPrWatches();
   syncStackReadiness(loadConfig(), now);
   observeWaitedPrs({ everySecs: pollSecs(), now });

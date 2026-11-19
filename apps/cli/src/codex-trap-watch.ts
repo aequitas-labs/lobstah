@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   atomicRenameSync, codexIdleWakeAt, dispatchProgress, hasOpenCatch, laneOf, listTraps, loadConfig,
-  lobstahHome, recordCodexIdleWake, trapUsageLimit, unhandled, unhandledTrapMessages, uniqueTempPath,
+  pendingWatchEvents, lobstahHome, recordCodexIdleWake, trapUsageLimit, unhandled, unhandledTrapMessages, uniqueTempPath,
   type TrapRegistration,
 } from '@lobstah/core';
 import { wakeCodexTrap, type CodexClaimWatchDeps } from './codex-claim-watch.js';
@@ -40,6 +40,7 @@ export function createCodexTrapWatch(deps: CodexClaimWatchDeps = {}) {
         const id = hasOpenCatch(trap) ? trap.claimed : undefined;
         const messages = [
           ...unhandledTrapMessages(trap.trapId).map(m => `trap:${m.file}`),
+          ...pendingWatchEvents(false, `trap:${trap.trapId}`).flatMap(({ watch, events }) => events.map((event) => `watch:${watch.key}:${String(event.seq)}`)),
           ...(id ? unhandled(id, laneOf(id) ?? 'work').map(m => `dispatch:${id}:${m.file}`) : []),
         ];
         const old = delivered(trap);

@@ -13,11 +13,11 @@ import {
   presentLegacyAttention,
   presentWatchCondition,
   watchConditionKey,
+  WatchJournal,
   journalWatchViews,
   presentedWatchViews,
   watchInstructionLines,
   workerLabel,
-  questionViewedAt,
   activeIds,
   questionHeld,
   waitingText,
@@ -114,9 +114,9 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { reportAttention } from './report-file.js';
-import { decisionAttention, hideFramedQuestions } from './decisions.js';
+import { decisionAttention } from './decisions.js';
 import { worktreeView } from './worktree-view.js';
-import { backendViews, hostedAttention, hostedDecisionFrames } from './hosted-view.js';
+import { backendViews, hostedAttention } from './hosted-view.js';
 import { otherBoatsAttention } from './wharf-attention.js';
 import { livenessView } from './liveness-view.js';
 import { dispatchUsageLimit } from '@lobstah/core';
@@ -193,6 +193,7 @@ export interface TendStory {
 }
 
 export interface TendWatch {
+  type?: { id: string; version: string; apiVersion: number; stateVersion: number };
   /** Source-supplied instructions and arbitrary rows, persisted with observation. */
   presentation?: WatchPresentation;
   key: string;
@@ -672,8 +673,7 @@ function bucketOf(uuid: string): TendDispatch['bucket'] | undefined {
  */
 export function walkingAttention(report: TendReport, now: number = Date.now(), opts: { boats?: boolean } = {}): TendAttention[] {
   const cfg = loadConfig();
-  const reviews = cfg.reviews.enabled ? reviewAttention(now) : [];
-  const own = [...report.attention, ...reviews].filter((a) => !a.held);
+  const own = report.attention.filter((a) => !a.held);
   return opts.boats ? [...own, ...otherBoatsAttention(cfg, own, now)] : own;
 }
 
@@ -705,40 +705,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     }
   }
 
-  // Attention is standing state, read straight from the status logs — not
-  // the wake cursor. Consuming a wake (a park, a wait) must not make an
-  // unanswered question drop out of the status view; remindSecs paces
-  // re-WAKES, never visibility.
   const attention: TendReport['attention'] = [];
-  for (const lane of ['work', 'chore'] as Lane[]) {
-    for (const id of [...pendingIds(lane), ...activeIds(lane)]) {
-      // A permission request filed after the question has its own card; the question stands.
-      const last = questionEntry(readStatusLog(id, lane));
-      if (!last) continue;
-      // Answered (a message newer than the question) is not standing, even
-      // before the worker reads it and reports; the dispatch row carries
-      // the marker instead.
-      if (answeredAt(id, lane, last.at) !== undefined) continue;
-      const key = `${lane}:${id}`;
-      const stateHash = statusStateHash(last.verb, last.at);
-      const repo = repoOf(id, lane);
-      attention.push({
-        kind: 'question',
-        key,
-        stateHash,
-        id,
-        lane,
-        verb: last.verb,
-        ageSecs: Math.max(0, Math.round((now - Date.parse(last.at)) / 1000)),
-        at: last.at,
-        standingSince: last.at,
-        note: last.note,
-        ...(repo ? { repo } : {}),
-        // On the helm's turn: listed here, kept from the pet and the glass.
-        ...(questionHeld({ key, stateHash, repo }, now) ? { held: true } : {}),
-      });
-    }
-  }
 
   // Watches join from disk, same observational stance as the merge view: an
   // unconsumed man-owned event is a standing wake nobody has answered yet.
@@ -751,6 +718,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     const last = events.at(-1);
     watches.push({
       key: w.key,
+      type: new WatchJournal().read(w.key)?.type,
       owner: w.owner,
       cursor: w.cursor,
       ...(presentation ? { presentation } : {}),
@@ -874,11 +842,12 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const records = readPrs();
   const legacy = evidencePrs();
   const observed = observedPrs(records, legacy);
-  const sourcePresentation = presentationSources(now, observed, cfg, { chainOf, repoOf });
+  const sourcePresentation = presentationSources(now, observed, cfg, { chainOf, repoOf }, { landed: (at) => landedAttention(cfg, at), decisions: (at) => decisionAttention(at), reports: (at) => reportAttention(at) });
   const legacyWatchKeys = new Set(watches.map((watch) => watch.key));
-  for (const view of presentedWatchViews(now, legacyWatchKeys, sourcePresentation.registry)) {
+  const sourceViews = presentedWatchViews(now, legacyWatchKeys, sourcePresentation.registry);
+  for (const view of sourceViews) {
     const { snapshot, watch, pending, events } = view;
-    watches.push({ key: watch.key, owner: watch.owner, cursor: watch.cursor, pendingEvents: pending.length,
+    if (snapshot.presentation.listing !== 'conditions' || watch.heldAt) watches.push({ key: watch.key, type: snapshot.type, owner: watch.owner, cursor: watch.cursor, pendingEvents: pending.length,
       presentation: snapshot.presentation, lastSummary: events.at(-1)?.summary, lastAt: events.at(-1)?.at,
       ...(watch.heldAt ? { heldAt: watch.heldAt, heldReason: watch.heldReason } : {}),
       ...(watch.lastError ? { error: watchErrorCell(watch) } : {}),
@@ -924,16 +893,9 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     records,
     { readySettleSecs: cfg.readySettleSecs, now },
   ).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...sourcePresentation.attention, ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
-  attention.push(...dispatchProgress(now, cfg).map((p): TendAttention => ({
-    kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
-    id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,
-    note: p.text, repo: p.repo,
-    // The helm always gets it (man tend, its verdict); it walks on the pet and the glass only when attentionKinds names it.
-    ...(cfg.attentionKinds.includes('dispatch-progress') ? {} : { quiet: true }),
-  })));
+  attention.push(...sourcePresentation.attention, ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
   const displayOf = (item: TendAttention) => item.presentation ?? presentLegacyAttention(item);
-  const suppressedConditions = new Set(attention.flatMap((item) => (displayOf(item).suppresses ?? []).map((rule) => `${rule.kind}\0${rule.key}`)));
+  const suppressedConditions = new Set([...sourceViews.flatMap((view) => view.snapshot.presentation.suppresses ?? []).map((rule) => `${rule.kind}\0${rule.key}`), ...attention.flatMap((item) => (displayOf(item).suppresses ?? []).map((rule) => `${rule.kind}\0${rule.key}`))]);
   const suppressed = new Set(attention.flatMap((item) => displayOf(item).suppressesKeys ?? []));
   const enabled = new Set<string>(cfg.attentionKinds);
   if (cfg.watches?.attention?.enabledKinds === undefined) {
@@ -944,7 +906,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     return !suppressed.has(item.key) && !suppressedConditions.has(`${item.kind}\0${item.key}`) && (display.always || enabled.has(item.kind) || display.enabledBy?.some((kind) => enabled.has(kind)));
   });
   // A question the helm framed as a decision shows as that decision.
-  const shown = enabled.has('decision') ? hideFramedQuestions(walking, [...listDecisions(), ...hostedDecisionFrames(cfg)]) : walking;
+  const shown = walking;
   attention.length = 0;
   // Acks are display-only: they annotate, never remove. The verdict below
   // and every wake path ignore them.
@@ -952,9 +914,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     ...shown.map((a) => {
       const ack = currentAck(a.key, a.stateHash);
       // A raw question's first view in the glass, scoped to when it was asked.
-      const viewedAt = a.kind === 'question' && a.at ? questionViewedAt(a.key, a.at) : undefined;
-      const seen = viewedAt ? { ...a, viewedAt } : a;
-      return ack ? { ...seen, acked: { at: ack.at, by: ack.by } } : seen;
+      return ack ? { ...a, acked: { at: ack.at, by: ack.by } } : a;
     }),
   );
   // Attention is a queue of standing conditions. Observation recency only
@@ -983,7 +943,6 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const pools = poolViews(cfg);
   const tools = reviewTools(cfg);
   for (const item of attention) {
-    if (item.kind === 'report' || item.kind === 'decision') item.petOpen = cfg.pet.open;
     if (item.prUrl) item.reviewUrl = prReviewUrl(item.prUrl, tools);
   }
   let todos: TodoView[] = [];
@@ -1117,9 +1076,9 @@ export function renderTend(r: TendReport): string {
           // Whether the human has opened it in the glass's decision modal,
           // or acked a report (opening its page acks it).
           viewed:
-            a.kind === 'decision' || a.kind === 'question'
+            (a.presentation ?? presentLegacyAttention(a)).viewedBy === 'viewedAt'
               ? a.viewedAt ? `yes ${a.viewedAt}` : 'no'
-              : a.kind === 'report'
+              : (a.presentation ?? presentLegacyAttention(a)).viewedBy === 'ack'
                 ? a.acked ? `yes ${a.acked.at}` : 'no'
                 : '',
           note: named(a.prUrl ? `${a.note ?? ''} ${a.prUrl}`.trim() : (a.note ?? '')),
@@ -1214,12 +1173,13 @@ export function renderTend(r: TendReport): string {
         r.watches.map((w) => ({
           key: w.key,
           owner: w.owner,
+          type: w.type ? `${w.type.id} ${w.type.version} (state ${w.type.stateVersion})` : '',
           pending: w.pendingEvents,
           held: w.heldAt ? `held: ${w.heldReason ?? 'held'}` : '',
           last: w.lastSummary ?? '',
           error: w.error ?? '',
         })),
-        ['key', 'owner', 'pending', 'held', 'last', 'error'],
+        ['key', 'owner', 'type', 'pending', 'held', 'last', 'error'],
       ),
     );
   }

@@ -205,16 +205,19 @@ export class WatchRuntime {
       if (!stored || stored.status !== 'watching' || (stored.lease && stored.lease.until > now)) return { result: undefined };
       const delay = Math.max(everySecs, stored.failure?.retryAfterSecs ?? 0) * 1000;
       if (!force && stored.checkedAt && Date.parse(stored.checkedAt) + delay > now) return { result: undefined };
-      let snapshot: WatchSnapshot, adapter: InstalledWatchType;
+      let snapshot: WatchSnapshot, adapter: InstalledWatchType | undefined;
       try {
         adapter = this.registry.get(stored.type.id);
         snapshot = adapter.restore(stored);
       } catch (error) {
+        let supplied: WatchFailure | undefined;
+        try { supplied = adapter?.failure(error); } catch { /* A broken failure formatter cannot hide the restore error. */ }
         stored.status = 'held';
         stored.failure = {
-          kind: 'adapter',
-          message: error instanceof Error ? error.message : String(error),
-          remedy: 'Install a compatible watch adapter or restore its supported state version.',
+          ...supplied,
+          kind: supplied?.kind ?? 'adapter',
+          message: supplied?.message ?? (error instanceof Error ? error.message : String(error)),
+          remedy: supplied?.remedy ?? 'Install a compatible watch adapter or restore its supported state version.',
           hold: true,
         };
         return { snapshot: stored, result: undefined };

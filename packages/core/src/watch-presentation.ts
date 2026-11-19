@@ -47,7 +47,7 @@ export function journalWatchViews(exclude: ReadonlySet<string> = new Set()): Jou
         seen: events.length - pending.length,
         seenAt: 0,
         presentation: snapshot.presentation,
-        ...(snapshot.failure ? { lastError: snapshot.failure.message, remedy: snapshot.failure.remedy } : {}),
+        ...(snapshot.failure ? { lastError: snapshot.failure.message, remedy: snapshot.failure.remedy, failingSince: snapshot.checkedAt ?? snapshot.createdAt } : {}),
         ...(snapshot.status === 'held' ? { heldAt: snapshot.checkedAt ?? snapshot.createdAt, heldReason: snapshot.failure?.message } : {}),
       };
       return { snapshot, watch, events, pending };

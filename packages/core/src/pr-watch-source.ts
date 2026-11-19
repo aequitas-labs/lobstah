@@ -10,6 +10,7 @@ import { isPrPresetWatch, prBatchInFlight, preparePrWatchBatch } from './pr-poll
 import { listWatches } from './watch.js';
 import { prFixBrief, prStandingKinds, prStateHash, prNote, parsePrRef } from './pr.js';
 import { readPr } from './prs.js';
+import { readWatch } from './watch.js';
 import { loadConfig } from './config.js';
 
 /** Provider-wide limits are one incident; permission and identity errors remain per watch. */
@@ -77,7 +78,7 @@ function presentPrSnapshot(snapshot: PrWatchSnapshot): WatchPresentation {
     tone: snapshot.failure && !snapshot.failure.shared ? 'risk' : 'neutral',
     worker: { steps: [snapshot.options.brief ?? prFixBrief(reference)] },
     helm: {
-      steps: ['Read the pull request record, its checks and its owning chain before dispatching another repair.'],
+      steps: ['Read the pull request record, its checks and its owning chain before dispatching another repair.', 'A human approval check starts no repair. Each failing check gets one repair round per PR head; read any supplied hold, settle period or cooldown before starting another round.', 'A repair pushes only its PR branch. On a non-fast-forward rejection, fetch the moved branch and retry with the source’s bounded push policy; report a blocked push and leave the PR when the bound is exhausted.'],
       read: { executable: 'lobstah', args: ['prs'] },
     },
     rows: [
@@ -107,16 +108,28 @@ export interface PrWatchSourceOptions {
   run?: PrBatchRun;
   effectHandler?: PrWatchServices['effectHandler'];
   automation?: PrWatchServices['automation'];
+  present?: PrWatchServices['present'];
 }
 
 export function createPrWatchType(options: PrWatchSourceOptions = {}): PrWatchType {
   return new PrWatchType({
+    noticePolicy: { kinds: [], current: () => true, relatedDispatches(notice) {
+      const ids: string[] = [];
+      for (const value of [notice.refId, notice.url]) {
+        const reference = value ? parsePrRef(value) : undefined;
+        if (!reference) continue;
+        const owner = readWatch(reference.key)?.owner;
+        if (owner?.startsWith('dispatch:')) ids.push(owner.slice(9));
+        ids.push(...(readPr(reference.key)?.dispatches ?? []).slice().reverse());
+      }
+      return ids;
+    } },
     observe: observePrWatch,
     effectHandler: options.effectHandler,
     automation: options.automation,
     dispatchPolicy: prDispatchPolicy(),
     failure: prWatchFailure,
-    present: presentPrSnapshot,
+    present: options.present ?? presentPrSnapshot,
     batchObserver: {
       group: ({ snapshot }) =>
         `${isPrPresetWatch({ key: snapshot.key, check: snapshot.options.check }) ? 'github' : 'command'}:${snapshot.reference.owner}/${snapshot.reference.repo}`,

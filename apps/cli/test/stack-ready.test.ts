@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { addWatch, appendWatchEvents, ensureLayout, listNotices, WatchJournal, listWatches, parsePrRef, prEvidence, readPrs, readStackEpochs, syncStackReadiness, upsertPr } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
 import { discoverPrStack } from '../src/pr-stack-watch.js';
-import { legacyPrWatchEffects } from '../src/pr-watch-effects.js';
+import { prWatchEffects } from '../src/pr-watch-effects.js';
 import { runDueManWatches } from '../src/pr-watch.js';
 import { addPrWatch, observePr } from '../src/pr-watch.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
@@ -360,7 +360,7 @@ it.each(['helm', 'daemon'])('%s observation preserves stack settle transitions w
     expect(Object.values(readStackEpochs())[0]?.ready).toBe(false);
     vi.setSystemTime(now + 11_000);
     if (feeder === 'helm') runDueManWatches();
-    else legacyPrWatchEffects(now + 11_000, () => {});
+    else prWatchEffects(now + 11_000, () => {});
     expect(Object.values(readStackEpochs())[0]?.ready).toBe(true);
     expect(buildTendReport(now + 11_000).attention.some((item) => item.kind === 'stack-ready' && !item.quiet)).toBe(true);
   } finally { vi.useRealTimers(); }

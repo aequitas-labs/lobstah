@@ -264,11 +264,13 @@ export function holdWatch(key: string, now = new Date(), opts: { reason?: string
 }
 
 /** Clear the hold on one watch, or on every held watch when key is undefined. Returns the released keys. */
-export function releaseHeldWatches(key?: string): string[] {
+export function releaseHeldWatches(key?: string, registry?: WatchRegistry): string[] {
+  const runtime = registry ? new WatchRuntime(registry) : commandWatchRuntime();
   const out: string[] = [];
   const legacy = listWatches(), all = [...legacy, ...journalWatchViews(new Set(legacy.map((watch) => watch.key))).map((view) => view.watch)];
   for (const w of key === undefined ? all : all.filter((watch) => watch.key === key)) {
     if (!w.heldAt) continue;
+    if (runtime.journal.read(w.key)?.status === 'held') runtime.release(w.key);
     w.heldAt = undefined;
     w.heldReason = undefined;
     w.heldFor = undefined;
@@ -370,7 +372,16 @@ export function runWatchCycle(defaultEverySecs: number, now = new Date(), option
   const due = listWatches().filter((watch) => !watch.done && (!options.include || options.include(watch)) && watchDue(watch, defaultEverySecs, now.getTime()));
   for (const watch of due) restoreCommandWatch(watch, runtime);
   const snapshots = runtime.checkManySync(due.map((watch) => watch.key), { now: now.getTime(), everySecs: defaultEverySecs, force: true });
-  return due.map((watch) => projectWatchSnapshot(watch, snapshots.get(watch.key), now, runtime));
+  const result = due.map((watch) => projectWatchSnapshot(watch, snapshots.get(watch.key), now, runtime));
+  const legacy = new Set(listWatches().map((watch) => watch.key));
+  const native = runtime.journal.list().filter((snapshot) => !legacy.has(snapshot.key) && snapshot.status === 'watching');
+  const priorIds = new Map(native.map((snapshot) => [snapshot.key, new Set(snapshot.events.map((event) => event.id))]));
+  const checked = runtime.checkManySync(native.map((snapshot) => snapshot.key), { now: now.getTime(), everySecs: defaultEverySecs });
+  for (const view of journalWatchViews(legacy)) {
+    if (!checked.has(view.watch.key)) continue;
+    result.push({ watch: view.watch, fresh: view.events.filter((event) => !priorIds.get(view.watch.key)?.has(String(event.seq))) });
+  }
+  return result;
 }
 
 /** Keep the legacy delivery/evidence wire projection until its policy slice cuts over. */

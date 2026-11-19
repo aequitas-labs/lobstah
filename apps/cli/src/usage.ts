@@ -138,8 +138,10 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '<uuid> <verb> [note...]',
   },
   watch: {
-    subverbs: ['add', 'rm', 'ls', 'check-pr', 'check-ume', 'backfill', 'hold', 'release'],
+    subverbs: ['add', 'rm', 'ls', 'inbox', 'check-pr', 'check-ume', 'backfill', 'hold', 'release'],
     flags: {
+      '--owner': { value: '<wt:id>' },
+      '--peek': {},
       '--check': { value: '<cmd>' },
       '--for': { value: '<uuid>' },
       '--cursor': { value: '<c>' },
@@ -149,7 +151,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--apply': {},
       '--all': {},
     },
-    flagSubverbs: { '--apply': ['backfill'], '--all': ['release'] },
+    flagSubverbs: { '--owner': ['inbox'], '--peek': ['inbox'], '--apply': ['backfill'], '--all': ['release'] },
     positionals: '[<key>]',
   },
   soak: {
@@ -407,11 +409,9 @@ acked. \`lobstah attention ack <key>\` acks one.`,
 A draft is staged on the PR as your pending review: edit and send it in your review tool.
 post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
 pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
-  watch: `Stand watch on something external; bare \`watch\` lists. \`watch add ume:<artifact>\` stores its project context and checks feedback without consuming it. \`watch add pr:<o>/<r>#<n>\`
-installs the shipped PR check; with --for, a check that fails after the first
-(baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
-\`report --pr\`, a trap's beat, and \`watch backfill --apply\` register; reads never do.
-\`watch hold <key> [--for <id>]\` holds PR repairs (--for ends it); \`watch release <key>|--all\` frees holds/cap.`,
+  watch: `Stand watch; bare \`watch\` lists source rows and held errors. \`watch add pr:<o>/<r>#<n>\` or \`watch add ume:<artifact>\` installs a builtin adapter.
+--check keeps a custom command; --for records its dispatch owner. \`watch inbox --owner wt:<id>\` consumes direct trap feedback (--peek leaves it buffered).
+\`watch hold <key> [--for <id>]\` holds repairs; \`watch release <key>|--all\` frees holds. Reads never register watches.`,
   soak: `Volunteer as worker. End your turn: Stop waits without waking on quiet deadlines. --wait does the same for hookless sessions; --timeout 0 probes once. Idle traps auto-stow after [soak].idleStowMins (60 by default), keeping the worktree. --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; --remote-link: the https://claude.ai/code/… URL Claude printed.
 --wait renews quiet deadlines; \`soak stop-listener\` ends only yours. --ticket or LOBSTAH_TRAP_TICKET: a reserved trap. Names the tab. \`soak beat\`: hook.`,

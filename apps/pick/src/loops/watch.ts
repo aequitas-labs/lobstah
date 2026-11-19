@@ -7,6 +7,7 @@ import {
   builtinWatchRegistry,
   WatchAutomationRunner,
   WatchJournal,
+  WatchRuntime,
   claimCommandWatchContinuation,
   reservedWatchDispatch,
   watchInstructionLines,
@@ -254,6 +255,12 @@ export async function watchLoop(
   const keys = [...listWatches().map((watch) => watch.key), ...new WatchJournal().list().map((snapshot) => snapshot.key)];
   const work = await new WatchAutomationRunner(registry).run(keys, Date.now(), cap, log);
   deliverDispatchOwned(log, Math.max(0, cap - work.length), registry);
+  const runtime = new WatchRuntime(registry);
+  for (const snapshot of runtime.journal.list()) {
+    if (snapshot.status !== 'draining' && snapshot.status !== 'closing') continue;
+    try { await runtime.close(snapshot.key); }
+    catch (error) { log(`watch ${snapshot.key} cleanup: ${error instanceof Error ? error.message : String(error)}`); }
+  }
 }
 
 /**

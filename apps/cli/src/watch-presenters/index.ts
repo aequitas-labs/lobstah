@@ -1,24 +1,71 @@
-import { builtinWatchRegistry, prBadge, prNote } from '@lobstah/core';
-import type { Config, Watch, WatchPresentation } from '@lobstah/core';
+import { hideFramedQuestions } from '../decisions.js';
+import { hostedAttention, hostedDecisionFrames } from '../hosted-view.js';
+import { builtinWatchRegistry, prBadge, prNote, WatchJournal, watchSourceType, localQuestionAttention, listDecisions } from '@lobstah/core';
+import type { Config, Watch, WatchPresentation, LocalWatchSources } from '@lobstah/core';
 import { presentPrWatch, prAttention } from './pr.js';
 import type { observedPrs, PrAttentionGraph } from './pr.js';
 
-/** Temporary source presenters share one seam while their records migrate. */
-const presenters: ReadonlyArray<(watch: Watch) => WatchPresentation | undefined> = [presentPrWatch];
-
-export function presentRegisteredWatch(watch: Watch): WatchPresentation | undefined {
-  for (const present of presenters) {
-    const result = present(watch);
-    if (result) return result;
+/** Read through the installed contract without registering, polling or matching a source prefix. */
+export function presentRegisteredWatch(watch: Watch, registry = builtinWatchRegistry()): WatchPresentation | undefined {
+  const stored = new WatchJournal().read(watch.key);
+  try {
+    const source = registry.get(stored?.type.id ?? watchSourceType(watch, registry));
+    if (stored) return source.present(source.restore(stored));
+    const identified = source.identify(watch.key, { check: watch.check, cursor: watch.cursor, legacy: JSON.parse(JSON.stringify(watch)) });
+    if (!identified) return watch.presentation;
+    return source.present({
+      ...identified,
+      key: identified.key,
+      type: source.descriptor,
+      owner: { kind: 'helm', grounds: watch.grounds ?? 'home' },
+      generation: watch.generation ?? watch.createdAt,
+      status: 'watching',
+      events: [],
+      deliveries: [],
+      createdAt: watch.createdAt,
+      failures: watch.failures ?? 0,
+      presentation: watch.presentation!,
+    });
+  } catch {
+    return stored?.presentation ?? watch.presentation;
   }
-  return watch.presentation;
 }
 
-
 /** Builtin presenter composition supplies legacy ports; renderers consume only the contract. */
-export function presentationSources(now: number, observed: ReturnType<typeof observedPrs>, cfg: Config, graph: PrAttentionGraph) {
+export function presentationSources(
+  now: number,
+  observed: ReturnType<typeof observedPrs>,
+  cfg: Config,
+  graph: PrAttentionGraph,
+  local: LocalWatchSources = {},
+) {
   const attention = prAttention(now, observed, cfg, graph);
   const registry = builtinWatchRegistry({
+    local: {
+      ...local,
+      config: () => cfg,
+      suppressions(at) {
+        if (!cfg.attentionKinds.includes('decision')) return [];
+        const questions = [...localQuestionAttention(at), ...hostedAttention(cfg, at).filter((item) => item.kind === 'question')];
+        const retained = new Set(
+          hideFramedQuestions(questions, [...listDecisions(), ...hostedDecisionFrames(cfg)]).map((item) => item.key),
+        );
+        return questions.filter((item) => !retained.has(item.key)).map((item) => ({ kind: item.kind, key: item.key }));
+      },
+    },
+    pr: {
+      present(snapshot) {
+        return presentPrWatch({
+          key: snapshot.key,
+          owner: 'man',
+          check: snapshot.options.check,
+          cursor: snapshot.cursor,
+          seen: 0,
+          seenAt: 0,
+          createdAt: snapshot.createdAt,
+        })!;
+      },
+    },
     stack: {
       config: () => cfg,
       records: () => observed.map((entry) => entry.pr),

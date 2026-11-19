@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { registerUmeReview, clearFinishedUmeWatches, syncUmeWatches, addUmeWatch, runUmeCheck } from './ume-watch.js';
+import { addUmeWatch, runUmeCheck } from './ume-watch.js';
 import { createCliWatchRegistry } from './watch-automation.js';
-import { syncRegisteredWatches } from './watch-observation.js';
-import { legacyPrWatchEffects } from './pr-watch-effects.js';
+import { runCliWatchSources, registerCliReportWatches } from './watch-sources.js';
 import { presentRegisteredWatch } from './watch-presenters/index.js';
 import { createCodexTrapWatch } from './codex-trap-watch.js';
 import { soakPark } from './trap-park.js';
@@ -172,6 +171,7 @@ import {
   watchErrorCell,
   watchInstructionLines,
   pendingWatchEvents,
+  journalWatchViews,
   readWatchEvents,
   holdWatch,
   releaseHeldWatches,
@@ -1739,8 +1739,7 @@ async function mainCli(): Promise<void> {
           : verb === 'paused' && !noWatch
             ? registerWaitWatches(id, lane, entry)
             : [];
-      if (!noWatch) registerUmeReview(id, lane, entry);
-      clearFinishedUmeWatches();
+      registerCliReportWatches(id, lane, entry, !noWatch);
       const warnings = [waitWarning(id, lane, entry), filed && unattachedWarning(filed)].filter((w): w is string => !!w);
       let permissionCard: string | undefined;
       if (permCommand !== undefined || permPath !== undefined) {
@@ -2297,7 +2296,6 @@ async function mainCli(): Promise<void> {
       const report = buildTendReport();
       // The pet's lobsters: the same list the glass's lobs walk, and every other mirror boat's.
       const walking = walkingAttention(report, Date.now(), { boats: true });
-      if (loadConfig().reviews.enabled) report.attention.push(...reviewAttention(Date.now()));
       pruneStaleAcks(report.attention);
       if (sub === 'ack' || sub === 'unack') {
         const key = pos[1];
@@ -3943,11 +3941,7 @@ async function mainCli(): Promise<void> {
           trapPanes: createTrapPaneWatch(),
           trapStarts: createTrapDispatchScheduler(),
           culler: backgroundCuller,
-          watches: (now, log) => {
-            syncUmeWatches();
-            syncRegisteredWatches(now);
-            legacyPrWatchEffects(now, log);
-          },
+          watches: runCliWatchSources,
           todoFiring: createTodoFiring(),
           runCleanup: createRunCleanup(),
           codexServerWatch: createCodexServerWatch(),
@@ -4127,6 +4121,18 @@ async function mainCli(): Promise<void> {
     case 'watch': {
       const sub = pos[0];
       if (['add', 'check-pr'].includes(sub ?? '')) loadConfig({ upgrade: true });
+      if (sub === 'inbox') {
+        const trapId = opt('--owner')?.replace(/^wt:/, '') ?? (callerSession(opt('--session'))?.id ? trapBySession(callerSession(opt('--session'))!.id)?.trapId : undefined);
+        if (!trapId) throw new Error('watch inbox requires --trap wt:<id>');
+        const watches = pendingWatchEvents(!has('--peek'), `trap:${trapId}`);
+        for (const { watch, events } of watches) {
+          console.log(toonKV({ watch: watch.key, events: events.length }));
+          for (const event of events) console.log(toonKV({ seq: event.seq, summary: event.summary }));
+          for (const instruction of watchInstructionLines(watch.presentation, 'worker')) console.log(`instruction: ${instruction}`);
+        }
+        if (!watches.length) console.log(toonKV({ trap: `wt:${trapId}`, inbox: 'empty' }));
+        break;
+      }
       if (sub === 'check-ume') {
         console.log(runUmeCheck(pos[1] ?? '', opt('--cursor')));
         break;
@@ -4241,7 +4247,8 @@ async function mainCli(): Promise<void> {
         console.log(toonKV({ key, removed: removeWatch(key) }));
         break;
       }
-      const rows = listWatches().map((w) => ({
+      const legacy = listWatches();
+      const rows = [...legacy, ...journalWatchViews(new Set(legacy.map((watch) => watch.key))).map((view) => view.watch)].map((w) => ({
         key: w.key,
         owner: w.owner,
         cursor: w.cursor,

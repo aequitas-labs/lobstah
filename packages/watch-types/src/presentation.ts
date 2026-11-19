@@ -14,6 +14,8 @@ export interface WatchAttentionDisplay {
   badgeText: string;
   badgeClass: string;
   afterBadge?: string;
+  /** The generic row can show explicit viewing or acknowledgment without matching a source kind. */
+  viewedBy?: 'viewedAt' | 'ack';
   target?: WatchAttentionTarget;
   acknowledge: boolean;
   always: boolean;
@@ -80,6 +82,7 @@ export function presentLegacyAttention(record: LegacyAttentionRecord): WatchAtte
         ? `v-${record.verb}`
         : `badge ${kind === 'landed' ? (record.verb === 'failed' ? 'bad' : 'ok') : definition?.tone || 'dim'}`,
     acknowledge: true,
+    ...(['question', 'decision'].includes(kind) ? { viewedBy: 'viewedAt' as const } : kind === 'report' ? { viewedBy: 'ack' as const } : {}),
     always: kind === 'watch' || kind === 'dispatch-progress',
     blocking: ['question', 'decision', 'watch', 'dispatch-progress'].includes(kind),
   };

@@ -1,3 +1,4 @@
+import { localWatchTypes, type LocalWatchSources } from './local-watch-source.js';
 import { createUmeWatchType, type UmeWatchSourceOptions } from './ume-watch-source.js';
 import { CommandWatchType, MergePolicyWatchType, WatchRegistry } from '@lobstah/watch-types';
 import type { Watch } from './watch.js';
@@ -7,6 +8,7 @@ import { createPrWatchType, type PrWatchSourceOptions } from './pr-watch-source.
 import { createReviewWatchType, type ReviewWatchSourceOptions } from './review-watch-source.js';
 
 export interface BuiltinWatchServices {
+  local?: LocalWatchSources;
   ume?: UmeWatchSourceOptions;
   stack?: StackWatchSourceOptions;
   prMerge?: PrMergeWatchSourceOptions;
@@ -23,6 +25,7 @@ export function builtinWatchRegistry(options: BuiltinWatchServices = {}): WatchR
   registry.register(createPrMergeWatchType(options.prMerge));
   registry.register(new MergePolicyWatchType());
   registry.register(createUmeWatchType(options.ume));
+  for (const adapter of localWatchTypes(options.local)) registry.register(adapter);
   registry.register(new CommandWatchType());
   return registry;
 }

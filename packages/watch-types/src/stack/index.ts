@@ -1,3 +1,4 @@
+import type { WatchNoticePolicy } from '../model.js';
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
 import { watchJson } from '../registry.js';
@@ -40,6 +41,7 @@ export interface StackWatchState {
 export type StackWatchOptions = Record<string, never>;
 export type StackWatchSnapshot = WatchSnapshot<StackWatchReference, StackWatchState, string, StackWatchOptions>;
 export interface StackWatchServices {
+  noticePolicy?: WatchNoticePolicy;
   observe(context: WatchContext<StackWatchReference, StackWatchState, string, StackWatchOptions>): WatchObservationBatch<string>;
   present(snapshot: StackWatchSnapshot): WatchPresentation;
   failure(error: unknown): WatchFailure;
@@ -115,11 +117,13 @@ export class StackWatchType extends BaseWatchType<StackWatchReference, StackWatc
     },
   };
   readonly derived: WatchDerivation;
+  readonly noticePolicy: WatchNoticePolicy | undefined;
   readonly automation: StackWatchServices['automation'];
   readonly effectHandler: StackWatchServices['effectHandler'];
   constructor(private readonly services: StackWatchServices) {
     super();
     this.derived = services.derived;
+    this.noticePolicy = services.noticePolicy;
     this.automation = services.automation;
     this.effectHandler = services.effectHandler;
   }

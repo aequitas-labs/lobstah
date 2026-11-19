@@ -91,6 +91,10 @@ export interface WatchAction {
 
 /** Human and agent consumers share a provider-free presentation model. */
 export interface WatchPresentation {
+  /** Local condition sources can omit a redundant watch row while retaining their card projection. */
+  listing?: 'watch' | 'conditions';
+  /** Source-owned relationships can suppress another standing condition without a hidden card. */
+  suppresses?: Array<{ kind: string; key: string }>;
   title: string;
   summary: string;
   label: string;
@@ -271,3 +275,17 @@ export interface WatchDerivedView {
   presentation: WatchPresentation;
 }
 export interface WatchDerivation { views(now: string): WatchDerivedView[] }
+
+/** Durable notice filtering and ownership are source policy, independent of the helm wake loop. */
+export interface WatchNotice {
+  kind: string;
+  refId?: string;
+  url?: string;
+  stateHash?: string;
+}
+export interface WatchNoticePolicy {
+  kinds: readonly string[];
+  quietKinds?: readonly string[];
+  current(notice: WatchNotice): boolean;
+  relatedDispatches?(notice: WatchNotice): string[];
+}

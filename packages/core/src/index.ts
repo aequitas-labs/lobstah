@@ -145,3 +145,5 @@ export { createStackWatchType, presentStackWatch, stackWatchViews } from './stac
 export { createPrMergeWatchType } from './pr-merge-watch-source.js';
 
 export * from './ume-watch-source.js';
+
+export * from './local-watch-source.js';

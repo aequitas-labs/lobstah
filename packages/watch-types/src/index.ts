@@ -15,3 +15,6 @@ export * from './pr/merge-policy.js';
 export * from './ume/index.js';
 
 export * from './ume/index.js';
+
+export * from './local/index.js';
+export * from './local/notice-policy.js';

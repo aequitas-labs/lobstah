@@ -1,16 +1,15 @@
+import { QUIET_LOCAL_NOTICE_KINDS } from '@lobstah/watch-types';
+import { builtinWatchRegistry } from './watch-source-registry.js';
+import { watchNoticeCurrent, watchNoticeQuiet, watchNoticeDispatches } from './watch-notices.js';
 import fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
-import { readStackEpochs, repoKey, stackReadyEnabled, stackStateHash } from './pr-stacks.js';
+import { repoKey } from './pr-stacks.js';
 import { loadConfig } from './config.js';
 import type { Config } from './config.js';
-import { dispatchProgress } from './dispatch-progress.js';
 import { groundsList } from './helm.js';
 import { storageGrounds } from './grounds-name.js';
 import { storedDescriptor } from './queue.js';
-import { parsePrRef } from './pr.js';
-import { readPr } from './prs.js';
-import { readWatch } from './watch.js';
 import { withDirLock } from './dir-lock.js';
 
 /**
@@ -66,7 +65,8 @@ export type NoticeKind =
   | 'pool-returned'
   | 'heavy-line-long'
   | 'wharf-mirror-stale'
-  | 'heavy-over-limit';
+  | 'heavy-over-limit'
+  | `${string}:${string}`;
 
 /**
  * Notices that never wake a helm on their own: they show in tend, the
@@ -77,7 +77,7 @@ export type NoticeKind =
  * can also be posted `quiet` on its own (a trap that ghosted while idle, a
  * trap available as part of a batch).
  */
-export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = ['trap-listening', 'trap-starting', 'trap-signed-on', 'trap-stowed', 'pool-returned', 'heavy-line-long'];
+export const QUIET_NOTICE_KINDS: readonly NoticeKind[] = QUIET_LOCAL_NOTICE_KINDS;
 
 export interface Notice {
   /** Lexicographically ordered id — the filename stem. */
@@ -113,6 +113,7 @@ function cursorFile(): string {
 
 /** Route unconfigured repos through their originating dispatch, then to the first reader. */
 export function noticeFilterForGrounds(grounds: string, cfg: Config): (notice: Notice) => boolean {
+  const registry = builtinWatchRegistry();
   const configured = groundsList(cfg);
   const reader = storageGrounds(grounds, cfg);
   const groundsForRepo = (repo: string | undefined): string | undefined =>
@@ -121,14 +122,7 @@ export function noticeFilterForGrounds(grounds: string, cfg: Config): (notice: N
     const explicit = configured.find((entry) => entry.name === storageGrounds(notice.grounds ?? '', cfg))?.name;
     const owner = explicit ?? groundsForRepo(notice.repo);
     if (owner) return owner === reader;
-    const dispatchIds: Array<string | undefined> = [notice.refId];
-    for (const value of [notice.refId, notice.url]) {
-      const ref = value ? parsePrRef(value) : undefined;
-      if (!ref) continue;
-      const watchOwner = readWatch(ref.key)?.owner;
-      if (watchOwner?.startsWith('dispatch:')) dispatchIds.push(watchOwner.slice('dispatch:'.length));
-      dispatchIds.push(...(readPr(ref.key)?.dispatches ?? []).slice().reverse());
-    }
+    const dispatchIds: Array<string | undefined> = [notice.refId, ...watchNoticeDispatches(notice, registry)];
     for (const id of dispatchIds) {
       if (!id) continue;
       const dispatch = storedDescriptor(id, 'work') ?? storedDescriptor(id, 'chore');
@@ -277,13 +271,10 @@ export function unseenNotices(
   includeQuietKinds: readonly NoticeKind[] = [],
 ): Notice[] {
   const owned = consumeNotices(filter, consume);
-  const progress = owned.some((n) => n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') ? dispatchProgress() : [];
-  const waking = owned.filter((n) => {
-    if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return includeQuietKinds.includes(n.kind);
-    if (n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') return progress.some((p) => p.id === n.refId && p.stateHash === n.stateHash);
-    if (n.kind !== 'stack-ready') return true;
-    const epoch = n.refId ? readStackEpochs()[n.refId] : undefined;
-    return !!epoch?.ready && n.stateHash === stackStateHash({ id: n.refId! }, epoch.epoch) && stackReadyEnabled(loadConfig());
+  const registry = builtinWatchRegistry();
+  const waking = owned.filter((notice) => {
+    if (notice.quiet || watchNoticeQuiet(notice.kind, registry)) return includeQuietKinds.includes(notice.kind);
+    return watchNoticeCurrent(notice, registry);
   });
   return wakes ? waking.filter(wakes) : waking;
 }

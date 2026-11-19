@@ -1,3 +1,4 @@
+import type { WatchNoticePolicy } from '../model.js';
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
 import type { CommandWatchOptions } from '../command.js';
@@ -61,6 +62,7 @@ export const prWatchReferenceSchema: WatchSchema<PrWatchReference> = {
 
 /** Host services supply GitHub IO and existing evidence projections, never runtime policy. */
 export interface PrWatchServices {
+  noticePolicy?: WatchNoticePolicy;
   effectHandler?: WatchEffectHandler<PrWatchReference>;
   automation?: WatchAutomation<PrWatchReference, PrWatchState, string, PrWatchOptions>;
   dispatchPolicy?: WatchDispatchPolicy<PrWatchReference, PrWatchState, string, PrWatchOptions>;
@@ -122,12 +124,14 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, s
   readonly referenceSchema = prWatchReferenceSchema;
   readonly batchObserver: PrWatchServices['batchObserver'];
   readonly effectHandler: PrWatchServices['effectHandler'];
+  readonly noticePolicy: WatchNoticePolicy | undefined;
   readonly automation: PrWatchServices['automation'];
   readonly dispatchPolicy: PrWatchServices['dispatchPolicy'];
   constructor(private readonly services: PrWatchServices) {
     super();
     this.batchObserver = services.batchObserver;
     this.effectHandler = services.effectHandler;
+    this.noticePolicy = services.noticePolicy;
     this.automation = services.automation;
     this.dispatchPolicy = services.dispatchPolicy;
   }

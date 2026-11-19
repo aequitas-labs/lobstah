@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import type { Config } from './config.js';
 import { cutPrTitle, parsePrRef, prBadge, prNote, prStandingKinds } from './pr.js';
 import type { PrEvidence } from './pr.js';
-import { derivePrStacks, repoKey } from './pr-stacks.js';
+import { derivePrStacks, repoKey, stackReadyEnabled } from './pr-stacks.js';
 import { readPrs } from './prs.js';
 import { identifyPrStacks, readStackEpochs, reconcileStackReadiness, stackStateHash } from './stack-watch-state.js';
 import { WatchRegistry } from '@lobstah/watch-types';
@@ -172,6 +172,10 @@ const revision = (view: StackWatchView): string => createHash('sha256').update(J
 /** PR snapshot changes feed this adapter; no stack observer queries GitHub. */
 export function createStackWatchType(options: StackWatchSourceOptions = {}): StackWatchType {
   return new StackWatchType({
+    noticePolicy: { kinds: ['stack-ready'], current(notice) {
+      const epoch = notice.refId ? readStackEpochs()[notice.refId] : undefined;
+      return !!epoch?.ready && notice.stateHash === stackStateHash({ id: notice.refId! }, epoch.epoch) && stackReadyEnabled(options.config?.() ?? loadConfig());
+    } },
     automation: options.automation,
     effectHandler: options.effectHandler,
     derived: {
