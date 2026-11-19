@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerUmeReview, clearFinishedUmeWatches, syncUmeWatches, addUmeWatch, runUmeCheck } from './ume-watch.js';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { syncRegisteredWatches } from './watch-observation.js';
 import { legacyPrWatchEffects } from './pr-watch-effects.js';
@@ -1738,6 +1739,8 @@ async function mainCli(): Promise<void> {
           : verb === 'paused' && !noWatch
             ? registerWaitWatches(id, lane, entry)
             : [];
+      if (!noWatch) registerUmeReview(id, lane, entry);
+      clearFinishedUmeWatches();
       const warnings = [waitWarning(id, lane, entry), filed && unattachedWarning(filed)].filter((w): w is string => !!w);
       let permissionCard: string | undefined;
       if (permCommand !== undefined || permPath !== undefined) {
@@ -3941,6 +3944,7 @@ async function mainCli(): Promise<void> {
           trapStarts: createTrapDispatchScheduler(),
           culler: backgroundCuller,
           watches: (now, log) => {
+            syncUmeWatches();
             syncRegisteredWatches(now);
             legacyPrWatchEffects(now, log);
           },
@@ -4123,6 +4127,10 @@ async function mainCli(): Promise<void> {
     case 'watch': {
       const sub = pos[0];
       if (['add', 'check-pr'].includes(sub ?? '')) loadConfig({ upgrade: true });
+      if (sub === 'check-ume') {
+        console.log(runUmeCheck(pos[1] ?? '', opt('--cursor')));
+        break;
+      }
       if (sub === 'check-pr') {
         // The shipped check behind pr: watches — contract JSON, not TOON.
         const ref = pos[1];
@@ -4148,6 +4156,11 @@ async function mainCli(): Promise<void> {
               'lobstah watch   (list watches)',
             ]),
           );
+          break;
+        }
+        if (!check && key?.startsWith('ume:')) {
+          const w = addUmeWatch(key.slice(4), { forId, everySecs: every ? Number(every) : undefined, cursor: opt('--cursor') });
+          console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
           break;
         }
         if (!key || !check) throw new Error('watch add requires a key and --check <command>');

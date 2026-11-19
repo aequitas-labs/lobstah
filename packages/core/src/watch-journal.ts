@@ -43,12 +43,13 @@ export class WatchJournal {
       `${file}.lock`,
       () => {
         const previous = this.read(key),
-          oldVersion = previous?.type.stateVersion;
+          oldVersion = previous?.type.stateVersion,
+          oldType = previous?.type.id;
         const oldIdentity = previous ? `${previous.type.id}:${previous.generation}` : '';
         const { snapshot, result } = change(previous);
         if (snapshot) {
           if (snapshot.key !== key) throw new Error('Watch journal key cannot change');
-          if (oldVersion !== undefined && oldVersion !== snapshot.type.stateVersion) {
+          if (oldVersion !== undefined && (oldVersion !== snapshot.type.stateVersion || oldType !== snapshot.type.id)) {
             if (!Number.isSafeInteger(oldVersion) || oldVersion < 1) throw new Error('Invalid stored watch state version');
             const backup = `${file}.state-${oldVersion}-${createHash('sha256').update(oldIdentity).digest('hex').slice(0, 16)}.bak`;
             let backupFd: number | undefined;

@@ -48,6 +48,8 @@ export interface Watch {
   /** Persisted adapter instructions and view data for every consumer. */
   presentation?: WatchPresentation;
   check: string;
+  /** Recorded provider context reused by every observer, independent of the live shell. */
+  context?: { cwd?: string; env?: Record<string, string>; org?: string };
   /**
    * Optional held-stream command: a long-running process (spawned with
    * {cursor} substituted) that emits the same event objects as NDJSON lines,
@@ -159,6 +161,9 @@ function writeWatch(w: Watch, create = false): boolean {
   });
 }
 
+/** Persist a source's compatibility context only while its registration generation still exists. */
+export function updateWatch(watch: Watch): boolean { return writeWatch(watch); }
+
 export function readWatch(key: string): Watch | undefined {
   try {
     return JSON.parse(fs.readFileSync(watchPath(key), 'utf8')) as Watch;
@@ -184,7 +189,7 @@ export function listWatches(): Watch[] {
 export function addWatch(
   key: string,
   check: string,
-  opts: { typeId?: string; owner?: Watch['owner']; grounds?: string; cursor?: string; everySecs?: number; brief?: string; stream?: string } = {},
+  opts: { typeId?: string; owner?: Watch['owner']; grounds?: string; cursor?: string; everySecs?: number; brief?: string; stream?: string; context?: Watch['context'] } = {},
 ): Watch {
   if (!key || !check) throw new Error('watch add requires a key and a --check command');
   const existing = readWatch(key);
@@ -197,6 +202,7 @@ export function addWatch(
     grounds: opts.grounds ?? existing?.grounds,
     presentation: existing?.presentation,
     check,
+    context: opts.context ?? existing?.context,
     stream: opts.stream ?? existing?.stream,
     cursor: existing?.cursor ?? opts.cursor ?? '0',
     everySecs: opts.everySecs ?? existing?.everySecs,

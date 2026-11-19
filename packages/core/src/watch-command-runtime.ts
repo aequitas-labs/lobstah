@@ -28,7 +28,7 @@ export function restoreCommandWatch(watch: Watch, runtime = commandWatchRuntime(
   if (replaced) runtime.retire(watch.key);
   const typeId = watchSourceType(watch, runtime.registry),
     source = runtime.registry.get(typeId);
-  const options = { check: watch.check, cursor: watch.cursor, ...(watch.brief ? { brief: watch.brief } : {}), legacy: JSON.parse(JSON.stringify(watch)) };
+  const options = { check: watch.check, cursor: watch.cursor, ...(watch.context?.cwd ? { cwd: watch.context.cwd } : {}), ...(watch.context?.env ? { environment: watch.context.env } : {}), ...(watch.brief ? { brief: watch.brief } : {}), legacy: JSON.parse(JSON.stringify(watch)) };
   if (!replaced && previous && previous.status !== 'retired' && previous.type.id !== typeId) {
     const binding = source.bindings.find(
       (entry) =>

@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   appendWatchEvents,
+  sendMessageOnce,
   builtinWatchRegistry,
   WatchAutomationRunner,
   WatchJournal,
@@ -183,7 +185,6 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
     const plan = reservedWatchDispatch(watch.key)?.plan ?? planWatchDispatch(watch, events, undefined, registry);
     if (plan.disposition === 'managed') { markWatchSeen(watch.key); continue; }
     if (watch.heldAt) continue; // waits for `lobstah watch release`
-    if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
     const selected = new Set(plan.eventIds);
     const work = plan.disposition === 'ignore' ? [] : events.filter((event) => selected.has(String(event.seq)));
     const skipped = plan.notes;
@@ -192,6 +193,24 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
       log(`watch ${watch.key}: no continuation for ${skipped.join(', ')}`);
       continue;
     }
+    const owner = watch.owner.slice('dispatch:'.length);
+    const target = watch.lastFollowUpId && laneOf(watch.lastFollowUpId) ? watch.lastFollowUpId : owner;
+    const lane = laneOf(target);
+    if (lane && readStatusLog(target, lane).length && !isTerminal(target)) {
+      // One stable receipt per sequence also survives a crash followed by a larger feedback batch.
+      for (const event of work) {
+        const filled = (watch.brief ?? DEFAULT_BRIEF).replaceAll('{key}', watch.key)
+          .replaceAll('{summaries}', `- ${event.summary ?? String(event.seq)}`)
+          .replaceAll('{events}', JSON.stringify([event], null, 2));
+        const text = prepareWatchBrief(watch, [event], filled, descriptorOf(target, lane)?.repo, registry);
+        const receipt = createHash('sha256').update(JSON.stringify([watch.key, watch.generation ?? watch.createdAt, String(event.seq)])).digest('hex');
+        sendMessageOnce(target, lane, receipt, text, `watch:${watch.key}`);
+      }
+      markWatchSeen(watch.key);
+      log(`watch ${watch.key}: ${work.length} event(s) → inbox ${target}`);
+      continue;
+    }
+    if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // queued continuation owns this tail
     if (forks >= cap) {
       holdWatch(watch.key, new Date(), { reason: 'fork cap reached ([watch].maxForksPerCycle)' });
       held.push(watch.key);
