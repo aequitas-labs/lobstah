@@ -34,6 +34,8 @@ export interface ReviewSettings {
   /** Old requests stay in the inbox: enabled uses the enable/automatic-mode activation time, or set an ISO timestamp. */
   requestedAfter: string;
   publish: boolean;
+  /** Reuse an existing approval only after a verified base-only update. */
+  autoReapproveBaseOnly: boolean;
   /** Whether completed approve and request-changes drafts post without a glass action. */
   autoPostApprove: ReviewAutoPost;
   autoPostRequestChanges: ReviewAutoPost;
@@ -72,6 +74,7 @@ export const DEFAULT_REVIEWS: ReviewsConfig = {
   mode: 'notify',
   requestedAfter: 'enabled',
   publish: false,
+  autoReapproveBaseOnly: false,
   autoPostApprove: 'ask',
   autoPostRequestChanges: 'ask',
   repos: 'configured',
@@ -110,6 +113,10 @@ function parseSettings(raw: Record<string, unknown>, where: string): Partial<Rev
   if (raw.publish !== undefined) {
     if (typeof raw.publish !== 'boolean') throw new Error(`${where}.publish must be a boolean`);
     out.publish = raw.publish;
+  }
+  if (raw.autoReapproveBaseOnly !== undefined) {
+    if (typeof raw.autoReapproveBaseOnly !== 'boolean') throw new Error(`${where}.autoReapproveBaseOnly must be a boolean`);
+    out.autoReapproveBaseOnly = raw.autoReapproveBaseOnly;
   }
   if (raw.autoPostApprove !== undefined) out.autoPostApprove = oneOf(raw.autoPostApprove, REVIEW_AUTO_POST, `${where}.autoPostApprove`);
   if (raw.autoPostRequestChanges !== undefined) out.autoPostRequestChanges = oneOf(raw.autoPostRequestChanges, REVIEW_AUTO_POST, `${where}.autoPostRequestChanges`);
@@ -166,7 +173,7 @@ export function reviewSettings(cfg: ReviewsConfig, repoKey?: string, onDemand = 
   const publish = o.publish ?? (o.mode === 'auto-draft' ? false : o.mode === 'auto-review' ? true : cfg.publish);
   const mode = requestedMode.startsWith('auto-') ? (publish ? 'auto-review' : 'auto-draft') : requestedMode;
   const work = mode.startsWith('auto-') || onDemand ? (o.work && o.work !== 'off' ? o.work : base.work !== 'off' ? base.work : 'headless') : 'off';
-  return { ...base, ...o, mode, publish, work, post: publish ? 'auto' : 'draft', limits: { ...base.limits, ...o.limits } };
+  return { ...base, ...o, autoReapproveBaseOnly: o.autoReapproveBaseOnly ?? (['homebase', 'lobstah'].includes(repoKey ?? '') || base.autoReapproveBaseOnly), mode, publish, work, post: publish ? 'auto' : 'draft', limits: { ...base.limits, ...o.limits } };
 }
 
 // ── The item store ─────────────────────────────────────────────────────────
@@ -243,6 +250,8 @@ export interface ReviewRound {
   /** Product and ownership calls, with Chris's answers kept for this round. */
   decisions?: ReviewDecision[];
   decisionAnswers?: ReviewDecisionAnswers;
+  reReview?: { headSha: string; at: string };
+  autoReapprovals?: Array<{ headSha: string; approvedHeadSha: string; reviewId: string; at: string }>;
   needsYou?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;
@@ -370,10 +379,11 @@ export function writeReview(item: ReviewItem): ReviewItem {
 function clearFinishedReviewNotifications(item: ReviewItem): boolean {
   let changed = false;
   for (const round of item.rounds) {
-    if (round.state === 'drafted' && !['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
+    if ((round.state === 'drafted' || (round.reReview && round === latestRound(item) && !['merged', 'closed', 'withdrawn', 'dismissed'].includes(round.state))) && !['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
     if (round.notification || round.needsYou !== undefined) changed = true;
     delete round.notification;
     delete round.needsYou;
+    if (round.reReview) { delete round.reReview; changed = true; }
   }
   return changed;
 }
@@ -797,6 +807,7 @@ export function markReviewPosted(key: string, roundId: string, post: { reviewId:
   delete r.reason;
   delete r.staged;
   delete r.needsYou;
+  delete r.reReview;
   if (post.by !== 'auto') { delete r.notification; r.acknowledgedAt = post.at; }
   return writeReview({ ...item, updatedAt: post.at });
 }
@@ -808,6 +819,7 @@ export function reviewStands(round: ReviewRound | undefined): boolean {
   if (!round) return false;
   // Another boat on the wharf has this round: it waits on the person there, not here.
   if (round.wharf && !round.wharf.mine) return false;
+  if (round.reReview) return true;
   if (round.state === 'requested') return round.dispatch === undefined;
   return round.state === 'drafted' || round.state === 'stale' || round.state === 'failed';
 }
@@ -815,7 +827,7 @@ export function reviewStands(round: ReviewRound | undefined): boolean {
 export function reviewStateHash(item: ReviewItem): string {
   const r = latestRound(item);
   return createHash('sha1')
-    .update(`${item.key}\n${r?.id ?? ''}\n${r?.state ?? ''}\n${r?.headSha ?? ''}\n${r?.notificationGeneration ?? ''}`)
+    .update(`${item.key}\n${r?.id ?? ''}\n${r?.state ?? ''}\n${r?.headSha ?? ''}\n${r?.notificationGeneration ?? ''}\n${r?.reReview?.headSha ?? ''}`)
     .digest('hex')
     .slice(0, 16);
 }
@@ -857,21 +869,21 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
   for (const item of listReviews()) {
     if (clearFinishedReviewNotifications(item)) writeReview(item);
     const r = latestRound(item);
-    if (!r || r.wharf || r.state !== 'drafted' || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
-    const generation = `${r.id}:${r.dispatch ?? ''}:${r.state}:${r.postedAt ?? r.draftedAt ?? r.headSha}`;
+    if (!r || r.wharf || (!r.reReview && r.state !== 'drafted') || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
+    const generation = `${r.reReview?.headSha ?? ''}:${r.id}:${r.dispatch ?? ''}:${r.state}:${r.postedAt ?? r.draftedAt ?? r.headSha}`;
     if (r.notificationGeneration === generation) continue;
     r.notificationGeneration = generation;
-    const completed = r.postedAt ?? r.draftedAt;
+    const completed = r.reReview?.at ?? r.postedAt ?? r.draftedAt;
     if (completed && r.acknowledgedAt && r.acknowledgedAt >= completed) {
       writeReview(item); continue;
     }
-    const needsYou = r.state === 'drafted' && !reviewCanPublish(reviews, item.pr.repoKey, r, r.verdict);
+    const needsYou = !!r.reReview || r.state === 'drafted' && !reviewCanPublish(reviews, item.pr.repoKey, r, r.verdict);
     r.needsYou = needsYou;
     delete r.seenAt;
     const verdict = (r.verdict ?? 'comment').replace('_', ' ');
     const kind = needsYou ? 'needs-you' : 'draft-ready';
     const label = needsYou ? 'Draft ready (needs you)' : 'Draft ready';
-    r.notification = { kind, at: new Date(now).toISOString(), text: `${label}: ${prLabel(item.pr)} · ${verdict} · ${r.blocking?.length ?? 0} blocking` };
+    r.notification = { kind, at: new Date(now).toISOString(), text: r.reReview ? `Re-review needed: ${prLabel(item.pr)}` : `${label}: ${prLabel(item.pr)} · ${verdict} · ${r.blocking?.length ?? 0} blocking` };
     writeReview({ ...item, updatedAt: r.notification.at });
     events.push({ key: item.key, notification: r.notification, hash: reviewHash(item.key) });
   }

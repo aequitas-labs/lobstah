@@ -363,6 +363,8 @@ export interface GlassReview {
   publish?: boolean;
   mutedAt?: string;
   postedReviewUrl?: string;
+  reReview?: { headSha: string; at: string };
+  autoReapproved?: boolean;
   requestedBy?: string;
   asker?: string;
   askerName?: string;

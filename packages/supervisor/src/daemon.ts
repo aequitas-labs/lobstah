@@ -366,24 +366,28 @@ function pruneChores(cfg: Config): void {
  * hands the daemon a culler. Without one the daemon never deletes anything.
  */
 export interface DaemonCuller {
+  /** Production schedules a detached worker; the claim loop performs no removals. */
+  start?(log: (m: string) => void): boolean;
+  /** A chore finalized by reconciliation may need its checkout released. */
+  finished?(id: string, log: (m: string) => void): void;
   /**
    * Cull finished dispatches older than `days`: done entries, worktrees,
    * state, stale PR records and acks. Keeps branches, open-PR dispatches,
-   * and all queued and active work. At most `batch` dispatches per call.
+   * and all queued and active work. Worktrees precede metadata.
    * Returns how many dispatches it culled.
    */
-  retention(days: number, now: number, batch: number, log: (m: string) => void): number;
+  retention(days: number, now: number, log: (m: string) => void): number;
   /**
    * `[limits].releaseOnMerge`: remove the worktrees of finished dispatch
-   * chains whose PR merged, when clean and pushed, at most `batch` per call.
+   * chains whose PR merged, when clean and pushed.
    * Returns the released worktree ids.
    */
-  release?(now: number, batch: number, log: (m: string) => void): string[];
+  release?(now: number, log: (m: string) => void): string[];
   /**
    * Remove finished worktrees oldest first until `enough()` is true or none
-   * are left, at most `batch` per call. Returns how many it removed.
+   * are left. Returns how many it removed.
    */
-  pressure(enough: () => boolean, now: number, batch: number, log: (m: string) => void): number;
+  pressure(enough: () => boolean, now: number, log: (m: string) => void): number;
 }
 
 /** Start one detached warm-up pass for a pool (see warmPool). */
@@ -471,15 +475,13 @@ export interface DaemonHooks {
 
 /** The retention cull runs at most once per this interval. */
 export const CULL_INTERVAL_MS = 3_600_000;
-/** At most this many dispatches (or worktrees) per cull pass, so one pass cannot stall the claim loop. */
-export const CULL_BATCH = 10;
 
 /**
  * The retention cull, throttled to once per CULL_INTERVAL_MS. The stamp is
  * written before the pass, so a pass that throws is not retried every tick.
  * With `[limits].releaseOnMerge` the pass first releases merged PRs'
- * worktrees (one `worktree-released` notice lists them), then culls with
- * whatever is left of the batch. Returns true when a pass ran.
+ * worktrees (one `worktree-released` notice lists them), then culls the
+ * retention backlog. Production schedules this work outside the claim loop.
  */
 export function retentionPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
   const days = cfg.limits.retentionDays;
@@ -488,13 +490,11 @@ export function retentionPass(cfg: Config, hooks: DaemonHooks, log: (m: string) 
   const now = hooks.now?.() ?? Date.now();
   const last = lastCullPassAt();
   if (last !== undefined && now - last < CULL_INTERVAL_MS) return false;
+  if (hooks.culler.start) return hooks.culler.start(log);
   stampCullPass(now);
-  // Merge releases and the retention cull share one pass and one batch.
-  let budget = CULL_BATCH;
   if (release) {
     try {
-      const ids = hooks.culler.release!(now, budget, log);
-      budget -= ids.length;
+      const ids = hooks.culler.release!(now, log);
       if (ids.length > 0) {
         const text = `released on merge: ${ids.length} worktree(s) of merged PRs removed (${ids.map((id) => id.slice(0, 8)).join(', ')}); branches kept`;
         postNotice({ kind: 'worktree-released', text });
@@ -504,9 +504,9 @@ export function retentionPass(cfg: Config, hooks: DaemonHooks, log: (m: string) 
       log(`release on merge error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  if (days > 0 && budget > 0) {
+  if (days > 0) {
     try {
-      const n = hooks.culler.retention(days, now, budget, log);
+      const n = hooks.culler.retention(days, now, log);
       if (n > 0) log(`retention cull: ${n} finished dispatch(es) older than ${days}d removed`);
     } catch (err) {
       log(`retention cull error: ${err instanceof Error ? err.message : String(err)}`);
@@ -529,10 +529,18 @@ function liftHold(log: (m: string) => void, text: string): void {
  * false, and the work stays queued. One notice when a hold starts, one when
  * it clears. A failed read never blocks claiming.
  */
+/** A continuing disk hold asks for attention again every thirty minutes. */
+export const DISK_HOLD_NOTICE_INTERVAL_MS = 30 * 60_000;
+
 export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
   recoverTrapCaches(cfg, worktreesDir(), hooks.freeBytes ?? statfsFreeBytes, log);
   const need = (cfg.limits.minFreeGB ?? 0) * GB;
+  const cacheThreshold = (cfg.limits.cacheMinFreeGB ?? 0) * GB;
   if (!(need > 0)) {
+    if (cacheThreshold > 0 && hooks.culler?.start) {
+      try { if ((hooks.freeBytes ?? statfsFreeBytes)(worktreesDir()) < cacheThreshold) hooks.culler.start(log); }
+      catch { /* A failed read never blocks claiming. */ }
+    }
     liftHold(log, 'free-space hold cleared: [limits].minFreeGB is off');
     return true;
   }
@@ -546,9 +554,11 @@ export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => 
     log(`free-space check failed (${err instanceof Error ? err.message : String(err)}); claiming anyway`);
     return true;
   }
-  if (free < need && hooks.culler) {
+  if (free < Math.max(need, cacheThreshold) && hooks.culler?.start) {
+    hooks.culler.start(log);
+  } else if (free < need && hooks.culler) {
     try {
-      const n = hooks.culler.pressure(() => (free = read(dir)) >= need, now, CULL_BATCH, log);
+      const n = hooks.culler.pressure(() => (free = read(dir)) >= need, now, log);
       if (n > 0) free = read(dir);
       if (n > 0) log(`free-space cull: ${n} finished worktree(s) removed, ${formatGB(free)} free`);
     } catch (err) {
@@ -561,10 +571,15 @@ export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => 
   }
   const prior = readHold();
   const at = new Date(now).toISOString();
-  writeHold({ since: prior?.since ?? at, checkedAt: at, freeBytes: free, needBytes: need, dir });
-  if (!prior) {
-    const text = `dispatches held: ${formatGB(free)} free on ${dir}, needs ${formatGB(need)} ([limits].minFreeGB) — queued work waits`;
-    postNotice({ kind: 'disk-held', text });
+  const since = prior?.since ?? at;
+  const lastNotice = Date.parse(prior?.lastNoticedAt ?? since);
+  const announce = !prior || now - lastNotice >= DISK_HOLD_NOTICE_INTERVAL_MS;
+  writeHold({ since, checkedAt: at, lastNoticedAt: announce ? at : prior?.lastNoticedAt ?? since, freeBytes: free, needBytes: need, dir });
+  if (announce) {
+    const minutes = Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
+    const count = pendingIds('work').length + pendingIds('chore').length;
+    const text = `${count} queued dispatch(es) held for ${minutes} min: ${formatGB(free)} free on ${dir}, needs ${formatGB(need)}. Free disk space to resume dispatches.`;
+    postNotice({ kind: 'disk-held', text, quiet: false });
     log(text);
   }
   return false;
@@ -688,7 +703,10 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
     (!d.systemRepair?.trapWaitUntil || Date.now() < Date.parse(d.systemRepair.trapWaitUntil))) || poolWaits(d, cfg);
   const skipFor = (lane: Lane) => (lane === 'work' ? workSkip : choreSkip);
   for (const lane of ['chore', 'work'] as Lane[]) {
-    for (const st of listActive(lane)) reconcileOne(st, cfg, log, hooks.spawnRunner, wedgeGrace);
+    for (const st of listActive(lane)) {
+      reconcileOne(st, cfg, log, hooks.spawnRunner, wedgeGrace);
+      if (lane === 'chore' && fs.existsSync(path.join(laneDirs(lane).done, st.id))) hooks.culler?.finished?.(st.id, log);
+    }
   }
   // After reconcile: a dispatch the PR pass finished is in done/ before a
   // merged PR's worktree release looks at its chain.

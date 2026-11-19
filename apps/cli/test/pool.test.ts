@@ -84,8 +84,9 @@ describe('cull leaves pool worktrees alone', () => {
     const dir = slot(1);
     age(dir, 60);
     finishedIn('old', dir, 30);
-    // A plain lost worktree beside it is still swept, so the cull did run.
+    // A finished dispatch's worktree beside it is still swept, so the cull did run.
     fs.mkdirSync(path.join(home, 'worktrees', 'ghost'), { recursive: true });
+    finishedIn('ghost', path.join(home, 'worktrees', 'ghost'), 30);
     age(path.join(home, 'worktrees', 'ghost'), 30);
     const plan = planCull(0);
     expect(plan.filter((i) => i.target.startsWith(path.join(home, 'pools')))).toEqual([]);

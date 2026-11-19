@@ -111,7 +111,8 @@ export function pickupPlan(cfg: PickupConfig = loadPickupConfig()): string[] {
 }
 
 /** Pickup reads its own [pickup.*] sections from the shared config file. */
-export function loadPickupConfig(): PickupConfig {
+/** An injected GitHub token source lets doctor reuse its private, already-checked command output. */
+export function loadPickupConfig(githubToken?: () => string): PickupConfig {
   const file = configPath();
   const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
   const p = (raw.pickup ?? {}) as Record<string, unknown>;
@@ -126,7 +127,7 @@ export function loadPickupConfig(): PickupConfig {
 
   const gh = p.github as Record<string, unknown> | undefined;
   if (gh) {
-    const token = resolveTokenSource({ tokenEnv: 'GITHUB_TOKEN', ...gh }, 'pickup.github');
+    const token = githubToken ?? resolveTokenSource({ tokenEnv: 'GITHUB_TOKEN', ...gh }, 'pickup.github');
     token(); // fail at startup, not mid-loop
     const identity = String(gh.identity ?? '');
     if (!identity) throw new Error('pickup.github requires identity');

@@ -147,10 +147,9 @@ export interface ReleasePlan {
 }
 
 /**
- * Plan one release pass: at most `batch` worktrees are checked (oldest
- * first), each through git. Returns what to remove and what to keep.
+ * Plan one release pass, oldest first, each through git. Returns what to remove and keep.
  */
-export function planMergeRelease(now = Date.now(), batch = Infinity): ReleasePlan {
+export function planMergeRelease(now = Date.now()): ReleasePlan {
   const plan: ReleasePlan = { items: [], users: new Map(), kept: [] };
   if (!loadConfig().limits.releaseOnMerge) return plan;
   const all = allDispatches();
@@ -204,14 +203,11 @@ export function planMergeRelease(now = Date.now(), batch = Infinity): ReleasePla
     .sort((a, b) => a.from - b.from || a.o.localeCompare(b.o));
 
   const fetched = new Map<string, boolean>();
-  let checked = 0;
   for (const { o, c, from } of ordered) {
-    if (checked >= batch) break;
     // Every user of the worktree, and every dispatch in the chain, finished.
     const users = [...all.values()].filter((k) => k.id === o || owner(k.id) === o);
     if (usage.live.has(o)) continue;
     if (![...c.chain].every((id) => finished(all.get(id))) || !users.every((k) => finished(k))) continue;
-    checked++;
     const dir = worktreePath(o);
     const repoKey = users.map((k) => storedDescriptor(k.id, k.lane)?.repo).find(Boolean);
     const why = mergedWorktreeUnsafe(dir, c.pr.heads, loadConfig().repos[repoKey ?? '']?.trunk ?? 'main', fetched);
@@ -230,8 +226,8 @@ export function planMergeRelease(now = Date.now(), batch = Infinity): ReleasePla
  * removal path, record the release in each user's evidence, and update the
  * kept list. Returns the released owner ids.
  */
-export function runMergeRelease(now = Date.now(), batch = Infinity): { released: string[]; kept: KeptWorktree[] } {
-  const plan = planMergeRelease(now, batch);
+export function runMergeRelease(now = Date.now()): { released: string[]; kept: KeptWorktree[] } {
+  const plan = planMergeRelease(now);
   const at = new Date(now).toISOString();
   const released: string[] = [];
   for (const item of plan.items) {

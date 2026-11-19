@@ -150,6 +150,7 @@ export interface MenuAction {
   /** The matching review action is running in another surface. */
   pending?: boolean;
   done?: string;
+  onError?: (message: string) => void;
   onClick?: (e: Event) => void;
 }
 
@@ -195,7 +196,7 @@ export function SplitButton({ main, more }: { main?: Children; more: MenuAction[
                 const refusal = await m.action?.(e);
                 if (!refusal) setOpen(false);
                 return refusal;
-              }} sending=${m.sending} done=${m.done}>${m.icon}<span>${m.label}</span><//>`
+              }} sending=${m.sending} done=${m.done} onError=${m.onError}>${m.icon}<span>${m.label}</span><//>`
             : html`<${Button} variant="menu" role="menuitem" class="cmenuitem" title=${m.title} disabled=${m.disabled} pending=${m.pending} sending=${m.sending} onClick=${(
                 e: Event,
               ) => {

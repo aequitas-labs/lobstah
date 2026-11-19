@@ -2084,6 +2084,10 @@ a.lob {
   z-index: var(--layer-alert);
   pointer-events: none;
 }
+/* Action feedback stays visible over dialogs; the decision notice stays below them. */
+.toast-feedback-host {
+  z-index: calc(var(--layer-decision-modal) + 1);
+}
 .toast-feedback {
   position: fixed;
   left: 50%;

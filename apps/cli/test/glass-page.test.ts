@@ -1229,7 +1229,7 @@ describe('glass page: header', () => {
 });
 
 describe('glass page: lobs', () => {
-  it('attention walks: a PR lob links out, a question lob goes to its card on the deck', async () => {
+  it('attention walks: a PR lob links out, a question lob opens its card over the selected tab', async () => {
     const g = await page(acceptanceFleet(), { hash: '#dispatches' });
     const lobs = g.$$('#lobs .lob');
     expect(lobs.map((l) => [l.tagName, text(l.querySelector('.bub'))])).toEqual([
@@ -1240,10 +1240,13 @@ describe('glass page: lobs', () => {
     const key = acceptanceFleet().attention.find((a) => a.kind === 'question')!.key!;
     expect(lobs[0]!.getAttribute('href')).toBe(`#decision/${encodeURIComponent(key)}`);
     await click(g, lobs[0]!);
-    expect(g.$('.tabpage.on')!.id).toBe('page-deck');
+    expect(g.$('.tabpage.on')!.id).toBe('page-dispatches');
     expect(g.$('#overlay')!.className).not.toBe('open');
-    const card = g.$$('#deck [data-decision]').find((c) => c.getAttribute('data-decision') === key)!;
-    expect(card.className).toContain('focus');
+    expect(g.$('.dmodal')?.getAttribute('data-decision')).toBe(key);
+    g.window.history.back();
+    await g.settle();
+    expect(g.$('.dmodal')).toBeNull();
+    expect(g.$('.tabpage.on')!.id).toBe('page-dispatches');
   });
 
   it('acked items do not walk; a clicked lob hides in this browser until its state changes', async () => {

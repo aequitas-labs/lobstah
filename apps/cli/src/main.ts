@@ -259,7 +259,7 @@ import { runCullWithServers } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
-import { cliCuller } from './auto-cull.js';
+import { backgroundCuller, runCullWorker } from './background-cull.js';
 import { MANUAL } from './manual.js';
 import { decisionEventFields, decisionLine } from './decisions.js';
 import { readHelmPassRequest, requestHelmPass } from '@lobstah/core';
@@ -3923,7 +3923,7 @@ async function mainCli(): Promise<void> {
           idleTraps: createIdleTrapWatch(),
           trapPanes: createTrapPaneWatch(),
           trapStarts: createTrapDispatchScheduler(),
-          culler: cliCuller,
+          culler: backgroundCuller,
           prWatches: (now, log) => {
             syncPrWatches(now);
             observeWaitedPrs({ everySecs: pollSecs(), now });
@@ -4323,6 +4323,10 @@ wallClockSecs      = 3600
       if (has('--probe')) break;
       const { heavyPushHook } = await import('./heavy.js');
       await heavyPushHook(pos);
+      break;
+    }
+    case '__cull': {
+      await runCullWorker();
       break;
     }
     case '__pool-warm': {

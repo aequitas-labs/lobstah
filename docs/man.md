@@ -1713,6 +1713,11 @@ used it. Pool worktrees (`~/.lobstah/pools/`) are never culled, by `lobstah
 cull` or by the daemon: a pool keeps its worktrees, and the dispatch records
 that used them age out as usual.
 
+A worktree with no dispatch record ages from its directory's modification
+time. Retention leaves it inside the window. Both retention and the
+free-space cull keep it unless Git can verify that it is clean and every
+commit is on a remote-tracking branch.
+
 Without `--apply` it is a dry run: it measures each target and prints the
 sizes. A worktree is measured with one `du -sk`; where `du` is missing
 (Windows) a file walk measures it instead. `--apply` measures nothing. It
@@ -1732,16 +1737,21 @@ dry run — pass --apply to remove
 The daemon can do this on its own. Two `[limits]` keys turn it on
 ([configuration](configuration.md#limits)); both are off by default:
 
-- `retentionDays` — once an hour at most, the daemon culls finished
-  dispatches older than this, 10 at a time. A dispatch whose PR is still open
-  is kept.
+- `retentionDays` — once an hour at most, the daemon starts a background
+  worker that drains finished dispatches older than this, without a count
+  limit. A dispatch whose PR is still open is kept. Worktrees go before
+  metadata, oldest first within each set. Claims continue during removal.
 - `minFreeGB` — before it claims work (each claim creates a worktree), the
-  daemon reads free space on the worktrees volume. Below the limit it removes
-  finished worktrees, oldest first, until the limit is met. If space is still
+  daemon reads free space on the worktrees volume. Below the limit it schedules
+  the background worker to remove finished worktrees, oldest first, until the limit is met. If space is still
   short, the work stays queued. `man tend` shows it as
   `held (3.2 GB free, needs 10 GB)`, the glass shows the same reason in the
   note column, and one `disk-held` notice reaches the helm. When space
   returns, one `disk-cleared` notice follows and claiming resumes.
+
+Review chores release their own checkout on done or failed, when clean and
+published. Their reports, records, done entries and branches stay. Unsaved,
+shared and managed checkouts are kept, with the reason logged.
 
 A third key, `releaseOnMerge`, frees a worktree as soon as its PR merges
 instead of waiting out `retentionDays`. When a PR watch records `merged`, the
@@ -1753,6 +1763,19 @@ listed as `kept: unpushed work`. A PR closed without merge releases nothing,
 and a trap's worktree is never released. Branches and the dispatch record
 stay; `lobstah catch` says `worktree: released on merge (<time>)`. One
 `worktree-released` notice per pass lists what went.
+
+Under `minFreeGB` or `cacheMinFreeGB` pressure, cleanup first clears
+configured `cacheDirs` in finished checkouts whose PRs only await review,
+then in idle traps. If space remains short, clean, fully pushed review-wait
+checkouts may be removed. PR and dispatch records and branches stay; the
+next round allocates a checkout if the old one is gone. Clearing a reused
+checkout's caches makes its next round run setup again. Dirty work, unpushed
+commits, live traps, and queued or active chains stay protected.
+
+Doctor and cull previews group retained worktrees by reason and show their
+sizes, such as `5 kept for open PRs, 35 GB; 2 dirty, 4 GB`. A disk hold wakes
+the helm with elapsed wait time when it starts and every thirty minutes
+until space returns.
 
 `lobstah doctor` prints a `disk` row: free space on the worktrees volume, the
 limits, the count and age of the worktrees a cull could remove, and any

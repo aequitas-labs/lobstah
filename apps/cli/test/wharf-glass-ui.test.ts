@@ -585,13 +585,13 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   (reviewCards[0]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
   await g.settle();
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-dismiss', document: '7' } });
-  expect(g.doc.querySelector('.glass-toasts')?.textContent).toContain('Sent to the boat that drafted it');
+  expect(g.doc.querySelector('.toast-feedback')?.textContent).toContain('Sent to the boat that drafted it');
   (reviewCards[1]!.querySelector('.gactions button[aria-label="More actions"]') as unknown as HTMLElement).click();
   await g.settle();
   (reviewCards[1]!.querySelector('[role="menuitem"]') as unknown as HTMLElement).click();
   await g.settle();
   expect(g.writes.at(-1)).toMatchObject({ path: '/api/glass/requests', body: { kind: 'review-mute', document: '8' } });
-  expect(g.doc.querySelector('.glass-toasts')?.textContent).toContain('Muted');
+  expect(g.doc.querySelector('.toast-feedback')?.textContent).toContain('Muted');
   await g.go('#review/7');
   expect(g.activeTab()).toBe('reviews');
 });

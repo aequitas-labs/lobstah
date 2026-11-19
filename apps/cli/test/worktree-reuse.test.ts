@@ -101,8 +101,8 @@ describe('a shared worktree in the cull and the free-space guard', () => {
     enqueue({ id: 'queued', repo: 'r', brief: 'b', followUp: 'fu' });
     expect(worktreeItems(planCull(14, Date.now(), { measure: false }))).not.toContain('origin');
     expect(worktreeItems(planPressureCull())).not.toContain('origin');
-    cliCuller.pressure(() => false, Date.now(), 10, () => {});
-    cliCuller.retention(14, Date.now(), 10, () => {});
+    cliCuller.pressure(() => false, Date.now(), () => {});
+    cliCuller.retention(14, Date.now(), () => {});
     expect(fs.existsSync(wtOf('origin'))).toBe(true);
   });
 
@@ -113,8 +113,8 @@ describe('a shared worktree in the cull and the free-space guard', () => {
     fs.writeFileSync(path.join(laneDirs('work').active, 'running', 'worktree.json'), JSON.stringify({ path: wtOf('origin'), of: 'origin' }));
     expect(worktreeItems(planCull(14, Date.now(), { measure: false }))).not.toContain('origin');
     expect(worktreeItems(planPressureCull())).not.toContain('origin');
-    cliCuller.pressure(() => false, Date.now(), 10, () => {});
-    cliCuller.retention(14, Date.now(), 10, () => {});
+    cliCuller.pressure(() => false, Date.now(), () => {});
+    cliCuller.retention(14, Date.now(), () => {});
     expect(fs.existsSync(wtOf('origin'))).toBe(true);
   });
 
@@ -122,7 +122,7 @@ describe('a shared worktree in the cull and the free-space guard', () => {
     finished('origin', 30);
     finished('fu', 20, { followUp: 'origin', reused: 'origin' });
     fs.rmSync(path.join(laneDirs('work').done, 'origin'), { recursive: true });
-    cliCuller.retention(14, Date.now(), 10, () => {});
+    cliCuller.retention(14, Date.now(), () => {});
     expect(fs.existsSync(wtOf('origin'))).toBe(false);
     expect(git(repo, 'worktree', 'list')).not.toContain('origin');
     expect(git(repo, 'branch', '--list', 'lobstah/origin')).toContain('lobstah/origin');

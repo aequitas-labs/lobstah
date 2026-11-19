@@ -99,6 +99,33 @@ describe('the atom', () => {
     global.document = before;
   });
 
+  it('lets callers handle both returned and thrown failures without inline errors or success feedback', async () => {
+    const g = await page(acceptanceFleet(), '#deck');
+    const host = g.window.document.createElement('div');
+    g.window.document.body.appendChild(host);
+    const global = globalThis as { document?: unknown };
+    const before = global.document;
+    global.document = g.window.document;
+    const errors: string[] = [];
+    const onError = (message: string) => errors.push(message);
+    try {
+      render(html`<div>
+        <${Button} action=${() => 'Refused'} onError=${onError} done="Sent">Send<//>
+        <${Button} action=${() => { throw new Error('Unavailable'); }} onError=${onError} done="Sent">Retry<//>
+      </div>`, host as never);
+      for (const button of host.querySelectorAll('button')) {
+        (button as unknown as HTMLElement).click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(button.disabled).toBe(false);
+      }
+      expect(errors).toEqual(['Refused', 'Unavailable']);
+      expect(host.querySelector('[role="alert"]')).toBeNull();
+      expect(g.$('.toast-feedback .toast-content')).toBeNull();
+    } finally {
+      global.document = before;
+    }
+  });
+
   it('is 32px with 12px words, 40px with 14px at lg, and an icon is a square', async () => {
     const g = await page(acceptanceFleet(), '#deck');
     const host = g.window.document.createElement('div');

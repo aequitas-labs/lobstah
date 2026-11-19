@@ -82,6 +82,22 @@ async function open(hash = '#deck') {
 }
 
 describe('the shared glass on the wharf backend', () => {
+  it('returns from a decision to its tab on Back and restores the card on Forward', async () => {
+    const g = await open('#dispatches');
+    const length = g.window.history.length;
+    (g.$('.dalert-open') as unknown as HTMLElement).click();
+    await g.settle();
+    expect(g.window.location.hash).toBe('#decision/card');
+    expect(g.$('.dmodal')?.textContent).toContain('Choose the next catch');
+    expect(g.window.history.length).toBe(length + 1);
+    g.window.history.back(); await g.settle();
+    expect(g.window.location.hash).toBe('#dispatches');
+    expect(g.$('.dmodal')).toBeNull();
+    expect(g.$('.tabpage.on')?.id).toBe('page-dispatches');
+    g.window.history.forward(); await g.settle();
+    expect(g.$('.dmodal')?.textContent).toContain('Choose the next catch');
+  });
+
   it("shows the wharf's decision and job with the local glass's components", async () => {
     const g = await open('#deck');
     expect(g.text('#deck')).toContain('Choose the next catch');

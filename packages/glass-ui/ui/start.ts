@@ -14,6 +14,7 @@ import {
   reviewRequest,
   routeReport,
   routeDetailView,
+  routeDecision,
   sendAnswer,
   showModal,
   stepDecision,
@@ -56,7 +57,7 @@ const initialState = (): GlassState => ({
   preview: new URLSearchParams(location.search).has('lob'),
   drafts: {},
   focusDecision: decisionFromHash(location.hash),
-  decisionModal: decisionFromHash(location.hash) ? { key: decisionFromHash(location.hash) } : null,
+  decisionModal: decisionFromHash(location.hash) || location.hash === '#decisions' ? { key: decisionFromHash(location.hash) } : null,
   viewedHere: {},
   alertDismissed: [],
   lightbox: null,
@@ -207,12 +208,13 @@ function startGlass(): Array<() => void> {
     if (report !== null) return;
     const modal = detailFromHash(location.hash);
     const focusDecision = decisionFromHash(location.hash);
-    // A decision, like a report, stays above the detail that opened it.
-    if (!focusDecision) routeDetailView(modal);
-    if (modal) {
-      if (getState().decisionModal) closeDecision();
+    if (focusDecision || location.hash === '#decisions') {
+      routeDecision({ key: focusDecision });
       return;
     }
+    routeDecision(null);
+    routeDetailView(modal);
+    if (modal) return;
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({
       route,
@@ -224,8 +226,6 @@ function startGlass(): Array<() => void> {
       pendingOpen = { kind: 'trap', id: linkedTrap };
       openPending();
     }
-    // A `#decision/<key>` link (a lob, the pet) opens that decision too.
-    if (focusDecision) openDecision(focusDecision);
     if (route === 'stats') void loadStats();
     if (route === 'settings') void loadSettings();
   });
@@ -275,9 +275,30 @@ function startGlass(): Array<() => void> {
     }
   };
   document.addEventListener('keydown', keys);
+  // Keep ordinary card links (including lobs) on the same navigation path as the controls.
+  const decisionLink = (event: MouseEvent) => {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
+    const link = (event.target as Element | null)?.closest?.('a');
+    if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
+    const url = new URL(link.href, location.href);
+    if (url.origin !== location.origin || url.pathname !== location.pathname || url.search !== location.search) return;
+    const key = decisionFromHash(url.hash);
+    if (!key) return;
+    event.preventDefault();
+    // Let the link's own acknowledgement finish rendering before opening its card.
+    setTimeout(() => openDecision(key), 0);
+  };
+  document.addEventListener('click', decisionLink);
   const presence = startPresence();
   const polling = startPolling();
   if (getState().route === 'stats') void loadStats();
   if (getState().route === 'settings') void loadSettings();
-  return [unsubscribe, unroute, presence, polling, () => document.removeEventListener('keydown', keys)];
+  return [
+    unsubscribe,
+    unroute,
+    presence,
+    polling,
+    () => document.removeEventListener('keydown', keys),
+    () => document.removeEventListener('click', decisionLink),
+  ];
 }

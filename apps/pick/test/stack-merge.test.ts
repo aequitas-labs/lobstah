@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -15,6 +15,7 @@ beforeEach(() => {
   ensureLayout();
 });
 afterEach(() => {
+  vi.useRealTimers();
   delete process.env.LOBSTAH_HOME;
   removeTempDir(home);
 });
@@ -216,4 +217,85 @@ it('stops when native membership order changes between listing and the merge gat
   await tick(forge);
   expect(forge.events).toEqual([]);
   expect(listNotices().some((notice) => notice.text.includes('changed order'))).toBe(true);
+});
+
+/** A linked stack whose retries use the same durable pickup file as a restarted process. */
+function linkedForge(): Forge {
+  const forge = new Forge();
+  forge.open.forEach((pr) => { pr.linkedStack = { number: 9, position: pr.number, size: 3, base: 'main' }; });
+  return forge;
+}
+
+it.each([503, 409, 422])('refreshes the whole stack before retrying a %s response', async (status) => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const forge = linkedForge();
+  const merge = vi.spyOn(forge, 'mergeLinked').mockRejectedValueOnce(new Error(`github PUT /merge-async: ${status} base modified`));
+  const refresh = vi.spyOn(forge, 'refresh');
+  const membership = vi.spyOn(forge, 'linkedMembers');
+  await tick(forge);
+  expect(merge).toHaveBeenCalledTimes(1);
+  expect(listNotices().filter((notice) => notice.kind === 'stack-stopped')).toHaveLength(0);
+  await tick(forge);
+  expect(merge).toHaveBeenCalledTimes(1);
+  vi.setSystemTime(Date.now() + 40_000);
+  await tick(forge);
+  expect(merge).toHaveBeenCalledTimes(2);
+  expect(refresh).toHaveBeenCalledTimes(6);
+  expect(membership).toHaveBeenCalledTimes(2);
+});
+
+it('recognizes a merge committed before a 503 instead of submitting it twice', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const forge = linkedForge();
+  const merge = vi.spyOn(forge, 'mergeLinked').mockImplementation(async () => {
+    forge.merged = new Set([1, 2, 3]);
+    throw new Error('github PUT /merge-async: 503');
+  });
+  await tick(forge);
+  vi.setSystemTime(Date.now() + 40_000);
+  await tick(forge); // A stale open-list response must not cause another merge.
+  await tick(forge);
+  expect(merge).toHaveBeenCalledTimes(1);
+  expect(listNotices().filter((notice) => notice.kind === 'stack-stopped')).toHaveLength(0);
+});
+
+it('stops on a terminal 403 and never retries that head', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const forge = linkedForge();
+  const merge = vi.spyOn(forge, 'mergeLinked').mockRejectedValue(new Error('github PUT /merge-async: 403 Forbidden'));
+  await tick(forge);
+  vi.setSystemTime(Date.now() + 3600_000);
+  await tick(forge);
+  expect(merge).toHaveBeenCalledTimes(1);
+  expect(listNotices().filter((notice) => notice.kind === 'stack-stopped')).toHaveLength(1);
+});
+
+it('stops after five network failures across ten minutes and logs every attempt', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const forge = linkedForge();
+  const merge = vi.spyOn(forge, 'mergeLinked').mockRejectedValue(new TypeError('fetch failed'));
+  const log = vi.fn();
+  for (const delay of [0, 40_000, 80_000, 160_000, 320_000, 3600_000]) {
+    vi.setSystemTime(Date.now() + delay);
+    await mergeLoop(forge, policy, new PickupState(), log);
+  }
+  expect(merge).toHaveBeenCalledTimes(5);
+  expect(log.mock.calls.filter(([message]) => /stack attempt \d\/5$/.test(message))).toHaveLength(5);
+  expect(listNotices().filter((notice) => notice.kind === 'stack-stopped')).toHaveLength(1);
+});
+
+it('retries a failed stack read and a failed bottom-up merge after refreshing', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const forge = new Forge();
+  const refresh = vi.spyOn(forge, 'refresh').mockRejectedValueOnce(new Error('github GET /pulls/1: 503'));
+  await tick(forge);
+  expect(forge.events).toEqual([]);
+  vi.setSystemTime(Date.now() + 40_000);
+  const merge = vi.spyOn(forge, 'merge').mockRejectedValueOnce(new Error('github PUT /merge: 503'));
+  await tick(forge);
+  vi.setSystemTime(Date.now() + 80_000);
+  await tick(forge);
+  expect(merge).toHaveBeenCalledTimes(2);
+  expect(refresh.mock.calls.filter(([number]) => number === 1).length).toBeGreaterThanOrEqual(3);
+  expect(forge.merged.has(1)).toBe(true);
 });

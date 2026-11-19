@@ -6,6 +6,7 @@ import {
   applyBeats,
   decisionCards,
   decisionFromHash,
+  decisionHash,
   decisionNeighbours,
   filteredDecisionCards,
   modalItem,
@@ -46,6 +47,15 @@ export function receive(snapshot: GlassSnapshot): void {
   void setDecisionBadge(cards.length);
   const live = new Set(cards.map((c) => c.key));
   const kept = Object.fromEntries(Object.entries(drafts).filter(([key]) => live.has(key)));
+  const advance =
+    !initialLink &&
+    decisionModal?.key &&
+    !live.has(decisionModal.key) &&
+    getState().archivedDecision?.key !== decisionModal.key &&
+    !drafts[decisionModal.key]?.sent &&
+    !getState().runs?.[decisionModal.key]
+      ? nextOpen(modalOrder(), filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key)
+      : null;
   setState({
     snapshot,
     viewedHere: Object.fromEntries(
@@ -57,16 +67,10 @@ export function receive(snapshot: GlassSnapshot): void {
     stale: false,
     modal: modal && modalLives({ snapshot, older, detail }, modal) ? modal : null,
     ...(Object.keys(kept).length !== Object.keys(drafts).length ? { drafts: kept } : {}),
-    // Keep the old queue slot when the shown decision leaves through a live update.
-    ...(!initialLink &&
-    decisionModal?.key &&
-    !live.has(decisionModal.key) &&
-    getState().archivedDecision?.key !== decisionModal.key &&
-    !drafts[decisionModal.key]?.sent &&
-    !getState().runs?.[decisionModal.key]
-      ? { decisionModal: nextOpen(modalOrder(), filteredDecisionCards(snapshot, getState().prefs), kept, decisionModal.key) }
-      : {}),
+    ...(advance ? { decisionModal: advance, focusDecision: advance.key } : {}),
   });
+  // Keep the old queue slot without adding a visit to a withdrawn card.
+  if (advance) navigateDecision(advance.key, true);
   if (initialLink && !live.has(initialLink)) void loadClosedDecision(initialLink);
 }
 
@@ -122,19 +126,63 @@ export function unreadOrder(): ReturnType<typeof decisionCards> {
 export function openDecision(key?: string): void {
   const target = key ?? unreadOrder()[0]?.key ?? modalOrder()[0]?.key;
   if (!target) return;
-  setState({ decisionModal: { key: target } });
-  if (!modalOrder().some((card) => card.key === target)) void loadClosedDecision(target);
+  navigateDecision(target);
+}
+
+let decisionScroll: number | undefined;
+
+/** Render a history entry without adding another visit to the same card. */
+export function routeDecision(open: { key: string | null } | null): void {
+  const current = getState().decisionModal;
+  if (!!current === !!open && current?.key === open?.key) return;
+  const closing = !open && !!getState().decisionModal;
+  if (open && !getState().decisionModal) decisionScroll = window.scrollY;
+  setState({
+    decisionModal: open,
+    focusDecision: open?.key ?? null,
+    ...(open && history.state?.glassDecision ? { route: history.state.glassDecision.route } : {}),
+  });
+  if (open?.key && getState().snapshot && !modalOrder().some((card) => card.key === open.key)) void loadClosedDecision(open.key);
+  if (closing && decisionScroll !== undefined) {
+    const y = decisionScroll;
+    decisionScroll = undefined;
+    setTimeout(() => window.scrollTo(0, y), 0);
+  }
+}
+
+/** Deliberate card visits push; automatic queue advances replace the current visit. */
+function navigateDecision(key: string | null, replace = false): void {
+  const hash = key ? decisionHash(key) : '#decisions';
+  if (location.hash !== hash) {
+    const state = { ...history.state };
+    if (!replace) {
+      const previous = decisionFromHash(location.hash) || location.hash === '#decisions' ? state.glassDecision : undefined;
+      // Only entries opened here get a return depth. Fresh deep links keep native Back behavior.
+      if (previous || (!decisionFromHash(location.hash) && location.hash !== '#decisions'))
+        state.glassDecision = { route: previous?.route ?? getState().route, depth: (previous?.depth ?? 0) + 1 };
+    }
+    if (replace) history.replaceState(state, '', hash);
+    else history.pushState(state, '', hash);
+  }
+  routeDecision({ key });
 }
 
 /** Fetch a closed card only when its deep link is outside the live queue. */
 async function loadClosedDecision(key: string): Promise<void> {
   try {
     const answer = await backend().decision(key);
-    if (!answer.ok) return;
-    const archivedDecision = answer.data;
-    if (getState().decisionModal?.key === key) setState({ archivedDecision });
+    if (answer.ok) {
+      const archivedDecision = answer.data;
+      if (getState().decisionModal?.key === key) setState({ archivedDecision });
+      return;
+    }
   } catch {
-    /* The existing empty state remains when a card cannot be read. */
+    /* Return to the decisions list when the card cannot be read. */
+  }
+  if (getState().decisionModal?.key === key) {
+    history.replaceState(null, '', '#deck');
+    routeDecision(null);
+    setState({ route: 'deck' });
   }
 }
 
@@ -149,12 +197,21 @@ export function stepDecision(dir: -1 | 1): void {
   if (!shown) return;
   const near = decisionNeighbours(order, shown);
   const next = dir < 0 ? near.prev : near.next;
-  if (next) setState({ decisionModal: { key: next.key } });
+  if (next) openDecision(next.key);
 }
 
 export const closeDecision = (): void => {
-  setState({ decisionModal: null });
-  if (isDetail(getState().modal) && decisionFromHash(location.hash)) history.back();
+  const depth = history.state?.glassDecision?.depth;
+  if (depth) {
+    history.go(-depth);
+    return;
+  }
+  if (isDetail(getState().modal) && decisionFromHash(location.hash)) {
+    history.back();
+    return;
+  }
+  history.replaceState(history.state, '', '#' + getState().route);
+  routeDecision(null);
 };
 
 /** Hotkeys reach the first nine answers only: 1–9. */
@@ -469,7 +526,7 @@ export async function sendAnswer(key: string): Promise<string | undefined> {
     setDraft(key, { sending: false, sent: answerSummary({ option: draft.option, text, files: files.length }) });
     // Answered in the modal: the next open decision loads, or the all-answered state.
     const open = getState().decisionModal;
-    if (open?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
+    if (open?.key === key) navigateDecision(nextOpen(previous, currentCards(), getState().drafts, key).key, true);
     return undefined;
   } catch {
     const error = 'The answer could not be sent.';
@@ -873,7 +930,7 @@ export async function sendPermissionsProposal(key: string, option: 'Approve' | '
     await permissionsProposalRequest('permissions-proposal-answer', { key, option, selected, diffHash });
     const previous = modalOrder();
     setDraft(key, { sending: false, sent: option === 'Approve' ? 'Permission changes applied' : 'Permission changes rejected' });
-    if (getState().decisionModal?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
+    if (getState().decisionModal?.key === key) navigateDecision(nextOpen(previous, currentCards(), getState().drafts, key).key, true);
     return undefined;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The proposal could not be answered.';
@@ -1244,7 +1301,7 @@ export async function dismissRunCard(key: string): Promise<string | undefined> {
     }
     const previous = modalOrder();
     setDraft(key, { sent: 'Dismissed' });
-    if (getState().decisionModal?.key === key) setState({ decisionModal: nextOpen(previous, currentCards(), getState().drafts, key) });
+    if (getState().decisionModal?.key === key) navigateDecision(nextOpen(previous, currentCards(), getState().drafts, key).key, true);
     return undefined;
   } catch {
     const error = 'The card could not be dismissed. Try again.';
