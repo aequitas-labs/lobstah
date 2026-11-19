@@ -92,6 +92,21 @@ it('man wait ends on a pushed event, renews the helm on the socket, and sends no
   expect(w.http).toEqual([]);
 });
 
+it('man wait prints a native untriaged conversation as a thread event', async () => {
+  const w = await wharf(); configure(w.url);
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const flags: Record<string, string> = { '--grounds': 'away', '--session': 'helm', '--after': 'g.7', '--timeout': '20' };
+  const opts = { opt: (f: string) => flags[f], has: (f: string) => f in flags, values: () => [] };
+  const waiting = wharfCommand('man:wait', [], opts, loadConfig());
+  await until(() => w.messages.some(m => m.t === 'resume'));
+  w.push({ t: 'event', cursor: 'g.8', events: [{ cursor: 'g.8', kind: 'thread', at: new Date().toISOString(), thread: { id: 'thread-id', grounds: 'away', kind: 'untriaged', title: 'Navigation', text: 'Where should Helm go?' } }] });
+  await waiting;
+  expect(output.mock.calls.map(c => c[0]).join('\n')).toContain('event: thread');
+  expect(output.mock.calls.map(c => c[0]).join('\n')).toContain('kind: untriaged');
+  expect(output.mock.calls.map(c => c[0]).join('\n')).toContain('Where should Helm go?');
+  expect(w.http).toEqual([]);
+});
+
 it('man wait with no event reads nothing over HTTP until it times out', async () => {
   const w = await wharf(); configure(w.url);
   const output = vi.spyOn(console, 'log').mockImplementation(() => {});

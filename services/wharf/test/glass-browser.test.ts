@@ -273,6 +273,22 @@ it('the signed-in page acks a document or a job with its cookie and origin only'
   expect((await browser('dispatches/job/ack/extra', {})).status).toBe(404);
   expect(await sql("SELECT value FROM meta WHERE key='helm'")).toEqual(before);
 });
+it('accepts native conversation messages through the cookie boundary and blocks browser steering', async () => {
+  const id = 'abcdef01-1234-4000-8000-abcdef012345';
+  const created = await browser('threads', { id, grounds: 'away', text: 'Talk about navigation' });
+  expect(created.status).toBe(201);
+  expect(await created.json()).toMatchObject({kind:'untriaged'});
+  expect((await browser(`threads/${id}`)).status).toBe(200);
+  expect((await browser(`threads/${id}/post`, {text:'Keep Reviews'})).status).toBe(201);
+  expect((await browser(`threads/${id}/post`, {text:'No'}, 'POST', {Origin:'https://evil.test'})).status).toBe(403);
+  expect((await browser(`threads/${id}/triage`, {kind:'bait'})).status).toBe(404);
+  const uploaded = await SELF.fetch(`https://glass.test/api/glass/threads/${id}/files`, {method:'POST',headers:{Cookie:cookie,Origin:'https://glass.test','Idempotency-Key':`phone-${++sequence}`,'X-File-Name':'notes.txt'},body:'Phone context'});
+  expect(uploaded.status).toBe(200);
+  const file = (await uploaded.json<{id:string}>()).id;
+  expect((await browser(`threads/${id}/post`, {text:'See the attachment',files:[file]})).status).toBe(201);
+  expect(await (await browser(`threads/${id}/files/${file}`)).text()).toBe('Phone context');
+});
+
 it('requires a separate in-page deletion confirmation and then removes identity and account data', async () => {
   await job();
   expect((await browser('account', {}, 'DELETE')).status).toBe(400);

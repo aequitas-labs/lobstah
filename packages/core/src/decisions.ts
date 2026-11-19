@@ -1,3 +1,4 @@
+import { MESSAGE_FILE_TYPES, messageFileType } from './message-files.js';
 import { validDesktopStartLink, type DesktopAppStart } from './desktop-start-link.js';
 import type { GrantIntent } from './grants.js';
 import { validDecisionReferences, type DecisionReference } from './backend-model.js';
@@ -191,42 +192,8 @@ export const ANSWER_TEXT_MAX = 20_000;
 /** Files one answer may carry. */
 export const ANSWER_FILES_MAX = 8;
 
-/**
- * File types an answer may attach, by extension. An image must also start
- * with its format's signature.
- */
-const ANSWER_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.pdf': 'application/pdf',
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.csv': 'text/csv',
-  '.json': 'application/json',
-  '.log': 'text/plain',
-  '.diff': 'text/plain',
-  '.patch': 'text/plain',
-  '.yaml': 'text/plain',
-  '.yml': 'text/plain',
-  '.toml': 'text/plain',
-  '.zip': 'application/zip',
-};
-
 /** The extensions an answer accepts, for messages and the glass's file picker. */
-export const ANSWER_EXTENSIONS: readonly string[] = Object.keys(ANSWER_TYPES);
-
-const SIGNATURES: Record<string, (b: Buffer) => boolean> = {
-  '.png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
-  '.jpg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
-  '.jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
-  '.gif': (b) => b.subarray(0, 4).toString('latin1') === 'GIF8',
-  '.webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
-  '.pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
-  '.zip': (b) => b[0] === 0x50 && b[1] === 0x4b,
-};
+export const ANSWER_EXTENSIONS: readonly string[] = Object.keys(MESSAGE_FILE_TYPES);
 
 const DECISION_JSON = 'decision.json';
 const DETAIL_MD = 'detail.md';
@@ -605,10 +572,9 @@ function uploadName(raw: string): string | undefined {
 /** The type an answer file is stored as, or a DecisionError. */
 export function answerFileType(name: string, head: Buffer): string {
   const ext = path.extname(name).toLowerCase();
-  const type = ANSWER_TYPES[ext];
+  const type = MESSAGE_FILE_TYPES[ext];
   if (!type) throw new DecisionError(`file type not accepted: ${name} (accepted: ${ANSWER_EXTENSIONS.join(' ')})`, 415);
-  const sig = SIGNATURES[ext];
-  if (sig && !sig(head)) throw new DecisionError(`file content does not match its type: ${name}`, 415);
+  if (!messageFileType(name, head)) throw new DecisionError(`file content does not match its type: ${name}`, 415);
   return type;
 }
 

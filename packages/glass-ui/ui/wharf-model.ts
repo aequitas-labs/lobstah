@@ -30,6 +30,9 @@ export interface Worker {
 }
 /** What the hosted glass's GET /api/glass answers: the signed-in person's account. */
 export interface WharfGlass {
+  threads?: import('@lobstah/core').ThreadSummary[];
+  threadGrounds?: string[];
+  messageLimits?: import('@lobstah/core').GlassSnapshot['answerLimits'];
   boats: Boat[];
   workers: Worker[];
   documents: WharfDocument[];

@@ -21,8 +21,8 @@ import { viewerDevice } from '../../../core/src/viewer-device.js';
  * acknowledging a clicked lob on the wharf, where every boat reads the ack.
  */
 export const WHARF_CAPABILITIES: GlassCapabilities = {
-  tabs: ['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports'],
-  actions: new Set(['message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'attention-ack']),
+  tabs: ['deck', 'helm', 'dispatches', 'traps', 'boats', 'reviews', 'reports'],
+  actions: new Set(['thread-message', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'attention-ack']),
   daemon: false,
 };
 
@@ -59,6 +59,7 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
   const now = options.now ?? Date.now;
   let glass: WharfGlass | undefined;
   let jobs: DispatchView[] = [];
+  const conversations = new Map<string, import('@lobstah/core').ThreadView>();
   /** Decision Markdown read so far, by file id. Wharf files never change, so each is read once. */
   const texts = new Map<string, string>();
   /** The last detail read per job, for its files' URLs. */
@@ -152,7 +153,52 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
     older: async () => missing(),
     stats: async () => missing(),
     settings: async () => missing(),
+    async thread(id) {
+      const answer = await call<import('@lobstah/core').ThreadView>(`/api/glass/threads/${encodeURIComponent(id)}`);
+      if (!answer.ok || !answer.body) return { ok: false, status: answer.status };
+      conversations.set(id, answer.body);
+      return { ok: true, status: answer.status, data: answer.body };
+    },
     async request<T extends GlassVerdict>(kind: string, payload: unknown): Promise<GlassWrite<T>> {
+      if (kind === 'thread-start' || kind === 'thread-post' || kind === 'thread-reopen') {
+        const input = (payload ?? {}) as { id?: string; files?: Array<{ name: string; data: string }>; [key: string]: unknown };
+        const id = input.id ?? crypto.randomUUID(),
+          files: string[] = [];
+        for (const file of input.files ?? []) {
+          const bytes = Uint8Array.from(atob(file.data), (c) => c.charCodeAt(0));
+          const uploaded = await call<{ id: string }>(`/api/glass/threads/${encodeURIComponent(id)}/files`, {
+            method: 'POST',
+            headers: { 'X-File-Name': file.name, 'Idempotency-Key': crypto.randomUUID() },
+            body: bytes,
+          });
+          if (!uploaded.ok || !uploaded.body)
+            return {
+              ok: false,
+              status: uploaded.status,
+              body: { ok: false, reason: uploaded.body?.error ?? 'The attachment could not be sent' } as T,
+            };
+          files.push(uploaded.body.id);
+        }
+        const path =
+          kind === 'thread-start'
+            ? '/api/glass/threads'
+            : `/api/glass/threads/${encodeURIComponent(id)}/${kind === 'thread-post' ? 'post' : 'reopen'}`;
+        const answer = await call<import('@lobstah/core').ThreadView>(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+          body: JSON.stringify({ ...input, id, files }),
+        });
+        if (!answer.ok || !answer.body)
+          return {
+            ok: false,
+            status: answer.status,
+            body: { ok: false, reason: answer.body?.error ?? 'The message could not be sent' } as T,
+          };
+        conversations.set(id, answer.body);
+        const verdict: GlassVerdict = { ok: true };
+        Object.assign(verdict, { item: answer.body });
+        return { ok: true, status: answer.status, body: verdict as T };
+      }
       const p = (payload ?? {}) as { key?: string; option?: string; text?: string; files?: unknown[]; dispatch?: string };
       const documentPath = (key: string | undefined, route: string) => `/api/glass/documents/${encodeURIComponent(key ?? '')}/${route}`;
       if (kind === 'decision-answer') {
@@ -218,7 +264,13 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
       }
     },
     fileUrl(owner, name) {
-      if (owner.kind === 'thread') return ''; // Native conversations join in the wharf slice.
+      if (owner.kind === 'thread') {
+        const file = conversations
+          .get(owner.id)
+          ?.rounds.flatMap((r) => r.entries.flatMap((e) => ('attachments' in e ? e.attachments : [])))
+          .find((a) => a.name === name);
+        return file ? `/api/glass/threads/${encodeURIComponent(owner.id)}/files/${encodeURIComponent(file.path)}` : '';
+      }
 
       if (owner.kind === 'trap') return '';
       if (owner.kind === 'dispatch') {

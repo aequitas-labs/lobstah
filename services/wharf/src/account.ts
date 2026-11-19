@@ -1,3 +1,5 @@
+import { Threads } from './threads.js';
+import { messageFileType, MESSAGE_FILE_TYPES } from '../../../packages/core/src/message-files.js';
 import { DurableObject } from 'cloudflare:workers';
 import type { ReportInput, BackendEvent, DispatchInput, DispatchView, GlassCard, GlassCardAction } from '../../../packages/core/src/backend-model.js';
 import { ApiError, LEASE_MS, boatName, capability, digest, dispatchInput, hex, identifier, configuredTarget, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
@@ -62,6 +64,7 @@ export const IDEM_WINDOW_MS = 24 * 60 * 60 * 1000;
  */
 export class Account extends DurableObject<Env> {
   private glass: GlassState;
+  private threads: Threads;
   private cards: Cards;
   private outbox: SlackOutbox;
   private mirrorState: MirrorState;
@@ -268,6 +271,13 @@ export class Account extends DurableObject<Env> {
     const generation = this.get('generation')!;
     const rows = this.ctx.storage.sql.exec<{ seq: number; kind: string; dispatch: string | null; at: string; note: string | null }>('SELECT e.*,d.note FROM events e LEFT JOIN event_details d ON d.seq=e.seq WHERE e.seq>? ORDER BY e.seq LIMIT ?', after, limit).toArray();
     const events: BackendEvent[] = rows.map((r) => ({ cursor: `${generation}.${r.seq}`, kind: r.kind, ...(r.dispatch ? { dispatchId: r.dispatch } : {}), at: r.at, ...(r.note ? { note: r.note } : {}) }));
+    for (const e of events) {
+      if (e.kind === 'thread' && e.note) e.thread = this.threads.event(e.note);
+      if (e.kind === 'decision-answer' && e.note) {
+        const row = this.ctx.storage.sql.exec<{data: string}>('SELECT data FROM documents WHERE id=?', e.note).toArray()[0];
+        if (row) e.threadId = (JSON.parse(row.data) as {thread?: string}).thread;
+      }
+    }
     // Historical events still label an addressed boat with its current name.
     for (const e of events) if (e.dispatchId) {
       const d = this.ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches WHERE id=?', e.dispatchId).toArray()[0];
@@ -299,7 +309,7 @@ export class Account extends DurableObject<Env> {
       const stale = this.ctx.storage.sql.exec<{ at: number | null }>('SELECT min(seen) AS at FROM workers WHERE seen>?', now - LEASE_MS).one().at;
       if (stale !== null) times.push(stale + LEASE_MS);
     }
-    for (const at of [this.mirrorState.nextExpiry(now), this.glass.nextExpiry(now), this.cards.nextExpiry(now), this.outbox.nextDue()]) if (at !== undefined) times.push(at);
+    for (const at of [this.mirrorState.nextExpiry(now), this.glass.nextExpiry(now), this.cards.nextExpiry(now), this.outbox.nextDue(), this.threads.nextDue(now)]) if (at !== undefined) times.push(at);
     return times.length ? Math.max(Math.min(...times), now) : undefined;
   }
   /** Set the alarm to the next due time, move it when that changed, or delete it when nothing is due. */
@@ -325,7 +335,7 @@ export class Account extends DurableObject<Env> {
     const now = Date.now();
     const account = this.ctx.id.name;
     const cleanup = this.ctx.storage.transactionSync(() => {
-      this.expire(now); this.availability(now);
+      this.expire(now); this.threads.maintain(now); this.availability(now);
       const keys = this.mirrorState.expire(account ?? '', now);
       this.cards.project(now);
       return keys;
@@ -359,7 +369,7 @@ export class Account extends DurableObject<Env> {
       throw e;
     } finally {
       // After the command commits, its card changes go out; a failed drain is retried by the alarm.
-      await this.afterChange();
+      if (!(c.method === 'GET' && (c.path === 'glass' || c.path === 'threads' || c.path.startsWith('threads/')))) await this.afterChange();
     }
   }
   /** Private binding only: deliver what is due now, and wait for it. */
@@ -483,7 +493,8 @@ export class Account extends DurableObject<Env> {
     if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(idem)').toArray().some((c) => c.name === 'at')) ctx.storage.sql.exec('ALTER TABLE idem ADD COLUMN at INTEGER');
     // Request counts and the hosted glass's watch moved to memory; their old rows go (nothing to write once gone).
     ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
-    this.glass = new GlassState(ctx.storage.sql, { helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
+    this.threads = new Threads(ctx.storage.sql, { remindMs: () => (JSON.parse(this.get('helm') ?? 'null')?.remindSecs ?? 900) * 1000, helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note) });
+    this.glass = new GlassState(ctx.storage.sql, { threadGrounds: () => { const h = JSON.parse(this.get('helm') ?? 'null'); return [...new Set([...(h?.grounds ? [h.grounds] : []), ...this.threads.summaries(Date.now()).map(t => t.grounds)])]; }, messageLimits: () => ({ maxBytes: Math.min(10 * 1024 * 1024, Number(this.env.MAX_FILE_BYTES)), maxFiles: 8, textMax: 20000, extensions: Object.keys(MESSAGE_FILE_TYPES) }), threads: (n) => this.threads.summaries(n), threadCheck: (id, g) => this.threads.checkCard(id, g), threadLink: (id, key, n) => this.threads.linkCard(id, key, n), helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now) });
     this.cards = new Cards(ctx.storage.sql, {
       dispatches: () => ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches ORDER BY rowid DESC LIMIT 100').toArray().map((d) => this.view(d) as DispatchView),
@@ -676,8 +687,11 @@ export class Account extends DurableObject<Env> {
     return this.ctx.storage.transactionSync(() => {
       const now = Date.now();
       requireThat(!this.get('deleted'), 410, 'account deleted');
-      const actor = this.authenticate(c, hash, now); this.budget(now); this.expire(now);
+      const actor = this.authenticate(c, hash, now); this.budget(now);
       this.authorize(c, actor);
+      // These views are pure reads; the alarm owns maintenance even when it is due.
+      if (c.method === 'GET' && (c.path === 'glass' || c.path === 'threads' || c.path.startsWith('threads/'))) return this.execute(c, actor, now);
+      this.expire(now);
       if (c.method !== 'GET') {
         requireThat(c.key && /^[A-Za-z0-9_-]{1,128}$/.test(c.key), 400, 'Idempotency-Key required');
         const previous = this.ctx.storage.sql.exec<{ fingerprint: string; result: string }>('SELECT * FROM idem WHERE actor=? AND key=?', `${actor.kind}:${actor.id}`, c.key).toArray()[0];
@@ -745,14 +759,17 @@ export class Account extends DurableObject<Env> {
     if (c.path === 'helm/take' && c.method === 'POST') {
       this.requirePermission(actor, 'helm'); const session = identifier(b.session);
       const previous = JSON.parse(this.get('helm') ?? 'null');
+      if (b.remindSecs !== undefined) requireThat(typeof b.remindSecs === 'number' && Number.isSafeInteger(b.remindSecs) && b.remindSecs > 0, 400, 'Choose a positive reminder interval');
       const principal = `${actor.kind}:${actor.id}`;
       requireThat(!previous || previous.session === session && previous.actor === principal || previous.until <= now || b.take === true, 409, 'helm held; explicit takeover required');
-      const h = { session, actor: principal, until: now + HELM_MS }; this.set('helm', JSON.stringify(h)); this.event('helm-taken'); return ok(h);
+      const h = { session, actor: principal, until: now + HELM_MS, remindSecs: b.remindSecs ?? previous?.remindSecs ?? 900, ...(b.grounds === undefined ? {} : { grounds: identifier(b.grounds) }) }; this.set('helm', JSON.stringify(h)); this.event('helm-taken'); return ok(h);
     }
     if (c.path === 'helm/renew' || c.path === 'helm/release') {
       requireThat(c.method === 'POST', 405, 'POST required'); this.helm(c, actor, now);
       const h = { session: c.session, actor: `${actor.kind}:${actor.id}`, until: c.path.endsWith('release') ? 0 : now + HELM_MS };
-      this.set('helm', JSON.stringify(h)); return ok(h);
+      const previous = JSON.parse(this.get('helm') ?? 'null');
+      const renewed = { ...h, remindSecs: previous?.remindSecs ?? 900, ...(previous?.grounds ? { grounds: previous.grounds } : {}) };
+      this.set('helm', JSON.stringify(renewed)); return ok(renewed);
     }
     if (c.path === 'boats' && c.method === 'GET') {
       this.requirePermission(actor, 'read');
@@ -825,6 +842,8 @@ export class Account extends DurableObject<Env> {
     if (parts[0] === 'documents' && parts[2] === 'files' && !parts[3] && c.method === 'POST') {
       const scope = this.glass.uploadScope(c, actor, now); return this.reserveFile(c, b, scope);
     }
+    if (parts[0] === 'threads' && parts[2] === 'files' && !parts[3] && c.method === 'POST') return this.reserveFile(c, b, this.threads.uploadScope(c, actor));
+    const conversation = this.threads.execute(c, actor, now); if (conversation) return conversation;
     const cards = this.cards.execute(c, actor, now); if (cards) return cards;
     const glass = this.glass.execute(c, actor, now); if (glass) return glass;
     if (parts[0] === 'dispatches' && parts[1]) {
@@ -1179,6 +1198,7 @@ export class Account extends DurableObject<Env> {
     return this.serialFile(async () => {
       try {
         const c: Command = JSON.parse(command);
+        if (c.path.startsWith('threads/')) { const name = object(c.body).name; requireThat(typeof name === 'string' && messageFileType(name, bytes), 415, 'File content does not match an accepted type'); }
         const hash = hex(await crypto.subtle.digest('SHA-256', bytes)); const id = crypto.randomUUID();
         c.body = { ...object(c.body), size: bytes.byteLength, hash };
         c.prepared = { id, hash };
@@ -1190,7 +1210,7 @@ export class Account extends DurableObject<Env> {
           // SQL tombstones cannot race deletion: deleteAccount uses this same
           // R2 serial queue, and all metadata remains durable across eviction.
           this.ctx.storage.sql.exec('UPDATE files SET ready=1 WHERE id=?', file);
-          if (!this.glass.isReviewScope(row.dispatch)) this.event('file-uploaded', row.dispatch);
+          if (!row.dispatch.startsWith('thread:') && !this.glass.isReviewScope(row.dispatch)) this.event('file-uploaded', row.dispatch);
         }
         return JSON.stringify({ status: 200, value: { id: file, bytes: row.size } });
       } catch (e) {

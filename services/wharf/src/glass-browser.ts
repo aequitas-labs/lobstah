@@ -38,18 +38,20 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   if (route === 'slack' || route.startsWith('slack/')) return slackRoute(request, env, route, person);
   // A relayed call's answer comes on the tab's socket, or with the relay itself: there is no call to poll.
   if (request.method === 'GET' && /^mirror\/calls\/[A-Za-z0-9_-]+$/.test(route)) return Response.json({ error: 'a relayed call answers on the socket or with its relay; it is not polled' }, { status: 410 });
-  const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake', 'mirror', 'mirror/read', 'cards'].includes(route)
+  const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake', 'mirror', 'mirror/read', 'cards', 'threads'].includes(route)
+    || /^threads\/[A-Za-z0-9_-]+$/.test(route)
     || /^cards\/c\d{1,15}$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
-    || /^(documents|dispatches)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
-  const input = request.method === 'POST' && (route === 'requests'
+    || /^(documents|dispatches|threads)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
+  const input = request.method === 'POST' && (route === 'requests' || route === 'threads'
+    || /^threads\/[A-Za-z0-9_-]+\/(post|reopen)$/.test(route)
     || /^documents\/[A-Za-z0-9_-]+\/(answer|ack)$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/ack$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/cancel$/.test(route)
     || /^boats\/[A-Za-z0-9_-]+\/revoke$/.test(route)
     || route === 'mirror/calls' || route === 'mirror/relay');
   // A file the person attaches to a relayed answer: raw bytes, stored for the boat to fetch.
-  const mirrorFile = request.method === 'POST' && route === 'mirror/files';
+  const mirrorFile = request.method === 'POST' && (route === 'mirror/files' || /^threads\/[A-Za-z0-9_-]+\/files$/.test(route));
   const deleting = request.method === 'DELETE' && route === 'account';
   requireThat(read || input || deleting || mirrorFile, 404, 'browser action not available');
   let body: unknown = {};

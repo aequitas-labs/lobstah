@@ -205,7 +205,10 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
   async function load(): Promise<GlassSnapshot> {
     const [, wharf] = await Promise.all([list(), options.wharf.snapshot()]);
     // The wharf's own grounds show beside the boats only when it holds any of their work.
-    wharfPart = wharf.dispatches.length || wharf.reports.length || wharf.decisions?.length ? wharf : undefined;
+    wharfPart =
+      wharf.dispatches.length || wharf.reports.length || wharf.decisions?.length || wharf.threads?.length || wharf.backends?.length
+        ? wharf
+        : undefined;
     await probeBoats();
     return mergeNow();
   }
@@ -413,7 +416,7 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
       readFor(
         id,
         (local) => `/threads/${encodeURIComponent(local)}`,
-        async () => missing(),
+        async () => (options.wharf.thread ? options.wharf.thread(id) : missing()),
       ),
     async request<T extends GlassVerdict>(kind: string, payload: unknown): Promise<GlassWrite<T>> {
       if (!merged) await load();

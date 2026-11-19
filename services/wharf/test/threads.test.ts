@@ -1,0 +1,84 @@
+import { env, SELF, runInDurableObject, runDurableObjectAlarm } from 'cloudflare:test';
+import { beforeEach, it, expect } from 'vitest';
+import type { Account } from '../src/account.js';
+import type { ThreadView, ThreadSummary } from '../../../packages/core/src/thread-model.js';
+import { glassTables } from '../src/glass-state.js';
+import { authFixtures } from './auth-fixture.js';
+import { rowsWritten } from './rows-written.js';
+let sequence = 0;
+const ID = 'abcdef01-1234-4000-8000-abcdef012345';
+const token = 'test-helm-a';
+const call = (path: string, body?: unknown, auth = token, key = `thread-${++sequence}`, account = 'a') => SELF.fetch(`https://state.test/v1/accounts/${account}/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${auth}`, 'X-Lobstah-Helm': 'helm', 'Idempotency-Key': key }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+const stub = () => env.ACCOUNTS.getByName('a');
+const sql = (query: string, ...args: SqlStorageValue[]) => runInDurableObject(stub(), (_: Account, state) => state.storage.sql.exec(query, ...args).toArray());
+beforeEach(async () => {
+  await authFixtures();
+  await runInDurableObject(stub(), (instance: Account, state) => {
+    for (const table of ['boats','boat_permissions','workers','configured_workers','worker_nicknames','unservable','dispatches','reports','events','event_details','idem','files', ...glassTables]) state.storage.sql.exec(`DELETE FROM ${table}`);
+    state.storage.sql.exec("DELETE FROM meta WHERE key<>'generation'");
+    (instance as unknown as {budgets: Map<string, unknown>}).budgets.clear();
+  });
+});
+const create = async () => {
+  const response = await call('threads', { id: ID, grounds: 'harbor', text: 'Where does Helm go?' });
+  expect(response.status, await response.clone().text()).toBe(201);
+  return response.json<ThreadView>();
+};
+it('starts untriaged, emits the wake payload, deduplicates retries, and scopes the account', async () => {
+  const body = { id: ID, grounds: 'harbor', text: 'Where does Helm go?', kind: 'bait' };
+  const response = await call('threads', body, token, 'same-message');
+  expect(response.status).toBe(201);
+  expect(await response.json()).toMatchObject({ id: ID, kind: 'untriaged' });
+  expect((await call('threads', body, token, 'same-message')).status).toBe(201);
+  expect(await sql('SELECT count(*) AS n FROM helm_threads')).toEqual([{n:1}]);
+  const events = await (await call('events')).json<{events: Array<unknown>}>();
+  expect(events.events).toContainEqual(expect.objectContaining({kind:'thread', thread:{id:ID,grounds:'harbor',kind:'untriaged',title:body.text,text:body.text}}));
+  expect((await call(`threads/${ID}`, undefined, token, undefined, 'b')).status).toBe(403);
+  expect(await sql('SELECT count(*) AS n FROM dispatches')).toEqual([{n:0}]);
+});
+it('requires the helm for steering, joins card answers, resolves and reopens', async () => {
+  await create();
+  expect((await call(`threads/${ID}/triage`, {kind:'thread'})).status).toBe(409);
+  await call('helm/take', {session:'helm',grounds:'harbor'});
+  expect((await call(`threads/${ID}/triage`, {kind:'thread'})).status).toBe(200);
+  expect((await call(`threads/${ID}/note`, {decided:['Keep Reviews'],open:['Pick the middle tab']})).status).toBe(200);
+  expect((await call('documents', {id:'question',kind:'decision',title:'Use Helm?',options:['Yes'],thread:ID,grounds:'harbor'})).status).toBe(200);
+  expect((await call('documents/question/publish', {})).status).toBe(200);
+  expect(await (await call(`threads/${ID}`)).json()).toMatchObject({cards:[{key:'question',standing:true}]});
+  await call('documents/question/answer', {option:'Yes',text:'Middle tab'});
+  expect(await (await call(`threads/${ID}`)).json()).toMatchObject({cards:[{standing:false,answer:{option:'Yes',text:'Middle tab'}}]});
+  expect(await (await call('events')).json()).toMatchObject({events:expect.arrayContaining([expect.objectContaining({kind:'decision-answer',threadId:ID})])});
+  expect((await call(`threads/${ID}/resolve`, {outcome:'planned:http://bad.test',note:'Plan'})).status).toBe(400);
+  expect((await call(`threads/${ID}/resolve`, {outcome:'answered',note:'Helm goes in the middle'})).status).toBe(200);
+  expect((await call(`threads/${ID}/post`, {text:'More'})).status).toBe(409);
+  expect((await call(`threads/${ID}/reopen`, {})).status).toBe(200);
+  expect((await call(`threads/${ID}/post`, {text:'One more thought'})).status).toBe(201);
+  const summaries = await (await call('threads')).json<ThreadSummary[]>();
+  expect(summaries[0]).toMatchObject({roundCount:2,state:'open',waitingForHelm:true});
+  expect(summaries[0]).not.toHaveProperty('rounds'); expect(summaries[0]).not.toHaveProperty('attachments');
+});
+it('stores validated phone attachments and refuses foreign file references and malformed bytes', async () => {
+  const png = new Uint8Array([137,80,78,71,13,10,26,10,0]);
+  const upload = (id: string, name: string, bytes: Uint8Array) => SELF.fetch(`https://state.test/v1/accounts/a/threads/${id}/files`, {method:'POST',headers:{Authorization:`Bearer ${token}`,'X-File-Name':name,'Idempotency-Key':`upload-${++sequence}`},body:bytes});
+  expect((await upload(ID,'fake.png',new Uint8Array([1]))).status).toBe(415);
+  const file = await upload(ID,'phone.png',png); expect(file.status).toBe(200);
+  const key = (await file.json<{id:string}>()).id;
+  expect((await call('threads',{id:ID,grounds:'harbor',text:'Look at this',files:[key]})).status).toBe(201);
+  expect((await call(`threads/${ID}/post`,{text:'Again',files:[key]})).status).toBe(201);
+  const view = await (await call(`threads/${ID}`)).json<ThreadView>();
+  expect(view.attachments[0]).toMatchObject({name:'phone.png',type:'image/png'});
+  expect(view.rounds[1]!.entries[0]).toMatchObject({attachments:[{name:'phone-2.png'}]});
+  const image = await call(`threads/${ID}/files/${key}`); expect(image.headers.get('Content-Type')).toBe('image/png'); expect(new Uint8Array(await image.arrayBuffer())).toEqual(png);
+  const other = 'abcdef02-1234-4000-8000-abcdef012345';
+  expect((await call('threads',{id:other,text:'No',files:[key]})).status).toBe(400);
+  expect((await call(`threads/${other}/files/${key}`)).status).toBe(404);
+});
+it('writes no rows on glass polls, list reads or detail reads, even when a discussion is due to expire', async () => {
+  await create(); await call('helm/take',{session:'helm'}); await call(`threads/${ID}/triage`,{kind:'thread'});
+  await sql("UPDATE helm_threads SET data=json_set(data,'$.lastPersonAt','2000-01-01T00:00:00.000Z') WHERE id=?", ID);
+  expect(await rowsWritten(stub(), async () => {
+    for (let i=0;i<3;i++) for (const path of ['glass','threads',`threads/${ID}`]) expect((await call(path)).status).toBe(200);
+  })).toBe(0);
+  expect(await runDurableObjectAlarm(stub())).toBe(true);
+  expect(await (await call(`threads/${ID}`)).json()).toMatchObject({state:'resolved',outcome:{kind:'dropped'}});
+});

@@ -118,7 +118,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     const attached = opts.values('--attach').map((file) => ({ name: path.basename(file), bytes: readFile(file) }));
     if (attached.length > 32 || new Set(attached.map((f) => f.name)).size !== attached.length) throw new Error('at most 32 attachments, with different basenames');
     const base = key(), id = opts.opt('--id') ?? partKey(base, 'document').slice(0, 32);
-    await backend.request('documents', { id, kind, title, grounds: scope.grounds, options: kind === 'decision' ? opts.values('--option') : [], ...(kind === 'decision' && opts.references?.length ? { references: opts.references } : {}), ...(kind === 'decision' && pos[0] ? { dispatch: pos[0] } : {}) }, partKey(base, 'create'));
+    await backend.request('documents', { id, kind, title, grounds: scope.grounds, options: kind === 'decision' ? opts.values('--option') : [], ...(kind === 'decision' && opts.opt('--thread') ? { thread: opts.opt('--thread') } : {}), ...(kind === 'decision' && opts.references?.length ? { references: opts.references } : {}), ...(kind === 'decision' && pos[0] ? { dispatch: pos[0] } : {}) }, partKey(base, 'create'));
     const detail = contents ? await backend.uploadDocument(id, kind === 'decision' ? 'detail.md' : 'report.md', contents, partKey(base, 'markdown')) : undefined;
     const files: string[] = [];
     for (const [i, file] of attached.entries()) files.push(await backend.uploadDocument(id, file.name, file.bytes, partKey(base, `file-${i}`)));
@@ -215,7 +215,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     }
     case 'man:file': await fileDocument('report'); break;
     case 'man:tend': print({ dispatches: await backend.list(), ...await backend.request('glass') as Record<string, unknown> }); break;
-    case 'man:helm': print(await backend.request('helm/take', { session, take: opts.has('--take') }, key())); break;
+    case 'man:helm': print(await backend.request('helm/take', { session, grounds: scope.grounds, remindSecs: config.remindSecs ?? 900, take: opts.has('--take') }, key())); break;
     case 'man:relieve': print(await backend.request('helm/release', {}, key())); break;
     case 'man:throw': {
       if (configuredName && configuredProfile) {
@@ -237,13 +237,36 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       await backend.request('helm/renew', {}, key());
       print(await brokerRequest('launch', { grounds: scope.grounds, repo: opts.opt('--repo') })); break;
     }
+    case 'man:threads': {
+      const value = await backend.request(pos[0] ? `threads/${id()}` : 'threads');
+      if (pos[0] && (value as { grounds?: string }).grounds !== scope.grounds) throw new Error('This conversation belongs to another grounds');
+      print(Array.isArray(value) ? value.filter(t => t.grounds === scope.grounds) : value); break;
+    }
+    case 'man:triage':
+    case 'man:discuss':
+    case 'man:note':
+    case 'man:resolve': {
+      const grounds = scope.grounds;
+      if (cmd === 'man:discuss') {
+        const existing = /^[0-9a-f-]{36}$/.test(pos[0] ?? '');
+        print(await backend.request(existing ? `threads/${id()}/post` : 'threads', { grounds, text: opts.opt('--said'), via: 'chat', ...(existing ? {} : { title: pos.join(' ') }) }, key()));
+      } else if (cmd === 'man:triage') print(await backend.request(`threads/${id()}/triage`, { grounds, kind: opts.opt('--as') }, key()));
+      else if (cmd === 'man:resolve') print(await backend.request(`threads/${id()}/resolve`, { grounds, outcome: opts.opt('--outcome'), note: opts.opt('--note') }, key()));
+      else print(await backend.request(`threads/${id()}/note`, { grounds, ...(opts.has('--decided') ? { decided: opts.values('--decided') } : {}), ...(opts.has('--open') ? { open: opts.values('--open') } : {}), link: opts.opt('--link'), text: pos.slice(1).join(' ') || undefined }, key()));
+      break;
+    }
     case 'man:wait': {
+      const printBatch = (batch: { events: BackendEvent[]; cursor?: string }) => {
+        for (const event of batch.events) if (event.kind === 'thread' && event.thread?.grounds === scope.grounds) console.log(toonKV({ event: 'thread', ...event.thread }));
+        const rest = batch.events.filter(e => e.kind !== 'thread');
+        if (rest.length || !batch.events.length) print({ ...batch, events: rest });
+      };
       const after = opts.opt('--after');
       const idle = new IdleWait(session, config.wait, opts.opt('--timeout'));
       // Without a cursor, the wait starts from the account's history, as `GET events` gives it: one read.
       if (after === undefined) {
         const batch = await backend.events(undefined);
-        if (batch.events.length) { idle.woke(); print(batch); return true; }
+        if (batch.events.length) { idle.woke(); printBatch(batch); return true; }
       }
       // The wharf pushes every event after the cursor on the socket: the wait reads nothing while it waits.
       const pushed: BackendEvent[] = [];
@@ -261,13 +284,13 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
         while (idle.probe || !idle.expired()) {
           if (Date.now() - renewed > HELM_RENEW_MS) { await renew(); renewed = Date.now(); }
           cursor = socket.lastCursor() ?? cursor;
-          if (pushed.length) { idle.woke(); print({ events: pushed, cursor }); return true; }
+          if (pushed.length) { idle.woke(); printBatch({ events: pushed, cursor }); return true; }
           // A socket that dropped or could not open: read the events over HTTP, then again each WAIT_UNSOCKETED_READ_MS until it is back.
           if (!socket.connected() && (dropped || Date.now() - read >= WAIT_UNSOCKETED_READ_MS)) {
             read = Date.now(); dropped = false;
             try {
               const batch = await backend.events(cursor); cursor = batch.cursor;
-              if (batch.events.length) { idle.woke(); print(batch); return true; }
+              if (batch.events.length) { idle.woke(); printBatch(batch); return true; }
               unknown = false;
             } catch (e) {
               if (!(e instanceof BackendError) || e.status !== 503) throw e;

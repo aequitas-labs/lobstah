@@ -153,6 +153,7 @@ export function decisionOf(doc: WharfDocument, detail: string | undefined): Glas
     title: doc.title,
     detail: detail ?? '',
     options: doc.options ?? [],
+    ...(doc.thread ? { thread: doc.thread } : {}),
     ...(doc.references?.length ? { references: doc.references } : {}),
     attachments: attachments('documents', doc.id, doc.attachments),
     ...(doc.dispatch ? { dispatch: doc.dispatch, lane: LANE } : {}),
@@ -278,6 +279,9 @@ export function wharfSnapshot(
     // Never on a trap's machine: traps run on boats. The device decides which commands can work here.
     viewer: { onMachine: false, windowFocus: false, machine: '', device },
     helms: [],
+    threads: glass.threads ?? [],
+    backends: (glass.threadGrounds ?? []).map((grounds) => ({ grounds, kind: 'wharf' as const })),
+    answerLimits: glass.messageLimits,
     traps: glass.workers.map(trapOf),
     notices: [],
     watches: [],
