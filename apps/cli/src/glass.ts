@@ -1,4 +1,5 @@
 import { trapAvailability } from '@lobstah/core';
+import { questionParkNote } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
 import { requestHelmPass, resolveGrounds } from '@lobstah/core';
 import { readArchivedDecision, readDecision, readDecisionAnswer, readMirrorStatus, reconcilePermissionCards } from '@lobstah/core';
@@ -400,7 +401,7 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     // Held for free space: the note carries the reason.
     note: (usageLimit ? `Waiting on ${usageLimit.account} usage limit${usageLimit.resetAt ? ` · resets ${usageLimit.resetAt}` : ''}` : undefined) ?? (r.bucket === 'queued' && r.d.systemRepair?.trapWaitUntil && r.d.for
       ? `repair chore waits for ${r.d.for} until ${r.d.systemRepair.trapWaitUntil}` : undefined) ??
-      (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? last?.note,
+      (r.bucket === 'queued' && hold && r.d.for === undefined ? holdReason(hold) : undefined) ?? questionParkNote(id, r.lane, last) ?? last?.note,
     verbAt: last?.at ?? (r.bucket === 'queued' ? queuedAt(id, r.lane) : claim?.at),
     activity: r.bucket === 'active' ? activityView(readActivity(id, r.lane), staleSecs) : undefined,
     waiting: r.bucket === 'active' ? waitingView(last) : undefined,

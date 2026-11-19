@@ -253,11 +253,13 @@ import { swapTrapCatch } from './trap-swap.js';
 import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
 import { createTurnWaits } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
+import { createPrQuestionWatch, publishDispatchQuestions } from './pr-questions.js';
+import { questionPark } from '@lobstah/core';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS, walkingAttention } from './tend.js';
-import { runCull } from './cull.js';
+import { runCullWithServers } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -395,9 +397,9 @@ work (humans and agents):
   reviews post <key>              send a fresh draft as a comment-only review
   reviews dismiss <key>           drop the review and its pending draft
   prs [sync]                      list known PRs, or refresh due PR watches
-  cull [--older-than <days>] [--apply]
-                                  sweep aged catch and lost gear — old done/
-                                  entries, orphaned worktrees, stale state.
+  cull [--older-than <days>] [--idle-hours <hours>] [--apply]
+                                  stop idle worktree servers and containers;
+                                  sweep aged catch, worktrees, and state.
                                   Dry run by default (14 days).
   cancel <uuid>                   request cancellation
   watch [add <key> --check <cmd> [--for <uuid>] [--cursor <c>] [--every <s>]
@@ -817,6 +819,7 @@ function dispatchChain(target: string): ChainMember[] {
 /** An active record only steers a worker while its runner or trap is live. */
 function liveChainMember(member: ChainMember): boolean {
   if (member.bucket !== 'active') return false;
+  if (isParked(member.id, member.lane)) return true;
   const dir = path.join(laneDirs(member.lane).active, member.id);
   const claim = readSessionClaim(member.id, member.lane);
   if (claim?.by.startsWith('wt:')) {
@@ -1383,6 +1386,7 @@ async function mainCli(): Promise<void> {
           ...(descriptor?.pool || readEvidence(id, lane).pool ? { pool: readEvidence(id, lane).pool ?? `${descriptor!.pool} (no worktree yet)` } : {}),
           lastNote: log.at(-1)?.note === undefined ? undefined : nameTrapsIn(log.at(-1)!.note!, 'label', names),
           ...(waitingNow ? { [log.at(-1)!.verb]: waitingText(waitingNow) } : {}),
+          ...(questionPark(id, lane) ? { parked: questionPark(id, lane)!.note.replace(/^parked: /, '') } : {}),
           ...(waitingNow?.until ? { until: waitingNow.until } : {}),
           ...(activity ? { activity: activityLine(activity) } : {}),
           ...livenessView(id, lane),
@@ -1725,6 +1729,10 @@ async function mainCli(): Promise<void> {
         else mergeEvidence(id, lane, { prUrl });
       }
       const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
+      if (verb === 'needs-decision' && !asksPermission) {
+        try { await publishDispatchQuestions(id, lane); }
+        catch (error) { console.log(`warning: PR question delivery will retry: ${error instanceof Error ? error.message : String(error)}`); }
+      }
       // A PR stays observed from the first report that names it: CI, review,
       // and merge flow back through its pr: watch instead of lobstah going
       // blind at "PR open". The watch is registered once per PR. A pause on
@@ -2013,7 +2021,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'cull': {
-      console.log(runCull(Number(opt('--older-than') ?? '14'), has('--apply')));
+      console.log(await runCullWithServers(Number(opt('--older-than') ?? '14'), has('--apply'), { idleHours: Number(opt('--idle-hours') ?? '12') }));
       break;
     }
     case 'man:manual': {
@@ -3936,6 +3944,7 @@ async function mainCli(): Promise<void> {
             await (await import('./wharf-cards.js')).publishBoatCards(Date.now(), console.log);
           },
           idleTraps: createIdleTrapWatch(),
+          prQuestions: createPrQuestionWatch(),
           trapPanes: createTrapPaneWatch(),
           trapStarts: createTrapDispatchScheduler(),
           culler: backgroundCuller,

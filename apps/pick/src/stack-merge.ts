@@ -1,3 +1,4 @@
+import { stackAttemptReady, stackAttemptFailed } from './stack-retry.js';
 import { postNotice } from '@lobstah/core';
 import type { MergePolicy, MergeSource, PrCandidate } from './types.js';
 import type { PickupState } from './state.js';
@@ -37,7 +38,18 @@ export async function prepareStackMerges(
 
   for (const [key, pending] of state.stackMergeEntries(source.name)) {
     pending.members.forEach((number) => context.handled.add(number));
+    const retryKey = `${key}:result`;
+    if (!stackAttemptReady(state, retryKey, log)) continue;
     try {
+      if (state.stackRetry(retryKey)) {
+        const dispositions = await Promise.all(pending.members.map((member) => source.disposition(member)));
+        if (dispositions.every((status) => status === 'merged')) {
+          state.clearStackMerge(key);
+          state.clearStackRetry(retryKey);
+          log(`Stack through #${pending.number} merged before the retry.`);
+          continue;
+        }
+      }
       const result =
         !pending.enqueued && pending.uuid && source.linkedResult ? await source.linkedResult(pending.number, pending.uuid) : undefined;
       if (result?.status === 'failed') {
@@ -74,11 +86,10 @@ export async function prepareStackMerges(
           state.clearStackMerge(key);
         }
       }
+      state.clearStackRetry(retryKey);
       candidates.filter((pr) => pending.members.includes(pr.number)).forEach((pr) => observe(pr, 'stack-merge-pending'));
     } catch (error) {
-      log(`Stack merge #${pending.number}: ${error instanceof Error ? error.message : String(error)}`);
-      const message = `Stack merge #${pending.number} could not be refreshed. Check the pickup log.`;
-      if (state.newStackHold(key, message)) postNotice({ kind: 'stack-stopped', repo: source.repoKey(), text: message });
+      stackAttemptFailed(source, state, retryKey, error, log);
       candidates.filter((pr) => pending.members.includes(pr.number)).forEach((pr) => observe(pr, 'stack-merge-pending'));
     }
   }
@@ -99,7 +110,25 @@ export async function prepareStackMerges(
     const top = [...group].sort((left, right) => right.linkedStack!.position - left.linkedStack!.position)[0]!;
     const blocked = (gate: string, message: string, stopped = false): void =>
       group.forEach((pr, index) => hold(pr, gate, message, stopped && index === 0));
+    const retryKey = `${source.name}:stack:${number}:${group.map((pr) => `${pr.number}@${pr.headSha}`).sort().join(',')}`;
+    if (!stackAttemptReady(state, retryKey, log)) { blocked('stack-retry', 'Waiting to retry the stack merge.'); continue; }
     try {
+      if (state.stackRetry(retryKey)) {
+        const dispositions = await Promise.all(group.map((pr) => source.disposition(pr.number)));
+        if (dispositions.every((status) => status === 'merged')) {
+          state.clearStackRetry(retryKey);
+          for (const pr of group) {
+            const approval = approve(pr);
+            if (approval) state.consumeApproval(approval.key);
+          }
+          log(`Stack #${number} merged before the retry.`);
+          continue;
+        }
+        if (dispositions.some((status) => status !== 'open')) {
+          blocked('stack-changed', `Stack #${number} changed. Review the remaining PRs before merging.`, true);
+          continue;
+        }
+      }
       if (!source.linkedMembers || !source.mergeLinked) {
         blocked('stack-unsupported', 'The forge cannot merge a linked stack.', true);
         continue;
@@ -157,12 +186,13 @@ export async function prepareStackMerges(
         ...(result.details.uuid ? { uuid: result.details.uuid } : {}),
         ...(result.status === 'enqueued' ? { enqueued: true } : {}),
       });
+      state.clearStackRetry(retryKey);
       reviews.forEach((review) => state.consumeApproval(review!.key));
       blocked('stack-merge-pending', 'GitHub is processing the linked stack.');
       log(`Requested linked stack #${number} through #${top.number}; waiting for GitHub's result.`);
     } catch (error) {
-      log(`Stack #${number}: ${error instanceof Error ? error.message : String(error)}`);
-      blocked('stack-stopped', `Stack #${number} could not merge. Check the pickup log before retrying.`, true);
+      stackAttemptFailed(source, state, retryKey, error, log);
+      blocked('stack-retry', 'Waiting to retry the stack merge.');
     }
   }
 
@@ -189,6 +219,8 @@ export async function prepareStackMerges(
     if (context.handled.has(pr.number)) continue;
     const advance = state.stackAdvance(keyOf(pr));
     if (advance) {
+      const retryKey = `${keyOf(pr)}:advance:${pr.headSha}`;
+      if (!stackAttemptReady(state, retryKey, log)) { hold(pr, 'stack-retry', 'Waiting to advance the stack.'); continue; }
       try {
         context.members.add(pr.number);
         const parent = await source.disposition(advance.parent);
@@ -242,9 +274,10 @@ export async function prepareStackMerges(
           );
           continue;
         }
+        state.clearStackRetry(retryKey);
       } catch (error) {
-        log(`#${pr.number}: ${error instanceof Error ? error.message : String(error)}`);
-        hold(pr, 'stack-stopped', `#${pr.number} could not advance. Check the pickup log before retrying.`, true);
+        stackAttemptFailed(source, state, retryKey, error, log);
+        hold(pr, 'stack-retry', 'Waiting to advance the stack.');
         continue;
       }
     }

@@ -125,6 +125,6 @@ export function decisionLine(r: LobstahRequest): string {
     .join(' · ');
   return (
     `- decision-answer ${p.key}${p.dispatch ? ` (${p.dispatch})` : ''} — ${p.title} · ${what} (request ${r.id}). ` +
-    'Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.'
+    (readDecision(p.key)?.questionAt ? 'The answer was delivered to the worker’s inbox.' : 'Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.')
   );
 }

@@ -204,6 +204,8 @@ export function prAttention(now: number, observed: ReturnType<typeof observedPrs
         const gates = ['Approval Gate', ...humanGatesFor(readPr(pr.url), ref ? forgeRepoKey(cfg, `${ref.owner}/${ref.repo}`) : undefined)];
         if (pr.failingChecks?.length === pr.checks.failed && pr.failingChecks.every((c) => matchesGate(c.name, gates))) continue;
       }
+      // Pickup owns a submitted-review round before any repair continuation exists.
+      if (kind === 'pr:review' && onTheHook(kind, chain, { reviewRounds })) continue;
       const human = humanPrAttention(pr, kind, cfg, !!prWatch && !prWatch.done, now);
       if (!human.show) continue;
       const repairCannotAct =

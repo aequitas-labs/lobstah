@@ -3,6 +3,7 @@ import { evidencePrs, observedPrs, prAttention, type ChainMember } from './watch
 export { onTheHook, prKinds, humanPrAttention } from './watch-presenters/pr.js';
 export type { ChainMember } from './watch-presenters/pr.js';
 import { prMergeStatus } from '@lobstah/core';
+import { questionParkNote } from '@lobstah/core';
 import { configuredTrapViews, orderedDispatchPrUrls, reviewAttention } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -294,6 +295,7 @@ function groundsCursorFor(cfg: Config, repo: string | undefined): string {
   return Object.entries(cfg.grounds).find(([, g]) => g.repos.includes(repo))?.[0] ?? 'fleet';
 }
 
+
 /**
  * The kind as a person reads it. The stack item keeps its `stack-ready` kind
  * (config and acks use it), but it is only "ready" when every member is.
@@ -578,7 +580,7 @@ function describeDispatch(id: string, lane: Lane, bucket: TendDispatch['bucket']
     state,
     sessionMode: descriptor?.sessionMode ?? 'continue',
     ...(last?.verb === 'failed' && last.note?.startsWith('budget:') ? { outOfTimeWorkSaved: true } : {}),
-    note: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : held ?? last?.note,
+    note: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : held ?? questionParkNote(id, lane, last) ?? last?.note,
     ...(bucket === 'queued' && descriptor ? { queueReason: dispatchQueueReason(descriptor, lane) } : {}),
     // Queued work has no log yet; its time is when it entered the queue.
     at: last?.at ?? (bucket === 'queued' ? queuedAt(id, lane) : claimedAt),

@@ -5,6 +5,8 @@ import type { Verb } from '@lobstah/core';
 export type Classification = 'terminal' | 'busy' | 'wedged' | 'dead' | 'parked' | 'unclaimed' | 'unknown';
 
 export interface ClassifyInput {
+  /** A persisted resumable park, including an unanswered person wait past its deadline. */
+  parked?: boolean;
   hasRunner: boolean;
   alive?: boolean;
   lastVerb?: Verb;
@@ -27,7 +29,7 @@ export function classify(input: ClassifyInput): Classification {
   if (!hasRunner) return 'unclaimed';
   if (alive === undefined) return 'unknown';
   // A runner exits when its worker pauses: the dispatch is parked, not dead.
-  if (!alive) return lastVerb === 'paused' ? 'parked' : 'dead';
+  if (!alive) return lastVerb === 'paused' || input.parked ? 'parked' : 'dead';
   if (input.pausedWaiting) return 'busy';
   const baseline = lastEventAt ?? startedAt;
   if (baseline === undefined) return 'unknown';
