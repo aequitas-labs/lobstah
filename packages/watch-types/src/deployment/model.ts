@@ -1,5 +1,5 @@
 import { pluginSchema, type PluginJsonSchema } from '../plugin-model.js';
-import type { WatchActionRequest, WatchContext, WatchEffectResult, WatchObservationBatch } from '../model.js';
+import type { WatchActionRequest, WatchContext, WatchEffectResult, WatchObservationBatch, WatchSchema } from '../model.js';
 
 /** Provider identity is stable when a fixture's observations change. */
 export interface DeploymentReference {
@@ -26,6 +26,18 @@ export interface DeploymentTransition extends DeploymentState {
 }
 export type DeploymentContext = WatchContext<DeploymentReference, DeploymentState, number, DeploymentOptions>;
 
+/** Loading an unused adapter exposes schema metadata without compiling provider validators. */
+function deploymentSchema<T>(json: PluginJsonSchema, label: string): WatchSchema<T> {
+  let compiled: WatchSchema<T> | undefined;
+  return {
+    json,
+    parse(value) {
+      compiled ??= pluginSchema<T>(json, label);
+      return compiled.parse(value);
+    },
+  };
+}
+
 const name = { type: 'string', pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$' };
 const sequence = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
 const stateProperties = {
@@ -34,7 +46,7 @@ const stateProperties = {
   logUrl: { type: 'string', pattern: '^(https?://|$)' },
   terminal: { type: 'boolean' },
 };
-export const deploymentReferenceSchema = pluginSchema<DeploymentReference>(
+export const deploymentReferenceSchema = deploymentSchema<DeploymentReference>(
   {
     type: 'object',
     required: ['environment', 'deploymentId', 'fixturePath'],
@@ -43,12 +55,12 @@ export const deploymentReferenceSchema = pluginSchema<DeploymentReference>(
   },
   'Deployment reference',
 );
-export const deploymentStateSchema = pluginSchema<DeploymentState>(
+export const deploymentStateSchema = deploymentSchema<DeploymentState>(
   { type: 'object', required: ['sequence', 'phase', 'logUrl', 'terminal'], additionalProperties: false, properties: stateProperties },
   'Deployment state',
 );
-export const deploymentCursorSchema = pluginSchema<number>(sequence, 'Deployment cursor');
-export const deploymentOptionsSchema = pluginSchema<DeploymentOptions>(
+export const deploymentCursorSchema = deploymentSchema<number>(sequence, 'Deployment cursor');
+export const deploymentOptionsSchema = deploymentSchema<DeploymentOptions>(
   {
     type: 'object',
     required: ['fixturePath'],
@@ -57,7 +69,7 @@ export const deploymentOptionsSchema = pluginSchema<DeploymentOptions>(
   },
   'Deployment options',
 );
-export const deploymentHistorySchema = pluginSchema<DeploymentTransition[]>(
+export const deploymentHistorySchema = deploymentSchema<DeploymentTransition[]>(
   {
     type: 'array',
     maxItems: 10000,
