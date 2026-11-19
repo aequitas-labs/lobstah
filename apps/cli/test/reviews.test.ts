@@ -112,4 +112,6 @@ it('uses branch stack order for review requests without requiring PR watches', (
   const keys = [7, 8, 9].map(number => `review:acme/web#${number}`);
   expect(glassReviews()).toHaveLength(3);
   for (const row of glassReviews()) expect(row.stack?.keys).toEqual(keys);
+  for (const key of keys) { const item = readReview(key)!; item.pr.state = 'MERGED'; latestRound(item)!.state = 'merged'; writeReview(item); }
+  for (const row of glassReviews()) expect(row.stack?.keys).toEqual(keys);
 });

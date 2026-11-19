@@ -35,6 +35,12 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     checks: { total: 0, passed: 0, failed: 0, pending: 0 },
   }));
   const stacks = derivePrStacks(evidence);
+  // Retained branch observations keep a completed chain navigable after merge.
+  // Prefer live topology; only use the historical chain when it does not overlap it.
+  const historical = derivePrStacks(evidence.map(pr => ({ ...pr, state: 'OPEN' })));
+  for (const stack of historical) {
+    if (!stack.members.some(member => stacks.some(live => live.members.some(pr => pr.url === member.url)))) stacks.push(stack);
+  }
   for (const item of items) {
     const r = latestRound(item);
     if (!r) continue;
