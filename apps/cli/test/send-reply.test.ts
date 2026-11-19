@@ -162,6 +162,7 @@ describe('man haul and an unanswered send', () => {
   });
   const haul = () => lobstah(['man', 'haul'], JSON.stringify({ session_id: helmSession }));
 
+  // Eight CLI processes exercise delivery and acknowledgment; match the end-to-end budget above.
   it('lists the send as a standing item until the reply, then the reply', () => {
     live(A);
     send(A, '--session', helmSession, 'start the dev server\nthen report');
@@ -185,7 +186,7 @@ describe('man haul and an unanswered send', () => {
     const settled = haul();
     expect(settled.stdout).not.toContain('sent · ');
     expect(settled.stdout.replace(HELM_STOP_REMINDER, '')).not.toContain('reply ');
-  });
+  }, 30_000);
 
   it('with a live watcher, a send alone lets the stop pass', () => {
     live(A);
