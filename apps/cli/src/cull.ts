@@ -47,6 +47,8 @@ import {
 import type { CatchRef, FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
 import { mergedCullProofs, mergedWorktreeUnsafe } from './merged-worktree-safety.js';
+import { runServerCull, type ServerCullOptions } from './cull-servers.js';
+import type { ServerRuntime } from './cull-server-inventory.js';
 
 export interface CullItem {
   kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'decision' | 'release';
@@ -598,4 +600,10 @@ export function runCull(days: number, apply: boolean, freeBytes: FreeBytesReader
   const freed = before !== undefined && after !== undefined ? Math.max(0, after - before) : undefined;
   lines.push(`applied: ${applied.length} removed` + (freed !== undefined ? `, ${formatGB(freed)} freed (free-space change on the worktrees volume)` : ''));
   return lines.join('\n');
+}
+
+/** Manual cull stops idle worktree services before removing their checkout or state. */
+export async function runCullWithServers(days: number, apply: boolean, options: ServerCullOptions = {}, runtime?: ServerRuntime): Promise<string> {
+  const servers = await runServerCull(apply, options, runtime);
+  return `${servers}\n${runCull(days, apply)}`;
 }
