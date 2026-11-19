@@ -55,7 +55,8 @@ import {
   expireReservations,
   heavyDaemonPass,
   liveHeavyTickets,
-  pausedWaiting,
+  workClockWaiting,
+  reconcileTrapQuestions,
   poolDir,
   poolWaits,
   poolWarmDue,
@@ -214,12 +215,13 @@ export function reconcileOne(
   }
 
   const seen = classify({
+    parked: isParked(st.id, st.lane),
     hasRunner: st.runner !== undefined,
     alive,
     lastVerb,
     // Paused on something external (--waiting-on): silence is expected.
     // So is a command in the heavy line: it may not start for a while.
-    pausedWaiting: pausedWaiting(statusLog.at(-1)) || liveHeavyTickets({ dispatch: st.id }).length > 0,
+    pausedWaiting: workClockWaiting(st.id, st.lane, statusLog.at(-1)) || liveHeavyTickets({ dispatch: st.id }).length > 0,
     lastEventAt: lastEventAt(st.id, st.lane),
     startedAt: st.runner ? Date.parse(st.runner.startedAt) : undefined,
     now: Date.now(),
@@ -434,6 +436,8 @@ export function poolPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => vo
 }
 
 export interface DaemonHooks {
+  /** Posts durable PR questions and delivers PR answers without starting feedback rounds. */
+  prQuestions?: (now: number, log: (message: string) => void) => void;
   /** Detects provider limits before ghost sweeping and delivers due reset wakes without holding the tick. */
   usageLimits?: (now: number, log: (message: string) => void) => void;
   culler?: DaemonCuller;
@@ -529,10 +533,18 @@ function liftHold(log: (m: string) => void, text: string): void {
  * false, and the work stays queued. One notice when a hold starts, one when
  * it clears. A failed read never blocks claiming.
  */
+/** A continuing disk hold asks for attention again every thirty minutes. */
+export const DISK_HOLD_NOTICE_INTERVAL_MS = 30 * 60_000;
+
 export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
   recoverTrapCaches(cfg, worktreesDir(), hooks.freeBytes ?? statfsFreeBytes, log);
   const need = (cfg.limits.minFreeGB ?? 0) * GB;
+  const cacheThreshold = (cfg.limits.cacheMinFreeGB ?? 0) * GB;
   if (!(need > 0)) {
+    if (cacheThreshold > 0 && hooks.culler?.start) {
+      try { if ((hooks.freeBytes ?? statfsFreeBytes)(worktreesDir()) < cacheThreshold) hooks.culler.start(log); }
+      catch { /* A failed read never blocks claiming. */ }
+    }
     liftHold(log, 'free-space hold cleared: [limits].minFreeGB is off');
     return true;
   }
@@ -546,7 +558,7 @@ export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => 
     log(`free-space check failed (${err instanceof Error ? err.message : String(err)}); claiming anyway`);
     return true;
   }
-  if (free < need && hooks.culler?.start) {
+  if (free < Math.max(need, cacheThreshold) && hooks.culler?.start) {
     hooks.culler.start(log);
   } else if (free < need && hooks.culler) {
     try {
@@ -563,10 +575,15 @@ export function spaceGuard(cfg: Config, hooks: DaemonHooks, log: (m: string) => 
   }
   const prior = readHold();
   const at = new Date(now).toISOString();
-  writeHold({ since: prior?.since ?? at, checkedAt: at, freeBytes: free, needBytes: need, dir });
-  if (!prior) {
-    const text = `dispatches held: ${formatGB(free)} free on ${dir}, needs ${formatGB(need)} ([limits].minFreeGB) — queued work waits`;
-    postNotice({ kind: 'disk-held', text });
+  const since = prior?.since ?? at;
+  const lastNotice = Date.parse(prior?.lastNoticedAt ?? since);
+  const announce = !prior || now - lastNotice >= DISK_HOLD_NOTICE_INTERVAL_MS;
+  writeHold({ since, checkedAt: at, lastNoticedAt: announce ? at : prior?.lastNoticedAt ?? since, freeBytes: free, needBytes: need, dir });
+  if (announce) {
+    const minutes = Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
+    const count = pendingIds('work').length + pendingIds('chore').length;
+    const text = `${count} queued dispatch(es) held for ${minutes} min: ${formatGB(free)} free on ${dir}, needs ${formatGB(need)}. Free disk space to resume dispatches.`;
+    postNotice({ kind: 'disk-held', text, quiet: false });
     log(text);
   }
   return false;
@@ -601,6 +618,10 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   // Wedge handling waits one wedge threshold after a resume for events to flow again.
   const wedgeGrace = resumed !== undefined && now - resumed <= wedgeMs;
   writeHeartbeat(cfg);
+  try { reconcileTrapQuestions(now, cfg.limits.questionWaitSecs ?? 86400); }
+  catch (error) { log(`person questions: ${error instanceof Error ? error.message : String(error)}`); }
+  try { hooks.prQuestions?.(now, log); }
+  catch (error) { log(`PR questions: ${error instanceof Error ? error.message : String(error)}`); }
   try { hooks.usageLimits?.(now, log); }
   catch (error) { log(`usage limits: ${error instanceof Error ? error.message : String(error)}`); }
   try {

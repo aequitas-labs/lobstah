@@ -9,8 +9,9 @@ import { DetailFrame } from './detail-frame.js';
 import { Age, TrapName, reviewLink, stackNumbers } from './common.js';
 import { GitHubDescription, MarkdownElements } from './markdown.js';
 import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, prBadgeTags, StatusChip } from './prs.js';
-import { ReviewActions, markReviewOpened, reviewPrState, ReviewTags } from './reviews.js';
+import { ReviewActions, markReviewOpened, reviewPrState, reviewUpdating, ReviewTags } from './reviews.js';
 import { ReviewDecisions } from './review-decisions.js';
+import { Button } from './button.js';
 import { LinkedText } from './links.js';
 
 /** Shared safe Markdown for review summaries and complete findings. */
@@ -60,6 +61,14 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
       live = false;
     };
   }, [prKey]);
+  const members = review?.stack?.keys ?? [];
+  const position = review ? members.indexOf(review.key) : -1;
+  const navigate = (offset: number): (() => void) | undefined => {
+    const key = members[position + offset];
+    return key && !decisionSaving ? () => showModal('review', key) : undefined;
+  };
+  const previous = navigate(-1),
+    next = navigate(1);
   const data = loaded.key === prKey ? loaded.data : undefined;
   const url = p?.url ?? review?.url ?? data?.url;
   if (!url) return html`<${DetailFrame} identity="PR"><p class="dim">This PR is no longer in the glass.</p><//>`;
@@ -90,14 +99,15 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
         : p?.reviewDecision === 'REVIEW_REQUIRED'
           ? 'Review required'
           : '';
-  return html`<${DetailFrame} identity=${identity} open=${open} footer=${footer}>
+  return html`<${DetailFrame} identity=${identity} open=${open} footer=${footer} onPrevious=${previous} onNext=${next}>
+    ${members.length > 1 && html`<nav class="rv-stack-nav" aria-label="Review stack"><${Button} disabled=${!previous} onClick=${previous}>← Previous<//> <span>${position + 1} of ${members.length}</span> <${Button} disabled=${!next} onClick=${next}>Next →<//></nav>`}
     <header class="pr-view-head"><h2>${review && html`<${PrStateIcon} state=${reviewPrState(review, draft)} /> `}${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${review ? html`<${ReviewTags} r=${review} state=${state ? lifecycle : reviewPrState(review, draft)} />` : html`<${PrTags} state=${lifecycle} tags=${p ? prBadgeTags(p) : []} />`}${p?.state === 'OPEN' && p.gate && StatusChip(p.gate, 'warn')}</div>
     ${author && html`<div class=${'pr-view-person' + (asker === author ? ' rv-person' : '')}><${Avatar} url=${avatar} name=${authorName ?? author} size=${20} /><b>${authorName}</b></div>`}
     ${(data?.headRefName ?? p?.headRefName) && html`<div class="sub">${data?.headRefName ?? p?.headRefName} → ${data?.baseRefName ?? p?.baseRefName}${(data?.updatedAt ?? p?.updatedAt) && html` · updated ${Age(data?.updatedAt ?? p?.updatedAt)} ago`}</div>`}</header>
     ${p?.mergeRequest && html`<section><${MergeIntent} p=${p} /></section>`}
-    ${review?.reason && html`<p class="dim">${review.reason}</p>`}
-    ${review && html`<${ReviewDecisions} key=${[review.key, review.roundId, review.headSha, review.draftedAt].join(':')} review=${review} onSaving=${setDecisionSaving} />`}
-    ${review && html`<${Findings} review=${review} />`}
+    ${review?.reason && !reviewUpdating(review) && html`<p class="dim">${review.reason}</p>`}
+    ${review && !reviewUpdating(review) && html`<${ReviewDecisions} key=${[review.key, review.roundId, review.headSha, review.draftedAt].join(':')} review=${review} onSaving=${setDecisionSaving} />`}
+    ${review && !reviewUpdating(review) && html`<${Findings} review=${review} />`}
     <section><h4>Description</h4><div class="pr-description">${data ? (data.bodyHtml ? html`<${GitHubDescription} source=${data.bodyHtml} openImage=${openLightbox} />` : html`<span class="dim">No description.</span>`) : html`<span class="dim">${loaded.key === prKey && loaded.error ? loaded.error : 'Loading description…'}</span>`}</div></section>
     ${p && html`<section><h4>Checks <span class="dim">${p.checks.passed} passed · ${p.checks.pending} pending</span></h4>${p.failingChecks?.map((check) => html`<div class="pr-check">${StatusChip('failed', 'bad')} ${check.detailsUrl ? html`<a href=${check.detailsUrl} target="_blank" rel="noopener">${check.name}</a>` : check.name}</div>`)}${!p.failingChecks?.length && p.checks.failed > 0 && html`<div class="bad">${p.checks.failed} failed</div>`}</section>`}
     ${p && (decision || (p.review?.unresolvedThreads ?? 0) > 0) && html`<section><h4>Reviews</h4><div>${decision}${(p.review?.unresolvedThreads ?? 0) > 0 && ` · ${p.review?.unresolvedThreads ?? 0} unresolved threads`}${p.review && p.review.unresolvedThreads === 0 && ' · no unresolved threads'}</div></section>`}

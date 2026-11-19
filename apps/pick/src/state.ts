@@ -43,11 +43,19 @@ export interface PendingStackMerge {
   members: number[];
 }
 
+/** Failed stack attempts survive pickup restarts without sleeping in the merge loop. */
+export interface StackRetry {
+  failures: number;
+  retryAt: number;
+  stopped: boolean;
+}
+
 interface StateFile {
   map: Record<string, MapEntry>;
   consumedApprovals: Record<string, string>;
   requestedReviews: Record<string, string>;
   stackHolds?: Record<string, string>;
+  stackRetries?: Record<string, StackRetry>;
   stackAdvances?: Record<string, StackAdvance>;
   stackMerges?: Record<string, PendingStackMerge>;
   rebases: Record<string, { uuid: string; failed?: boolean }>;
@@ -119,6 +127,13 @@ export class PickupState {
     this.data.requestedReviews[prKey] = headSha;
     this.save();
   }
+
+  /** Read the retry budget for one stack operation and head. */
+  stackRetry(key: string): StackRetry | undefined { return this.data.stackRetries?.[key]; }
+  /** Persist a retry deadline or terminal failure before the next poll. */
+  setStackRetry(key: string, retry: StackRetry): void { (this.data.stackRetries ??= {})[key] = retry; this.save(); }
+  /** A completed operation no longer needs its retry budget. */
+  clearStackRetry(key: string): void { delete this.data.stackRetries?.[key]; this.save(); }
 
   /** Announce a held stack once per reason and head. */
   newStackHold(key: string, reason: string): boolean {

@@ -26,6 +26,8 @@ export interface DescriptorPr {
   url: string;
   headRefName?: string;
   headSha?: string;
+  /** Root review-comment id that opened this feedback round, when known. */
+  reviewThreadId?: number;
 }
 
 /** Whether a new dispatch starts with a clean conversation or keeps its worker's context. */

@@ -162,6 +162,7 @@ export async function dispatchLoop(
         id,
         repo: item.repoKey,
         brief: item.brief,
+        ...(item.pr ? { pr: item.pr } : {}),
         // A review dispatch forks the latest session in its chain; issues start cold.
         ...(plan.followUp ? { followUp: plan.followUp } : {}),
         // An issue starts fresh in a warm pool worktree when a pool serves its repo.

@@ -3,9 +3,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { activeIds, appendStatus, claimNext, enqueue, ensureLayout, GB, laneDirs, loadConfig, readHold,
-  readStatusLog, requestCancel, slotUsage } from '@lobstah/core';
+  readStatusLog, requestCancel, slotUsage, parkQuestion, sendMessage, mergeEvidence } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
-import { reconcileOne, tick } from '../src/daemon.js';
+import { reconcileOne, tick, wakeParked } from '../src/daemon.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -36,6 +36,24 @@ function activeHeadless(id: string, lane: Lane = 'work'): void {
 }
 
 describe('only daemon-spawned work spends headless slots', () => {
+  it('keeps an expired question parked until a late answer wakes its original session', () => {
+    activeHeadless('question');
+    const startedAt = new Date(Date.now() - 2 * 86400_000).toISOString();
+    const runner = { pid: 2 ** 30, startedAt, attempts: 1 };
+    const dir = path.join(laneDirs('work').active, 'question');
+    fs.writeFileSync(path.join(dir, 'runner.json'), JSON.stringify(runner));
+    mergeEvidence('question', 'work', { sessionId: 'same-session', harness: 'codex' });
+    appendStatus('question', 'work', 'needs-decision', 'Which option?', new Date(Date.now() - 86400_000).toISOString());
+    parkQuestion('question', 'work', 86400);
+    const spawned: Array<{ id: string; resume?: string; wake?: string }> = [];
+    const spawn: Parameters<typeof wakeParked>[3] = (state, options) => { spawned.push({ id: state.id, resume: options?.resume, wake: options?.wake }); };
+    reconcileOne({ id: 'question', lane: 'work', dir, runner }, loadConfig(), () => {}, spawn);
+    expect(spawned).toEqual([]);
+    expect(wakeParked('work', 1, () => {}, spawn)).toBe(0);
+    sendMessage('question', 'work', 'Use A', 'glass');
+    expect(wakeParked('work', 1, () => {}, spawn)).toBe(1);
+    expect(spawned).toEqual([{ id: 'question', resume: 'same-session', wake: '1 operator message(s) arrived' }]);
+  });
   it('claims two headless dispatches alongside three trap catches at maxConcurrent=2', () => {
     for (const id of ['trap1', 'trap2', 'trap3']) activeTrap(id);
     for (const id of ['head1', 'head2']) enqueue({ id, repo: 'demo', brief: 'headless work' });
