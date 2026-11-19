@@ -335,7 +335,11 @@ export interface ReviewItem {
   rounds: ReviewRound[];
   /** A mute hides no history and suppresses new rounds and drafts until cleared. */
   mutedAt?: string;
-  /** A dismissed request disappeared from a complete search and may later return on reopen or re-request. */
+  /**
+   * When the person stopped being asked to review this open PR: no direct
+   * request, and no requested team they are on. Its rounds stay as history;
+   * nothing drafts or refreshes automatically until a request returns.
+   */
   unseenAt?: string;
   updatedAt: string;
 }
@@ -557,15 +561,26 @@ export function unmuteReview(key: string, now = Date.now()): ReviewItem | string
 
 /**
  * Settle missing requests only after the caller confirms the PR's state.
- * Merged and closed PRs retain that outcome; only an open PR loses its
- * request as withdrawn. `inScope` must exclude unconfirmed state checks.
+ * Merged and closed PRs retain that outcome. An open PR the person is no
+ * longer asked to review is marked `unseenAt`, and its open round is
+ * withdrawn unless it holds a pending review or a draft the person asked
+ * for. `seen` holds every PR still asked of the person, directly or through
+ * a team. `inScope` must exclude unconfirmed state checks.
  */
 export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item: ReviewItem) => boolean, now = Date.now()): string[] {
   const out: string[] = [];
   const at = new Date(now).toISOString();
   for (const item of listReviews()) {
     const latest = latestRound(item);
-    if (seen.has(item.key) || !latest || !inScope(item) || !item.pr.state) continue;
+    if (!latest || !inScope(item) || !item.pr.state) continue;
+    if (seen.has(item.key)) {
+      // Asked again through a team, which the search does not return.
+      if (item.unseenAt && item.pr.state === 'OPEN') {
+        delete item.unseenAt;
+        writeReview({ ...item, updatedAt: at });
+      }
+      continue;
+    }
     if (item.pr.state === 'MERGED' || item.pr.state === 'CLOSED') {
       const state = item.pr.state === 'MERGED' ? 'merged' : 'closed';
       if (latest.state === state) continue;
@@ -578,13 +593,20 @@ export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item:
       out.push(item.key);
       continue;
     }
-    if (!seen.has(item.key) && latest?.state === 'dismissed' && inScope(item) && !item.unseenAt) {
+    // Submitting a review also ends its request; a re-review still asks for the person.
+    const removed = !item.unseenAt;
+    if (removed) {
       item.unseenAt = at;
-      writeReview({ ...item, updatedAt: at });
+      if (!latest.reReview && latest.state !== 'posted') {
+        delete latest.notification;
+        delete latest.needsYou;
+      }
+    }
+    // A pending review or a draft the person asked for stays as history.
+    if (latest.staged || latest.localRequest || !OPEN_STATES.includes(latest.state)) {
+      if (removed) writeReview({ ...item, updatedAt: at });
       continue;
     }
-    // A pending review remains actionable even after GitHub removes the request.
-    if (latest.staged || latest.localRequest || !OPEN_STATES.includes(latest.state)) continue;
     latest.state = 'withdrawn';
     latest.reason = 'the review request was removed';
     writeReview({ ...item, updatedAt: at });
@@ -892,7 +914,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
   for (const item of listReviews()) {
     if (clearFinishedReviewNotifications(item)) writeReview(item);
     const r = latestRound(item);
-    if (!r || r.refresh || r.reason?.startsWith('stage failed') || r.wharf || (!r.reReview && r.state !== 'drafted') || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
+    if (!r || (item.unseenAt && !r.reReview) || r.refresh || r.reason?.startsWith('stage failed') || r.wharf || (!r.reReview && r.state !== 'drafted') || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
     const generation = `${r.reReview?.headSha ?? ''}:${r.id}:${r.dispatch ?? ''}:${r.state}:${r.postedAt ?? r.draftedAt ?? r.headSha}`;
     if (r.notificationGeneration === generation) continue;
     r.notificationGeneration = generation;

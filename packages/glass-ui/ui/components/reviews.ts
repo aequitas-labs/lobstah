@@ -550,6 +550,7 @@ export function reviewGroups(reviews: readonly GlassReview[]): Array<{ stack?: G
 export function reviewNeedsViewer(review: GlassReview): boolean {
   if (
     review.mutedAt ||
+    review.requestRemoved ||
     reviewUpdating(review) ||
     ['MERGED', 'CLOSED'].includes(review.prState ?? '') ||
     ['merged', 'closed'].includes(review.state)
@@ -572,6 +573,7 @@ export function reviewSections(reviews: readonly GlassReview[]): Array<{
     { id: 'done' as const, title: 'Done', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
   ];
   const urgency = (review: GlassReview): number => {
+    if (review.requestRemoved) return 2;
     if (['MERGED', 'CLOSED'].includes(review.prState ?? '') || ['merged', 'closed'].includes(review.state)) return 2;
     return review.state === 'posted' && !review.reReview ? 1 : 0;
   };

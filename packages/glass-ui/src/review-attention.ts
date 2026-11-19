@@ -10,7 +10,7 @@ export function reviewUpdating(review: Pick<GlassReview, 'state' | 'updating' | 
 
 /** One rule for the Reviews badge and each row's unread marker; closed rounds never count. */
 export function reviewUnreadReason(review: GlassReview): string | undefined {
-  if (reviewUpdating(review) || review.mutedAt || ['CLOSED', 'MERGED'].includes(review.prState ?? '') ||
+  if (reviewUpdating(review) || review.mutedAt || review.requestRemoved || ['CLOSED', 'MERGED'].includes(review.prState ?? '') ||
       (!review.reReview && !['requested', 'drafting', 'drafted', 'stale', 'failed'].includes(review.state))) return undefined;
   const since = review.reReview?.at ?? review.notification?.at ?? review.draftedAt ?? review.requestedAt;
   if ((review.seenAt && review.seenAt >= since) || (review.acknowledgedAt && review.acknowledgedAt >= since)) return undefined;

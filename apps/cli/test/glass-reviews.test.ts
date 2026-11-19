@@ -474,6 +474,22 @@ describe('the Reviews tab', () => {
     });
     expect(glassReviews({ 'acme/web': 'linear-app' })[0]).toMatchObject({ asker: 'dana', askerName: 'Dana Developer', automatic: true, reviewUrl: 'linear://review/acme/web/pull/7' });
   });
+  it.each([
+    { state: 'dismissed', reReview: false, removed: true },
+    { state: 'drafted', reReview: false, removed: true },
+    { state: 'posted', reReview: false, removed: false },
+    { state: 'posted', reReview: true, removed: false },
+  ] as const)('marks a $state round whose request was removed (re-review: $reReview): $removed', ({ state, reReview, removed }) => {
+    const { item } = observeReviewRequest({
+      pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1', state: 'OPEN' },
+      round: { id: 'RRE_7', requestedAt: ago(60), requestedBy: 'maya' },
+    });
+    Object.assign(latestRound(item)!, { state, ...(reReview ? { reReview: { headSha: 'bbbbbbb2', at: ago(1) } } : {}) });
+    writeReview({ ...item, unseenAt: ago(30) });
+    const row = glassReviews()[0]!;
+    expect(row.requestRemoved).toBe(removed ? true : undefined);
+    if (removed) expect(row.stands).toBe(false);
+  });
   it.each(['cards', 'table'])('renders the earlier human requester after a bot re-request in %s', async (view) => {
     const pr = { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' };
     observeReviewRequest({ pr, round: { id: 'human', requestedAt: ago(120), requestedBy: 'maya', requestedByName: 'Maya Maintainer', requestedByAvatarUrl: 'https://avatars.githubusercontent.com/u/9?v=4' } });
@@ -789,6 +805,23 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
   expect(reload.$('[data-review-section="done"]')!.hasAttribute('open')).toBe(false);
 });
 
+
+it('files a review whose request was removed under Done, without counting it', async () => {
+  const reviews = [
+    review(7, { state: 'dismissed', requestRemoved: true }),
+    review(8, { state: 'drafted', staged: true, verdict: 'comment', requestRemoved: true }),
+    review(9, { state: 'requested', stands: true }),
+  ];
+  const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
+  open.push(g);
+  const needs = g.$('[data-review-section="needs"]')!;
+  expect(needs.textContent).toContain('Needs your review (1)');
+  expect([...needs.querySelectorAll('[data-review]')].map((row) => row.getAttribute('data-review'))).toEqual(['review:acme/web#9']);
+  const done = g.$('[data-review-section="done"]')!;
+  expect(done.querySelector('[data-review="review:acme/web#7"]')).toBeTruthy();
+  expect(done.querySelector('[data-review="review:acme/web#8"]')).toBeTruthy();
+  expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
+});
 
 it('counts only actionable stack members and preserves disclosure across polls and PR actions', async () => {
   const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8, 9, 10, 11, 12].map(number => `review:acme/web#${number}`) };

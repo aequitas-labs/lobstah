@@ -387,6 +387,8 @@ export interface GlassReview {
   decisions?: import('./reviews.js').ReviewDecision[];
   decisionAnswers?: import('./reviews.js').ReviewDecisionAnswers;
   needsYou?: boolean;
+  /** No one asks the person to review this open PR any more; its rounds are history. */
+  requestRemoved?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;
   notification?: import('./reviews.js').ReviewNotification;
