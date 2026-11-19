@@ -12,6 +12,9 @@ import type {
   WatchFailure,
   WatchResult,
   WatchBatchObserver,
+  WatchEffectHandler,
+  WatchAutomation,
+  WatchDispatchPolicy,
 } from './model.js';
 
 /** Runtime type erasure happens only after each adapter validates its own schemas. */
@@ -19,6 +22,9 @@ export interface InstalledWatchType {
   descriptor: WatchTypeDescriptor;
   bindings: readonly WatchRegistrationBinding[];
   batchObserver?: WatchBatchObserver<WatchValue, WatchValue, WatchValue, WatchValue>;
+  effectHandler?: WatchEffectHandler<WatchValue>;
+  automation?: WatchAutomation<WatchValue, WatchValue, WatchValue, WatchValue>;
+  dispatchPolicy?: WatchDispatchPolicy<WatchValue, WatchValue, WatchValue, WatchValue>;
   identify(
     input: string,
     options: unknown,
@@ -55,6 +61,11 @@ export class WatchRegistry {
     for (const method of ['identify', 'key', 'initialize', 'restore', 'poll', 'reduce', 'present', 'failure', 'close'] as const) {
       if (typeof adapter[method] !== 'function') throw new Error(`Watch adapter must implement ${method}`);
     }
+    if (
+      adapter.effectHandler &&
+      (!['sync', 'async'].includes(adapter.effectHandler.execution) || typeof adapter.effectHandler.execute !== 'function')
+    )
+      throw new Error('Watch effect handler must declare its execution mode');
     const kindNames = new Set(this.attentionKinds().map((kind) => kind.kind));
     for (const kind of adapter.descriptor.attentionKinds ?? []) {
       if (!kind.kind || !kind.label || typeof kind.defaultEnabled !== 'boolean' || kindNames.has(kind.kind))
@@ -72,6 +83,40 @@ export class WatchRegistry {
     this.types.set(id, {
       descriptor: { ...adapter.descriptor },
       bindings: adapter.bindings,
+      ...(adapter.effectHandler
+        ? {
+            effectHandler: {
+              execution: adapter.effectHandler.execution,
+              execute(request) {
+                return adapter.effectHandler!.execute({ ...request, reference: adapter.referenceSchema.parse(request.reference) });
+              },
+            },
+          }
+        : {}),
+      ...(adapter.automation
+        ? {
+            automation: {
+              propose(context) {
+                return adapter.automation!.propose({ ...context, snapshot: restore(context.snapshot) });
+              },
+            },
+          }
+        : {}),
+      ...(adapter.dispatchPolicy
+        ? {
+            dispatchPolicy: {
+              plan(context) {
+                return adapter.dispatchPolicy!.plan({ ...context, snapshot: restore(context.snapshot) });
+              },
+              prepareBrief(context, filled) {
+                return adapter.dispatchPolicy!.prepareBrief?.({ ...context, snapshot: restore(context.snapshot) }, filled) ?? filled;
+              },
+              delivered(context, plan, workId) {
+                adapter.dispatchPolicy!.delivered?.({ ...context, snapshot: restore(context.snapshot) }, plan, workId);
+              },
+            },
+          }
+        : {}),
       ...(adapter.batchObserver
         ? {
             batchObserver: {

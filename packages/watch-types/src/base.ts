@@ -13,6 +13,8 @@ import type {
   WatchSubscriber,
   WatchBatchObserver,
   WatchEffectHandler,
+  WatchAutomation,
+  WatchDispatchPolicy,
 } from './model.js';
 
 /** Every source implements policy and presentation as well as observation. */
@@ -26,6 +28,8 @@ export abstract class BaseWatchType<Reference, State, Cursor, Options> {
   readonly subscriber?: WatchSubscriber<Reference, State, Cursor, Options>;
   readonly batchObserver?: WatchBatchObserver<Reference, State, Cursor, Options>;
   readonly effectHandler?: WatchEffectHandler<Reference>;
+  readonly automation?: WatchAutomation<Reference, State, Cursor, Options>;
+  readonly dispatchPolicy?: WatchDispatchPolicy<Reference, State, Cursor, Options>;
   abstract readonly bindings: readonly WatchRegistrationBinding[];
 
   /** Reject unrelated input; return a fully validated source reference. */

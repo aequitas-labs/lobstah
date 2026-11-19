@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { PrWatchType, parseCommandWatchBatch, WatchCommandError } from '@lobstah/watch-types';
+import { PrWatchType, CommandWatchType, parseCommandWatchBatch, WatchCommandError } from '@lobstah/watch-types';
+import type { PrWatchServices } from '@lobstah/watch-types';
+import { prDispatchPolicy } from './pr-watch-delivery.js';
 import type { PrWatchContext, PrWatchSnapshot, WatchFailure, WatchObservationBatch, WatchPresentation } from '@lobstah/watch-types';
 import { classifyGhError, firstMeaningfulLine } from './gh-errors.js';
 import { githubBlockedUntil, recordGitHubRateLimit } from './github-budget.js';
@@ -26,6 +28,11 @@ function prWatchFailure(error: unknown): WatchFailure {
 /** The shipped check remains a local transport for existing evidence and stack projections. */
 function observePrWatch(context: PrWatchContext): WatchObservationBatch<string> {
   const { snapshot, now } = context;
+  if (!isPrPresetWatch({ key: snapshot.key, check: snapshot.options.check })) {
+    const batch = new CommandWatchType().poll({ ...context, snapshot: { ...snapshot, state: {} } });
+    if (batch.failure) batch.failure = prWatchFailure(batch.failure.message);
+    return batch;
+  }
   if (prBatchInFlight(snapshot.key)) return { cursor: snapshot.cursor, events: [], deferred: true };
   const blocked = githubBlockedUntil();
   if (blocked)
@@ -78,7 +85,7 @@ function presentPrSnapshot(snapshot: PrWatchSnapshot): WatchPresentation {
       { label: 'State', value: pr?.state ?? 'unobserved' },
     ],
     links: [{ label: 'Open pull request', url: reference.url }],
-    actions: [],
+    actions: [{ id: 'repair', label: 'Schedule repair', requiresAuthority: true, automatic: true }],
     attention: pr
       ? prStandingKinds(pr, { readySettleSecs: config.readySettleSecs, now: Date.parse(snapshot.checkedAt ?? snapshot.createdAt) }).map(
           (kind) => ({
@@ -96,16 +103,36 @@ function presentPrSnapshot(snapshot: PrWatchSnapshot): WatchPresentation {
 }
 
 /** Composition lives beside the source; the generic runtime has no GitHub branches. */
-export function createPrWatchType(options: { run?: PrBatchRun } = {}): PrWatchType {
+export interface PrWatchSourceOptions {
+  run?: PrBatchRun;
+  effectHandler?: PrWatchServices['effectHandler'];
+  automation?: PrWatchServices['automation'];
+}
+
+export function createPrWatchType(options: PrWatchSourceOptions = {}): PrWatchType {
   return new PrWatchType({
     observe: observePrWatch,
+    effectHandler: options.effectHandler,
+    automation: options.automation,
+    dispatchPolicy: prDispatchPolicy(),
     failure: prWatchFailure,
     present: presentPrSnapshot,
     batchObserver: {
-      group: ({ snapshot }) => `${snapshot.reference.owner}/${snapshot.reference.repo}`,
+      group: ({ snapshot }) =>
+        `${isPrPresetWatch({ key: snapshot.key, check: snapshot.options.check }) ? 'github' : 'command'}:${snapshot.reference.owner}/${snapshot.reference.repo}`,
       pollBatch(contexts) {
         const first = contexts[0];
         if (!first) return {};
+        if (!isPrPresetWatch({ key: first.snapshot.key, check: first.snapshot.options.check }))
+          return Object.fromEntries(
+            contexts.map((context) => {
+              try {
+                return [context.snapshot.key, observePrWatch(context)];
+              } catch (error) {
+                return [context.snapshot.key, { cursor: context.snapshot.cursor, events: [], failure: prWatchFailure(error) }];
+              }
+            }),
+          );
         const { owner, repo } = first.snapshot.reference;
         const registered = listWatches().filter(
           (watch) => isPrPresetWatch(watch) && !watch.done && !['MERGED', 'CLOSED'].includes(readPr(watch.key)?.state ?? ''),

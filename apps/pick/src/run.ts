@@ -12,7 +12,8 @@ import { reportLoop } from './loops/report.js';
 import type { ReportNotification } from './loops/report.js';
 import { reconcileLoop } from './loops/reconcile.js';
 import { mergeLoop } from './loops/merge.js';
-import { reviewsLoop } from './loops/reviews.js';
+import { reviewWatchPasses } from './watch-review-requests.js';
+import type { WatchRegistry, WatchSourcePass } from '@lobstah/watch-types';
 import type { GhGraphql } from './loops/reviews.js';
 import { handleStreamLine, watchLoop } from './loops/watch.js';
 import type { MergePolicy, MergeSource, Source } from './types.js';
@@ -120,9 +121,10 @@ export async function cycle(
   notify: (n: ReportNotification) => void,
   liveComment = true,
   pools: string[] = [],
-  /** The review-request search (`[reviews]`), when [pickup.github] gives it an identity. */
-  reviews?: () => Promise<void>,
+  /** Configured source effects run independently of tracker pickup. */
+  sourcePasses: readonly WatchSourcePass[] = [],
   watches = true,
+  watchRegistry?: WatchRegistry,
 ): Promise<void> {
   for (const source of sources) {
     // A guard per loop: reconcile is the safety net for a report that never
@@ -146,21 +148,21 @@ export async function cycle(
       log(`${source.name} merge: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  if (reviews) {
+  for (const pass of sourcePasses) {
     try {
-      await reviews();
+      await pass.run();
     } catch (err) {
-      log(`reviews: ${err instanceof Error ? err.message : String(err)}`);
+      log(`${pass.label}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   try {
-    if (watches) await watchLoop(pollSecs, log, notify);
+    if (watches) await watchLoop(pollSecs, log, notify, watchRegistry);
   } catch (err) {
     log(`watches: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
-export async function runPickup(mode: 'once' | 'daemon' = 'daemon', opts: { reviewRun?: GhGraphql } = {}): Promise<void> {
+export async function runPickup(mode: 'once' | 'daemon' = 'daemon', opts: { reviewRun?: GhGraphql; watchRegistry?: (log: (message: string) => void) => WatchRegistry } = {}): Promise<void> {
   ensureLayout();
   const cfg = loadPickupConfig();
   const state = new PickupState();
@@ -184,10 +186,9 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon', opts: { revi
 
   const notify = makeNotifier(cfg.notifyCommand, log);
   // Review requests search as [pickup.github]'s identity, with its token.
-  const gh = cfg.reviews;
-  const reviews = gh ? () => reviewsLoop(gh.identity, gh.token, log, { run: opts.reviewRun }) : undefined;
+  const sourcePasses = reviewWatchPasses(cfg.reviews, log, opts.reviewRun);
   if (mode === 'once') {
-    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews, cfg.watches);
+    await cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, sourcePasses, cfg.watches, opts.watchRegistry?.(log));
     return;
   }
   log(`polling every ${cfg.pollSecs}s — no webhooks, no inbound surface`);
@@ -197,7 +198,7 @@ export async function runPickup(mode: 'once' | 'daemon' = 'daemon', opts: { revi
   const streamChildren = new Map<string, ChildProcess>();
   while (true) {
     fs.writeFileSync(path.join(lobstahHome(), 'pick.json'), JSON.stringify({ pid: process.pid, heartbeat: new Date().toISOString(), pollSecs: cfg.pollSecs }));
-    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, reviews, cfg.watches));
+    await flight.run(() => cycle(sources, merges, state, cfg.pollSecs, log, notify, cfg.liveComment, cfg.pools, sourcePasses, cfg.watches, opts.watchRegistry?.(log)));
     if (cfg.watches) syncStreams(streamChildren, flight, log, notify);
     await new Promise((r) => setTimeout(r, cfg.pollSecs * 1000));
   }

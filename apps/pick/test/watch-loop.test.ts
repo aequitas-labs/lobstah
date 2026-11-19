@@ -1,8 +1,10 @@
+import { CommandWatchType, WatchRegistry } from '@lobstah/watch-types';
+import type { CommandWatchOptions, CommandWatchReference, CommandWatchState, WatchSnapshot, WatchDispatchPolicy } from '@lobstah/watch-types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendStatus, appendWatchEvents, ensureLayout, laneDirs, listNotices, listWatches, readWatch, runWatchCheck, claimCommandWatchContinuation, enqueue, releaseHeldWatches, signOnTrap } from '@lobstah/core';
+import { builtinWatchRegistry, WatchRuntime, WatchJournal, pendingWatchEvents, addWatch, appendStatus, appendWatchEvents, ensureLayout, laneDirs, listNotices, listWatches, readWatch, runWatchCheck, claimCommandWatchContinuation, enqueue, releaseHeldWatches, signOnTrap } from '@lobstah/core';
 import type { Descriptor } from '@lobstah/core';
 import { watchLoop, deliverDispatchOwned } from '../src/loops/watch.js';
 import type { ReportNotification } from '../src/loops/report.js';
@@ -19,7 +21,7 @@ afterEach(() => {
   removeTempDir(dir);
 });
 
-function eventCheck(events: Array<{ seq: number; summary: string }>, cursor: string): string {
+function eventCheck(events: Array<{ seq: number; summary: string; [key: string]: unknown }>, cursor: string): string {
   const script = path.join(dir, `check-${cursor}.cjs`);
   fs.writeFileSync(
     script,
@@ -251,4 +253,83 @@ it('replays a reserved continuation without filing a second dispatch after resta
   expect(queuedDescriptors().map((descriptor) => descriptor.id)).toEqual([reserved]);
   expect(readWatch(watch.key)?.lastFollowUpId).toBe(reserved);
   expect(readWatch(watch.key)?.seen).toBe(1);
+});
+
+it('a journal-only source delivers its own instructions and replays the same continuation, including fork holds', () => {
+  const owner = '33333333-3333-4333-8333-333333333333';
+  makeOwnerDispatch(owner); appendStatus(owner, 'work', 'done', 'ready');
+  class FixtureWatch extends CommandWatchType {
+    readonly descriptor = { id: 'fixture', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
+    committed = new Set<string>();
+    readonly dispatchPolicy: WatchDispatchPolicy<CommandWatchReference, CommandWatchState, string, CommandWatchOptions> = {
+      plan: ({ snapshot, events }) => ({ disposition: this.committed.has(snapshot.key) ? 'ignore' : 'continue', eventIds: events.map((event) => event.id), notes: [], state: { recorded: true } }),
+      delivered: ({ snapshot }) => { this.committed.add(snapshot.key); },
+    };
+    poll() { return { cursor: '1', events: [{ id: 'changed', kind: 'fixture:changed', summary: 'Fixture needs a response', at: new Date().toISOString(), data: null }] }; }
+    present(snapshot: WatchSnapshot<CommandWatchReference, CommandWatchState, string, CommandWatchOptions>) {
+      return { ...super.present(snapshot), worker: { steps: ['Read the fixture feedback and respond.'], read: { executable: 'fixture', args: ['feedback', snapshot.key], environment: { FIXTURE_PROJECT: 'example' } } } };
+    }
+  }
+  const registry = new WatchRegistry(); registry.register(new FixtureWatch());
+  const runtime = new WatchRuntime(registry);
+  for (const key of ['fixture:one', 'fixture:two']) { runtime.register('fixture', key, { check: 'unused' }, { kind: 'dispatch', chainId: owner, grounds: 'home' }); runtime.checkSync(key); }
+  deliverDispatchOwned(() => {}, 1, registry);
+  expect(queuedDescriptors()).toHaveLength(1);
+  expect(queuedDescriptors()[0]?.brief).toContain('Read the fixture feedback and respond.');
+  expect(queuedDescriptors()[0]?.brief).toContain('FIXTURE_PROJECT');
+  expect(queuedDescriptors()[0]?.brief).toContain('Fixture needs a response');
+  const snapshots = new WatchJournal().list();
+  const delivered = snapshots.find((snapshot) => snapshot.deliveryProgress?.lastFollowUpId)!;
+  const held = snapshots.find((snapshot) => snapshot.deliveryProgress?.heldAt)!;
+  expect(held).toBeTruthy();
+  runtime.journal.update(delivered.key, (snapshot) => {
+    snapshot!.deliveries.forEach((receipt) => { receipt.status = 'pending'; });
+    snapshot!.deliveryProgress = {};
+    return { snapshot, result: undefined };
+  });
+  deliverDispatchOwned(() => {}, 1, registry);
+  expect(queuedDescriptors()).toHaveLength(1);
+  expect(runtime.journal.read(delivered.key)?.deliveryProgress?.lastFollowUpId).toBe(queuedDescriptors()[0]?.id);
+  expect(runtime.journal.read(delivered.key)?.deliveries.every((receipt) => receipt.status === 'delivered')).toBe(true);
+  expect(releaseHeldWatches(held.key)).toEqual([held.key]);
+  deliverDispatchOwned(() => {}, 2, registry);
+  expect(queuedDescriptors()).toHaveLength(2);
+  expect(pendingWatchEvents(false, 'dispatch')).toEqual([]);
+});
+
+it('a journal-only PR keeps check-round policy state and human gates across delivery replay', () => {
+  const owner = '44444444-4444-4444-8444-444444444444';
+  makeOwnerDispatch(owner); appendStatus(owner, 'work', 'done', 'ready');
+  fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nautoRepair=false\n[repos.myrepo]\npath="/repo"\nhumanGateChecks=["Approval Gate"]\n');
+  const registry = builtinWatchRegistry(), runtime = new WatchRuntime(registry);
+  const key = 'pr:acme/web#40';
+  const check = eventCheck([
+    { seq: 1, summary: 'verify failed', kind: 'check-completed', name: 'verify', conclusion: 'FAILURE', headSha: 'head' },
+    { seq: 2, summary: 'approval needed', kind: 'check-completed', name: 'Approval Gate', conclusion: 'FAILURE', headSha: 'head' },
+  ], '2');
+  runtime.register('pr', key, { check }, { kind: 'dispatch', chainId: owner, grounds: 'home' });
+  runtime.checkSync(key);
+  deliverDispatchOwned(() => {}, 3, registry);
+  expect(queuedDescriptors()).toHaveLength(1);
+  const workId = queuedDescriptors()[0]!.id;
+  expect(runtime.journal.read(key)?.state).toEqual({ checkRounds: ['head:verify'] });
+  runtime.journal.update(key, (snapshot) => {
+    const receipt = snapshot!.deliveries.find((entry) => entry.continuationId === workId)!;
+    receipt.status = 'pending'; snapshot!.deliveryProgress = {};
+    return { snapshot, result: undefined };
+  });
+  deliverDispatchOwned(() => {}, 3, registry);
+  expect(queuedDescriptors()).toHaveLength(1);
+  expect(runtime.journal.read(key)?.deliveryProgress?.lastFollowUpId).toBe(workId);
+  appendStatus(workId, 'work', 'done', 'checked');
+  deliverDispatchOwned(() => {}, 3, registry);
+  expect(pendingWatchEvents(false, 'dispatch')).toEqual([]);
+  runtime.journal.update(key, (snapshot) => {
+    snapshot!.events.push({ id: '3', kind: 'check-completed', summary: 'verify still failed', at: new Date().toISOString(), data: { kind: 'check-completed', name: 'verify', conclusion: 'FAILURE', headSha: 'head' } });
+    snapshot!.deliveries.push({ id: 'later', eventIds: ['3'], status: 'pending' });
+    return { snapshot, result: undefined };
+  });
+  deliverDispatchOwned(() => {}, 3, registry);
+  expect(queuedDescriptors()).toHaveLength(1);
+  expect(pendingWatchEvents(false, 'dispatch')).toEqual([]);
 });

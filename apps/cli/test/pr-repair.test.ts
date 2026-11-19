@@ -1,3 +1,6 @@
+import { watchLoop } from '../../pick/src/loops/watch.js';
+import { createCliWatchRegistry } from '../src/watch-automation.js';
+import { WatchActionRunner, WatchRuntime, restoreLegacyWatch, readWatch } from '@lobstah/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -395,4 +398,27 @@ describe('PR watch repairs', () => {
     expect(queued()[0]!.brief).toContain('requested review changes');
     expect(repairBrief(readPr(KEY)!, 'review')).toContain('gh pr view --comments');
   });
+});
+
+it('pickup executes the same registered repair capability without a daemon callback', async () => {
+  upsertPr(pr(), OWNER); upsertPr(pr(), OWNER);
+  const registry = createCliWatchRegistry(() => {});
+  await watchLoop(45, () => {}, () => {}, registry);
+  expect(queued()).toHaveLength(1);
+  expect(queued()[0]?.systemRepair).toBeDefined();
+  const snapshot = new WatchRuntime(registry).journal.read(KEY)!;
+  expect(snapshot.actionReceipts?.some((receipt) => receipt.result?.workIds.includes(queued()[0]!.id))).toBe(true);
+  await watchLoop(45, () => {}, () => {}, registry);
+  expect(queued()).toHaveLength(1);
+});
+
+it('a repair action authorized for an older head creates no worker after the head moves', () => {
+  upsertPr(pr(), OWNER); upsertPr(pr(), OWNER);
+  const registry = createCliWatchRegistry(() => {}), runtime = new WatchRuntime(registry);
+  restoreLegacyWatch(readWatch(KEY)!, runtime);
+  const actions = new WatchActionRunner(registry, runtime.journal);
+  const request = actions.authorize(KEY, { actionId: 'repair', expectedRevision: SHA, idempotencyKey: 'old-head', authority: 'config:watchTypes.pr.autoRepair', arguments: {} }, { id: 'config:watchTypes.pr.autoRepair', by: 'configuration', at: new Date().toISOString() });
+  upsertPr(pr({ headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }), OWNER);
+  expect(() => actions.executeSync(KEY, request)).toThrow('observation changed');
+  expect(queued()).toEqual([]);
 });

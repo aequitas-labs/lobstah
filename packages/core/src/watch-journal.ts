@@ -42,9 +42,26 @@ export class WatchJournal {
     return withDirLock(
       `${file}.lock`,
       () => {
-        const { snapshot, result } = change(this.read(key));
+        const previous = this.read(key),
+          oldVersion = previous?.type.stateVersion;
+        const oldIdentity = previous ? `${previous.type.id}:${previous.generation}` : '';
+        const { snapshot, result } = change(previous);
         if (snapshot) {
           if (snapshot.key !== key) throw new Error('Watch journal key cannot change');
+          if (oldVersion !== undefined && oldVersion !== snapshot.type.stateVersion) {
+            if (!Number.isSafeInteger(oldVersion) || oldVersion < 1) throw new Error('Invalid stored watch state version');
+            const backup = `${file}.state-${oldVersion}-${createHash('sha256').update(oldIdentity).digest('hex').slice(0, 16)}.bak`;
+            let backupFd: number | undefined;
+            try {
+              backupFd = fs.openSync(backup, 'wx', 0o600);
+              fs.writeFileSync(backupFd, fs.readFileSync(file));
+              fs.fsyncSync(backupFd);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+            } finally {
+              if (backupFd !== undefined) fs.closeSync(backupFd);
+            }
+          }
           const temporary = uniqueTempPath(file);
           try {
             const fd = fs.openSync(temporary, 'wx', 0o600);

@@ -1,20 +1,21 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import {
   appendWatchEvents,
+  builtinWatchRegistry,
+  WatchAutomationRunner,
+  WatchJournal,
   claimCommandWatchContinuation,
+  reservedWatchDispatch,
+  watchInstructionLines,
+  planWatchDispatch,
+  prepareWatchBrief,
+  completeWatchDispatch,
   storedDescriptor,
-  checkRoundKey,
   enqueue,
-  humanGatesFor,
-  isFailingConclusion,
-  matchesGate,
-  recordCheckRounds,
   holdWatch,
   laneDirs,
   loadConfig,
-  withBriefHooks,
   lastEventAt,
   listWatches,
   markFollowUp,
@@ -25,7 +26,6 @@ import {
   readWatchEvents,
   readStatusLog,
   readEvidence,
-  readPr,
   reconcile,
   removeWatch,
   setWatchCursor,
@@ -33,6 +33,7 @@ import {
   runWatchCycle,
 } from '@lobstah/core';
 import { readSessionClaim, readTrap } from '@lobstah/core';
+import type { WatchDispatchPlan, WatchRegistry } from '@lobstah/watch-types';
 import type { Descriptor, Lane, Watch, WatchEvent } from '@lobstah/core';
 import type { ReportNotification } from './report.js';
 
@@ -86,6 +87,8 @@ function spawnContinuation(
   log: (m: string) => void,
   fixedBrief?: string,
   targetOverride?: string,
+  registry?: WatchRegistry,
+  plan?: WatchDispatchPlan,
 ): string | undefined {
   const owner = w.owner.slice('dispatch:'.length);
   const target = targetOverride ?? (w.lastFollowUpId && !laneOf(w.lastFollowUpId) ? owner : (w.lastFollowUpId ?? owner));
@@ -101,19 +104,22 @@ function spawnContinuation(
     removeWatch(w.key);
     return undefined;
   }
-  const reservation = claimCommandWatchContinuation(w.key, pending);
-  const id = reservation?.id ?? randomUUID();
+  const reservation = claimCommandWatchContinuation(w.key, pending, plan);
+  if (!reservation) return undefined;
+  const id = reservation.id;
   const deliveredThrough = reservation?.deliveredThrough ?? readWatchEvents(w.key).length;
   if (storedDescriptor(id, 'work')) {
+    if (plan) completeWatchDispatch(w, pending, reservation.plan ?? plan, id, registry);
     markFollowUp(w.key, id, deliveredThrough);
     return id;
   }
-  const filled = (fixedBrief ?? w.brief ?? DEFAULT_BRIEF)
+  const supplied = !w.check && w.presentation ? [...watchInstructionLines(w.presentation, 'worker'), '', 'Watched events:', '{events}'].join('\n') : DEFAULT_BRIEF;
+  const filled = (fixedBrief ?? w.brief ?? supplied)
     .replaceAll('{key}', w.key)
     .replaceAll('{summaries}', pending.map((e) => `- ${e.summary ?? `event ${String(e.seq)}`}`).join('\n'))
     .replaceAll('{events}', JSON.stringify(pending, null, 2));
-  // A PR watch's continuation is a CI fix: the repo's hooks for it apply.
-  const brief = w.key.startsWith('pr:') ? withBriefHooks(filled, loadConfig(), descriptor.repo, 'ciFix') : filled;
+  // Each adapter supplies its own repository instructions.
+  const brief = prepareWatchBrief(w, pending, filled, descriptor.repo, registry);
   // A chain worked by a live trap gets its continuation addressed there —
   // the trap picks it up at its next park instead of a headless fork
   // running beside it. Addressed bait is sticky: if the trap ghosts, the
@@ -124,6 +130,7 @@ function spawnContinuation(
   const claimant = trapAddress?.slice('wt:'.length);
   const live = claimant !== undefined && readTrap(claimant) !== undefined;
   enqueue({ id, repo: descriptor.repo, brief, followUp: target, ...(live ? { for: trapAddress } : {}) }, 'work');
+  if (plan) completeWatchDispatch(w, pending, reservation.plan ?? plan, id, registry);
   markFollowUp(w.key, id, deliveredThrough);
   log(
     `watch ${w.key}: ${pending.length} event(s) → continuation ${id} ` +
@@ -139,32 +146,7 @@ function spawnContinuation(
  * check that already had its one round at this head. Returns the events to
  * deliver and the rounds they take.
  */
-export function ciFixWork(w: Watch, events: WatchEvent[]): { work: WatchEvent[]; rounds: string[]; skipped: string[] } {
-  if (!w.key.startsWith('pr:') || !w.owner.startsWith('dispatch:')) return { work: events, rounds: [], skipped: [] };
-  const owner = w.owner.slice('dispatch:'.length);
-  const ownerLane = laneOf(owner);
-  const repo = ownerLane ? descriptorOf(owner, ownerLane)?.repo : undefined;
-  const gates = humanGatesFor(readPr(w.key), repo, [owner, ...(w.lastFollowUpId ? [w.lastFollowUpId] : [])]);
-  const done = new Set(w.checkRounds ?? []);
-  const rounds: string[] = [];
-  const skipped: string[] = [];
-  const work = events.filter((e) => {
-    if (e.kind !== 'check-completed' || !isFailingConclusion(e.conclusion as string | undefined) || typeof e.name !== 'string') return true;
-    if (matchesGate(e.name, gates)) {
-      skipped.push(`${e.name} (human gate)`);
-      return false;
-    }
-    const round = checkRoundKey(String(e.headSha ?? ''), e.name);
-    if (done.has(round)) {
-      skipped.push(`${e.name} (had its round at ${String(e.headSha ?? '').slice(0, 7)})`);
-      return false;
-    }
-    done.add(round);
-    rounds.push(round);
-    return true;
-  });
-  return { work, rounds, skipped };
-}
+export { ciFixWork } from '@lobstah/core';
 
 /** [watch].maxForksPerCycle; a bad value falls back to the default of 3. */
 function maxForksPerCycle(): number {
@@ -193,19 +175,18 @@ function notifyMan(watch: Watch, fresh: WatchEvent[], notify: (n: ReportNotifica
  * its events stay buffered, tend lists it as held, one notice names it, and
  * it forks nothing until `lobstah watch release`. A held watch is skipped.
  */
-export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPerCycle()): void {
-  // The daemon owns PR repair delivery. Pickup only delivers generic watches.
+export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPerCycle(), registry?: WatchRegistry): void {
+  // Sources may delegate managed work to their configured action handlers.
   let forks = 0;
-  const autoRepair = loadConfig().watch.autoRepair;
   const held: string[] = [];
   for (const { watch, events } of pendingWatchEvents(false, 'dispatch')) {
-    if (autoRepair && watch.key.startsWith('pr:') && readPr(watch.key)) {
-      markWatchSeen(watch.key);
-      continue;
-    }
+    const plan = reservedWatchDispatch(watch.key)?.plan ?? planWatchDispatch(watch, events, undefined, registry);
+    if (plan.disposition === 'managed') { markWatchSeen(watch.key); continue; }
     if (watch.heldAt) continue; // waits for `lobstah watch release`
     if (watch.lastFollowUpId && !isTerminal(watch.lastFollowUpId)) continue; // one continuation in flight
-    const { work, rounds, skipped } = ciFixWork(watch, events);
+    const selected = new Set(plan.eventIds);
+    const work = plan.disposition === 'ignore' ? [] : events.filter((event) => selected.has(String(event.seq)));
+    const skipped = plan.notes;
     if (work.length === 0) {
       markWatchSeen(watch.key);
       log(`watch ${watch.key}: no continuation for ${skipped.join(', ')}`);
@@ -216,8 +197,8 @@ export function deliverDispatchOwned(log: (m: string) => void, cap = maxForksPer
       held.push(watch.key);
       continue;
     }
-    if (spawnContinuation(watch, work, log)) {
-      recordCheckRounds(watch.key, rounds);
+    const workId = spawnContinuation(watch, work, log, undefined, undefined, registry, plan);
+    if (workId) {
       forks++;
     }
   }
@@ -244,13 +225,16 @@ export async function watchLoop(
   defaultEverySecs: number,
   log: (m: string) => void,
   notify: (n: ReportNotification) => void = () => {},
+  registry: WatchRegistry = builtinWatchRegistry(),
 ): Promise<void> {
-  const autoRepair = loadConfig().watch.autoRepair;
-  for (const { watch, fresh } of runWatchCycle(defaultEverySecs, new Date(), { include: (watch) => !(autoRepair && watch.typeId === 'pr' && watch.owner.startsWith('dispatch:')) })) {
+  for (const { watch, fresh } of runWatchCycle(defaultEverySecs, new Date(), { registry })) {
     if (watch.lastError) log(watchFailureLogLine(watch));
     notifyMan(watch, fresh, notify);
   }
-  deliverDispatchOwned(log);
+  const cap = maxForksPerCycle();
+  const keys = [...listWatches().map((watch) => watch.key), ...new WatchJournal().list().map((snapshot) => snapshot.key)];
+  const work = await new WatchAutomationRunner(registry).run(keys, Date.now(), cap, log);
+  deliverDispatchOwned(log, Math.max(0, cap - work.length), registry);
 }
 
 /**

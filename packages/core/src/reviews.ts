@@ -271,6 +271,8 @@ export interface ReviewRound {
   state: ReviewRoundState;
   /** The review job's dispatch id, and when it started (the daily cap counts these). */
   dispatch?: string;
+  /** Reserve before enqueue so a crash cannot create a second job for this attempt. */
+  draftReservation?: { id: string; attempt: number };
   dispatchedAt?: string;
   /** Start receipts survive redrafts so retries still count against the daily cap. */
   draftStarts?: string[];

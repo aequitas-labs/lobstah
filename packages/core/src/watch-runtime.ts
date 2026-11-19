@@ -322,6 +322,7 @@ export class WatchRuntime {
       if (!current || current.status === 'retired') return { result: undefined };
       if (reason === 'done' && current.status !== 'draining' && current.status !== 'closing') return { result: undefined };
       if (current.deliveries.some((delivery) => delivery.status === 'pending')) return { result: undefined };
+      if (current.actionReceipts?.some((receipt) => receipt.generation === current.generation && (receipt.status === 'pending' || receipt.status === 'running'))) return { result: undefined };
       current.status = 'closing';
       current.lease = undefined;
       return { snapshot: current, result: current };

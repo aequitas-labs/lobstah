@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   appendStatus,
+  enqueue,
   claimNext,
   claimBait,
   signOnTrap,
@@ -533,4 +534,15 @@ it('an explicit Draft action can start an old request held by the default activa
   expect(round()).toMatchObject({ state: 'requested', reason: expect.stringContaining('requested before') });
   expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
   expect(round()).toMatchObject({ state: 'drafting', onDemand: true });
+});
+
+it('recovers a reserved review job after enqueue without filing a second worker', () => {
+  config(); request();
+  const reserved = '77777777-7777-4777-8777-777777777777';
+  const item = readReview(KEY)!;
+  item.rounds[0]!.draftReservation = { id: reserved, attempt: 0 }; writeReview(item);
+  enqueue({ id: reserved, repo: 'web', brief: 'reserved review worker', readOnly: true }, 'chore');
+  draftReviews('chris', () => {}, NOW);
+  expect(pendingIds('chore')).toEqual([reserved]);
+  expect(round()).toMatchObject({ state: 'drafting', dispatch: reserved });
 });

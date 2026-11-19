@@ -1,3 +1,4 @@
+import { deliverRegisteredWatchActions } from './watch-automation.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -233,6 +234,11 @@ export function checksStillFailing(
 }
 
 export interface RepairOptions {
+  /** Adapter execution limits this reconciliation to the authorized references. */
+  keys?: readonly string[];
+  /** The generic action receipt supplies the replay-stable scheduler ID. */
+  dispatchId?: string;
+  expectedHead?: string;
   now?: number;
   /** Read the latest check runs of a PR before a checks repair (default: gh). */
   readChecks?: (pr: PrRecord) => LatestChecks | undefined;
@@ -327,7 +333,7 @@ function trapAddressOf(id: string): string | undefined {
   return claim?.by.startsWith('wt:') ? claim.by : deliveredTo?.startsWith('wt:') ? deliveredTo : undefined;
 }
 
-export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: RepairOptions = {}): number {
+export function reconcilePrRepairs(log: (message: string) => void, cap = 3, opts: RepairOptions = {}): number {
   const config = loadConfig();
   const cfg = config.watch;
   if (!cfg.autoRepair) return 0;
@@ -341,6 +347,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
   const viewer = (): string | undefined => (login === null ? (login = (opts.viewer ?? (() => githubViewer(now)))()) : login);
   let started = 0;
   for (let w of listWatches()) {
+    if (opts.keys && !opts.keys.includes(w.key)) continue;
     if (started >= budget) break;
     if (!w.key.startsWith('pr:') || !w.owner.startsWith('dispatch:') || w.done) continue;
     // A hold for one dispatch ends when that dispatch ends.
@@ -352,6 +359,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
     const watch = w;
     withPrLock(watch.key, () => {
       let pr = readPr(watch.key);
+      if (opts.expectedHead && pr?.headSha !== opts.expectedHead) return;
       if (!pr || pr.state !== 'OPEN' || pr.dispatches.length === 0 || (pr.observations ?? 0) <= 1) return;
       // Never push to someone else's PR, even one a dispatch reported.
       if (!mayAutoRepair(prAuthorship(pr, viewer))) return;
@@ -526,7 +534,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         const until = new Date(cooldownUntil).toISOString();
         return wait({ heldBy: 'cooldown', reason: `cooldown until ${until}` }, until);
       }
-      const id = randomUUID();
+      const id = opts.dispatchId ?? randomUUID();
       writePr({
         ...pr,
         repairCooldown: { dispatchId: id },
@@ -692,4 +700,9 @@ export function recordPushFailure(id: string, lane: Lane, note: string | undefin
     dedupeKey: `push-failed-${id}`,
   });
   return ref.key;
+}
+
+/** Compatibility entry point uses the same registered action pass as the daemon. */
+export function deliverPrRepairs(log: (message: string) => void, cap = 3, options: RepairOptions = {}): number {
+  return deliverRegisteredWatchActions(options.now ?? Date.now(), cap, log, options).length;
 }

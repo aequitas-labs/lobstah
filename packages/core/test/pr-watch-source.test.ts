@@ -19,6 +19,7 @@ import {
   runWatchCycle,
   upsertPr,
   WatchJournal,
+  WatchRuntime,
 } from '../src/index.js';
 import type { GhPrView } from '../src/pr.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -107,7 +108,7 @@ it('batches a shared GitHub rate limit once and retains every PR checkpoint with
     status: 1,
     stdout: 'HTTP/2 403 Forbidden\r\nx-ratelimit-remaining: 0\r\nretry-after: 60\r\n\r\n{"message":"API rate limit exceeded"}',
   }));
-  const results = runWatchCycle(45, new Date(now), { registry: builtinWatchRegistry({ run }) });
+  const results = runWatchCycle(45, new Date(now), { registry: builtinWatchRegistry({ pr: { run } }) });
   expect(run).toHaveBeenCalledTimes(1);
   expect(results).toHaveLength(2);
   for (const { watch, fresh } of results) {
@@ -153,7 +154,7 @@ it('adapter grouping retains the shared budget allocation across repositories', 
     status: 0,
     stdout: `HTTP/2.0 200 OK\r\nX-Ratelimit-Resource: graphql\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 100\r\nX-Ratelimit-Reset: ${(now + 3600_000) / 1000}\r\n\r\n${JSON.stringify({ data: { repository: {}, rateLimit: { cost: 5 } } })}`,
   }));
-  runWatchCycle(45, new Date(now), { registry: builtinWatchRegistry({ run }) });
+  runWatchCycle(45, new Date(now), { registry: builtinWatchRegistry({ pr: { run } }) });
   expect(run).toHaveBeenCalledTimes(2);
   for (const repo of ['web', 'api']) {
     const cycle = JSON.parse(fs.readFileSync(path.join(home, 'pr-polls', `acme_${repo}.json`), 'utf8'));
@@ -181,4 +182,40 @@ it('a replacement legacy generation starts fresh rather than importing the remov
     deliveries: [],
     originGeneration: watch.generation,
   });
+});
+
+it('migrates PR state with an exact backup while retaining checkpoints and pending delivery', () => {
+  const registry = builtinWatchRegistry(),
+    runtime = new WatchRuntime(registry);
+  runtime.register('pr', reference.key, { check: 'echo {}' }, { kind: 'helm', grounds: 'home' });
+  const file = path.join(
+    runtime.journal.directory,
+    fs.readdirSync(runtime.journal.directory).find((name) => name.endsWith('.json'))!,
+  );
+  const previous = runtime.journal.read(reference.key)!;
+  previous.type.stateVersion = 1;
+  previous.type.version = '1.0.0';
+  previous.cursor = 'prior-checkpoint';
+  previous.state = {};
+  previous.events = [{ id: 'prior', kind: 'check-completed', summary: 'waiting', at: previous.createdAt, data: {} }];
+  previous.deliveries = [{ id: 'receipt', eventIds: ['prior'], status: 'pending', continuationId: 'reserved' }];
+  const original = JSON.stringify(previous);
+  fs.writeFileSync(file, original);
+  const current = runtime.register('pr', reference.key, { check: 'echo {}' }, { kind: 'helm', grounds: 'home' });
+  expect(current).toMatchObject({
+    type: { stateVersion: 2 },
+    cursor: 'prior-checkpoint',
+    events: [{ id: 'prior' }],
+    deliveries: [{ id: 'receipt', continuationId: 'reserved', status: 'pending' }],
+  });
+  const backup = fs.readdirSync(runtime.journal.directory).find((name) => name.endsWith('.bak'))!;
+  expect(fs.readFileSync(path.join(runtime.journal.directory, backup), 'utf8')).toBe(original);
+});
+
+it('imports consumed legacy check rounds before the next provider observation', () => {
+  const watch = addWatch(reference.key, 'echo {}', { owner: 'dispatch:owner' });
+  watch.checkRounds = ['head:verify'];
+  const runtime = restoreCommandWatch(watch);
+  expect(runtime.journal.read(reference.key)?.state).toEqual({ checkRounds: ['head:verify'] });
+  expect(runtime.journal.read(reference.key)?.cursor).toBe('0');
 });

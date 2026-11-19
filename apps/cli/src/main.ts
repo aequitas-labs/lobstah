@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createCliWatchRegistry } from './watch-automation.js';
 import { syncRegisteredWatches } from './watch-observation.js';
 import { legacyPrWatchEffects } from './pr-watch-effects.js';
 import { presentRegisteredWatch } from './watch-presenters/index.js';
@@ -3952,7 +3953,7 @@ async function mainCli(): Promise<void> {
           turnWaits: createTurnWaits().pass,
           codexHookWatch: createCodexHookWatch(),
         });
-      } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon');
+      } else await runPickup(pos[0] === 'once' ? 'once' : 'daemon', { watchRegistry: createCliWatchRegistry });
       break;
     }
     case 'pet': {

@@ -83,6 +83,8 @@ export interface WatchAction {
   id: string;
   label: string;
   requiresAuthority: boolean;
+  /** Automatic actions are scheduler capabilities, not human card controls. */
+  automatic?: boolean;
 }
 
 /** Human and agent consumers share a provider-free presentation model. */
@@ -115,6 +117,8 @@ export interface WatchDelivery {
   eventIds: string[];
   status: 'pending' | 'delivered';
   continuationId?: string;
+  /** Source delivery policy is replayed with the reserved continuation after enqueue. */
+  dispatchPlan?: WatchDispatchPlan;
 }
 
 /** One atomic journal snapshot contains progress, observations and outbox receipts. */
@@ -132,6 +136,8 @@ export interface WatchSnapshot<Reference = WatchValue, State = WatchValue, Curso
   status: 'watching' | 'draining' | 'closing' | 'retired' | 'held';
   events: WatchObservation[];
   deliveries: WatchDelivery[];
+  deliveryProgress?: WatchDeliveryProgress;
+  actionReceipts?: WatchActionReceipt[];
   presentation: WatchPresentation;
   createdAt: string;
   checkedAt?: string;
@@ -182,5 +188,66 @@ export interface WatchActionRequest<Reference> {
 
 /** Source handlers own effect semantics; the runtime owns receipts and authorization. */
 export interface WatchEffectHandler<Reference> {
-  execute(request: WatchActionRequest<Reference>): WatchResult<WatchValue>;
+  /** Hosts reject an incompatible execution mode before invoking the handler. */
+  execution: 'sync' | 'async';
+  execute(request: WatchActionRequest<Reference>): WatchResult<WatchEffectResult>;
+}
+
+/** Delivery policy chooses work; transport owns queuing and durable receipts. */
+export interface WatchDispatchPlan {
+  disposition: 'continue' | 'managed' | 'ignore';
+  eventIds: string[];
+  notes: string[];
+  state?: WatchValue;
+}
+export interface WatchDispatchContext<Reference, State, Cursor, Options> extends WatchContext<Reference, State, Cursor, Options> {
+  events: WatchObservation[];
+  repo?: string;
+}
+export interface WatchDispatchPolicy<Reference, State, Cursor, Options> {
+  plan(context: WatchDispatchContext<Reference, State, Cursor, Options>): WatchDispatchPlan;
+  prepareBrief?(context: WatchDispatchContext<Reference, State, Cursor, Options>, filled: string): string;
+  delivered?(context: WatchDispatchContext<Reference, State, Cursor, Options>, plan: WatchDispatchPlan, workId: string): void;
+}
+
+/** Automatic proposals name the existing configuration authority that permits them. */
+export interface WatchActionProposal {
+  actionId: string;
+  expectedRevision: string;
+  idempotencyKey: string;
+  authority: string;
+  arguments: WatchValue;
+}
+export interface WatchAutomation<Reference, State, Cursor, Options> {
+  propose(context: WatchContext<Reference, State, Cursor, Options>): WatchActionProposal[];
+}
+/** A bounded action history retains replay receipts without growing with every poll. */
+export interface WatchActionReceipt {
+  request: WatchActionRequest<WatchValue>;
+  idempotencyKey: string;
+  generation: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  lease?: { token: string; until: number };
+  result?: WatchEffectResult;
+  failure?: WatchFailure;
+}
+/** Effects return concrete scheduler IDs, so the generic host can enforce its work cap. */
+export interface WatchEffectResult {
+  workIds: string[];
+  data?: WatchValue;
+}
+/** Delivery scheduling is runtime state, separate from a source’s cursor and reducer state. */
+export interface WatchDeliveryProgress {
+  lastFollowUpId?: string;
+  seenAt?: number;
+  heldAt?: string;
+  heldReason?: string;
+  heldFor?: string;
+  heldBy?: string;
+}
+
+/** Composition roots install source passes; the host invokes them without source branches. */
+export interface WatchSourcePass {
+  label: string;
+  run(): WatchResult<void>;
 }

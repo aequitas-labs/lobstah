@@ -294,7 +294,7 @@ export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}):
   const every = pollSecs();
   const now = new Date(at);
   const before = new Map(listWatches().map((watch) => [watch.key, readPr(watch.key)?.observedAt]));
-  for (const { watch } of runWatchCycle(every, now, { registry: builtinWatchRegistry(opts), include: (watch) => watchSourceType(watch) === 'pr' })) {
+  for (const { watch } of runWatchCycle(every, now, { registry: builtinWatchRegistry({ pr: opts }), include: (watch) => watchSourceType(watch) === 'pr' })) {
     const after = readPr(watch.key)?.observedAt;
     if (!watch.lastError && after && after !== before.get(watch.key)) refreshed++;
     if (watch.done) removeWatch(watch.key);

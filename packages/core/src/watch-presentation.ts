@@ -35,6 +35,9 @@ export function journalWatchViews(exclude: ReadonlySet<string> = new Set()): Jou
             : `trap:${snapshot.owner.trapId}`;
       const watch: Watch = {
         key: snapshot.key,
+        typeId: snapshot.type.id,
+        generation: snapshot.generation,
+        ...snapshot.deliveryProgress,
         owner,
         grounds: snapshot.owner.grounds,
         check: '',
@@ -58,13 +61,10 @@ export function pendingJournalWatchEvents(
   owner: 'man' | 'dispatch' | `trap:${string}`,
   sinceMs = 0,
 ): WatchAttention[] {
-  // Dispatch continuations remain under their existing planner until the
-  // source's delivery policy cuts over. New source records already render.
-  if (owner === 'dispatch') return [];
   const journal = new WatchJournal();
   const result: WatchAttention[] = [];
   for (const view of journalWatchViews(exclude)) {
-    if (view.watch.owner !== owner || !view.pending.length) continue;
+    if ((owner === 'dispatch' ? !view.watch.owner.startsWith('dispatch:') : view.watch.owner !== owner) || !view.pending.length) continue;
     const events = sinceMs > 0 ? view.pending.filter((event) => Date.parse(event.at) >= sinceMs) : view.pending;
     if (events.length) result.push({ watch: view.watch, events });
     if (consume)

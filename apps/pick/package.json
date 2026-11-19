@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@lobstah/core": "workspace:*",
-    "smol-toml": "^1.3.1"
+    "smol-toml": "^1.3.1",
+    "@lobstah/watch-types": "workspace:*"
   },
   "license": "MIT"
 }

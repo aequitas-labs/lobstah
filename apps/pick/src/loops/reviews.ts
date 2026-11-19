@@ -1,3 +1,4 @@
+import { runReviewWatch } from '../watch-review-requests.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
@@ -20,6 +21,7 @@ import {
   loadConfig,
   observeReviewRequest,
   queuedDescriptor,
+  storedDescriptor,
   readRoundDraft,
   readReview,
   reviewKey,
@@ -155,11 +157,13 @@ function configuredRepos(): Map<string, string> {
  * call. The search and batched checks of missing PRs share the GitHub budget;
  * they wait while that budget is blocked.
  */
-export async function reviewsLoop(
+export type ReviewReconciliationOptions = { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions; notify?: (event: { key: string; text: string; kind: string; url: string }) => void };
+
+export async function reconcileReviews(
   identity: string,
   token: () => string,
   log: (m: string) => void = () => {},
-  opts: { run?: GhGraphql; fetch?: FetchLike; now?: number; wharf?: ReviewWharfOptions; notify?: (event: { key: string; text: string; kind: string; url: string }) => void } = {},
+  opts: ReviewReconciliationOptions = {},
 ): Promise<void> {
   const cfg = loadConfig();
   reviewAutomationCutoff(cfg.reviews, undefined, opts.now ?? Date.now());
@@ -552,9 +556,11 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       const outDir = reviewRoundDir(item.key, r.id);
       if (!outDir) continue;
       fs.mkdirSync(outDir, { recursive: true });
-      const id = randomUUID();
+      const attempt = r.draftStarts?.length ?? (r.dispatchedAt ? 1 : 0);
+      if (!r.draftReservation || r.draftReservation.attempt !== attempt) { r.draftReservation = { id: randomUUID(), attempt }; save(); }
+      const id = r.draftReservation.id;
       const trap = settings.work === 'trap' && settings.trapWaitSecs > 0;
-      enqueue(
+      if (!storedDescriptor(id, 'chore')) enqueue(
         {
           id,
           repo: item.pr.repoKey!,
@@ -691,4 +697,9 @@ export function removeReviewCheckout(item: ReviewItem, round: ReviewRound, log: 
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
   git('worktree', 'prune');
   log(`${item.key}: removed the review checkout of round ${round.id}`);
+}
+
+/** Compatibility callers and pickup both enter the registered review source. */
+export async function reviewsLoop(identity: string, token: () => string, log: (message: string) => void = () => {}, options: ReviewReconciliationOptions = {}): Promise<void> {
+  await runReviewWatch(identity, token, log, options);
 }

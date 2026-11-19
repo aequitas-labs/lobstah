@@ -127,3 +127,14 @@ export * from './watch-presentation.js';
 export * from './watch-type-descriptors.js';
 
 export { builtinWatchRegistry, watchSourceType } from './watch-source-registry.js';
+
+export * from './watch-actions.js';
+export * from './watch-automation.js';
+export * from './watch-dispatch.js';
+export { ciFixWork } from './pr-watch-delivery.js';
+
+export { restoreCommandWatch as restoreLegacyWatch } from './watch-command-runtime.js';
+
+export { createReviewWatchType, reviewWatchRevision } from './review-watch-source.js';
+
+export { reservedWatchDispatch } from './watch-command-runtime.js';

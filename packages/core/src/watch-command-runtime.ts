@@ -1,8 +1,10 @@
+import { storedDescriptor } from './queue.js';
 import { randomUUID } from 'node:crypto';
 import { readWatch, readWatchEvents } from './watch.js';
 import { builtinWatchRegistry, watchSourceType } from './watch-source-registry.js';
-import type { WatchOwner, WatchSnapshot } from '@lobstah/watch-types';
+import type { WatchOwner, WatchSnapshot, WatchDispatchPlan } from '@lobstah/watch-types';
 import { WatchRuntime } from './watch-runtime.js';
+import { journalWatchViews } from './watch-presentation.js';
 import type { Watch, WatchEvent } from './watch.js';
 
 /** Legacy CLI registrations use the same installed source registry as typed watches. */
@@ -26,7 +28,7 @@ export function restoreCommandWatch(watch: Watch, runtime = commandWatchRuntime(
   if (replaced) runtime.retire(watch.key);
   const typeId = watchSourceType(watch, runtime.registry),
     source = runtime.registry.get(typeId);
-  const options = { check: watch.check, cursor: watch.cursor, ...(watch.brief ? { brief: watch.brief } : {}) };
+  const options = { check: watch.check, cursor: watch.cursor, ...(watch.brief ? { brief: watch.brief } : {}), legacy: JSON.parse(JSON.stringify(watch)) };
   if (!replaced && previous && previous.status !== 'retired' && previous.type.id !== typeId) {
     const binding = source.bindings.find(
       (entry) =>
@@ -54,12 +56,13 @@ export function restoreCommandWatch(watch: Watch, runtime = commandWatchRuntime(
   runtime.register(
     typeId,
     watch.key,
-    { check: watch.check, cursor: watch.cursor, ...(watch.brief ? { brief: watch.brief } : {}) },
+    options,
     commandWatchOwner(watch),
   );
   const legacyEvents = readWatchEvents(watch.key);
   runtime.journal.update(watch.key, (snapshot) => {
     if (!snapshot) throw new Error('Command watch registration disappeared');
+    snapshot = source.restore(snapshot);
     snapshot.originGeneration = origin;
     const known = new Set(snapshot.events.map((event) => event.id));
     const imported = legacyEvents.filter((event) => !known.has(String(event.seq)));
@@ -106,19 +109,25 @@ export function acknowledgeCommandWatch(key: string, events: WatchEvent[], seen:
 export interface CommandWatchContinuation {
   id: string;
   deliveredThrough: number;
+  plan?: WatchDispatchPlan;
 }
 
 /** Reserve a complete batch atomically; replay never consumes later arrivals. */
-export function claimCommandWatchContinuation(key: string, events?: readonly WatchEvent[]): CommandWatchContinuation | undefined {
-  const watch = readWatch(key);
+export function claimCommandWatchContinuation(
+  key: string,
+  events?: readonly WatchEvent[],
+  plan?: WatchDispatchPlan,
+): CommandWatchContinuation | undefined {
+  const legacy = readWatch(key);
+  const watch = legacy ?? journalWatchViews().find((view) => view.watch.key === key)?.watch;
   if (!watch) return undefined;
-  const runtime = restoreCommandWatch(watch);
+  const runtime = legacy ? restoreCommandWatch(legacy) : commandWatchRuntime();
   const recorded = readWatchEvents(key);
   const requested = new Set((events ?? recorded.slice(watch.seen)).map((event) => String(event.seq)));
   const through = recorded.reduce((end, event, index) => (requested.has(String(event.seq)) ? index + 1 : end), watch.seen);
   const prefix = new Set(recorded.slice(0, through).map((event) => String(event.seq)));
   const reservation = runtime.journal.update(key, (snapshot) => {
-    if (!snapshot) return { result: undefined };
+    if (!snapshot || snapshot.status === 'retired') return { result: undefined };
     const pending = snapshot.deliveries.filter((delivery) => delivery.status === 'pending');
     const existing = pending.find((delivery) => delivery.continuationId !== undefined);
     let id = existing?.continuationId;
@@ -131,15 +140,33 @@ export function claimCommandWatchContinuation(key: string, events?: readonly Wat
         if (later.length) snapshot.deliveries.push({ id: randomUUID(), eventIds: later, status: 'pending' });
         delivery.eventIds = delivery.eventIds.filter((eventId) => prefix.has(eventId));
         delivery.continuationId = id;
+        if (plan) delivery.dispatchPlan = structuredClone(plan);
       }
     }
     const ids = snapshot.deliveries.filter((delivery) => delivery.continuationId === id).flatMap((delivery) => delivery.eventIds);
-    return { snapshot, result: { id, ids } };
+    return { snapshot, result: { id, ids, plan: snapshot.deliveries.find((delivery) => delivery.continuationId === id)?.dispatchPlan } };
   });
   if (!reservation) return undefined;
   const ids = new Set(reservation.ids);
   return {
     id: reservation.id,
+    ...(reservation.plan ? { plan: reservation.plan } : {}),
     deliveredThrough: recorded.reduce((end, event, index) => (ids.has(String(event.seq)) ? index + 1 : end), watch.seen),
+  };
+}
+
+/** Recover only a continuation whose enqueue is already durable before re-evaluating source policy. */
+export function reservedWatchDispatch(key: string): CommandWatchContinuation | undefined {
+  const snapshot = commandWatchRuntime().journal.read(key);
+  const receipt = snapshot?.deliveries.find((delivery) => delivery.status === 'pending' && delivery.continuationId);
+  if (!snapshot || snapshot.status === 'retired' || !receipt?.continuationId || !storedDescriptor(receipt.continuationId, 'work'))
+    return undefined;
+  const batch = snapshot.deliveries.filter((delivery) => delivery.continuationId === receipt.continuationId);
+  const ids = new Set(batch.flatMap((delivery) => delivery.eventIds));
+  const recorded = readWatchEvents(key);
+  return {
+    id: receipt.continuationId,
+    deliveredThrough: recorded.reduce((end, event, index) => (ids.has(String(event.seq)) ? index + 1 : end), 0),
+    plan: receipt.dispatchPlan ?? { disposition: 'continue', eventIds: [...ids], notes: [] },
   };
 }

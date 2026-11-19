@@ -1,14 +1,18 @@
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
-import type { CommandWatchOptions, CommandWatchState } from '../command.js';
+import type { CommandWatchOptions } from '../command.js';
 import type {
   WatchBatchObserver,
+  WatchEffectHandler,
+  WatchAutomation,
+  WatchDispatchPolicy,
   WatchContext,
   WatchFailure,
   WatchObservationBatch,
   WatchPresentation,
   WatchSchema,
   WatchSnapshot,
+  WatchValue,
 } from '../model.js';
 
 /** GitHub identity is canonical across report URLs, explicit keys and wharf reports. */
@@ -19,8 +23,16 @@ export interface PrWatchReference {
   key: string;
   url: string;
 }
-export type PrWatchSnapshot = WatchSnapshot<PrWatchReference, CommandWatchState, string, CommandWatchOptions>;
-export type PrWatchContext = WatchContext<PrWatchReference, CommandWatchState, string, CommandWatchOptions>;
+/** PR policy state retains each check’s consumed repair round independently of transport. */
+export interface PrWatchState {
+  checkRounds?: string[];
+}
+/** Only the source’s required legacy fields cross the one-time transport import. */
+export interface PrWatchOptions extends CommandWatchOptions {
+  legacy?: { checkRounds?: string[] };
+}
+export type PrWatchSnapshot = WatchSnapshot<PrWatchReference, PrWatchState, string, PrWatchOptions>;
+export type PrWatchContext = WatchContext<PrWatchReference, PrWatchState, string, PrWatchOptions>;
 
 /** Parse the historical key and URL spellings without querying GitHub. */
 export function parsePrWatchReference(input: string): PrWatchReference | undefined {
@@ -36,19 +48,22 @@ export function parsePrWatchReference(input: string): PrWatchReference | undefin
 
 /** Host services supply GitHub IO and existing evidence projections, never runtime policy. */
 export interface PrWatchServices {
+  effectHandler?: WatchEffectHandler<PrWatchReference>;
+  automation?: WatchAutomation<PrWatchReference, PrWatchState, string, PrWatchOptions>;
+  dispatchPolicy?: WatchDispatchPolicy<PrWatchReference, PrWatchState, string, PrWatchOptions>;
   observe(context: PrWatchContext): WatchObservationBatch<string>;
-  batchObserver: WatchBatchObserver<PrWatchReference, CommandWatchState, string, CommandWatchOptions>;
+  batchObserver: WatchBatchObserver<PrWatchReference, PrWatchState, string, PrWatchOptions>;
   present(snapshot: PrWatchSnapshot): WatchPresentation;
   failure(error: unknown): WatchFailure;
 }
 
 /** The PR source owns identity, observation, checkpoints, errors and instructions. */
-export class PrWatchType extends BaseWatchType<PrWatchReference, CommandWatchState, string, CommandWatchOptions> {
+export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, string, PrWatchOptions> {
   readonly descriptor = {
     id: 'pr',
     apiVersion: 1 as const,
-    stateVersion: 1,
-    version: '1.0.0',
+    stateVersion: 2,
+    version: '1.1.0',
     attentionKinds: [
       { kind: 'pr:draft', label: 'Draft', defaultEnabled: false },
       { kind: 'pr:review', label: 'Review', defaultEnabled: true },
@@ -60,12 +75,37 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, CommandWatchSta
   readonly bindings = [
     { event: 'explicit' as const, field: 'key' },
     { event: 'report' as const, field: 'pr' },
-    { event: 'legacy-command' as const, field: 'check', importsType: 'command', pattern: '\\bwatch check-pr\\s' },
+    { event: 'legacy-command' as const, field: 'check', importsType: 'command', pattern: '[\\s\\S]+' },
   ];
   private readonly command = new CommandWatchType();
-  readonly stateSchema = this.command.stateSchema;
+  readonly stateSchema: WatchSchema<PrWatchState> = {
+    json: { type: 'object', additionalProperties: false, properties: { checkRounds: { type: 'array', items: { type: 'string' } } } },
+    parse(value) {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => key !== 'checkRounds'))
+        throw new Error('Invalid PR watch policy state');
+      const rounds = (value as PrWatchState).checkRounds;
+      if (rounds !== undefined && (!Array.isArray(rounds) || rounds.some((round) => typeof round !== 'string')))
+        throw new Error('Invalid PR check rounds');
+      return rounds === undefined ? {} : { checkRounds: [...new Set(rounds)].slice(-100) };
+    },
+  };
   readonly cursorSchema = this.command.cursorSchema;
-  readonly optionsSchema = this.command.optionsSchema;
+  readonly optionsSchema: WatchSchema<PrWatchOptions> = {
+    json: {
+      ...this.command.optionsSchema.json,
+      properties: {
+        ...(this.command.optionsSchema.json.properties as Record<string, WatchValue>),
+        legacy: { type: 'object', properties: { checkRounds: { type: 'array', items: { type: 'string' } } } },
+      },
+    },
+    parse: (value) => {
+      const base = this.command.optionsSchema.parse(value);
+      const legacy = (value as { legacy?: unknown }).legacy;
+      if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) return base;
+      const rounds = this.stateSchema.parse({ checkRounds: (legacy as PrWatchState).checkRounds }).checkRounds;
+      return rounds ? { ...base, legacy: { checkRounds: rounds } } : base;
+    },
+  };
   readonly referenceSchema: WatchSchema<PrWatchReference> = {
     json: { type: 'object', required: ['key', 'owner', 'repo', 'number', 'url'] },
     parse(value) {
@@ -79,9 +119,15 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, CommandWatchSta
     },
   };
   readonly batchObserver: PrWatchServices['batchObserver'];
+  readonly effectHandler: PrWatchServices['effectHandler'];
+  readonly automation: PrWatchServices['automation'];
+  readonly dispatchPolicy: PrWatchServices['dispatchPolicy'];
   constructor(private readonly services: PrWatchServices) {
     super();
     this.batchObserver = services.batchObserver;
+    this.effectHandler = services.effectHandler;
+    this.automation = services.automation;
+    this.dispatchPolicy = services.dispatchPolicy;
   }
   identify(input: string): PrWatchReference | undefined {
     return parsePrWatchReference(input);
@@ -89,24 +135,32 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, CommandWatchSta
   key(reference: PrWatchReference): string {
     return reference.key;
   }
-  initialize(_reference: PrWatchReference, options: CommandWatchOptions) {
-    return { state: {}, cursor: options.cursor ?? '0' };
+  initialize(_reference: PrWatchReference, options: PrWatchOptions) {
+    return {
+      state: { ...(options.legacy?.checkRounds ? { checkRounds: options.legacy.checkRounds } : {}) },
+      cursor: options.cursor ?? '0',
+    };
   }
   restore(snapshot: WatchSnapshot): PrWatchSnapshot {
-    if (snapshot.type.apiVersion !== 1 || snapshot.type.stateVersion !== 1) throw new Error('PR watch state version is unsupported');
+    if (snapshot.type.apiVersion !== 1 || ![1, 2].includes(snapshot.type.stateVersion))
+      throw new Error('PR watch state version is unsupported');
+    const options = this.optionsSchema.parse(snapshot.options),
+      state = this.stateSchema.parse(snapshot.state);
+    const rounds = [...new Set([...(state.checkRounds ?? []), ...(options.legacy?.checkRounds ?? [])])].slice(-100);
     return {
       ...snapshot,
+      type: { ...this.descriptor },
       reference: this.referenceSchema.parse(snapshot.reference),
-      state: this.stateSchema.parse(snapshot.state),
+      state: rounds.length ? { checkRounds: rounds } : {},
       cursor: this.cursorSchema.parse(snapshot.cursor),
-      options: this.optionsSchema.parse(snapshot.options),
+      options,
     };
   }
   poll(context: PrWatchContext): WatchObservationBatch<string> {
     return this.services.observe(context);
   }
-  reduce(_snapshot: PrWatchSnapshot, batch: WatchObservationBatch<string>) {
-    return { state: {}, cursor: batch.cursor, done: batch.done === true };
+  reduce(snapshot: PrWatchSnapshot, batch: WatchObservationBatch<string>) {
+    return { state: snapshot.state, cursor: batch.cursor, done: batch.done === true };
   }
   present(snapshot: PrWatchSnapshot): WatchPresentation {
     return this.services.present(snapshot);

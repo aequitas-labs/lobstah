@@ -52,7 +52,7 @@ const readCycle = (repo: string): Cycle | undefined => {
   }
 };
 const repoOf = (ref: PrRef) => `${ref.owner}/${ref.repo}`;
-export const isPrPresetWatch = (w: Watch): boolean => !!parsePrRef(w.key) && /\bwatch check-pr\s/.test(w.check);
+export const isPrPresetWatch = (w: Pick<Watch, 'key' | 'check'>): boolean => !!parsePrRef(w.key) && /\bwatch check-pr\s/.test(w.check);
 export const prBatchInFlight = (key: string): boolean => {
   const ref = parsePrRef(key);
   return !!ref && fs.existsSync(`${cycleFile(repoOf(ref))}.lock`);

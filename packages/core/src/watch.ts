@@ -1,4 +1,4 @@
-import { pendingJournalWatchEvents } from './watch-presentation.js';
+import { pendingJournalWatchEvents, journalWatchViews } from './watch-presentation.js';
 import type { WatchPresentation, WatchRegistry, WatchSnapshot } from '@lobstah/watch-types';
 import { WatchRuntime } from './watch-runtime.js';
 import { watchSourceType } from './watch-source-registry.js';
@@ -235,7 +235,19 @@ export function addWatch(
  */
 export function holdWatch(key: string, now = new Date(), opts: { reason?: string; forId?: string; by?: string } = {}): Watch | undefined {
   const w = readWatch(key);
-  if (!w) return undefined;
+  if (!w) {
+    const journal = commandWatchRuntime().journal;
+    journal.update(key, (snapshot) => {
+      if (!snapshot || snapshot.status === 'retired') return { result: undefined };
+      const progress = snapshot.deliveryProgress ??= {};
+      progress.heldAt ??= now.toISOString();
+      if (opts.reason !== undefined) progress.heldReason = opts.reason;
+      if (opts.forId !== undefined) progress.heldFor = opts.forId;
+      if (opts.by !== undefined) progress.heldBy = opts.by;
+      return { snapshot, result: undefined };
+    });
+    return journalWatchViews().find((view) => view.watch.key === key)?.watch;
+  }
   if (w.heldAt && opts.reason === undefined && opts.forId === undefined && opts.by === undefined) return w;
   w.heldAt ??= now.toISOString();
   if (opts.reason !== undefined) w.heldReason = opts.reason;
@@ -248,13 +260,20 @@ export function holdWatch(key: string, now = new Date(), opts: { reason?: string
 /** Clear the hold on one watch, or on every held watch when key is undefined. Returns the released keys. */
 export function releaseHeldWatches(key?: string): string[] {
   const out: string[] = [];
-  for (const w of key === undefined ? listWatches() : [readWatch(key)].filter((x): x is Watch => x !== undefined)) {
+  const legacy = listWatches(), all = [...legacy, ...journalWatchViews(new Set(legacy.map((watch) => watch.key))).map((view) => view.watch)];
+  for (const w of key === undefined ? all : all.filter((watch) => watch.key === key)) {
     if (!w.heldAt) continue;
     w.heldAt = undefined;
     w.heldReason = undefined;
     w.heldFor = undefined;
     w.heldBy = undefined;
-    writeWatch(w);
+    if (readWatch(w.key)) writeWatch(w);
+    else commandWatchRuntime().journal.update(w.key, (snapshot) => {
+      if (!snapshot) return { result: undefined };
+      const progress = snapshot.deliveryProgress ??= {};
+      progress.heldAt = undefined; progress.heldReason = undefined; progress.heldFor = undefined; progress.heldBy = undefined;
+      return { snapshot, result: undefined };
+    });
     out.push(w.key);
   }
   return out;
@@ -262,7 +281,7 @@ export function releaseHeldWatches(key?: string): string[] {
 
 export function removeWatch(key: string): boolean {
   return withWatchLock(key, () => {
-    const existed = fs.existsSync(watchPath(key));
+    const existed = fs.existsSync(watchPath(key)) || commandWatchRuntime().journal.read(key)?.status !== undefined && commandWatchRuntime().journal.read(key)?.status !== 'retired';
     commandWatchRuntime().retire(key);
     fs.rmSync(watchPath(key), { force: true });
     fs.rmSync(eventsPath(key), { force: true });
@@ -270,16 +289,18 @@ export function removeWatch(key: string): boolean {
   });
 }
 
+function readStoredWatchEvents(key: string): WatchEvent[] {
+  try { return fs.readFileSync(eventsPath(key), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as WatchEvent); }
+  catch { return []; }
+}
+
+/** A journal-only type exposes its normalized events through the compatibility read API. */
 export function readWatchEvents(key: string): WatchEvent[] {
-  try {
-    return fs
-      .readFileSync(eventsPath(key), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((l) => JSON.parse(l) as WatchEvent);
-  } catch {
-    return [];
-  }
+  if (fs.existsSync(eventsPath(key))) return readStoredWatchEvents(key);
+  const snapshot = commandWatchRuntime().journal.read(key);
+  if (!snapshot || snapshot.status === 'retired') return [];
+  if (readWatch(key)) return commandWatchEvents(snapshot);
+  return snapshot.events.map((event) => ({ seq: event.id, kind: event.kind, summary: event.summary, at: event.at, data: event.data }));
 }
 
 /**
@@ -288,7 +309,7 @@ export function readWatchEvents(key: string): WatchEvent[] {
  * become duplicate delivery downstream. Returns what was actually new.
  */
 export function appendWatchEvents(key: string, events: WatchEvent[]): WatchEvent[] {
-  const seen = new Set(readWatchEvents(key).map((e) => String(e.seq)));
+  const seen = new Set(readStoredWatchEvents(key).map((e) => String(e.seq)));
   const fresh = events.filter((e) => { const id = String(e.seq); if (seen.has(id)) return false; seen.add(id); return true; });
   if (fresh.length > 0) {
     fs.appendFileSync(eventsPath(key), fresh.map((e) => JSON.stringify(e)).join('\n') + '\n');
@@ -493,7 +514,15 @@ export function pendingWatchEvents(
 /** Persist bookkeeping pick needs after spawning a continuation dispatch. */
 export function markFollowUp(key: string, followUpId: string, deliveredThrough: number): void {
   const w = readWatch(key);
-  if (!w) return;
+  if (!w) {
+    acknowledgeCommandWatch(key, readWatchEvents(key), deliveredThrough);
+    commandWatchRuntime().journal.update(key, (snapshot) => {
+      if (!snapshot) return { result: undefined };
+      snapshot.deliveryProgress = { ...snapshot.deliveryProgress, lastFollowUpId: followUpId, seenAt: Date.now() };
+      return { snapshot, result: undefined };
+    });
+    return;
+  }
   acknowledgeCommandWatch(key, readWatchEvents(key), deliveredThrough);
   w.lastFollowUpId = followUpId;
   w.seen = deliveredThrough;
@@ -505,8 +534,8 @@ export function markFollowUp(key: string, followUpId: string, deliveredThrough: 
 /** Consume PR watch events handled by the repair planner without a generic continuation. */
 export function markWatchSeen(key: string): void {
   const w = readWatch(key);
-  if (!w) return;
   const events = readWatchEvents(key);
+  if (!w) { acknowledgeCommandWatch(key, events, events.length); return; }
   acknowledgeCommandWatch(key, events, events.length);
   w.seen = events.length;
   w.seenAt = Date.now();
