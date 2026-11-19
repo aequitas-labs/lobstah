@@ -103,6 +103,8 @@ export interface GlassPrefs {
   chain: boolean;
   noticeKind: string;
   trapGroup?: TrapGrouping;
+  /** This viewer's remembered Reviews disclosure state. */
+  reviewSections?: { waiting?: boolean; done?: boolean };
 }
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
@@ -634,7 +636,7 @@ export interface SectionInputs {
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps']; groupBy?: TrapGrouping };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
-  reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[] };
+  reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[]; expanded?: GlassPrefs['reviewSections'] };
   notices: { list: Notice[] };
   foot: { version: string; repoUrl: string };
   modal: {
@@ -731,6 +733,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       list: reports,
     },
     reviews: {
+      expanded: st.reviewSections,
       view: st.view,
       list: reviews,
     },

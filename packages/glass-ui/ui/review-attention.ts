@@ -1,1 +1,1 @@
-export { reviewUnreadReason } from '../src/review-attention.js';
+export { reviewUnreadReason, reviewUpdating } from '../src/review-attention.js';
