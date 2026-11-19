@@ -238,6 +238,8 @@ export interface ReviewRound {
   autoPostRequestChanges?: ReviewAutoPost;
   /** An explicit Draft action started this job; automatic work cannot publish in on-demand mode. */
   onDemand?: boolean;
+  /** An automatic replacement draft must always wait for a publishing click. */
+  repairDraft?: boolean;
   /**
    * A person asked for this round's next draft (a redraft from the CLI or
    * the glass). The daily cap ([reviews].maxPerDay) bounds only the reviews
@@ -516,6 +518,7 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     ...(seen.pr.baseSha ? { baseSha: seen.pr.baseSha } : {}),
     ...(seen.pr.diffId ? { diffId: seen.pr.diffId } : {}),
     state: 'requested',
+    ...(prior && ['drafting', 'drafted', 'stale'].includes(latestRound(prior)?.state ?? '') ? { repairDraft: true } : {}),
     ...(latest && latest.headSha !== seen.pr.headSha ? { changesObservedAt: at } : {}),
     ...(seen.skip ? { reason: seen.skip } : {}),
   });
@@ -569,7 +572,7 @@ export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item:
       continue;
     }
     // A pending review remains actionable even after GitHub removes the request.
-    if (latest.staged || latest.localRequest || !OPEN_STATES.includes(latest.state)) continue;
+    if (latest.staged || latest.repairDraft || latest.localRequest || !OPEN_STATES.includes(latest.state)) continue;
     latest.state = 'withdrawn';
     latest.reason = 'the review request was removed';
     writeReview({ ...item, updatedAt: at });
@@ -874,7 +877,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
   for (const item of listReviews()) {
     if (clearFinishedReviewNotifications(item)) writeReview(item);
     const r = latestRound(item);
-    if (!r || r.wharf || (!r.reReview && r.state !== 'drafted') || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
+    if (!r || r.reason?.startsWith('stage failed') || r.wharf || (!r.reReview && r.state !== 'drafted') || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
     const generation = `${r.reReview?.headSha ?? ''}:${r.id}:${r.dispatch ?? ''}:${r.state}:${r.postedAt ?? r.draftedAt ?? r.headSha}`;
     if (r.notificationGeneration === generation) continue;
     r.notificationGeneration = generation;
@@ -897,7 +900,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
 
 /** Current repo policy can lower a round's publishing permission; it cannot upgrade a draft-only receipt. */
 export function reviewCanPublish(config: ReviewsConfig, repoKey: string | undefined, round: ReviewRound, verdict?: ReviewVerdict): boolean {
-  if (unansweredReviewDecisions(round).length) return false;
+  if (round.repairDraft || unansweredReviewDecisions(round).length) return false;
   const settings = reviewSettings(config, repoKey);
   const selected = verdict ?? round.verdict;
   const configured = selected === 'approve' ? settings.autoPostApprove : selected === 'request_changes' ? settings.autoPostRequestChanges : 'ask';

@@ -399,6 +399,8 @@ export interface GlassReview {
   draftedAt?: string;
   postedAt?: string;
   by?: string;
+  /** Automatic replacement drafts always wait for a publishing click. */
+  repairDraft?: boolean;
   /** The draft is staged on the PR as the identity's pending review. */
   staged?: boolean;
   /** The newest round's review job, when one ran: the card names the trap that has it. */

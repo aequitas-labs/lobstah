@@ -4169,3 +4169,36 @@ footer .glass-brand {
     min-width: 0;
   }
 }
+
+/* Reviews keep the stack order readable on narrow screens. */
+[data-review-section] {
+  margin-top: var(--space-4);
+}
+[data-review-section] > h2,
+[data-review-section] > summary {
+  margin-bottom: var(--space-4);
+}
+.review-group + .review-group {
+  margin-top: var(--space-4);
+}
+.review-group h3 {
+  margin: var(--space-4) 0 var(--space-2);
+}
+.review-stack-summary {
+  margin: 0 0 var(--space-4);
+  line-height: 1.6;
+}
+.review-group .cards {
+  gap: var(--space-4);
+}
+.rv-card {
+  padding: var(--space-4);
+  gap: var(--space-3);
+}
+.rv-card .gline {
+  gap: var(--space-3);
+}
+.rv-card .gactions {
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+}

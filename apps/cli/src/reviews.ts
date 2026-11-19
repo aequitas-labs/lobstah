@@ -88,6 +88,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       ...(r.by ? { by: r.by } : {}),
       ...(item.mutedAt ? { mutedAt: item.mutedAt } : {}),
       ...(r.staged ? { staged: true } : {}),
+      ...(r.repairDraft ? { repairDraft: true } : {}),
       ...(r.dispatch ? { dispatch: r.dispatch } : {}),
     });
   }

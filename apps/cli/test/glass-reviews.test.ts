@@ -94,17 +94,17 @@ describe('the Reviews tab', () => {
         return { status: 200, body: { ok: true } };
       },
     }); open.push(g);
-    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('3');
-    expect(g.$('.bbitem[href="#reviews"] .dbadge')?.textContent).toBe('3');
-    expect(g.$$('#reviews [data-review-unread]')).toHaveLength(3);
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
+    expect(g.$('.bbitem[href="#reviews"] .dbadge')?.textContent).toBe('2');
+    expect(g.$$('#reviews [data-review-unread]')).toHaveLength(2);
     expect(g.$('#reviews [data-review="review:acme/web#2919"] [data-review-unread]')).toBeNull();
     expect(g.$('#reviews [data-review="review:acme/web#7"] [data-review-unread]')?.textContent).toContain('draft ready');
     (g.$('#reviews [data-review="review:acme/web#7"]') as unknown as HTMLElement).click(); await g.settle();
-    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
     (g.$('.detail-close') as unknown as HTMLElement).click(); await g.settle();
-    expect(g.$$('#reviews [data-review-unread]')).toHaveLength(2);
+    expect(g.$$('#reviews [data-review-unread]')).toHaveLength(1);
     const reload = await loadGlass(GLASS_PAGE, snapshot(), { now: NOW, hash: '#reviews', prefs: { view } }); open.push(reload);
-    expect(reload.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
+    expect(reload.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
   });
   it.each(['cards', 'table'])('shows needs your call in %s until every decision has an answer', async view => {
     const r = review(7, { state: 'drafted', verdict: 'approve', decisions: REVIEW_DECISIONS });
@@ -281,7 +281,7 @@ describe('the Reviews tab', () => {
     expect(g.$$('.toast-content').map((status) => status.textContent)).toContain('Approved #7');
   });
 
-  it.each(['cards', 'table', 'detail'])('toasts a stale publish failure and offers re-drafting in %s', async (view) => {
+  it.each(['cards', 'table', 'detail'])('quietly updates after a stale publish failure in %s', async (view) => {
     const r = review(7, { state: 'drafted', verdict: 'request_changes' });
     const g = await loadGlass(GLASS_PAGE, { ...emptyFleet(), focusToken: 'tok', reviews: [r] }, {
       now: NOW, prefs: { view: view === 'table' ? 'table' : 'cards' },
@@ -295,17 +295,15 @@ describe('the Reviews tab', () => {
     const scope = () => g.$(view === 'detail' ? '.detail-frame' : '#reviews')!;
     const publish = [...scope().querySelectorAll('button')].find(b => b.textContent === 'Request changes')!;
     (publish as unknown as HTMLElement).click(); await g.settle();
-    expect(g.$$('.toast-content').map(t => t.textContent)).toEqual(['This draft is out of date. Re-draft it before publishing.']);
+    expect(g.$$('.toast-content')).toEqual([]);
+    r.state = 'stale';
+    g.serve({ ...emptyFleet(), focusToken: 'tok', reviews: [r] });
+    await g.poll();
     expect(scope().querySelector('[role="alert"]')).toBeNull();
     expect(scope().textContent).not.toContain(r.key);
-    if (view !== 'table') {
-      (scope().querySelector('.splitcaret') as unknown as HTMLElement).click(); await g.settle();
-    }
-    const redraft = [...scope().querySelectorAll('button')].find(b => b.textContent === 'Re-draft')!;
-    expect(redraft).toBeTruthy();
-    (redraft as unknown as HTMLElement).click(); await g.settle();
-    expect(g.posts().map(p => JSON.parse(p.body))).toContainEqual({ kind: 'review-redraft', payload: { key: r.key } });
-    expect(g.$$('.toast-content').map(t => t.textContent)).toContain('Draft requested');
+    expect(scope().textContent).toContain('updating');
+    expect([...scope().querySelectorAll('button')].some(button => button.textContent === 'Re-draft')).toBe(false);
+    expect(g.posts().map(p => JSON.parse(p.body).kind)).not.toContain('review-redraft');
   });
 
   it.each([
@@ -409,7 +407,7 @@ describe('the Reviews tab', () => {
     await g.go('#reviews');
     // A drafted round's chip says its draft is ready; every other state says itself.
     const chips = g.$$('#reviews .gstate .gchip').map((b) => b.textContent?.replace(/^● /, ''));
-    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'staged on GitHub' : state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : state);
+    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'stale' ? 'updating' : state === 'drafted' ? 'Ready to post' : state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : state);
     // The drafted round's card links its pending review; the others open the review tool.
     const drafted = 20 + REVIEW_ROUND_STATES.indexOf('drafted');
     const draftLink = g.$(`#reviews [data-review="review:acme/web#${drafted}"] .gactions a`)!;
@@ -500,9 +498,10 @@ describe('the Reviews tab', () => {
     expect(g.$('#tabs a[data-tab="reviews"]')?.textContent).toContain('Reviews');
     const rows = g.$$('#reviews tr.rowhead');
     expect(rows.map((r) => r.querySelector('td')?.textContent?.trim())).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
-    expect(rows[1]!.textContent).toContain('staged on GitHub');
-    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Publish comment', 'Re-draft', 'More actions', 'Mute this PR', 'Dismiss']);
-    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Re-draft', 'More actions', 'Mute this PR', 'Dismiss']);
+    expect(rows[1]!.textContent).toContain('Ready to post');
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Publish', 'Re-draft', 'More actions', 'Mute this PR', 'Dismiss']);
+    expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Mute this PR', 'Dismiss']);
+    expect(rows[2]!.textContent).toContain('updating');
     expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['More actions', 'Mute this PR']);
     (rows[1] as unknown as HTMLElement).click();
     await g.settle();
@@ -510,11 +509,11 @@ describe('the Reviews tab', () => {
     expect(g.posts().map(post => JSON.parse(post.body))).toEqual([{ kind: 'review-seen', payload: { key: 'review:acme/web#7' } }]);
     (g.$('.detail-close') as unknown as HTMLElement).click();
     await g.settle();
-    (rows[2]!.querySelector('button') as unknown as HTMLElement).click();
+    (rows[1]!.querySelectorAll('button')[1] as unknown as HTMLElement).click();
     await g.settle();
     const sent = g.posts().find((p) => JSON.parse(p.body).kind === 'review-redraft')!;
     expect(sent.headers['x-lobstah-token']).toBe('tok');
-    expect(JSON.parse(sent.body)).toEqual({ kind: 'review-redraft', payload: { key: 'review:acme/web#9' } });
+    expect(JSON.parse(sent.body)).toEqual({ kind: 'review-redraft', payload: { key: 'review:acme/web#7' } });
   });
 
   it('card mode shows the Reviews inbox and On Deck has no review cards', async () => {
@@ -726,4 +725,14 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
   open.push(reload);
   expect(reload.$('[data-review-section="waiting"]')!.hasAttribute('open')).toBe(true);
   expect(reload.$('[data-review-section="done"]')!.hasAttribute('open')).toBe(false);
+});
+
+
+it.each(['cards', 'table'])('shows quiet automatic repair without exposing staging errors in %s', async view => {
+  const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews: [review(7, { state: 'drafted', repairDraft: true, reason: 'stage failed: invalid line', verdict: 'comment' })] }, { now: NOW, hash: '#reviews', prefs: { view } });
+  open.push(g);
+  const content = g.$('#reviews')!;
+  expect(content.textContent).toContain('updating');
+  expect(content.textContent).not.toContain('stage failed');
+  expect([...content.querySelectorAll('button')].some(button => /^(?:Publish|Re-draft)/.test(button.textContent ?? ''))).toBe(false);
 });

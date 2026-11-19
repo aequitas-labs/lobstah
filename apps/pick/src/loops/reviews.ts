@@ -179,6 +179,7 @@ export async function reviewsLoop(
   }
   // On wharf grounds, a round is claimed (its document created) before it is drafted.
   if (wharf) await claimReviewDocs(log, w);
+  await repairReviewDrafts(gh, log);
   draftReviews(identity, log, now, undefined, { token, run: opts.run ?? runGraphql });
   if (!githubBlockedUntil(now)) await postOrStage(gh, log);
   for (const event of refreshReviewNotifications(now)) {
@@ -277,10 +278,28 @@ function settleSubmittedReview(item: ReviewItem, reviews: SearchPr['reviews']): 
     verdict: SUBMITTED_VERDICTS[submitted.state] });
 }
 
+/** Repair existing drafts without granting permission to publish them. */
+export async function repairReviewDrafts(gh: { now: number }, log: (m: string) => void = () => {}): Promise<void> {
+  for (const item of listReviews()) {
+    const r = latestRound(item);
+    if (!r || item.mutedAt || ['MERGED', 'CLOSED'].includes(item.pr.state ?? '')) continue;
+    const draft = r.state === 'drafted' ? readRoundDraft(item.key, r.id) : undefined;
+    const moved = draft && !('error' in draft) && !reviewDraftCoversHead(item, r, draft);
+    if (r.state !== 'stale' && !(r.state === 'drafted' && (moved || r.reason?.startsWith('stage failed')))) continue;
+    // Back off repeated staging failures rather than starting a job on every poll.
+    if (r.repairDraft && r.dispatchedAt && gh.now - Date.parse(r.dispatchedAt) < 30_000) continue;
+    const why = await redraftReviewRound(item.key, gh);
+    if (why) { log(`${item.key}: ${why}`); continue; }
+    const fresh = readReview(item.key)!;
+    latestRound(fresh)!.repairDraft = true;
+    writeReview(fresh);
+  }
+}
+
 /**
  * A fresh draft is staged pending or published with its verdict according to
- * the repo policy and the job's publishing receipt. Stale drafts and failed
- * attempts are not retried automatically.
+ * the repo policy and the job's publishing receipt. The next drafting pass
+ * repairs stale drafts and staging failures; publishing failures wait for a click.
  */
 async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
   for (const item of listReviews()) {
@@ -535,7 +554,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     const r = latestRound(item);
     if (!r) continue;
     // A round a person asked for (this Draft click, or a redraft) starts as a Draft click does, past the daily cap and in any mode.
-    const manual = manualKey !== undefined || r.byHand === true;
+    const manual = manualKey !== undefined || r.byHand === true || r.repairDraft === true;
     const settings = reviewSettings(cfg.reviews, item.pr.repoKey, manual);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
@@ -554,7 +573,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     }
 
     if (r.state === 'requested' && !r.dispatch) {
-      if (!manual && r.changesObservedAt && now - Date.parse(r.changesObservedAt) < 30_000) continue;
+      if (!manualKey && !r.byHand && r.changesObservedAt && now - Date.parse(r.changesObservedAt) < 30_000) continue;
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
       if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
       const cutoff = reviewAutomationCutoff(cfg.reviews, item.pr.repoKey, now);
@@ -594,10 +613,10 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: at });
       r.onDemand = manual;
       delete r.byHand;
-      r.publish = settings.publish;
-      r.draftOnly = !settings.publish;
-      r.autoPostApprove = settings.autoPostApprove;
-      r.autoPostRequestChanges = settings.autoPostRequestChanges;
+      r.publish = r.repairDraft ? false : settings.publish;
+      r.draftOnly = r.repairDraft || !settings.publish;
+      r.autoPostApprove = r.repairDraft ? 'ask' : settings.autoPostApprove;
+      r.autoPostRequestChanges = r.repairDraft ? 'ask' : settings.autoPostRequestChanges;
       delete r.reason;
       save();
       started++;

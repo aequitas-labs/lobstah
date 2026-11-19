@@ -307,21 +307,24 @@ failed round at the current head, on the next pick cycle, in any mode.
 **Staging and posting.** With `mode = "auto-draft"` or `publish = false` for an on-demand job, a
 fresh draft is staged on the PR as the identity's **pending review**:
 `POST /repos/{o}/{r}/pulls/{n}/reviews` with no event, `commit_id` set to the
-head the draft reviewed, the inline comments, and a body ending with
+head the draft reviewed, the inline comments, and a body carrying the hidden round marker
 `<!-- lobstah:review <round id> -->`. GitHub shows a pending review only to
 its author, so nothing is visible on the PR until the person opens it in
 their review tool (`[repos.<key>].reviewTool`), edits the draft there, and
 sends it, with whatever event they choose. When the request then disappears from the
 search, pick reads that review once: submitted marks the round `posted` (by
 `review tool`), deleted or dismissed dismisses it, and still pending keeps it in
-`lobstah reviews` and Glass with a “staged on GitHub” link. Previously withdrawn
+`lobstah reviews` and Glass as “Ready to post” with a Publish button. Previously withdrawn
 staged drafts return to the inbox when GitHub confirms they are still pending.
-A new draft reuses the configured identity’s existing pending review: the old
-body and inline comments stay, with the new summary and findings alongside them.
-The row explains that the existing review and comments were kept.
+A new draft reuses the configured identity’s existing pending review, replacing
+lobstah’s previous summary and findings while keeping handwritten text and inline
+comments. New PR changes and staging failures automatically trigger a replacement
+draft, including for on-demand reviews. Glass quietly shows “updating” during
+repair. Replacement drafts are always draft-only: they never publish or submit
+automatically, regardless of the repo’s publishing policy.
 
 With `mode = "auto-review"` (also legacy `post = "auto"`), pick publishes fresh drafts as REQUEST_CHANGES when there are blocking findings, otherwise COMMENT. An approve verdict is staged pending with a needs-you marker and always waits for the person’s Approve click; approval is never automatic. The glass Publish toggle selects draft or publish, including for on-demand jobs; the row action reads Review (draft) or Review (publish). The repo filter scopes both settings to `[repos.<key>.reviews]`, otherwise they change the global `[reviews]` default. Jobs started with publishing off stay draft-only even if the toggle changes later. Manual drafting respects `maxPerDay`, including retries of the same round. `lobstah reviews post <key>` explicitly sends a staged review as a
-comment review. The glass shows Approve, Request changes, or Publish comment according to the verdict; Approve posts APPROVE with the summary as the identity, only on the person’s explicit click. The glass shows requester names/avatars cached from the same authenticated search; workflow requests show the PR author with an automatic badge. Cards and rows open the configured review tool; drafted rounds link to their pending review. Skip (formerly Dismiss) means “Handle it yourself; removes lobstah’s draft”: it deletes any staged pending review without declining the request on GitHub. Redraft starts a stale round again. Every row action acknowledges and clears its notification and needs-you marker; opening a row only marks it seen and dims it. A stale draft is never staged or posted, including by hand. Publishing checks the live PR head immediately before submission; a changed or closed PR requires a new draft. Each round is staged at most once and posted at
+comment review. The glass shows Approve, Request changes, or Publish comment according to the verdict; Approve posts APPROVE with the summary as the identity, only on the person’s explicit click. The glass shows requester names/avatars cached from the same authenticated search; workflow requests show the PR author with an automatic badge. Cards and rows open the configured review tool; drafted rounds link to their pending review. Skip (formerly Dismiss) means “Handle it yourself; removes lobstah’s draft”: it deletes any staged pending review without declining the request on GitHub. Stale drafts are replaced automatically; Re-draft also starts a replacement by hand. Every row action acknowledges and clears its notification and needs-you marker; opening a row only marks it seen and dims it. A stale draft is never staged or posted, including by hand. Publishing checks the live PR head immediately before submission; a changed or closed PR requires a new draft. Each round is staged at most once and posted at
 most once: `staged.json` and `posted.json` in the round's directory are
 created with `wx` before the call and removed if it fails, and a review on
 the PR that already carries the round's marker is adopted (pending) or

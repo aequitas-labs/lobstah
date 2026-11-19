@@ -9,6 +9,7 @@ import { DetailFrame } from './detail-frame.js';
 import { Age, TrapName, reviewLink, stackNumbers } from './common.js';
 import { GitHubDescription, MarkdownElements } from './markdown.js';
 import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, prBadgeTags, StatusChip } from './prs.js';
+import { reviewUpdating } from '../review-attention.js';
 import { ReviewActions, markReviewOpened, reviewPrState, ReviewTags } from './reviews.js';
 import { ReviewDecisions } from './review-decisions.js';
 import { Button } from './button.js';
@@ -105,7 +106,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
     ${author && html`<div class=${'pr-view-person' + (asker === author ? ' rv-person' : '')}><${Avatar} url=${avatar} name=${authorName ?? author} size=${20} /><b>${authorName}</b></div>`}
     ${(data?.headRefName ?? p?.headRefName) && html`<div class="sub">${data?.headRefName ?? p?.headRefName} → ${data?.baseRefName ?? p?.baseRefName}${(data?.updatedAt ?? p?.updatedAt) && html` · updated ${Age(data?.updatedAt ?? p?.updatedAt)} ago`}</div>`}</header>
     ${p?.mergeRequest && html`<section><${MergeIntent} p=${p} /></section>`}
-    ${review?.reason && html`<p class="dim">${review.reason}</p>`}
+    ${review?.reason && !reviewUpdating(review) && html`<p class="dim">${review.reason}</p>`}
     ${review && html`<${ReviewDecisions} key=${[review.key, review.roundId, review.headSha, review.draftedAt].join(':')} review=${review} onSaving=${setDecisionSaving} />`}
     ${review && html`<${Findings} review=${review} />`}
     <section><h4>Description</h4><div class="pr-description">${data ? (data.bodyHtml ? html`<${GitHubDescription} source=${data.bodyHtml} openImage=${openLightbox} />` : html`<span class="dim">No description.</span>`) : html`<span class="dim">${loaded.key === prKey && loaded.error ? loaded.error : 'Loading description…'}</span>`}</div></section>

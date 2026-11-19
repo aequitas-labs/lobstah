@@ -145,7 +145,7 @@ function reviewBody(body: string, r: ReviewRound, decisions: ReviewDecision[]): 
  * review tool, edits it, and sends it from there. Nothing is posted. Once
  * per round: `staged.json` guards the write, and a pending review that
  * already carries the round's marker is adopted and updated instead of duplicated.
- * Existing body text and inline comments survive re-requests and redrafts.
+ * Handwritten text and comments survive; unchanged generated contributions are replaced.
  */
 export async function stageReview(key: string, opts: Opts = {}): Promise<{ staged: true; reviewId: string } | { staged: false; why: string }> {
   const c = context(key, opts);
@@ -169,15 +169,46 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
     const refused = postRefusal(key, r, 'cli');
     if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
     // GitHub allows one pending review per identity, across all request rounds.
-    // Keep its body and inline comments intact; put the new draft alongside them.
+    // Replace only known generated text; keep handwritten text and comments.
     const identity = loadConfig().reviews.identity?.toLowerCase();
     const pending = prior ?? (identity
       ? existing.find(review => review.state === 'PENDING' && review.user?.login.toLowerCase() === identity)
       : undefined);
     if (pending) {
+      const item = readReview(key)!;
+      let kept = pending.body ?? '';
+      const generatedBodies: string[] = [];
+      const generatedComments = new Set<string>();
+      // Exact matching also preserves edits made inside a generated summary.
+      for (const old of item.rounds) {
+        const memories = [...(old.previousReviews ?? [])];
+        const saved = readRoundDraft(key, old.id);
+        if (!('error' in saved)) memories.push({ ...saved, headSha: old.headSha, decisionAnswers: old.decisionAnswers });
+        for (const memory of memories) {
+          const generated = reviewBody(memory.body, { ...old, decisionAnswers: memory.decisionAnswers }, memory.decisions ?? []);
+          const comments = draftComments(memory);
+          const findings = comments.map(comment => `${comment.path}:${comment.line}\n\n${publishableBody(comment.body)}`).join('\n\n');
+          generatedBodies.push(generated, [generated, findings].filter(Boolean).join('\n\n'));
+          inlineComments(comments, old).forEach(comment => generatedComments.add(comment.body));
+        }
+      }
+      for (const body of generatedBodies.sort((a, b) => b.length - a.length)) kept = kept.replaceAll(body, '');
+      kept = kept.replace(/<!-- lobstah:pending:(?:start|end) -->/g, '');
+      const comments: Array<{ id: number; body: string }> = [];
+      for (let page = 1; ; page++) {
+        const batch = await github<Array<{ id: number; body: string }>>(f, token(), 'GET', `${base}/${pending.id}/comments?per_page=100&page=${page}`);
+        comments.push(...batch);
+        if (batch.length < 100) break;
+      }
+      for (const comment of comments) {
+        if (!generatedComments.has(comment.body)) continue;
+        const refused = postRefusal(key, r, 'cli');
+        if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
+        await github(f, token(), 'DELETE', `${base.replace(/\/\d+\/reviews$/, '')}/comments/${comment.id}`);
+      }
       const findings = draftComments(draft).map(comment => `${comment.path}:${comment.line}\n\n${publishableBody(comment.body)}`).join('\n\n');
-      const additions = [reviewBody(draft.body, r, draft.decisions), findings].filter(part => part && !pending.body?.includes(part));
-      const body = [pending.body, ...additions].filter(Boolean).join('\n\n---\n\n');
+      const generated = [reviewBody(draft.body, r, draft.decisions), findings].filter(Boolean).join('\n\n');
+      const body = [kept.trim().replace(/^(?:---\s*)+|(?:\s*---)+$/g, '').trim(), `<!-- lobstah:pending:start -->\n${generated}\n<!-- lobstah:pending:end -->`].filter(Boolean).join('\n\n');
       const refused = postRefusal(key, r, 'cli');
       if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
       if (body !== pending.body) await github(f, token(), 'PUT', `${base}/${pending.id}`, { body });
@@ -187,7 +218,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
       : pending ? pending.id : (
           await github<{ id: number }>(f, token(), 'POST', base, {
             commit_id: readReview(key)!.pr.headSha,
-            body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions),
+            body: `<!-- lobstah:pending:start -->\n${reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions)}\n<!-- lobstah:pending:end -->`,
             comments: inlineComments(draftComments(draft), r),
           })
         ).id;
@@ -197,8 +228,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
       r.id,
       (x) => {
         x.staged = { reviewId: String(id), at };
-        if (pending) x.reason = 'Your existing pending review and comments are kept alongside the new draft.';
-        else delete x.reason;
+        delete x.reason;
       },
       at,
     );
