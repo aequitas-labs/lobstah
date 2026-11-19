@@ -100,7 +100,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
           ? 'Review required'
           : '';
   return html`<${DetailFrame} identity=${identity} open=${open} footer=${footer} onPrevious=${previous} onNext=${next}>
-    ${members.length > 1 && html`<nav aria-label="Review stack"><${Button} disabled=${!previous} onClick=${previous}>← Previous<//> <span>${position + 1} of ${members.length}</span> <${Button} disabled=${!next} onClick=${next}>Next →<//></nav>`}
+    ${members.length > 1 && html`<nav class="rv-stack-nav" aria-label="Review stack"><${Button} disabled=${!previous} onClick=${previous}>← Previous<//> <span>${position + 1} of ${members.length}</span> <${Button} disabled=${!next} onClick=${next}>Next →<//></nav>`}
     <header class="pr-view-head"><h2>${review && html`<${PrStateIcon} state=${reviewPrState(review, draft)} /> `}${LinkedText(title ?? `${repo}#${number}`)}</h2><div class="pr-view-chips">${review ? html`<${ReviewTags} r=${review} state=${state ? lifecycle : reviewPrState(review, draft)} />` : html`<${PrTags} state=${lifecycle} tags=${p ? prBadgeTags(p) : []} />`}${p?.state === 'OPEN' && p.gate && StatusChip(p.gate, 'warn')}</div>
     ${author && html`<div class=${'pr-view-person' + (asker === author ? ' rv-person' : '')}><${Avatar} url=${avatar} name=${authorName ?? author} size=${20} /><b>${authorName}</b></div>`}
     ${(data?.headRefName ?? p?.headRefName) && html`<div class="sub">${data?.headRefName ?? p?.headRefName} → ${data?.baseRefName ?? p?.baseRefName}${(data?.updatedAt ?? p?.updatedAt) && html` · updated ${Age(data?.updatedAt ?? p?.updatedAt)} ago`}</div>`}</header>
