@@ -38,7 +38,7 @@ function object(value: unknown): Record<string, unknown> {
 export class UmeWatchType extends BaseWatchType<UmeWatchReference, UmeWatchState, string, UmeWatchOptions> {
   readonly commands: WatchCommandPolicy | undefined;
   readonly registration: WatchRegistrationPolicy | undefined;
-  readonly descriptor = { id: 'ume', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
+  readonly descriptor = { id: 'ume', keyPrefix: 'ume:', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
   readonly bindings = [
     { event: 'explicit' as const, field: 'key', pattern: '^ume:' },
     { event: 'report' as const, field: 'link' },

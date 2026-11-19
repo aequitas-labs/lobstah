@@ -22,3 +22,5 @@ export * from './plugin.js';
 export * from './plugin-server.js';
 
 export * from './deployment/index.js';
+
+export { builtinAttentionKinds, builtinDefaultAttentionKinds } from './adapters/metadata.js';

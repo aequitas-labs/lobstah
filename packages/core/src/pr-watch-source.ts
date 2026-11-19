@@ -1,3 +1,5 @@
+import { prAcknowledgements } from './pr-acknowledgements.js';
+import { prTodoTriggers } from './pr-todo.js';
 import { spawnSync } from 'node:child_process';
 import { PrWatchType, CommandWatchType, parseCommandWatchBatch, WatchCommandError } from '@lobstah/watch-types';
 import type { PrWatchServices } from '@lobstah/watch-types';
@@ -105,6 +107,8 @@ function presentPrSnapshot(snapshot: PrWatchSnapshot): WatchPresentation {
 
 /** Composition lives beside the source; the generic runtime has no GitHub branches. */
 export interface PrWatchSourceOptions {
+  acknowledgements?: PrWatchServices['acknowledgements'];
+  triggers?: PrWatchServices['triggers'];
   commands?: PrWatchServices['commands'];
   registration?: PrWatchServices['registration'];
   run?: PrBatchRun;
@@ -115,6 +119,8 @@ export interface PrWatchSourceOptions {
 
 export function createPrWatchType(options: PrWatchSourceOptions = {}): PrWatchType {
   return new PrWatchType({
+    acknowledgements: options.acknowledgements ?? prAcknowledgements(),
+    triggers: options.triggers ?? prTodoTriggers(),
     commands: options.commands,
     registration: options.registration,
     noticePolicy: { kinds: [], current: () => true, relatedDispatches(notice) {

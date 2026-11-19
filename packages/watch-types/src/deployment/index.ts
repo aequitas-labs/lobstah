@@ -18,7 +18,7 @@ export * from './fixture.js';
 /** Fixture-backed source policy runs unchanged in a local registry or the process host. */
 export class DeploymentWatchType extends BaseWatchType<DeploymentReference, DeploymentState, number, DeploymentOptions> {
   readonly descriptor = {
-    id: 'deployment',
+    id: 'deployment', keyPrefix: 'deployment:',
     apiVersion: 1 as const,
     stateVersion: 1,
     version: '1.0.0',

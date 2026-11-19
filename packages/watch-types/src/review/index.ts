@@ -30,7 +30,7 @@ export interface ReviewWatchServices {
 /** Remote reconciliation is an authorized effect; local observation remains read-only. */
 export class ReviewWatchType extends BaseWatchType<ReviewWatchReference, ReviewWatchState, string, ReviewWatchOptions> {
   readonly descriptor = {
-    id: 'review-requests',
+    id: 'review-requests', keyPrefix: 'review-requests:',
     apiVersion: 1 as const,
     stateVersion: 1,
     version: '1.0.0',

@@ -56,7 +56,7 @@ describe('reading --when', () => {
     expect(parseTodoTrigger('card:decision:ab12cd34')).toEqual({ kind: 'card', key: 'decision:ab12cd34' });
     expect(parseTodoTrigger('card:ab12cd34')).toEqual({ kind: 'card', key: 'decision:ab12cd34' });
     expect(parseTodoTrigger('dispatch:d1 needs-decision')).toEqual({ kind: 'dispatch', id: 'd1', verb: 'needs-decision' });
-    expect(parseTodoTrigger('pr:o/r#7 merged')).toEqual({ kind: 'pr', key: 'pr:o/r#7', on: 'merged' });
+    expect(parseTodoTrigger('pr:o/r#7 merged')).toEqual({ kind: 'watch', typeId: 'pr', key: 'pr:o/r#7', on: 'merged' });
     expect(parseTodoTrigger('trap:early-pebble free')).toMatchObject({ kind: 'trap', name: 'early-pebble' });
   });
 

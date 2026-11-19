@@ -1,4 +1,4 @@
-import { parsePrRef, prFixBrief, readWatch } from '@lobstah/core';
+import { parsePrRef, prFixBrief, readWatch, prTodoTriggers, readPr, upsertPr, prEvidence, ghPrViewDirect } from '@lobstah/core';
 import type { WatchRegistrationPolicy } from '@lobstah/watch-types';
 import { prCheckCommand } from '../pr-watch.js';
 import { prWatchEffects } from '../pr-watch-effects.js';
@@ -32,4 +32,14 @@ export function prRegistration(log: (message: string) => void): WatchRegistratio
       if (phase === 'after-observe') prWatchEffects(Date.parse(now), log);
     },
   };
+}
+
+/** Provider refresh and todo instructions stay with the adapter. */
+export function prTriggerServices() {
+  return { ...prTodoTriggers(), prepare({ key }: { key: string; on: string }) {
+    const reference = parsePrRef(key)!;
+    if (readWatch(key) && readPr(key)) return;
+    try { upsertPr(prEvidence(reference, ghPrViewDirect(reference), new Date().toISOString())); }
+    catch (error) { throw new Error(`GitHub can't read ${key}: ${error instanceof Error ? error.message : String(error)}`); }
+  } };
 }

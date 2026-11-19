@@ -29,6 +29,8 @@ export interface WatchPluginInstallation {
 export interface WatchTypeDescriptor {
   installation?: WatchPluginInstallation;
   id: string;
+  /** Canonical key namespace; absent on older installations and arbitrary command transports. */
+  keyPrefix?: string;
   apiVersion: 1;
   stateVersion: number;
   version: string;
@@ -76,6 +78,25 @@ export interface WatchCommandRequest {
 export interface WatchCommandPolicy {
   bindings: ReadonlyArray<{ name: string; pattern?: string }>;
   run(request: WatchCommandRequest): string;
+}
+
+/** Todo conditions are parsed and read by the source that owns their records. */
+export interface WatchTriggerReference { key: string; on: string }
+export type WatchTriggerReading = { state: 'waiting' } | { state: 'lost' } | { state: 'met'; as: string };
+export interface WatchTriggerPolicy {
+  parse(subject: string, condition?: string): WatchTriggerReference | undefined;
+  read(reference: WatchTriggerReference, since: string): WatchTriggerReading;
+  prepare?(reference: WatchTriggerReference): void;
+  needsWatch?(reference: WatchTriggerReference): boolean;
+  watchNote?(reference: WatchTriggerReference): string;
+}
+
+/** A source can retain an acknowledgement through a stable revision or own an older item key. */
+export interface WatchAcknowledgement { key: string; kind: string; stateHash: string }
+export interface WatchAcknowledgementPolicy {
+  patterns: readonly string[];
+  exists(key: string, culling: readonly string[]): boolean | undefined;
+  retain(acknowledgement: WatchAcknowledgement, standing: WatchValue | undefined): boolean;
 }
 
 /** Provider IDs are stable across polling, streaming and reconnects. */

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import { decisionDir, readDecision, readDecisionAnswer } from './decisions.js';
-import { parsePrRef } from './pr.js';
-import { readPr } from './prs.js';
+import { builtinWatchRegistry } from './watch-source-registry.js';
+import type { WatchRegistry, WatchTriggerReading } from '@lobstah/watch-types';
 import { readRoster, rosterByAddress } from './roster.js';
 import { readTrap, trapByAddress } from './soak.js';
 import { readStatusLog } from './status.js';
@@ -12,19 +12,19 @@ import { laneOf } from './worktrees.js';
 /**
  * Todo triggers: what `--when` reads, whether lobstah can observe it, and
  * whether it has come true. A check reads only the local record a trigger
- * names, so it makes no GitHub calls and adds no watches.
+ * names. Provider preparation and watch creation happen only when adding a todo.
  */
 
 /** The dispatch verbs a trigger can wait on. */
 const DISPATCH_VERBS = ['done', 'blocked', 'needs-decision', 'failed'] as const;
-const PR_CONDITIONS = ['merged', 'closed', 'green'] as const;
 const DISPATCH_ID = /^[A-Za-z0-9._-]+$/;
 
 /** What a check found: not yet, true and how, or its record is gone. */
-export type TriggerReading = { state: 'waiting' } | { state: 'met'; as: string } | { state: 'lost' };
+export type TriggerReading = WatchTriggerReading;
 
 function refuseUnobservable(subject: string): never {
-  throw new TodoError(`lobstah can't observe "${subject}": it watches card:, dispatch:, pr: and trap:`);
+  const prefixes = builtinWatchRegistry().list().filter(source => source.triggers).map(source => source.descriptor.keyPrefix ?? `${source.descriptor.id}:`);
+  throw new TodoError(`lobstah can't observe "${subject}": it watches ${['card:', 'dispatch:', ...prefixes].join(', ')} and trap:`);
 }
 
 function isOneOf<T extends string>(values: readonly T[], value: string | undefined): value is T {
@@ -50,15 +50,16 @@ export function parseTodoTrigger(input: string): TodoTriggerTarget {
     if (!isOneOf(DISPATCH_VERBS, condition)) throw new TodoError(`"${subject}" needs a verb to wait on: ${DISPATCH_VERBS.join(', ')}`);
     return { kind: 'dispatch', id: name, verb: condition };
   }
-  if (kind === 'pr') {
-    const ref = parsePrRef(subject);
-    if (!ref) throw new TodoError(`not a PR reference: "${subject}": use pr:<owner>/<repo>#<number>`);
-    if (!isOneOf(PR_CONDITIONS, condition)) throw new TodoError(`"${subject}" needs a condition to wait on: ${PR_CONDITIONS.join(', ')}`);
-    return { kind: 'pr', key: ref.key, on: condition };
-  }
   if (kind === 'trap') {
     if (condition !== 'free') throw new TodoError(`"${subject}" needs the condition it waits on: free`);
     return { kind: 'trap', trapId: '', name };
+  }
+  for (const source of builtinWatchRegistry().list()) {
+    if (!source.triggers || !subject.startsWith(source.descriptor.keyPrefix ?? `${source.descriptor.id}:`)) continue;
+    try {
+      const reference = source.triggers.parse(subject, condition);
+      if (reference) return { kind: 'watch', typeId: source.descriptor.id, key: reference.key, on: reference.on };
+    } catch (error) { throw new TodoError(error instanceof Error ? error.message : String(error)); }
   }
   return refuseUnobservable(subject);
 }
@@ -88,7 +89,7 @@ export function resolveTodoTrigger(target: TodoTriggerTarget): TodoTriggerTarget
 export function todoTriggerLabel(target: TodoTriggerTarget): string {
   if (target.kind === 'card') return `card:${target.key}`;
   if (target.kind === 'dispatch') return `dispatch:${target.id} ${target.verb}`;
-  if (target.kind === 'pr') return `${target.key} ${target.on}`;
+  if ('on' in target) return `${target.key} ${target.on}`;
   return `trap:${target.name} free`;
 }
 
@@ -103,17 +104,13 @@ function dispatchReached(id: string, verb: string, createdAt: string): TriggerRe
   return reported ? { state: 'met', as: verb } : { state: 'waiting' };
 }
 
-/** A merge wait ends on either terminal PR outcome; green requires readable, passing checks. */
-function prReached(key: string, on: 'merged' | 'closed' | 'green'): TriggerReading {
-  const pr = readPr(key);
-  if (!pr) return { state: 'lost' };
-  if (on === 'merged') {
-    if (pr.state === 'MERGED') return { state: 'met', as: 'merged' };
-    return pr.state === 'CLOSED' ? { state: 'met', as: 'closed without merging' } : { state: 'waiting' };
-  }
-  if (on === 'closed') return pr.state === 'CLOSED' ? { state: 'met', as: 'closed' } : { state: 'waiting' };
-  const { total, failed, pending, unknown } = pr.checks;
-  return total > 0 && failed === 0 && pending === 0 && unknown === undefined ? { state: 'met', as: 'green' } : { state: 'waiting' };
+/** Older keyed triggers retain their source ID; new ones store it explicitly. */
+export function watchTodoTrigger(target: TodoTriggerTarget, registry: WatchRegistry = builtinWatchRegistry()) {
+  if (!('on' in target)) return undefined;
+  try {
+    const source = registry.get(target.kind === 'watch' ? target.typeId : target.kind);
+    return source.triggers ? { source, policy: source.triggers, reference: { key: target.key, on: target.on } } : undefined;
+  } catch { return undefined; }
 }
 
 /** Whether a trap is signed on and free. A stowed one is only waiting; a forgotten one is gone. */
@@ -131,7 +128,7 @@ export function readTodoTrigger(target: TodoTriggerTarget, createdAt: string): T
     return dir && fs.existsSync(dir) ? { state: 'waiting' } : { state: 'met', as: 'withdrawn' };
   }
   if (target.kind === 'dispatch') return dispatchReached(target.id, target.verb, createdAt);
-  if (target.kind === 'pr') return prReached(target.key, target.on);
+  if ('on' in target) return watchTodoTrigger(target)?.policy.read({ key: target.key, on: target.on }, createdAt) ?? { state: 'waiting' };
   return trapReached(target.trapId);
 }
 

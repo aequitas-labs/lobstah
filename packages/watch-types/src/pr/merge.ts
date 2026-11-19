@@ -25,7 +25,7 @@ export interface PrMergeWatchServices {
 
 /** A standing merge authorization outlives the PR’s observation watch and retargets its successors. */
 export class PrMergeWatchType extends BaseWatchType<PrWatchReference, PrMergeWatchState, string, PrMergeWatchOptions> {
-  readonly descriptor = { id: 'pr-merge', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
+  readonly descriptor = { id: 'pr-merge', keyPrefix: 'pr-merge:', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
   readonly bindings = [{ event: 'local' as const, field: 'pr.mergeRequest' }];
   private readonly command = new CommandWatchType();
   readonly referenceSchema = prWatchReferenceSchema;

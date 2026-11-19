@@ -69,11 +69,13 @@ In this repository import `@lobstah/watch-types`. Installed adapters can import
 stdio runner. Keep the adapter separate from its executable entry point so the
 same history can run in both hosts.
 
+Every typed adapter declares its canonical `keyPrefix`; aliases in its bindings may accept other input spellings. The command transport declares an empty prefix to preserve arbitrary user keys. The host checks canonical identity at registration and restore.
+
 Every adapter supplies these methods:
 
 | Method or declaration | Responsibility |
 | --- | --- |
-| `descriptor` | Stable type ID, API major, adapter release, state version and attention names. |
+| `descriptor` | Canonical `keyPrefix`, stable type ID, API major, adapter release, state version and attention names. |
 | `bindings` | Explicit reference patterns and any supported legacy registration imports. |
 | `referenceSchema`, `optionsSchema`, `stateSchema`, `cursorSchema` | JSON schemas and matching parsers. |
 | `identify`, `key`, `initialize` | Validate a reference, derive its canonical key and initialize progress. |
@@ -105,7 +107,7 @@ import { DeploymentWatchType } from './deployment.js';
 await serveWatchPlugin(new DeploymentWatchType());
 ```
 
-Presentation is a validated data object, including worker and helm steps, optional
+Presentation is a validated data object. Attention display data also declares its card family, shared identity and links, so mirrors need no provider prefix checks. It includes worker and helm steps, optional
 read commands, human attention cards and glass rows. It cannot provide JavaScript,
 HTML callbacks or arbitrary UI components. Consumers render the recorded object
 without knowing the provider's type. Optional read commands are displayed as
@@ -133,6 +135,17 @@ must grant each optional capability with `allowCapabilities`; the default is
   installed adapter; a replacement source supplies its own handlers. Configuration
   must grant `commands` before the host calls `watch.command`. Ambiguous handlers
   fail before either runs.
+- `triggers`: the source parses todo conditions and reads them from its cached
+  records. `parse(subject, condition)` returns `{ key, on }`; `read(reference,
+  since)` returns `waiting`, `lost`, or `met` with its outcome in `as`. Optional
+  `prepare`, `needsWatch` and `watchNote` hooks refresh a source before a todo is
+  stored and register a needed watch afterward. Existing PR trigger records remain
+  readable; new source triggers store their installed type ID.
+- `acknowledgements`: declared key `patterns` select optional `exists(key, culling)` and `retain(ack, standing)`
+  rules preserve source-owned legacy item keys and stable acknowledgements. Return
+  `undefined` from `exists` for another source's key. These rules read cached data;
+  they do not poll the provider. Ordinary source attention uses its journal and
+  supplied state hash without this capability.
 - `batch`: the source groups compatible checks and returns a batch or failure for
   each requested key. Shared rate limits belong here.
 - `subscribe`: an async iterable yields the same batches as `poll`. The host

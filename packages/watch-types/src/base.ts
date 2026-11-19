@@ -1,4 +1,6 @@
 import type {
+  WatchAcknowledgementPolicy,
+  WatchTriggerPolicy,
   WatchCommandPolicy,
   WatchRegistrationPolicy,
   WatchCloseReason,
@@ -29,6 +31,8 @@ export abstract class BaseWatchType<Reference, State, Cursor, Options> {
   abstract readonly cursorSchema: WatchSchema<Cursor>;
   abstract readonly optionsSchema: WatchSchema<Options>;
   /** Optional capabilities are composed with the required source contract. */
+  readonly acknowledgements?: WatchAcknowledgementPolicy;
+  readonly triggers?: WatchTriggerPolicy;
   readonly commands?: WatchCommandPolicy;
   readonly registration?: WatchRegistrationPolicy;
   readonly subscriber?: WatchSubscriber<Reference, State, Cursor, Options>;

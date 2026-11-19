@@ -1,6 +1,6 @@
 import * as readline from 'node:readline';
 import type { BaseWatchType } from './base.js';
-import type { WatchCommandRequest, WatchRegistrationRequest, WatchCloseReason, WatchContext, WatchSnapshot, WatchValue } from './model.js';
+import type { WatchAcknowledgement, WatchTriggerReference, WatchCommandRequest, WatchRegistrationRequest, WatchCloseReason, WatchContext, WatchSnapshot, WatchValue } from './model.js';
 import {
   pluginDto,
   validateWatchFailure,
@@ -23,6 +23,8 @@ export function watchPluginManifest<Reference, State, Cursor, Options>(
   options: WatchPluginServerOptions = {},
 ): WatchPluginManifest {
   const capabilities: WatchPluginManifest['capabilities'] = {};
+  if (adapter.acknowledgements) capabilities.acknowledgements = { patterns: [...adapter.acknowledgements.patterns] };
+  if (adapter.triggers) capabilities.triggers = true;
   if (adapter.commands) capabilities.commands = { bindings: [...adapter.commands.bindings] };
   if (adapter.registration) capabilities.registration = true;
   if (adapter.batchObserver) capabilities.batch = true;
@@ -88,6 +90,28 @@ export async function serveWatchPlugin<Reference, State, Cursor, Options>(
     switch (request.method) {
       case 'watch.handshake':
         return pluginDto(manifest);
+      case 'watch.acknowledgement.exists':
+        if (!adapter.acknowledgements) throw new Error('Watch plugin acknowledgement capability is unavailable');
+        return adapter.acknowledgements.exists(String(body.key), body.culling as string[]) ?? null;
+      case 'watch.acknowledgement.retain':
+        if (!adapter.acknowledgements) throw new Error('Watch plugin acknowledgement capability is unavailable');
+        return adapter.acknowledgements.retain(body.acknowledgement as unknown as WatchAcknowledgement, body.standing as WatchValue | undefined);
+      case 'watch.trigger.parse':
+        if (!adapter.triggers) throw new Error('Watch plugin trigger capability is unavailable');
+        return pluginDto(adapter.triggers.parse(String(body.subject), body.condition === undefined ? undefined : String(body.condition)) ?? null);
+      case 'watch.trigger.read':
+        if (!adapter.triggers) throw new Error('Watch plugin trigger capability is unavailable');
+        return pluginDto(adapter.triggers.read(body.reference as unknown as WatchTriggerReference, String(body.since)));
+      case 'watch.trigger.prepare':
+        if (!adapter.triggers) throw new Error('Watch plugin trigger capability is unavailable');
+        adapter.triggers.prepare?.(body.reference as unknown as WatchTriggerReference);
+        return null;
+      case 'watch.trigger.needsWatch':
+        if (!adapter.triggers) throw new Error('Watch plugin trigger capability is unavailable');
+        return adapter.triggers.needsWatch?.(body.reference as unknown as WatchTriggerReference) ?? true;
+      case 'watch.trigger.note':
+        if (!adapter.triggers) throw new Error('Watch plugin trigger capability is unavailable');
+        return adapter.triggers.watchNote?.(body.reference as unknown as WatchTriggerReference) ?? '';
       case 'watch.command': {
         if (!adapter.commands) throw new Error('Watch plugin command capability is unavailable');
         const command = body.request as unknown as WatchCommandRequest;

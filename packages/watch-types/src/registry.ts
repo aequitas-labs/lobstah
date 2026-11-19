@@ -1,5 +1,7 @@
 import { BaseWatchType } from './base.js';
 import type {
+  WatchAcknowledgementPolicy,
+  WatchTriggerPolicy,
   WatchCommandPolicy,
   WatchRegistrationPolicy,
   WatchSnapshot,
@@ -24,6 +26,8 @@ import type {
 
 /** Runtime type erasure happens only after each adapter validates its own schemas. */
 export interface InstalledWatchType {
+  acknowledgements?: WatchAcknowledgementPolicy;
+  triggers?: WatchTriggerPolicy;
   commands?: WatchCommandPolicy;
   registration?: WatchRegistrationPolicy;
   descriptor: WatchTypeDescriptor;
@@ -76,6 +80,7 @@ export class WatchRegistry {
       (!['sync', 'async'].includes(adapter.effectHandler.execution) || typeof adapter.effectHandler.execute !== 'function')
     )
       throw new Error('Watch effect handler must declare its execution mode');
+    if (adapter.descriptor.keyPrefix !== undefined && !/^(?:[a-z][a-z0-9.-]*:)?$/.test(adapter.descriptor.keyPrefix)) throw new Error('Invalid watch key prefix');
     const kindNames = new Set(this.attentionKinds().map((kind) => kind.kind));
     for (const kind of adapter.descriptor.attentionKinds ?? []) {
       if (!kind.kind || !kind.label || typeof kind.defaultEnabled !== 'boolean' || kindNames.has(kind.kind))
@@ -87,12 +92,16 @@ export class WatchRegistry {
       if (snapshot.type.id !== id || snapshot.type.apiVersion !== apiVersion || snapshot.type.stateVersion > stateVersion)
         throw new Error(`Unsupported stored watch type version: ${snapshot.type.id}`);
       const restored = adapter.restore(structuredClone(snapshot));
+      if (restored.key !== snapshot.key || adapter.key(restored.reference) !== snapshot.key) throw new Error('Watch restore changed its durable key');
+      if (adapter.descriptor.keyPrefix && !snapshot.key.startsWith(adapter.descriptor.keyPrefix)) throw new Error('Watch key is outside its declared prefix');
       if (restored.type.stateVersion !== stateVersion) throw new Error(`Watch state migration is incomplete: ${id}`);
       return restored;
     };
     this.types.set(id, {
       descriptor: { ...adapter.descriptor },
       bindings: adapter.bindings,
+      ...(adapter.acknowledgements ? { acknowledgements: adapter.acknowledgements } : {}),
+      ...(adapter.triggers ? { triggers: adapter.triggers } : {}),
       ...(adapter.commands ? { commands: adapter.commands } : {}),
       ...(adapter.registration ? { registration: adapter.registration } : {}),
       ...(adapter.noticePolicy ? { noticePolicy: adapter.noticePolicy } : {}),
@@ -155,9 +164,11 @@ export class WatchRegistry {
         const identified = adapter.identify(input, parsed);
         if (identified === undefined) return undefined;
         const reference = adapter.referenceSchema.parse(identified);
+        const key = adapter.key(reference);
+        if (adapter.descriptor.keyPrefix && !key.startsWith(adapter.descriptor.keyPrefix)) throw new Error('Watch key is outside its declared prefix');
         const initial = adapter.initialize(reference, parsed);
         return {
-          key: adapter.key(reference),
+          key,
           reference: watchJson(reference),
           state: watchJson(adapter.stateSchema.parse(initial.state)),
           cursor: watchJson(adapter.cursorSchema.parse(initial.cursor)),

@@ -53,7 +53,7 @@ export interface StackWatchServices {
 /** Normalize the local PR graph into one durable stack view. */
 export class StackWatchType extends BaseWatchType<StackWatchReference, StackWatchState, string, StackWatchOptions> {
   readonly descriptor = {
-    id: 'stack',
+    id: 'stack', keyPrefix: 'stack:',
     apiVersion: 1 as const,
     stateVersion: 1,
     version: '1.0.0',

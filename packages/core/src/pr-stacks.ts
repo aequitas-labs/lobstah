@@ -174,8 +174,4 @@ export { readStackEpochs, stackText, stackStateHash, identifyPrStacks } from './
 /** Compatibility callers reconcile through the derived stack adapter. */
 export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void { syncDerivedStackWatches(cfg, now); }
 
-export function repoKey(cfg: Config, forgeRepo: string): string {
-  return Object.entries(cfg.repos).find(([, r]) =>
-    r.origin?.replace(/\.git$/, '').endsWith(`/${forgeRepo}`) ||
-    r.origin?.replace(/\.git$/, '') === `git@github.com:${forgeRepo}`)?.[0] ?? forgeRepo;
-}
+export { repoKey } from './repo-key.js';

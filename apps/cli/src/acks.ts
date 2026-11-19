@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome, parsePrRef, prStandingKinds, readEvidence, readPr, readStackEpochs, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
-import type { Lane, PrEvidence } from '@lobstah/core';
+import { uniqueTempPath, atomicRenameSync, laneDirs, lobstahHome, builtinWatchRegistry, WatchJournal, watchConditionKey, readDecision, readDecisionAnswer, readReport, readWatch, statusStateHash } from '@lobstah/core';
+import type { Lane } from '@lobstah/core';
 import { hostedItemExists, isHostedKey } from './hosted-view.js';
 
 /**
@@ -92,7 +92,7 @@ export { statusStateHash };
  * check does not re-stand it. Other kinds still hash their evidence as before.
  */
 export { prStateHash } from '@lobstah/core';
-import { prStateHash, prReadyStateHash } from '@lobstah/core';
+
 
 /** The ack an item currently has: only one whose stateHash still matches. */
 export function currentAck(key: string, stateHash: string): Ack | undefined {
@@ -104,11 +104,12 @@ export function currentAck(key: string, stateHash: string): Ack | undefined {
 export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string; headSha?: string }>): string[] {
   const items = new Map(standing.map((s) => [s.key, s]));
   const pruned: string[] = [];
+  const sources = builtinWatchRegistry().list();
   for (const a of listAcks()) {
     // Different hashes keep checks/review/draft visible, but must not discard
     // an acknowledgement of ready on this same head.
     const item = items.get(a.key);
-    if (a.kind === 'pr:ready' && item?.headSha && a.stateHash === prReadyStateHash(item.headSha)) continue;
+    if (sources.some(source => source.acknowledgements?.patterns.some(pattern => new RegExp(pattern).test(a.key)) && source.acknowledgements.retain(a, item ? JSON.parse(JSON.stringify(item)) : undefined))) continue;
     const h = item?.stateHash;
     if (h !== undefined && h !== a.stateHash && removeAck(a.key)) pruned.push(a.key);
   }
@@ -121,10 +122,15 @@ export function pruneStaleAcks(standing: Array<{ key: string; stateHash: string;
  * watch is still registered, or the report is still filed.
  */
 export function ackItemExists(key: string, culling: ReadonlySet<string> = new Set()): boolean {
-  if (key.startsWith('stack:')) {
-    const stack = readStackEpochs()[key.slice('stack:'.length)];
-    return stack ? Object.keys(stack.heads).some((pr) => readPr(pr)?.state === 'OPEN') : readPr(key.slice('stack:'.length))?.state === 'OPEN';
+  for (const source of builtinWatchRegistry().list()) {
+    if (!source.acknowledgements?.patterns.some(pattern => new RegExp(pattern).test(key))) continue;
+    const exists = source.acknowledgements.exists(key, [...culling]);
+    if (exists !== undefined) return exists;
   }
+  const journalExists = new WatchJournal().list().some(snapshot => snapshot.status !== 'retired' &&
+    (snapshot.key === key || `watch:${snapshot.key}` === key || snapshot.presentation.attention.some(condition =>
+      (condition.key ?? watchConditionKey(snapshot.key, condition.id)) === key)));
+  if (journalExists) return true;
   if (key.startsWith('watch:')) return readWatch(key.slice('watch:'.length)) !== undefined;
   // An item of a grounds on a wharf lives in the boat's cache of it, never on this disk.
   if (isHostedKey(key)) {
@@ -135,27 +141,6 @@ export function ackItemExists(key: string, culling: ReadonlySet<string> = new Se
   if (key.startsWith('report:')) {
     const r = readReport(key);
     return r !== undefined && !culling.has(key) && !(r.dispatch !== undefined && culling.has(r.dispatch));
-  }
-  const ref = key.startsWith('pr:') ? parsePrRef(key) : undefined;
-  if (ref) {
-    // The PR record decides when there is one; evidence only for a PR without.
-    const record = readPr(ref.key);
-    if (record) return record.state === 'OPEN';
-    for (const lane of ['work', 'chore'] as Lane[]) {
-      let files: string[];
-      try {
-        files = fs.readdirSync(laneDirs(lane).state).filter((f) => f.endsWith('.evidence'));
-      } catch {
-        continue;
-      }
-      for (const f of files) {
-        const id = f.slice(0, -'.evidence'.length);
-        if (culling.has(id)) continue;
-        const pr = readEvidence(id, lane).pr;
-        if (pr && parsePrRef(pr.url)?.key === ref.key && pr.state === 'OPEN') return true;
-      }
-    }
-    return false;
   }
   const m = /^(work|chore):(.+)$/.exec(key);
   if (!m) return false;

@@ -1,3 +1,4 @@
+import { presentLegacyAttention } from '@lobstah/watch-types/presentation';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { atomicRenameSync, lobstahHome, readMirrorStatus, uniqueTempPath } from '@lobstah/core';
@@ -94,7 +95,7 @@ export function otherBoatsAttention(config: Config, local: readonly Pick<TendAtt
       const item = raw as TendAttention;
       if (typeof item.key !== 'string' || typeof item.stateHash !== 'string' || typeof item.kind !== 'string') continue;
       if (item.grounds !== undefined && viewed.has(`${item.grounds}@${item.wharf}`)) continue;
-      const shared = item.key.startsWith('pr:') || item.key.startsWith('stack:');
+      const shared = item.presentation?.shared ?? presentLegacyAttention(item).shared ?? false;
       if (shared && seen.has(item.key)) continue;
       if (shared) seen.add(item.key);
       const since = Date.parse(item.standingSince ?? item.at ?? '');

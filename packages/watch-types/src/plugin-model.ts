@@ -6,7 +6,7 @@ import { watchJson } from './registry.js';
 
 export const WATCH_PLUGIN_PROTOCOL = 1 as const;
 export const WATCH_PRESENTATION_PROTOCOL = 1 as const;
-export const WATCH_PLUGIN_CAPABILITIES = ['poll', 'batch', 'subscribe', 'actions', 'automation', 'dispatch', 'derived', 'notices', 'registration', 'commands'] as const;
+export const WATCH_PLUGIN_CAPABILITIES = ['poll', 'batch', 'subscribe', 'actions', 'automation', 'dispatch', 'derived', 'notices', 'registration', 'commands', 'triggers', 'acknowledgements'] as const;
 export type WatchPluginCapability = (typeof WATCH_PLUGIN_CAPABILITIES)[number];
 export type PluginJsonSchema = Record<string, WatchValue>;
 
@@ -33,6 +33,8 @@ export interface WatchPluginManifest {
   schemas: { reference: PluginJsonSchema; options: PluginJsonSchema; state: PluginJsonSchema; cursor: PluginJsonSchema };
   bindings: WatchRegistrationBinding[];
   capabilities: {
+    acknowledgements?: { patterns: string[] };
+    triggers?: boolean;
     commands?: { bindings: Array<{ name: string; pattern?: string }> };
     registration?: boolean;
     batch?: boolean;
@@ -164,6 +166,9 @@ const attentionDisplay: PluginJsonSchema = {
   required: ['itemKey', 'text', 'label', 'cliKind', 'cliVerb', 'badgeText', 'badgeClass', 'acknowledge', 'always', 'blocking'],
   additionalProperties: false,
   properties: {
+    family: { enum: ['question', 'decision', 'landed', 'report', 'review', 'pr', 'stack', 'notice', 'dispatch'] },
+    shared: { type: 'boolean' },
+    links: { type: 'array', items: { type: 'object', required: ['label', 'url'], additionalProperties: false, properties: { label: string, url: string } } },
     itemKey: string,
     text: string,
     label: string,
@@ -246,6 +251,7 @@ const descriptorSchema: PluginJsonSchema = {
   additionalProperties: false,
   properties: {
     id: { type: 'string', pattern: '^[a-z][a-z0-9.-]*$' },
+    keyPrefix: { type: 'string', pattern: '^(?:[a-z][a-z0-9.-]*:)?$' },
     apiVersion: { const: 1 },
     stateVersion: { type: 'integer', minimum: 1 },
     version: { type: 'string', minLength: 1 },
@@ -292,6 +298,8 @@ const manifestSchema: PluginJsonSchema = {
       type: 'object',
       additionalProperties: false,
       properties: {
+        acknowledgements: { type: 'object', required: ['patterns'], additionalProperties: false, properties: { patterns: { type: 'array', items: { type: 'string' } } } },
+        triggers: { type: 'boolean' },
         commands: { type: 'object', required: ['bindings'], additionalProperties: false, properties: {
           bindings: { type: 'array', items: { type: 'object', required: ['name'], additionalProperties: false,
             properties: { name: { type: 'string', minLength: 1 }, pattern: { type: 'string' } } } },
@@ -339,6 +347,9 @@ export function validatePluginManifest(
         throw new WatchPluginError('Invalid plugin registration pattern');
       }
     }
+  for (const pattern of manifest.capabilities.acknowledgements?.patterns ?? []) {
+    try { new RegExp(pattern); } catch { throw new WatchPluginError('Invalid plugin acknowledgement pattern'); }
+  }
   return manifest;
 }
 
@@ -525,5 +536,16 @@ export const watchRegistrationPlanSchema: PluginJsonSchema = {
     { type: 'null' },
     { type: 'object', required: ['input', 'options'], additionalProperties: false,
       properties: { input: { type: 'string', minLength: 1 }, options: {} } },
+  ],
+};
+
+export const watchTriggerReferenceSchema: PluginJsonSchema = {
+  type: 'object', required: ['key', 'on'], additionalProperties: false,
+  properties: { key: { type: 'string', minLength: 1 }, on: { type: 'string', minLength: 1 } },
+};
+export const watchTriggerReadingSchema: PluginJsonSchema = {
+  oneOf: [
+    { type: 'object', required: ['state'], additionalProperties: false, properties: { state: { enum: ['waiting', 'lost'] } } },
+    { type: 'object', required: ['state', 'as'], additionalProperties: false, properties: { state: { const: 'met' }, as: { type: 'string' } } },
   ],
 };

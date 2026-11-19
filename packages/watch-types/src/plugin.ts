@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { BaseWatchType } from './base.js';
 import type {
+  WatchAcknowledgementPolicy,
+  WatchTriggerPolicy,
   WatchCommandPolicy,
   WatchRegistrationPolicy,
   WatchActionProposal,
@@ -31,6 +33,8 @@ import {
   validateWatchFailure,
   validateWatchPresentation,
   watchRegistrationPlanSchema,
+  watchTriggerReferenceSchema,
+  watchTriggerReadingSchema,
   watchActionRequestSchema,
   watchBatchSchema,
   watchEffectResultSchema,
@@ -111,6 +115,8 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
   readonly stateSchema: WatchSchema<WatchValue>;
   readonly cursorSchema: WatchSchema<WatchValue>;
   readonly optionsSchema: WatchSchema<WatchValue>;
+  declare readonly acknowledgements?: WatchAcknowledgementPolicy;
+  declare readonly triggers?: WatchTriggerPolicy;
   declare readonly commands?: WatchCommandPolicy;
   declare readonly registration?: WatchRegistrationPolicy;
   declare readonly subscriber?: WatchSubscriber<WatchValue, WatchValue, WatchValue, WatchValue>;
@@ -160,6 +166,24 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
         if (!value || typeof value !== 'object' || Array.isArray(value)) return options.parse(value);
         return options.parse(pluginDto({ ...defaults, ...value }));
       },
+    };
+    if (enabled('acknowledgements') && capabilities.acknowledgements) this.acknowledgements = {
+      patterns: capabilities.acknowledgements.patterns,
+      exists: (key, culling) => pluginSchema<boolean | null>({ type: ['boolean', 'null'] }, 'Plugin item existence')
+        .parse(this.call('watch.acknowledgement.exists', { key, culling })) ?? undefined,
+      retain: (acknowledgement, standing) => pluginSchema<boolean>({ type: 'boolean' }, 'Plugin retained acknowledgement')
+        .parse(this.call('watch.acknowledgement.retain', { acknowledgement, standing })),
+    };
+    if (enabled('triggers')) this.triggers = {
+      parse: (subject, condition) => pluginSchema<ReturnType<WatchTriggerPolicy['parse']> | null>(
+        { anyOf: [{ type: 'null' }, watchTriggerReferenceSchema] }, 'Plugin todo reference',
+      ).parse(this.call('watch.trigger.parse', { subject, condition })) ?? undefined,
+      read: (reference, since) => pluginSchema<ReturnType<WatchTriggerPolicy['read']>>(
+        watchTriggerReadingSchema, 'Plugin todo condition',
+      ).parse(this.call('watch.trigger.read', { reference, since })),
+      prepare: (reference) => { this.call('watch.trigger.prepare', { reference }); },
+      needsWatch: (reference) => pluginSchema<boolean>({ type: 'boolean' }, 'Plugin todo watch').parse(this.call('watch.trigger.needsWatch', { reference })),
+      watchNote: (reference) => pluginSchema<string>(stringSchema, 'Plugin todo instructions').parse(this.call('watch.trigger.note', { reference })),
     };
     if (enabled('commands') && capabilities.commands) this.commands = {
       bindings: capabilities.commands.bindings,

@@ -1,3 +1,4 @@
+import { presentLegacyAttention } from '@lobstah/watch-types/presentation';
 import { createHash, randomUUID } from 'node:crypto';
 import { backendScopes, listNotices, loadConfig, repoKey, standingDecisions } from '@lobstah/core';
 import type { BackendScope, Config, DecisionMeta, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardLink, Notice, TendAttention } from '@lobstah/core';
@@ -19,10 +20,6 @@ export interface BoatCardSet {
   cards: GlassCardInput[];
 }
 
-const FAMILY: Record<string, GlassCardFamily> = {
-  question: 'question', decision: 'decision', landed: 'landed', report: 'report', review: 'review',
-  'stack-ready': 'stack', watch: 'notice', 'dispatch-progress': 'dispatch',
-};
 const iso = (value: string | undefined, now: number) => {
   const ms = value ? Date.parse(value) : NaN;
   return new Date(Number.isFinite(ms) ? ms : now).toISOString();
@@ -51,7 +48,7 @@ export function attentionCard(a: TendAttention, decision: DecisionMeta | undefin
   // A wharf item is already the wharf's card; a boat never restates it.
   if (isHostedKey(a.key) || a.wharf) return undefined;
   const permission = !!decision?.permission;
-  const family: GlassCardFamily | undefined = a.kind.startsWith('pr:') ? 'pr' : permission ? 'permission' : FAMILY[a.kind];
+  const family: GlassCardFamily | undefined = permission ? 'permission' : a.presentation?.family ?? presentLegacyAttention(a).family;
   if (!family) return undefined;
   const actions: GlassCardAction[] = permission ? (decision!.options ?? []).map(permissionAction)
     : family === 'decision' ? [...(decision?.options ?? []).map((option): GlassCardAction => ({ kind: 'answer', option })), { kind: 'answer-text' }]
@@ -62,7 +59,7 @@ export function attentionCard(a: TendAttention, decision: DecisionMeta | undefin
     family, key: a.key, stateHash: a.stateHash, sourceAt: iso(a.at ?? a.standingSince, now),
     title: firstLine(decision?.title ?? a.note ?? a.verb, 300) || a.kind, grounds,
     ...(summary ? { summary: summary.slice(0, 2400) } : {}),
-    links: [...https('Open PR', a.prUrl), ...https('Open review', a.reviewUrl)],
+    links: (a.presentation?.links ?? presentLegacyAttention(a).links ?? []).flatMap(link => https(link.label, link.url)),
     actions, ...(a.quiet ? { quiet: true } : {}), ...(a.acked ? { seen: a.acked } : {}),
   };
 }

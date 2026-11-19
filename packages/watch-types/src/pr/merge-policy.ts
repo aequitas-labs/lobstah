@@ -15,7 +15,7 @@ export interface MergePolicyWatchServices {
 
 /** Provider IO and merge policy are composed by the host; the generic loop runs this contract. */
 export class MergePolicyWatchType extends BaseWatchType<MergePolicyReference, Record<string, never>, string, Record<string, never>> {
-  readonly descriptor = { id: 'merge-policy', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
+  readonly descriptor = { id: 'merge-policy', keyPrefix: 'merge-policy:', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
   readonly bindings = [{ event: 'local' as const, field: 'pickup.merge' }];
   private readonly command = new CommandWatchType();
   readonly stateSchema = this.command.stateSchema;

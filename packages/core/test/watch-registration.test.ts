@@ -95,3 +95,28 @@ it('continues other sources after a reconciliation failure and preserves the lif
   expect(errors).toEqual(['Installation unavailable']);
   expect(phases).toEqual(['after-observe']);
 });
+
+it('uses a declared canonical prefix when its namespace differs from the type ID', () => {
+  const registry = new WatchRegistry();
+  const adapter = source('provider', { prepare });
+  Object.assign(adapter.descriptor, { keyPrefix: 'signal:' });
+  Object.assign(adapter, { bindings: [{ event: 'explicit', field: 'key' }] });
+  registry.register(adapter);
+  expect(registerWatchEvent(request, registry)?.key).toBe('signal:test');
+});
+
+it('refuses a source key outside its declared namespace before publishing a watch', () => {
+  const registry = new WatchRegistry();
+  const adapter = source('provider', { prepare });
+  Object.assign(adapter.descriptor, { keyPrefix: 'other:' });
+  registry.register(adapter);
+  expect(() => registerWatchEvent(request, registry)).toThrow(/outside its declared prefix/);
+  expect(new WatchRuntime(registry).journal.list()).toEqual([]);
+});
+
+it('uses explicit type selection for aliases outside the default binding namespace', () => {
+  const registry = new WatchRegistry();
+  registry.register(new CommandWatchType());
+  const snapshot = registerWatchEvent({ ...request, fields: { key: 'arbitrary-key' }, options: { check: 'fixture command' } }, registry, 'command');
+  expect(snapshot?.key).toBe('arbitrary-key');
+});

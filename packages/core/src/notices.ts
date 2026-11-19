@@ -4,7 +4,7 @@ import { watchNoticeCurrent, watchNoticeQuiet, watchNoticeDispatches } from './w
 import fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
-import { repoKey } from './pr-stacks.js';
+import { repoKey } from './repo-key.js';
 import { loadConfig } from './config.js';
 import type { Config } from './config.js';
 import { groundsList } from './helm.js';

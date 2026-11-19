@@ -1,3 +1,4 @@
+import type { WatchTriggerReference } from '@lobstah/watch-types';
 import {
   DEFAULT_HELM,
   ageLabel,
@@ -13,17 +14,14 @@ import {
   overdueTodoNote,
   peekTodoFirings,
   readGoals,
-  readPr,
   shortTodoTime,
   TodoError,
   shownTodos,
   shownTodosByGrounds,
-  parsePrRef,
   parseTodoTrigger,
-  prEvidence,
   readTodoTrigger,
-  readWatch,
   resolveTodoTrigger,
+  watchTodoTrigger,
   staleTodoNote,
   staleTodos,
   todoFiredBy,
@@ -31,8 +29,6 @@ import {
   todoOverdue,
   todoScheduled,
   todoWaitingOn,
-  ghPrViewDirect,
-  upsertPr,
   toonTable,
   toonKV,
   type Todo,
@@ -42,6 +38,7 @@ import {
   type TodoView,
   type HelmConfig,
 } from '@lobstah/core';
+import { createCliWatchRegistry } from './watch-automation.js';
 import { addCliWatch } from './watch-registration.js';
 
 export type { TodoView };
@@ -200,21 +197,16 @@ export interface PreparedTodoTriggers {
   triggers: TodoTriggerSet;
   /** Conditions true now, which fire on the next check. */
   already: string[];
-  /** Open PRs named by a trigger with no watch yet. Registered once the todo is stored. */
-  unwatched: string[];
+  /** Source conditions that need a watch. Registered once the todo is stored. */
+  unwatched: WatchTriggerReference[];
 }
 
-/** The target as `--when` will check it, reading a named PR from GitHub so its record is fresh. */
+/** Prepare a source condition before storing the todo, so a refusal leaves no todo or watch. */
 function readyTrigger(input: string): TodoTriggerTarget {
   const target = resolveTodoTrigger(parseTodoTrigger(input));
-  if (target.kind !== 'pr') return target;
-  const ref = parsePrRef(target.key)!;
-  if (readWatch(ref.key) && readPr(ref.key)) return target;
-  try {
-    upsertPr(prEvidence(ref, ghPrViewDirect(ref), new Date().toISOString()));
-  } catch (err) {
-    throw new TodoError(`GitHub can't read ${ref.key}: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  const source = watchTodoTrigger(target, createCliWatchRegistry(() => {}));
+  try { if (source) source.policy.prepare?.(source.reference); }
+  catch (error) { throw new TodoError(error instanceof Error ? error.message : String(error)); }
   return target;
 }
 
@@ -222,21 +214,22 @@ function readyTrigger(input: string): TodoTriggerTarget {
 export function prepareTodoTriggers(values: readonly string[], mode: TodoTriggerSet['mode'], createdAt: string): PreparedTodoTriggers {
   const targets = values.map(readyTrigger);
   const already: string[] = [];
-  const unwatched: string[] = [];
+  const unwatched: WatchTriggerReference[] = [];
   for (const target of targets) {
     const reading = readTodoTrigger(target, createdAt);
     if (reading.state === 'met') already.push(reading.as);
-    if (target.kind !== 'pr' || readWatch(target.key)) continue;
-    const state = readPr(target.key)?.state;
-    if (state !== 'MERGED' && state !== 'CLOSED' && !unwatched.includes(target.key)) unwatched.push(target.key);
+    const source = watchTodoTrigger(target, createCliWatchRegistry(() => {}));
+    if (source?.policy.needsWatch?.(source.reference) && !unwatched.some(item => item.key === source.reference.key)) unwatched.push(source.reference);
   }
   return { triggers: { mode, items: targets }, already, unwatched };
 }
 
-/** Stand watch on an open PR a trigger named, as `report --pr` would; the helm owns it. Returns what to say. */
-export function watchTriggerPr(key: string): string {
-  addCliWatch(key);
-  return `watching ${key}: also wakes the helm on failing checks and requested changes`;
+/** Register the source after the todo is stored, and return its supplied instructions. */
+export function watchTriggerSource(reference: WatchTriggerReference): string {
+  const watch = addCliWatch(reference.key);
+  const source = createCliWatchRegistry(() => {}).get(watch.typeId!);
+  const note = source.triggers?.watchNote?.(reference);
+  return `watching ${watch.key}${note ? `: ${note}` : ''}`;
 }
 
 /** The `next` line of a `todo-due` event. */

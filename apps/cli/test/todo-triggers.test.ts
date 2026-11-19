@@ -91,7 +91,7 @@ describe('todo add --when: a PR trigger', () => {
     expect(out.status, printed(out)).toBe(0);
     expect(out.stdout).toContain('watching pr:o/r#7: also wakes the helm on failing checks and requested changes');
     expect(readWatch('pr:o/r#7')?.owner).toBe('man');
-    expect(stored()[0]!.triggers).toEqual({ mode: 'any', items: [{ kind: 'pr', key: 'pr:o/r#7', on: 'merged' }] });
+    expect(stored()[0]!.triggers).toEqual({ mode: 'any', items: [{ kind: 'watch', typeId: 'pr', key: 'pr:o/r#7', on: 'merged' }] });
   });
 
   it('leaves an existing watch and its owner alone, and doesn’t mention one', () => {

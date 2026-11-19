@@ -153,3 +153,5 @@ export * from './local-watch-source.js';
 export { registerInstalledWatch, registerWatchEvent, syncWatchRegistrations } from './watch-registration.js';
 export { WatchSubscriptionManager, syncWatchSubscriptions } from './watch-subscriptions.js';
 export * from './review-wait-worktrees.js';
+
+export { prTodoTriggers } from './pr-todo.js';

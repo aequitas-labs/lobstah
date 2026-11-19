@@ -114,7 +114,7 @@ export class LocalSignalWatchType extends BaseWatchType<LocalSignalReference, Lo
   ) {
     super();
     this.noticePolicy = services.noticePolicy;
-    this.descriptor = { id: specification.id, apiVersion: 1, stateVersion: 1, version: '1.0.0', attentionKinds: specification.kinds };
+    this.descriptor = { id: specification.id, keyPrefix: `${specification.id}:`, apiVersion: 1, stateVersion: 1, version: '1.0.0', attentionKinds: specification.kinds };
     this.derived = {
       views: (now) => {
         const state = this.stateSchema.parse(services.read(now));

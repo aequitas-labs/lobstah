@@ -317,7 +317,7 @@ import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedDecisionWarning, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
-import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
+import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerSource } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
@@ -2102,7 +2102,7 @@ async function mainCli(): Promise<void> {
                 : undefined;
           const prepared = whenValues.length > 0 ? prepareTodoTriggers(whenValues, whenAll.length > 0 ? 'all' : 'any', new Date(now).toISOString()) : undefined;
           const t = addTodo(grounds, text, now, { dueAt, every, triggers: prepared?.triggers });
-          const watching = (prepared?.unwatched ?? []).map(watchTriggerPr);
+          const watching = (prepared?.unwatched ?? []).map(watchTriggerSource);
           console.log(toonKV({
             todo: t.id,
             grounds: shown,

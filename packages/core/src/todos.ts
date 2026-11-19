@@ -55,6 +55,7 @@ export type TodoTriggerTarget =
   | { kind: 'card'; key: string }
   | { kind: 'dispatch'; id: string; verb: 'done' | 'blocked' | 'needs-decision' | 'failed' }
   | { kind: 'pr'; key: string; on: 'merged' | 'closed' | 'green' }
+  | { kind: 'watch'; typeId: string; key: string; on: string }
   | { kind: 'trap'; trapId: string; name: string };
 
 /** A target plus its latch: once met it stays met, even if the record later changes. */

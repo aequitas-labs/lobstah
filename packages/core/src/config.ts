@@ -1,3 +1,4 @@
+import { builtinAttentionKinds, builtinDefaultAttentionKinds } from '@lobstah/watch-types';
 import { storedWatchTypeDescriptors } from './watch-type-descriptors.js';
 import * as fs from 'node:fs';
 import { parseConfiguredTraps, type ConfiguredTrapProfile } from './configured-traps.js';
@@ -8,7 +9,7 @@ import { prepareConfigurationUpgrade, applyConfigurationUpgrade, type WatchConfi
 import { parseBackendLocation } from './backend.js';
 import type { Descriptor, DispatchLimits } from './types.js';
 import { lobstahHome } from './paths.js';
-import { validReviewTool } from './pr-review.js';
+import { validReviewTool } from './review-tools.js';
 import { parseReviews } from './reviews.js';
 import { validCacheGlob } from './cache-paths.js';
 import type { ReviewsConfig } from './reviews.js';
@@ -589,10 +590,10 @@ function parsePermissions(raw: unknown): PermissionsConfig {
  * Level-triggered: each stands until its clear condition, unlike [hooks.notify].verbs,
  * which fire once per transition.
  */
-export const ATTENTION_KINDS = ['question', 'decision', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready', 'report', 'stack-ready', 'review', 'dispatch-progress'] as const;
+export const ATTENTION_KINDS = builtinAttentionKinds;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number] | `${string}:${string}`;
 /** Human-actionable conditions; drafts, landed catches and review requests are opt-in. */
-export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'decision', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks'];
+export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = [...builtinDefaultAttentionKinds];
 
 function parseAttentionKinds(raw: unknown, types: Record<string, WatchTypeConfiguration> = {}): AttentionKind[] {
   if (raw === undefined) return [...DEFAULT_ATTENTION_KINDS];

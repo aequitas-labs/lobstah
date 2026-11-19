@@ -1,3 +1,4 @@
+import { ackItemExists, pruneStaleAcks, readAck, writeAck } from '../src/acks.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parse, stringify } from 'smol-toml';
 import { disposeWatchPlugins } from '@lobstah/watch-types';
 import {
+  fireDueTodos,
+  listTodos,
   parsePrRef,
   registerWatchEvent,
   appendStatus,
@@ -50,7 +53,7 @@ beforeEach(() => {
 import fs from 'node:fs';
 import { CommandWatchType, serveWatchPlugin } from ${JSON.stringify(library)};
 class HarborWatch extends CommandWatchType {
-  descriptor = { id: 'harbor', apiVersion: 1, stateVersion: 1, version: '1.0.0',
+  descriptor = { id: 'harbor', keyPrefix: 'harbor:', apiVersion: 1, stateVersion: 1, version: '1.0.0',
     attentionKinds: [{ kind: 'harbor:attention', label: 'Harbor attention', defaultEnabled: true }] };
   bindings = [ { event: 'explicit', field: 'key', pattern: '^harbor:' },
     { event: 'turn-wait', field: 'read', pattern: '^harbor inspect ' } ];
@@ -58,6 +61,16 @@ class HarborWatch extends CommandWatchType {
     properties: { history: { type: 'string' }, cleanup: { type: 'string' }, cursor: { type: 'string' } } },
     parse(value) { if (!value || typeof value.history !== 'string' || typeof value.cleanup !== 'string') throw new Error('Missing history'); return value; } };
   identify(input) { return /^harbor:[a-z]+$/.test(input) ? { key: input } : undefined; }
+  acknowledgements = {
+    patterns: ['^harbor-legacy:'],
+    exists(key) { return key.startsWith('harbor-legacy:') ? true : undefined; },
+    retain(ack, standing) { return ack.kind === 'harbor:attention' && ack.stateHash === 'stable' && standing?.stateHash === 'new'; },
+  };
+  triggers = {
+    parse(subject, condition) { return subject.startsWith('harbor:') && condition === 'ready' ? { key: subject, on: condition } : undefined; },
+    read() { return JSON.parse(fs.readFileSync(new URL('./history.json', import.meta.url), 'utf8')).cursor !== '0' ? { state: 'met', as: 'ready' } : { state: 'waiting' }; },
+    needsWatch() { return true; }, watchNote() { return 'wakes when harbor is ready'; },
+  };
   commands = { bindings: [{ name: 'check-ume' }], run({ args }) { return JSON.stringify({ adapter: 'harbor', input: args[0] }); } };
   registration = {
     prepare(request) {
@@ -214,6 +227,7 @@ it.each(['pr', 'ume'] as const)('honors an installed process replacement through
     fs
       .readFileSync(program, 'utf8')
       .replace("id: 'harbor'", `id: '${typeId}'`)
+      .replace("keyPrefix: 'harbor:'", `keyPrefix: '${typeId}:'`)
       .replace("pattern: '^harbor:'", `pattern: '^${typeId}:'`)
       .replace('^harbor:[a-z]+$', `^${typeId}:.+$`),
   );
@@ -250,4 +264,50 @@ it('keeps the recorded owner when a compatibility helper re-registers without a 
   expect(first.owner).toBe(`dispatch:${owner}`);
   expect(repeated.owner).toBe(first.owner);
   expect(new WatchJournal().read(first.key)?.owner).toMatchObject({ kind: 'dispatch', chainId: owner });
+});
+
+it('registers and fires a todo condition supplied by the outside process adapter', () => {
+  const config = parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'));
+  const settings = (config.watchTypes as Record<string, Record<string, unknown>>).harbor;
+  settings.allowCapabilities = ['poll', 'registration', 'triggers'];
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  expect(command('todo', 'add', 'Use the harbor result', '--when', 'harbor:todo ready')).toContain('watching harbor:todo');
+  expect(listTodos('fleet')[0]?.triggers?.items).toMatchObject([{ kind: 'watch', typeId: 'harbor', key: 'harbor:todo', on: 'ready' }]);
+  expect(new WatchJournal().read('harbor:todo')?.type.id).toBe('harbor');
+  settings.allowCapabilities = ['poll', 'registration'];
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  fireDueTodos();
+  expect(listTodos('fleet')[0]?.firing).toBeUndefined();
+  settings.enabled = false;
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  fireDueTodos();
+  expect(listTodos('fleet')[0]?.firing).toBeUndefined();
+  settings.enabled = true;
+  settings.allowCapabilities = ['poll', 'registration', 'triggers'];
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  feedback();
+  fireDueTodos();
+  expect(listTodos('fleet')[0]?.firing?.cause).toMatchObject({ kind: 'event', triggers: ['harbor:todo ready'] });
+});
+
+it('applies a process adapter acknowledgement policy only with its capability grant', () => {
+  const config = parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'));
+  const settings = (config.watchTypes as Record<string, Record<string, unknown>>).harbor;
+  settings.allowCapabilities = ['poll', 'registration', 'acknowledgements'];
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  const acknowledgement = {
+    key: 'harbor-legacy:ack',
+    kind: 'harbor:attention',
+    stateHash: 'stable',
+    at: new Date().toISOString(),
+    by: 'fixture',
+  };
+  writeAck(acknowledgement);
+  expect(ackItemExists(acknowledgement.key)).toBe(true);
+  expect(pruneStaleAcks([{ key: acknowledgement.key, stateHash: 'new' }])).toEqual([]);
+  expect(readAck(acknowledgement.key)).toBeDefined();
+  settings.allowCapabilities = ['poll', 'registration'];
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  expect(ackItemExists(acknowledgement.key)).toBe(false);
+  expect(pruneStaleAcks([{ key: acknowledgement.key, stateHash: 'new' }])).toEqual([acknowledgement.key]);
 });

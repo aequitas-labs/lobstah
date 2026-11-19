@@ -9,7 +9,7 @@ export function registerWatchEvent(
   typeId?: string,
 ): WatchSnapshot | undefined {
   const candidates = (typeId ? [registry.get(typeId)] : registry.list()).filter((source) =>
-    source.bindings.some(
+    (typeId !== undefined && request.event === 'explicit') || source.bindings.some(
       (binding) =>
         binding.event === request.event &&
         typeof request.fields[binding.field] === 'string' &&
@@ -17,7 +17,7 @@ export function registerWatchEvent(
           ? new RegExp(binding.pattern).test(request.fields[binding.field] as string)
           : request.event !== 'explicit' ||
             typeId !== undefined ||
-            (request.fields[binding.field] as string).startsWith(`${source.descriptor.id}:`)),
+            (request.fields[binding.field] as string).startsWith(source.descriptor.keyPrefix || `${source.descriptor.id}:`)),
     ),
   );
   const plans: Array<{ typeId: string; plan: WatchRegistrationPlan }> = [];

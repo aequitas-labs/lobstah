@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { BaseWatchType } from './base.js';
-import type { WatchContext, WatchObservationBatch, WatchPresentation, WatchSchema, WatchSnapshot, WatchValue } from './model.js';
+import type { WatchContext, WatchObservationBatch, WatchPresentation, WatchSchema, WatchSnapshot, WatchValue, WatchTypeDescriptor } from './model.js';
 import { watchJson } from './registry.js';
 
 export interface CommandWatchReference {
@@ -41,7 +41,7 @@ function object(value: unknown): Record<string, unknown> {
 
 /** The existing check-command protocol is an adapter, including custom briefs. */
 export class CommandWatchType extends BaseWatchType<CommandWatchReference, CommandWatchState, string, CommandWatchOptions> {
-  readonly descriptor = { id: 'command', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
+  readonly descriptor: WatchTypeDescriptor = { id: 'command', keyPrefix: '', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
   readonly bindings = [{ event: 'explicit' as const, field: 'key' }];
   readonly referenceSchema: WatchSchema<CommandWatchReference> = {
     json: { type: 'object', required: ['key'], properties: { key: { type: 'string' } } },
