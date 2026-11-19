@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ANSWER_INLINE_MAX_BYTES, askDecision, claimBait, decodeFrame, enqueue, ensureLayout, listGrants, listNotices, loadConfig, readDecisionAnswer, settlePermissionCards, signOnTrap } from '@lobstah/core';
+import { ANSWER_INLINE_MAX_BYTES, readThread, threadView, askDecision, claimBait, decodeFrame, enqueue, ensureLayout, listGrants, listNotices, loadConfig, readDecisionAnswer, settlePermissionCards, signOnTrap } from '@lobstah/core';
 import type { ClientSocketMessage, MirrorStatus, WharfMirrorCall } from '@lobstah/core';
 import { readHelmPassRequest } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
@@ -326,6 +326,24 @@ describe('relayed calls', () => {
     await mirror(wharf).onCall(call('recheck', { write: { kind: 'helm-pass-request', payload: { grounds: 'home' } } }));
     expect(wharf.answers.get('recheck')?.status).toBe(200);
     expect(JSON.parse(wharf.answers.get('recheck')!.body).requestedAt).toBe(readHelmPassRequest('fleet')?.at);
+  });
+
+  it('stores hosted messages and attachments on the target conversation through the mirror', async () => {
+    const wharf = new FakeWharf(), m = mirror(wharf);
+    wharf.files.set('phone-shot', { name: 'notes.txt', bytes: new TextEncoder().encode('phone context') });
+    await m.onCall(call('message-start', { write: { kind: 'thread-start', payload: { grounds: 'home', text: 'Rework the navigation' } } }, ['phone-shot']));
+    const created = JSON.parse(wharf.answers.get('message-start')!.body);
+    expect(created.ok).toBe(true);
+    const id = created.item.id;
+    expect(readThread(id)?.kind).toBe('untriaged');
+    await m.onCall(call('message-post', { write: { kind: 'thread-post', payload: { id, text: 'Keep Reviews' } } }, ['phone-shot']));
+    expect(wharf.answers.get('message-post')?.status).toBe(201);
+    const item = threadView(readThread(id)!);
+    expect(item.rounds).toHaveLength(2);
+    expect(item.rounds[1]!.entries[0]).toMatchObject({ text: 'Keep Reviews', attachments: [{ name: 'notes-2.txt' }] });
+    expect(fs.readFileSync(item.attachments[0]!.path, 'utf8')).toBe('phone context');
+    await m.onCall(call('read-thread', { read: `/threads/${id}` }));
+    expect(JSON.parse(wharf.answers.get('read-thread')!.body).rounds).toHaveLength(2);
   });
 
   it('brings the files a person attached on the hosted glass to the local answer', async () => {

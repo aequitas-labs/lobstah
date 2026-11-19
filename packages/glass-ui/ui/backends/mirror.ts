@@ -409,6 +409,12 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
       const read = pages.flatMap((p) => (p.page.ok ? [{ name: p.name, settings: p.page.data }] : []));
       return read.length ? { ok: true, status: 200, data: mergeSettings(read) } : { ok: false, status: pages[0]?.page.status ?? 404 };
     },
+    thread: (id) =>
+      readFor(
+        id,
+        (local) => `/threads/${encodeURIComponent(local)}`,
+        async () => missing(),
+      ),
     async request<T extends GlassVerdict>(kind: string, payload: unknown): Promise<GlassWrite<T>> {
       if (!merged) await load();
       const r = route(payload);
@@ -469,19 +475,21 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
       return relayRead<string>(r.boat, reportMarkdownUrl(r.value), 'text');
     },
     fileUrl(owner: GlassFileOwner, fileName: string): string {
-      const key = owner.kind === 'dispatch' ? owner.id : owner.kind === 'trap' ? owner.trapId : owner.key;
+      const key = owner.kind === 'dispatch' || owner.kind === 'thread' ? owner.id : owner.kind === 'trap' ? owner.trapId : owner.key;
       const r = route(key);
       if (!r.boat) return '';
       if (r.boat === WHARF_SOURCE) return options.wharf.fileUrl(owner, fileName);
       const local = String(r.value);
       const path =
-        owner.kind === 'dispatch'
-          ? dispatchFileUrl(owner.lane, local, fileName)
-          : owner.kind === 'trap'
-            ? trapFileUrl(local, fileName)
-            : owner.kind === 'decision'
-              ? decisionFileUrl(local, fileName)
-              : reportFileUrl(local, fileName);
+        owner.kind === 'thread'
+          ? `/threads/${encodeURIComponent(local)}/files/${encodeURIComponent(fileName)}`
+          : owner.kind === 'dispatch'
+            ? dispatchFileUrl(owner.lane, local, fileName)
+            : owner.kind === 'trap'
+              ? trapFileUrl(local, fileName)
+              : owner.kind === 'decision'
+                ? decisionFileUrl(local, fileName)
+                : reportFileUrl(local, fileName);
       return `/api/glass/mirror/read?boat=${encodeURIComponent(r.boat)}&path=${encodeURIComponent(path)}`;
     },
     checklists: {

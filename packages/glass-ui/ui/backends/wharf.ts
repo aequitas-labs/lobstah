@@ -218,6 +218,8 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
       }
     },
     fileUrl(owner, name) {
+      if (owner.kind === 'thread') return ''; // Native conversations join in the wharf slice.
+
       if (owner.kind === 'trap') return '';
       if (owner.kind === 'dispatch') {
         const file = details.get(owner.id)?.files.find((f) => f.name === name);

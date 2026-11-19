@@ -1853,3 +1853,11 @@ to read. Consider a report or plan at six rounds; further messages stop at 100.
 on the configured reminder cadence. Discussion threads with no new message for
 seven days and no standing card close as dropped; bait and standing questions
 remain open. Reads never run this maintenance; the helm wait does.
+
+The glass's Helm view lists bait, discussion threads and recent outcomes. The
+fish button on Helm and On deck opens one message composer; the helm classifies
+the message. Cards and conversation replies use the same text and attachment
+controls. A card from a thread shows that thread's notes above its question.
+Phone navigation is On deck, Reviews, Helm, Search and Menu; PRs remain in Menu
+with their attention count. Message the helm on a dispatch supplies that dispatch
+as context to the same composer.

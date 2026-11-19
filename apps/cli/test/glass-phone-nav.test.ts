@@ -59,24 +59,25 @@ describe('the phone header', () => {
 });
 
 describe('the bottom bar', () => {
-  it('holds On deck, Reviews and PRs with their labels, then Search and Menu as named icons', async () => {
+  it('holds On deck, Reviews and Helm with their labels, then Search and Menu as named icons', async () => {
     const g = await page();
-    expect([...bar(g).querySelectorAll('.bbitem .bblabel')].map(text)).toEqual(['On deck', 'Reviews', 'PRs']);
+    expect([...bar(g).querySelectorAll('.bbitem .bblabel')].map(text)).toEqual(['On deck', 'Reviews', 'Helm']);
     expect([...bar(g).querySelectorAll('.bbitem.bbiconly')].map((b) => [b.getAttribute('aria-label'), text(b)])).toEqual([
       ['Search', ''],
       ['Menu', ''],
     ]);
     expect(item(g, 'On deck').getAttribute('href')).toBe('#deck');
     expect(item(g, 'On deck').getAttribute('aria-current')).toBe('page');
-    expect(item(g, 'PRs').getAttribute('href')).toBe('#prs');
+    expect(item(g, 'Helm').getAttribute('href')).toBe('#helm');
   });
 
-  it("counts the person's own PRs that need them on PRs", async () => {
+  it("counts the person's own PRs that need them in Menu", async () => {
     const d = fleet();
     const failing = { ...d.prs[0]!, key: 'pr:acme/web#77', number: 77, mine: true, state: 'OPEN', badge: { ...d.prs[0]!.badge, tone: 'bad' as const } };
     d.prs = [failing, { ...failing, key: 'pr:acme/web#78', number: 78, mine: false }];
     const g = await page(d);
-    expect(text(item(g, 'PRs').querySelector('.dbadge'))).toBe('1');
+    (g.$('.bbitem[aria-label="Menu"]') as HTMLElement).click(); await g.settle();
+    expect(text(g.$('#phone-menu a[href="#prs"] .dbadge'))).toBe('1');
   });
 
   it('Search becomes a focused search box with the repo chips above it; ✕ puts the bar back', async () => {

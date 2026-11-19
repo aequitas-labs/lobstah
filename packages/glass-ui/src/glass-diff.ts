@@ -202,6 +202,7 @@ export function prBadgeClass(b: Partial<PrBadge> | undefined | null): string {
 
 export const GLASS_TABS = [
   'deck',
+  'helm',
   'dispatches',
   'traps',
   'boats',
@@ -219,6 +220,7 @@ export type GlassRoute = GlassTab | 'decisions';
 
 export function tabFromHash(hash: string | undefined | null): GlassTab {
   const tab = String(hash || '').replace(/^#/, '');
+  if (tab.startsWith('thread/')) return 'helm';
   if (tab.startsWith('review-')) return 'reviews';
   if (tab.startsWith('pr/')) return 'prs';
   if (tab.startsWith('dispatch/')) return 'dispatches';
@@ -276,6 +278,7 @@ export const decisionFileUrl = (key: string, name: string): string =>
 export type DecisionCard =
   | {
       kind: 'decision';
+      thread?: string;
       readOnly?: boolean;
       appStart?: import('@lobstah/core').DesktopAppStart;
       key: string;
@@ -330,6 +333,7 @@ export function decisionCards(
         kind: 'decision',
         key: d.key,
         title: d.title,
+        ...(d.thread ? { thread: d.thread } : {}),
         ...(d.readOnly ? { readOnly: true } : {}),
         detail: d.detail,
         options: d.options,
@@ -439,7 +443,7 @@ export function validShowHash(hash: unknown): hash is string {
       return false;
     }
   }
-  return hash === '#decisions' || (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
+  return /^#thread\/[0-9a-f-]{36}$/.test(hash) || hash === '#decisions' || (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
 }
 
 /** The report key a `/report/<key>` page path names, else null. */

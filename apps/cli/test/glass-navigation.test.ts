@@ -110,7 +110,7 @@ describe('the tab bar and More', () => {
     await click(g, '.nav-toggle');
     expect(g.$('.nav-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(g.$$('#more-sections a').map((a) => a.getAttribute('data-tab'))).toEqual(
-      GLASS_TABS.filter((t) => t !== 'deck' && t !== 'reviews' && t !== 'prs' && t !== 'boats'),
+      GLASS_TABS.filter((t) => t !== 'deck' && t !== 'reviews' && t !== 'helm' && t !== 'boats'),
     ); // Boats is the hosted glass's account page
     expect(g.document.activeElement?.getAttribute('data-tab')).toBe('dispatches');
     await click(g, '#more-sections [data-tab="todos"]');
@@ -123,7 +123,7 @@ describe('the tab bar and More', () => {
     expect(g.document.activeElement?.getAttribute('data-tab')).toBe('todos');
   });
 
-  it('in a narrow desktop window, leads the bar with On deck, Reviews and PRs, the phone bar order, and counts PRs that need you', async () => {
+  it('in a narrow desktop window, leads the bar with On deck, Reviews and Helm and keeps PR attention in More', async () => {
     const d = emptyFleet();
     const mine = acceptanceFleet().prs[0]!;
     d.prs = [{ ...mine, mine: true, state: 'OPEN', badge: { ...mine.badge, tone: 'bad', text: 'checks failed' } }];
@@ -144,7 +144,7 @@ describe('the tab bar and More', () => {
         .$$('#tabs a')
         .slice(0, 3)
         .map((a) => a.getAttribute('data-tab')),
-    ).toEqual(['deck', 'reviews', 'prs']);
+    ).toEqual(['deck', 'reviews', 'helm']);
     expect(g.$('#tabs a[data-tab="prs"] .dbadge')?.getAttribute('aria-label')).toBe('1 of your PRs needs you');
     // A window wide enough for every tab keeps the tabs' own order.
     const wide = await loadGlass(GLASS_PAGE, d, { now: NOW, hash: '#deck' });
