@@ -160,7 +160,13 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
       return { ok: true, status: answer.status, data: answer.body };
     },
     async request<T extends GlassVerdict>(kind: string, payload: unknown): Promise<GlassWrite<T>> {
-      if (kind === 'thread-start' || kind === 'thread-post' || kind === 'thread-reopen') {
+      if (
+        kind === 'thread-start' ||
+        kind === 'thread-post' ||
+        kind === 'thread-reopen' ||
+        kind === 'thread-seen' ||
+        kind === 'thread-notice-dismiss'
+      ) {
         const input = (payload ?? {}) as { id?: string; files?: Array<{ name: string; data: string }>; [key: string]: unknown };
         const id = input.id ?? crypto.randomUUID(),
           files: string[] = [];
@@ -182,7 +188,7 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
         const path =
           kind === 'thread-start'
             ? '/api/glass/threads'
-            : `/api/glass/threads/${encodeURIComponent(id)}/${kind === 'thread-post' ? 'post' : 'reopen'}`;
+            : `/api/glass/threads/${encodeURIComponent(id)}/${kind === 'thread-post' ? 'post' : kind === 'thread-seen' ? 'seen' : kind === 'thread-notice-dismiss' ? 'dismiss-notice' : 'reopen'}`;
         const answer = await call<import('@lobstah/core').ThreadView>(path, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },

@@ -103,7 +103,7 @@ import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
 import { helmPassViews } from './helm-pass.js';
 import { answerKey, viewKey } from './decision-answer.js';
-import { startThread, postThread, reopenThread, readThread, threadView, threadSummaries, resolveThreadFile, ThreadError } from '@lobstah/core';
+import { markThreadResponsesSeen, dismissThreadNotice, threadSubscriberNotices, startThread, postThread, reopenThread, readThread, threadView, threadSummaries, resolveThreadFile, ThreadError } from '@lobstah/core';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, readMergeView, redraftReviewRound } from '@lobstah/pick';
@@ -1124,12 +1124,19 @@ export function serveGlass(
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
+          case 'thread-seen':
+          case 'thread-notice-dismiss':
           case 'thread-start':
           case 'thread-post':
           case 'thread-reopen': {
             try {
               if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) throw new ThreadError('Enter a message');
               const payload = body.payload as Record<string, unknown>;
+              if (body.kind === 'thread-seen' || body.kind === 'thread-notice-dismiss') {
+                if (typeof payload.id !== 'string') throw new ThreadError('Choose a conversation');
+                const item = body.kind === 'thread-seen' ? markThreadResponsesSeen(payload.id, payload.through) : dismissThreadNotice(payload.id, payload.through);
+                return reply(200, { ok: true, item: threadView(item) });
+              }
               if (body.kind === 'thread-reopen') {
                 if (typeof payload.id !== 'string') throw new ThreadError('Choose a conversation');
                 return reply(200, { ok: true, item: threadView(reopenThread(payload.id)) });
@@ -1473,6 +1480,11 @@ export function serveGlass(
     }
     // The hosted glass, open in a browser on this machine, asks whether it runs here, and raises a trap's window from here.
     if (req.url === '/api/mirror/probe' || req.url?.startsWith('/api/mirror/focus/')) return mirrorFocus(req, res);
+    if (req.method === 'GET' && req.url === '/thread-notices') {
+      if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(threadSubscriberNotices())); return;
+    }
     if (req.method === 'GET' && req.url?.startsWith('/threads/')) {
       if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
       try {

@@ -125,6 +125,7 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
 /** What a tab's count says to a screen reader: the same words on the tab bar and the phone bar. */
 function badgeLabel(t: GlassTab, n: number): string {
   if (t === 'deck') return `${n} new decision${n === 1 ? '' : 's'}`;
+  if (t === 'helm') return `${n} unread helm response${n === 1 ? '' : 's'}`;
   if (t === 'prs') return `${n} of your PRs need${n === 1 ? 's' : ''} you`;
   return `${n} unread review${n === 1 ? '' : 's'}`;
 }
@@ -201,7 +202,16 @@ function Navigation({ d, tab, unread, reviewCount }: { d?: GlassSnapshot; tab: G
     };
   }, [open]);
   const badge = (t: GlassTab) => {
-    const count = t === 'deck' ? unread : t === 'reviews' ? reviewCount : t === 'prs' ? prsNeedingYou(d?.prs ?? []) : 0;
+    const count =
+      t === 'deck'
+        ? unread
+        : t === 'reviews'
+          ? reviewCount
+          : t === 'prs'
+            ? prsNeedingYou(d?.prs ?? [])
+            : t === 'helm'
+              ? (d?.threads ?? []).filter((t) => t.unreadResponse).length
+              : 0;
     return count > 0 && html`<span class="dbadge" aria-label=${badgeLabel(t, count)}>${count}</span>`;
   };
   const link = (t: GlassTab, inMenu = false) =>
@@ -319,7 +329,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
     <nav class="bbrow" aria-label="Spyglass">
       ${link('deck', TAB_ICON.deck, count(unread, badgeLabel('deck', unread)))}
       ${link('reviews', TAB_ICON.reviews, count(reviews, badgeLabel('reviews', reviews)))}
-      ${link('helm', TAB_ICON.helm, null)}
+      ${link('helm', TAB_ICON.helm, count((d?.threads ?? []).filter((t) => t.unreadResponse).length, badgeLabel('helm', (d?.threads ?? []).filter((t) => t.unreadResponse).length)))}
       <button type="button" class=${'bbitem bbiconly' + (st.q || st.repo ? ' on' : '')} aria-label="Search" onClick=${() => setMode('search')}><span class="bbicon">${ITEM_ICON.search}</span></button>
       <button type="button" class=${'bbitem bbiconly' + (mode === 'menu' ? ' on' : '')} aria-label="Menu" aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${ITEM_ICON.menu}</span></button>
     </nav>

@@ -369,7 +369,18 @@ export class Account extends DurableObject<Env> {
       throw e;
     } finally {
       // After the command commits, its card changes go out; a failed drain is retried by the alarm.
+      if (c.method === 'POST' && /^threads\/[^/]+\/(seen|dismiss-notice)$/.test(c.path)) this.ctx.waitUntil(this.refreshThreadReaders());
       if (!(c.method === 'GET' && (c.path === 'glass' || c.path === 'threads' || c.path.startsWith('threads/')))) await this.afterChange();
+    }
+  }
+  /** Read cursors refresh glass tabs without adding a helm wake event. */
+  private async refreshThreadReaders(): Promise<void> {
+    const seq = this.ctx.storage.sql.exec<{n: number}>('SELECT coalesce(max(seq),0) AS n FROM events').one().n;
+    for (const socket of this.ctx.getWebSockets('glass')) {
+      try {
+        const a = socket.deserializeAttachment() as SocketAttachment | null;
+        if (a && await this.socketAllowed(a)) send(socket, { t: 'event', events: [], cursor: `${this.get('generation')}.${seq}` });
+      } catch { /* A closed tab catches up on its next read. */ }
     }
   }
   /** Private binding only: deliver what is due now, and wait for it. */
@@ -493,7 +504,7 @@ export class Account extends DurableObject<Env> {
     if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(idem)').toArray().some((c) => c.name === 'at')) ctx.storage.sql.exec('ALTER TABLE idem ADD COLUMN at INTEGER');
     // Request counts and the hosted glass's watch moved to memory; their old rows go (nothing to write once gone).
     ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
-    this.threads = new Threads(ctx.storage.sql, { remindMs: () => (JSON.parse(this.get('helm') ?? 'null')?.remindSecs ?? 900) * 1000, helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note) });
+    this.threads = new Threads(ctx.storage.sql, { person: () => ctx.id.name ?? 'owner', remindMs: () => (JSON.parse(this.get('helm') ?? 'null')?.remindSecs ?? 900) * 1000, helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note) });
     this.glass = new GlassState(ctx.storage.sql, { threadGrounds: () => { const h = JSON.parse(this.get('helm') ?? 'null'); return [...new Set([...(h?.grounds ? [h.grounds] : []), ...this.threads.summaries(Date.now()).map(t => t.grounds)])]; }, messageLimits: () => ({ maxBytes: Math.min(10 * 1024 * 1024, Number(this.env.MAX_FILE_BYTES)), maxFiles: 8, textMax: 20000, extensions: Object.keys(MESSAGE_FILE_TYPES) }), threads: (n) => this.threads.summaries(n), threadCheck: (id, g) => this.threads.checkCard(id, g), threadLink: (id, key, n) => this.threads.linkCard(id, key, n), helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now) });
     this.cards = new Cards(ctx.storage.sql, {

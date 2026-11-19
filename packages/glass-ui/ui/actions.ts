@@ -46,7 +46,9 @@ export function receive(snapshot: GlassSnapshot): void {
   const cards = decisionCards(snapshot.attention || [], snapshot.decisions || []);
   void setDecisionBadge(cards.length);
   const live = new Set(cards.map((c) => c.key));
-  const kept = Object.fromEntries(Object.entries(drafts).filter(([key]) => live.has(key)));
+  const kept = Object.fromEntries(
+    Object.entries(drafts).filter(([key]) => live.has(key) || key.startsWith('message:') || key.startsWith('thread:')),
+  );
   const advance =
     !initialLink &&
     decisionModal?.key &&

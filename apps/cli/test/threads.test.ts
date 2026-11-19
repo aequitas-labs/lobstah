@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, readThread, takeHelm, startThread, listThreads, mirrorReadAllowed, mirrorWriteAllowed } from '@lobstah/core';
+import { ensureLayout, readThread, takeHelm, startThread, triageThread, noteThread, askDecision, readDecisionAnswer, listThreads, mirrorReadAllowed, mirrorWriteAllowed } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -70,4 +70,24 @@ it('authorizes writes, validates uploads, serves rounds on demand, and keeps sna
   expect(mirrorReadAllowed(`/threads/${item.id}/files/phone.png`)).toBe(true);
   expect(mirrorReadAllowed(`/threads/${item.id}/files/..%2Fsecret`)).toBe(false);
   expect(mirrorWriteAllowed('thread-post')).toBe(true);
+});
+
+it('shares response read cursors and subscriber notices across the local and mirror HTTP paths', async () => {
+  const item = startThread({grounds:'home',text:'Navigation'}); triageThread(item.id,'thread');
+  const {meta} = askDecision({title:'Use Helm?',thread:item.id,askedBy:'helm',maxBytes:100});
+  const shown = readThread(item.id)!.responseSeq!;
+  noteThread(item.id,{decided:['Keep Reviews']});
+  server = serveGlass(0); await new Promise<void>(r => server!.once('listening',r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const token = ((await (await fetch(`${base}/data`)).json()) as {focusToken:string}).focusToken;
+  const send = (kind:string, through:number) => fetch(`${base}/requests`,{method:'POST',headers:{Origin:base,'content-type':'application/json','x-lobstah-token':token,'x-lobstah-relay':'wharf'},body:JSON.stringify({kind,payload:{id:item.id,through}})});
+  expect((await send('thread-seen',shown)).status).toBe(200);
+  expect(await (await fetch(`${base}/threads/${item.id}`)).json()).toMatchObject({seenThrough:shown,responseSeq:shown+1,unreadResponse:true});
+  const notices = await (await fetch(`${base}/thread-notices`)).json();
+  expect(notices).toMatchObject([{thread:item.id,seq:shown+1}]);
+  expect((await send('thread-notice-dismiss',shown+1)).status).toBe(200);
+  expect(await (await fetch(`${base}/thread-notices`)).json()).toEqual([]);
+  expect(readDecisionAnswer(meta.key)).toBeUndefined();
+  expect(mirrorReadAllowed('/thread-notices')).toBe(true);
+  expect(mirrorWriteAllowed('thread-seen')).toBe(true);
 });

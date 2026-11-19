@@ -12,7 +12,7 @@ const view = (): ThreadView => ({ ...summary(), text: 'How do we navigate?', att
 const pages: GlassDom[] = [];
 afterEach(async () => { for (const page of pages) await page.close(); pages.length = 0; });
 function fleet() { const d = emptyFleet(); d.focusToken = 'tok'; d.threads = [summary()]; d.answerLimits = { maxBytes: 1024, maxFiles: 8, textMax: 20000, extensions: ['.png', '.txt'] }; return d; }
-async function page(d: GlassSnapshot, options: Partial<GlassDomOptions> = {}) { const p = await loadGlass(GLASS_PAGE, d, { now: NOW, get: url => url === `/threads/${ID}` ? { status: 200, body: view() } : undefined, ...options }); pages.push(p); return p; }
+async function page(d: GlassSnapshot, options: Partial<GlassDomOptions> = {}) { const p = await loadGlass(GLASS_PAGE, d, { now: NOW, get: url => url === `/threads/${ID}` ? { status: 200, body: view() } : undefined, ...options, prepare: w => { Object.defineProperty(w, 'IntersectionObserver', { value: undefined, configurable: true }); options.prepare?.(w); } }); pages.push(p); return p; }
 async function click(g: GlassDom, selector: string) { (g.$(selector) as HTMLElement).click(); await g.settle(); }
 async function type(g: GlassDom, text: string) { const input = g.$('textarea[aria-label="Your message"]') as HTMLTextAreaElement; input.value = text; input.dispatchEvent(new g.window.Event('input', { bubbles: true })); await g.settle(); }
 it('opens one card composer from the fish button and retains its draft after closing', async () => {
@@ -81,4 +81,57 @@ it('uses the shared message sheet with dispatch context', async () => {
   expect(g.$('[role="dialog"]')?.textContent).toContain('About ' + id.slice(0, 8));
   await type(g, 'Consider this change'); await click(g, '.dsend');
   expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'thread-start', payload: { about: id, text: 'Consider this change' } });
+});
+
+it('counts one unread response per thread, marks only its displayed sequence read and keeps Card for you', async () => {
+  const d = fleet();
+  d.threads![0] = {...summary(),responseSeq:5,seenThrough:3,unreadResponse:true,responseText:'Notes updated'};
+  const response = {...view(),responseSeq:5,seenThrough:3,unreadResponse:true,responseText:'Notes updated'};
+  const g = await page(d,{hash:'#helm',get:url=>url.startsWith('/threads/')?{status:200,body:response}:undefined,post:(_url,req)=>{
+    const sent=JSON.parse(req.body);
+    if(sent.kind==='thread-seen') { d.threads![0]={...d.threads![0]!,seenThrough:5,unreadResponse:false}; return {status:200,body:{ok:true}}; }
+    return {status:404,body:{}};
+  }});
+  expect(g.$('.bbitem[href="#helm"] .dbadge')?.textContent).toBe('1');
+  expect(g.$('#helm')?.textContent).toContain('Response waiting');
+  expect(g.$$('#helm .drow')).toHaveLength(1);
+  await click(g,'#helm .drow .dopen');
+  expect(g.posts().map(p=>JSON.parse(p.body))).toContainEqual({kind:'thread-seen',payload:{id:ID,through:5}});
+  expect(g.posts().some(p=>JSON.parse(p.body).kind==='decision-answer')).toBe(false);
+  await g.go('#helm');
+  expect(g.$('.bbitem[href="#helm"] .dbadge')).toBeNull();
+  expect(g.$('#helm')?.textContent).toContain('Card for you');
+  expect(g.$$('#helm .drow')).toHaveLength(1);
+});
+it('retains message and thread drafts when read receipts or polls replace the snapshot', async () => {
+  const d=fleet(); const g=await page(d,{hash:`#thread/${ID}`});
+  await type(g,'A thread draft');
+  d.threads![0]={...summary(),openLine:'A fresh note'}; g.serve(d); await g.poll();
+  expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('A thread draft');
+  await g.go('#helm'); await click(g,'.fish-fab'); await type(g,'A new message draft');
+  d.threads![0]={...summary(),openLine:'Another note'}; g.serve(d); await g.poll();
+  expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('A new message draft');
+});
+it('leaves a response unread while its conversation is in a hidden tab', async () => {
+  const d=fleet(); d.threads![0]={...summary(),responseSeq:2,seenThrough:0,unreadResponse:true};
+  const response={...view(),responseSeq:2,seenThrough:0,unreadResponse:true,responseText:'Notes updated'};
+  const g=await page(d,{hash:`#thread/${ID}`,hidden:true,get:url=>url.startsWith('/threads/')?{status:200,body:response}:undefined,post:()=>({status:200,body:{ok:true}})});
+  expect(g.posts().some(p=>JSON.parse(p.body).kind==='thread-seen')).toBe(false);
+  await g.hide(false);
+  expect(g.posts().map(p=>JSON.parse(p.body))).toContainEqual({kind:'thread-seen',payload:{id:ID,through:2}});
+});
+
+it('waits until the response enters the viewport before acknowledging it', async () => {
+  const d=fleet(); d.threads![0]={...summary(),responseSeq:2,seenThrough:0,unreadResponse:true};
+  const response={...view(),responseSeq:2,seenThrough:0,unreadResponse:true,responseText:'Notes updated'};
+  let show: (()=>void) | undefined;
+  const g=await page(d,{hash:`#thread/${ID}`,get:url=>url.startsWith('/threads/')?{status:200,body:response}:undefined,post:()=>({status:200,body:{ok:true}}),prepare:w=>{
+    Object.defineProperty(w,'IntersectionObserver',{configurable:true,value:class {
+      constructor(callback:(entries:Array<{isIntersecting:boolean}>)=>void) { show=()=>callback([{isIntersecting:true}]); }
+      observe() {} disconnect() {}
+    }});
+  }});
+  expect(g.posts().some(p=>JSON.parse(p.body).kind==='thread-seen')).toBe(false);
+  expect(show).toBeDefined(); show!(); await g.settle();
+  expect(g.posts().map(p=>JSON.parse(p.body))).toContainEqual({kind:'thread-seen',payload:{id:ID,through:2}});
 });

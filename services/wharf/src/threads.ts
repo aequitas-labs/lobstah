@@ -1,19 +1,19 @@
 import type { HelmThread, ThreadSummary, ThreadView } from '../../../packages/core/src/thread-model.js';
-import { classifyThread, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from '../../../packages/core/src/thread-model.js';
+import { responseState, recordThreadResponse, acknowledgeThreadResponse, pendingThreadNotice, classifyThread, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from '../../../packages/core/src/thread-model.js';
 import { messageFileType } from '../../../packages/core/src/message-files.js';
 import type { ThreadAttachment as Attachment } from '../../../packages/core/src/thread-model.js';
 import type { WharfDocument } from '../../../packages/core/src/backend-model.js';
 import type { Actor, Command } from './account.js';
 import { ApiError, identifier, object, requireThat } from './protocol.js';
 export const threadSchema = 'CREATE TABLE IF NOT EXISTS helm_threads (id TEXT PRIMARY KEY, data TEXT NOT NULL);';
-type Hooks = { remindMs: () => number; helm: (c: Command, a: Actor, now: number) => void; event: (kind: string, dispatch?: string, note?: string) => void };
+type Hooks = { person: () => string; remindMs: () => number; helm: (c: Command, a: Actor, now: number) => void; event: (kind: string, dispatch?: string, note?: string) => void };
 export class Threads {
   constructor(private sql: SqlStorage, private hooks: Hooks) {}
   read(id: string): HelmThread | undefined {
     const row = this.sql.exec<{data: string}>('SELECT data FROM helm_threads WHERE id=?', id).toArray()[0];
     return row ? JSON.parse(row.data) : undefined;
   }
-  private list(): HelmThread[] { return this.sql.exec<{data: string}>("SELECT data FROM helm_threads WHERE json_extract(data,'$.state')='open' OR json_extract(data,'$.updatedAt')>? ORDER BY rowid DESC", new Date(Date.now() - 86400_000).toISOString()).toArray().map(r => JSON.parse(r.data)); }
+  private list(): HelmThread[] { return this.sql.exec<{data: string}>("SELECT data FROM helm_threads WHERE json_extract(data,'$.state')='open' OR json_extract(data,'$.updatedAt')>? OR coalesce(json_extract(data,'$.responseSeq'),0)>coalesce(json_extract(data,?),0) ORDER BY json_extract(data,'$.updatedAt') DESC,rowid DESC", new Date(Date.now() - 86400_000).toISOString(), `$.readers.${JSON.stringify(this.hooks.person())}.seenThrough`).toArray().map(r => JSON.parse(r.data)); }
   private put(item: HelmThread): HelmThread { this.sql.exec('INSERT OR REPLACE INTO helm_threads VALUES (?,?)', item.id, JSON.stringify(item)); return item; }
   private need(id: unknown): HelmThread { requireThat(typeof id === 'string' && THREAD_ID.test(id), 404, 'Conversation not found'); const item = this.read(id); requireThat(item, 404, 'Conversation not found'); return item; }
   private open(item: HelmThread) { requireThat(item.state === 'open', 409, 'Reopen this conversation before adding to it'); }
@@ -41,11 +41,11 @@ export class Threads {
       const d = JSON.parse(row.data) as WharfDocument;
       return [{ key, title: d.title, options: d.options ?? [], standing: d.published && !d.withdrawn && !d.answer, ...(d.answer ? { answer: { option: d.answer.option, text: d.answer.text, attachments: [], answeredAt: d.answer.at } } : {}) }];
     });
-    return { ...item, cards };
+    return { ...item, ...responseState(item, this.hooks.person()), cards };
   }
   private personAt(item: HelmThread): string { return this.view(item).cards.reduce((at, c) => c.answer && c.answer.answeredAt > at ? c.answer.answeredAt : at, item.lastPersonAt); }
   summaries(now: number): ThreadSummary[] {
-    return this.list().filter(t => t.state === 'open' || now - Date.parse(t.updatedAt) < 86400_000).map(t => ({ id: t.id, grounds: t.grounds, title: t.title, kind: t.kind, state: t.state, updatedAt: t.updatedAt, roundCount: t.rounds.length,
+    return this.list().filter(t => t.state === 'open' || responseState(t, this.hooks.person()).unreadResponse || now - Date.parse(t.updatedAt) < 86400_000).map(t => ({ ...responseState(t, this.hooks.person()), id: t.id, grounds: t.grounds, title: t.title, kind: t.kind, state: t.state, updatedAt: t.updatedAt, roundCount: t.rounds.length,
       cards: this.view(t).cards.filter(c => c.standing).map(c => c.key), waitingForHelm: t.state === 'open' && (!t.lastHelmAt || this.personAt(t) > t.lastHelmAt), ...(t.notes.open[0] ? { openLine: t.notes.open[0] } : {}), ...(t.outcome ? { outcome: t.outcome } : {}) }));
   }
   checkCard(id: unknown, grounds?: string): HelmThread {
@@ -54,7 +54,7 @@ export class Threads {
   linkCard(id: string, key: string, now: number) {
     const item = this.checkCard(id), at = this.at(item, now);
     item.rounds.at(-1)!.entries.push({ card: key });
-    this.put({ ...item, updatedAt: at, lastHelmAt: at });
+    this.put(recordThreadResponse({ ...item, updatedAt: at, lastHelmAt: at }, at, 'A card is ready for you'));
   }
   /** Called only by the alarm; reads never perform maintenance. */
   maintain(now: number) {
@@ -62,7 +62,7 @@ export class Threads {
       if (item.state !== 'open') continue;
       const at = this.at(item, now), personAt = this.personAt(item);
       if (item.kind === 'thread' && now - Date.parse(personAt) >= THREAD_IDLE_MS && !this.view(item).cards.some(c => c.standing)) {
-        this.put({ ...item, state: 'resolved', outcome: threadOutcome('dropped', 'No new message for seven days', at), updatedAt: at, lastHelmAt: at });
+        this.put(recordThreadResponse({ ...item, state: 'resolved', outcome: threadOutcome('dropped', 'No new message for seven days', at), updatedAt: at, lastHelmAt: at }, at, 'No new message for seven days'));
         this.hooks.event('thread-updated', undefined, item.id);
       } else if ((!item.lastHelmAt || personAt > item.lastHelmAt) && (!item.notifiedAt || now - Date.parse(item.notifiedAt) >= this.hooks.remindMs())) this.notify(item, now);
     }
@@ -94,6 +94,7 @@ export class Threads {
   private action(c: Command, actor: Actor, now: number): {status: number; value: unknown} | undefined {
     const parts = c.path.split('/'), b = c.method === 'GET' ? {} : object(c.body);
     const ok = (value: unknown, status = 200) => ({ status, value });
+    if (c.path === 'threads/notices' && c.method === 'GET') return ok(this.list().flatMap(item => pendingThreadNotice(item, this.hooks.person()) ?? []));
     if (c.path === 'threads' && c.method === 'GET') return ok(this.summaries(now));
     if (c.path === 'threads' && c.method === 'POST') {
       if (b.via === 'chat') this.hooks.helm(c, actor, now); else this.person(actor);
@@ -113,7 +114,9 @@ export class Threads {
       requireThat(file, 404, 'Attachment not found'); return ok({ id: file.path, type: file.type });
     }
     requireThat(c.method === 'POST' && parts.length === 3, 404, 'Conversation action not found');
-    if (parts[2] === 'post') {
+    if (parts[2] === 'seen' || parts[2] === 'dismiss-notice') {
+      this.person(actor); this.put(acknowledgeThreadResponse(item, actor.id, b.through, parts[2] === 'dismiss-notice'));
+    } else if (parts[2] === 'post') {
       this.open(item); if (b.via === 'chat') this.hooks.helm(c, actor, now); else this.person(actor);
       requireThat(item.rounds.length < THREAD_MESSAGES_MAX, 409, 'This conversation needs a report or plan before more messages');
       const attachments = this.files(item.id, b.files ?? [], item), words = (b.text === undefined || b.text === '') && attachments.length ? '' : threadWords(b.text);
@@ -124,8 +127,8 @@ export class Threads {
       this.person(actor); this.put({ ...item, state: 'open', outcome: undefined, updatedAt: at, lastPersonAt: at, lastHelmAt: undefined, notifiedAt: undefined }); this.notify(this.read(item.id)!, now);
     } else {
       this.hooks.helm(c, actor, now);
-      if (parts[2] === 'triage') this.put(classifyThread(item, b.kind, at));
-      else if (parts[2] === 'resolve') this.put({ ...item, state: 'resolved', outcome: threadOutcome(b.outcome, b.note, at), updatedAt: at, lastHelmAt: at });
+      if (parts[2] === 'triage') this.put(recordThreadResponse(classifyThread(item, b.kind, at), at, b.kind === 'thread' ? 'Discussion started' : 'Bait received'));
+      else if (parts[2] === 'resolve') this.put(recordThreadResponse({ ...item, state: 'resolved', outcome: threadOutcome(b.outcome, b.note, at), updatedAt: at, lastHelmAt: at }, at, threadWords(b.note, 'an outcome note', 1000)));
       else if (parts[2] === 'note') {
         this.open(item);
         const lines = (value: unknown, old: string[]) => { if (value === undefined) return old; requireThat(Array.isArray(value) && value.length <= 50, 400, 'Keep notes to 50 lines'); return value.filter(v => v !== '').map(v => threadWords(v, 'a note', 2000)); };
@@ -135,10 +138,10 @@ export class Threads {
           requireThat(['dispatched','report','planned'].includes(link) && ref && (link !== 'planned' || ref.startsWith('https://')), 400, 'Choose a dispatch, report or HTTPS plan link');
           item.rounds.at(-1)!.entries.push({ link: link as 'dispatched'|'report'|'planned', ref, text: threadWords(b.text ?? ref, 'a link note', 1000) });
         }
-        this.put({ ...item, notes, updatedAt: at, lastHelmAt: at });
+        this.put(recordThreadResponse({ ...item, notes, updatedAt: at, lastHelmAt: at }, at, b.link ? threadWords(b.text ?? b.link, 'a link note', 1000) : 'Notes updated'));
       } else throw new ApiError(404, 'Conversation action not found');
     }
-    if (parts[2] !== 'post' && parts[2] !== 'reopen') this.hooks.event('thread-updated', undefined, item.id);
+    if (!['post', 'reopen', 'seen', 'dismiss-notice'].includes(parts[2]!)) this.hooks.event('thread-updated', undefined, item.id);
     return ok(this.view(this.read(item.id)!), parts[2] === 'post' ? 201 : 200);
   }
 }
