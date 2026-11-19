@@ -125,12 +125,13 @@ describe("a Codex trap's project hooks", () => {
       hook('lobstah@lobstah:hooks/hooks.json:stop:0:0', 'untrusted', 'lobstah hook stop'),
     ]);
     fs.appendFileSync(config, '[hooks.state."ume@ume:hooks/hooks.json:session_end:0:0"]\nenabled=false\n');
+    const notInstalled = 'lobstah supplies no trust because the plugin is not installed and enabled in this Codex home';
     const blockers = codexTrapHookBlockers(worktree, { env: { CODEX_HOME: home }, listed });
     expect(blockers.map((b) => [b.key, b.reason])).toEqual([
-      ['ume@ume:hooks/hooks.json:stop:0:0', 'ume@ume never trusted'],
-      ['ume@ume:hooks/hooks.json:session_start:0:0', 'ume@ume changed since it was trusted'],
+      ['ume@ume:hooks/hooks.json:stop:0:0', `ume@ume never trusted; ${notInstalled}`],
+      ['ume@ume:hooks/hooks.json:session_start:0:0', `ume@ume changed since it was trusted; ${notInstalled}`],
     ]);
-    expect(codexStallReason(worktree, { env: { CODEX_HOME: home }, listed })).toContain('ume@ume:hooks/hooks.json:stop:0:0 (`ume hook stop`, ume@ume never trusted)');
+    expect(codexStallReason(worktree, { env: { CODEX_HOME: home }, listed })).toContain(`ume@ume:hooks/hooks.json:stop:0:0 (\`ume hook stop\`, ume@ume never trusted; ${notInstalled})`);
     const row = codexTrapHooksRow({ web: { path: main }, api: { path: main } }, { env: { CODEX_HOME: home }, listed });
     expect(row.status).toBe('fail');
     expect(row.detail.match(/ume@ume:hooks\/hooks\.json:stop:0:0/g)).toHaveLength(1);

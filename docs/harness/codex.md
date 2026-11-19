@@ -39,18 +39,29 @@ the plugin's contents (`trusted_content_hash`). If Codex can't answer, lobstah
 computes the hook hash itself, which is enough only before 0.166.
 Thrown sessions also set `check_for_update_on_startup=false` for that
 invocation, so an interactive update picker cannot hold the launch.
-The launcher rejects a plugin definition containing another command; it
-never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
-disabled hook, or approves repo/user/other-plugin hooks. Those still require
-their normal review. Manually launched Codex sessions still use `/hooks`.
 
-Doctor's `codex trap hooks` row names every hook that would hold a thrown
-trap at that picker: the user's `hooks.json`, each repo's project hooks, and
-another plugin's hooks, such as ume's after `codex plugin add ume@ume`.
+The same `hooks.state` also covers every other plugin that
+`$CODEX_HOME/config.toml` enables and Codex has cached under
+`plugins/cache/<marketplace>/<plugin>/<version>/`, such as ume. Each hook in
+that plugin's `hooks/hooks.json` is trusted at its current hash, so updating
+the plugin doesn't hold a thrown trap at the picker. Lobstah uses Codex's
+`hooks/list` hash only when Codex reports the same command and hook hash as
+the installed file. A disabled plugin or hook, a plugin with no cached copy,
+and a hook Codex doesn't list get no trust.
+
+The launcher rejects a lobstah plugin definition containing another command;
+it never uses `--dangerously-bypass-hook-trust`, edits saved trust, enables a
+disabled hook, or approves the user's `hooks.json` or uncommitted project
+hooks. Those still require their normal review. Manually launched Codex
+sessions still use `/hooks`.
+
+Doctor's `codex trap hooks` row names every hook that would still hold a
+thrown trap at that picker: the user's `hooks.json`, each repo's project
+hooks, and any other plugin hook lobstah can't trust, with the reason.
 Plugin hooks apply in every folder, so they're listed once. Their trust
 comes from Codex's own `hooks/list` answer; a disabled one doesn't count.
 When a thrown Codex trap doesn't sign on in time, the error names the same
-hooks.
+hooks and says to trust them in that session's `/hooks`.
 
 That trust covers the plugin as it was at launch. When the lobstah Codex
 plugin's contents change, a running session refuses lobstah's hooks: the

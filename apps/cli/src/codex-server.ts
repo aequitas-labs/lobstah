@@ -156,7 +156,7 @@ export function setTomlTableFields(text: string, header: string, fields: Readonl
  * pane's TUI don't reach a server it attaches to, so this one trust has to be
  * in `config.toml`; the server reads it without a restart. It covers exactly
  * what a session flag would: lobstah's own vetted hook commands, committed
- * project hooks, and a lobstah-created worktree. An explicit untrusted folder
+ * project hooks, other installed plugins' hooks, and a lobstah-created worktree. An explicit untrusted folder
  * stays untrusted, and a hook's `enabled` setting isn't touched.
  */
 export function trustForCodexServer(cwd: string, trapId: string, listed: CodexHookList | undefined, env: NodeJS.ProcessEnv = process.env): void {
