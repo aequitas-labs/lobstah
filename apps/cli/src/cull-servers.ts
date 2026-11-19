@@ -116,8 +116,10 @@ function protectedProcess(row: ServerProcess, protectedPids: Set<number>): boole
 
 function protectedProcessIds(processes: ServerProcess[], extra: number[]): Set<number> {
   const ids = new Set([process.pid, ...extra, ...listRoster().flatMap((trap) => trap.harnessProcess ? [trap.harnessProcess.pid] : [])]);
+  const visited = new Set<number>();
   let pid = process.ppid;
-  while (pid > 1 && !ids.has(pid)) {
+  while (pid > 1 && !visited.has(pid)) {
+    visited.add(pid);
     ids.add(pid);
     pid = processes.find((row) => row.pid === pid)?.parentPid ?? 0;
   }

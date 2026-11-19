@@ -164,6 +164,11 @@ describe('server cleanup safety', () => {
     expect(planServerCull(inventory(), { ...options, protectedPids: [700001] })[0]?.reason).toBe('agent or infrastructure process');
   });
 
+  it('continues protecting caller ancestors beyond an already protected parent', () => {
+    const rows = inventory([server(), server({ pid: process.ppid, parentPid: 700001, groupId: process.ppid, ports: [], command: 'zsh' })]);
+    expect(planServerCull(rows, { ...options, protectedPids: [process.ppid] })[0]?.reason).toBe('agent or infrastructure process');
+  });
+
   it('dry run shows ports, pid, worktree, age and actions without effects', async () => {
     const initial = inventory(); initial.containers = [container()];
     const runtime = fakeRuntime(initial);
