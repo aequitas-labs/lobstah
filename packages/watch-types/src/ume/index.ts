@@ -1,3 +1,4 @@
+import type { WatchRegistrationPolicy } from '../model.js';
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType, watchStringSchema } from '../command.js';
 import type { CommandWatchOptions } from '../command.js';
@@ -21,6 +22,7 @@ export interface UmeWatchOptions extends Partial<CommandWatchOptions> {
 export type UmeWatchSnapshot = WatchSnapshot<UmeWatchReference, UmeWatchState, string, UmeWatchOptions>;
 export type UmeWatchContext = WatchContext<UmeWatchReference, UmeWatchState, string, UmeWatchOptions>;
 export interface UmeWatchServices {
+  registration?: WatchRegistrationPolicy;
   observe(context: UmeWatchContext): WatchObservationBatch<string>;
   failure(error: unknown): WatchFailure;
   subscriber?: WatchSubscriber<UmeWatchReference, UmeWatchState, string, UmeWatchOptions>;
@@ -33,9 +35,12 @@ function object(value: unknown): Record<string, unknown> {
 
 /** Ume owns feedback normalization, project context and the read instructions for every consumer. */
 export class UmeWatchType extends BaseWatchType<UmeWatchReference, UmeWatchState, string, UmeWatchOptions> {
+  readonly registration: WatchRegistrationPolicy | undefined;
   readonly descriptor = { id: 'ume', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
   readonly bindings = [
+    { event: 'explicit' as const, field: 'key', pattern: '^ume:' },
     { event: 'report' as const, field: 'link' },
+    { event: 'report' as const, field: 'note' },
     { event: 'turn-wait' as const, field: 'read' },
     { event: 'legacy-command' as const, field: 'check', pattern: '\\bwatch\\s+check-ume\\b', importsType: 'command' },
   ];
@@ -114,6 +119,7 @@ export class UmeWatchType extends BaseWatchType<UmeWatchReference, UmeWatchState
   readonly subscriber: UmeWatchServices['subscriber'];
   constructor(private readonly services: UmeWatchServices) {
     super();
+    this.registration = services.registration;
     this.subscriber = services.subscriber;
   }
   identify(input: string): UmeWatchReference | undefined {

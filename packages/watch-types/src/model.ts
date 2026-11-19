@@ -46,6 +46,27 @@ export interface WatchRegistrationBinding {
   field: string;
 }
 
+/** Adapters interpret registration fields after their declared bindings match. */
+export interface WatchRegistrationRequest {
+  event: WatchRegistrationBinding['event'];
+  fields: Record<string, WatchValue>;
+  owner: WatchOwner;
+  options: WatchValue;
+  cwd?: string;
+  cursor?: string;
+  everySecs?: number;
+}
+export interface WatchRegistrationPlan {
+  input: string;
+  options: WatchValue;
+}
+/** Registration and reconciliation belong to the source in either host. */
+export interface WatchRegistrationPolicy {
+  prepare(request: WatchRegistrationRequest): WatchRegistrationPlan | undefined;
+  registered?(request: WatchRegistrationRequest, snapshot: WatchSnapshot): void;
+  sync?(now: string, phase: 'before-observe' | 'after-observe' | 'report'): void;
+}
+
 /** Provider IDs are stable across polling, streaming and reconnects. */
 export interface WatchObservation {
   id: string;
@@ -155,6 +176,7 @@ export interface WatchSnapshot<Reference = WatchValue, State = WatchValue, Curso
   /** Import provenance for a compatibility registration, never a session ID. */
   originGeneration?: string;
   status: 'watching' | 'draining' | 'closing' | 'retired' | 'held';
+  closeReason?: WatchCloseReason;
   events: WatchObservation[];
   deliveries: WatchDelivery[];
   deliveryProgress?: WatchDeliveryProgress;

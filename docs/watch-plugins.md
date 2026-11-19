@@ -117,6 +117,16 @@ The handshake advertises capabilities implemented by the adapter. Configuration
 must grant each optional capability with `allowCapabilities`; the default is
 `["poll"]`. Grants never add a capability that the adapter did not declare.
 
+- `registration`: the adapter's `registration.prepare(request)` interprets its
+  declared bindings for explicit keys, report fields and tool parks. It returns
+  `{ input, options }` or `undefined`; the host validates the result through the
+  adapter's identity and schemas, then registers it with the supplied durable
+  owner. Preparation must not write state. The optional `registered(request,
+  snapshot)` hook runs after identity, ambiguity and ownership checks pass.
+  `registration.sync(now, phase)` reconciles source registrations at
+  `before-observe`, `after-observe` and `report` boundaries. A failed source hook
+  does not prevent another adapter's reconciliation. Grant `registration` in
+  `allowCapabilities` to enable these hooks for a process plugin.
 - `batch`: the source groups compatible checks and returns a batch or failure for
   each requested key. Shared rate limits belong here.
 - `subscribe`: an async iterable yields the same batches as `poll`. The host
@@ -167,6 +177,14 @@ Required operations are `watch.identify`, `watch.key`, `watch.initialize`,
 version; the host retains ownership, generation, events, authority and receipts.
 Before a release or state migration publishes, the journal retains a backup of
 the previous installation's snapshot.
+
+Registration uses `watch.registration.prepare`, `watch.registration.registered`
+and `watch.registration.sync` when the capability is granted. A request includes
+its event, fields, durable owner, adapter options and optional working directory,
+cursor and cadence. Bindings match fields with adapter-declared patterns; the host
+never recognizes a provider's tool name or key prefix. Unknown parks keep their
+ordinary turn-wait process. The source's existing `close` hook also runs on
+explicit removal; failed cleanup remains retryable.
 
 A subscription uses `watch.subscribe`. Notifications use `watch.observation` and
 repeat the original request ID, watch key, generation, protocol and deadline with

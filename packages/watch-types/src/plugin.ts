@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { BaseWatchType } from './base.js';
 import type {
+  WatchRegistrationPolicy,
   WatchActionProposal,
   WatchActionRequest,
   WatchAutomation,
@@ -28,6 +29,7 @@ import {
   validatePluginManifest,
   validateWatchFailure,
   validateWatchPresentation,
+  watchRegistrationPlanSchema,
   watchActionRequestSchema,
   watchBatchSchema,
   watchEffectResultSchema,
@@ -108,6 +110,7 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
   readonly stateSchema: WatchSchema<WatchValue>;
   readonly cursorSchema: WatchSchema<WatchValue>;
   readonly optionsSchema: WatchSchema<WatchValue>;
+  declare readonly registration?: WatchRegistrationPolicy;
   declare readonly subscriber?: WatchSubscriber<WatchValue, WatchValue, WatchValue, WatchValue>;
   declare readonly batchObserver?: WatchBatchObserver<WatchValue, WatchValue, WatchValue, WatchValue>;
   declare readonly effectHandler?: WatchEffectHandler<WatchValue>;
@@ -155,6 +158,13 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
         if (!value || typeof value !== 'object' || Array.isArray(value)) return options.parse(value);
         return options.parse(pluginDto({ ...defaults, ...value }));
       },
+    };
+    if (enabled('registration')) this.registration = {
+      prepare: (request) => pluginSchema<ReturnType<WatchRegistrationPolicy['prepare']> | null>(
+        watchRegistrationPlanSchema, 'Plugin registration',
+      ).parse(this.call('watch.registration.prepare', { request })) ?? undefined,
+      registered: (request, snapshot) => { this.call('watch.registration.registered', { request, snapshot }, snapshot); },
+      sync: (now, phase) => { this.call('watch.registration.sync', { now, phase }); },
     };
     if (enabled('subscribe')) this.subscriber = { subscribe: (context) => this.subscribe(context) };
     if (enabled('batch'))

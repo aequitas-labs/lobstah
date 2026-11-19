@@ -20,7 +20,7 @@ import {
   type TurnWaitRegistration,
   type Watch,
 } from '@lobstah/core';
-import { watchSelfCommand } from './pr-watch.js';
+import { watchSelfCommand } from './watch-command.js';
 import type { UmeRead } from '@lobstah/core';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -46,17 +46,17 @@ function localContext(cwd: string): { project?: string; cursors?: Record<string,
     return {};
   }
 }
-export function addUmeWatch(
+export function prepareUmeWatch(
   artifact: string,
   opts: { forId?: string; cwd?: string; project?: string; org?: string; cursor?: string; everySecs?: number } = {},
-): Watch {
+): { key: string; check: string; options: Parameters<typeof addWatch>[2] } {
   if (!ID.test(artifact)) throw new Error('watch add requires a ume artifact id');
   const key = `ume:${artifact}`;
   const existing = readWatch(key);
   const cwd = opts.cwd ?? process.cwd();
   const local = localContext(cwd);
   const project = opts.project ?? process.env.UME_PROJECT ?? local.project;
-  return addWatch(key, `${watchSelfCommand()} watch check-ume ${artifact} --cursor {cursor}`, {
+  return { key, check: `${watchSelfCommand()} watch check-ume ${artifact} --cursor {cursor}`, options: {
     typeId: 'ume',
     owner: opts.forId ? `dispatch:${opts.forId}` : existing?.owner,
     cursor: opts.cursor ?? String(local.cursors?.[artifact] ?? 0),
@@ -68,7 +68,11 @@ export function addUmeWatch(
       org: existing?.context?.org ?? opts.org,
     },
     brief: `The watched source {key} has new review feedback:\n\n{summaries}\n\nRead the feedback in its recorded ume project, act on it, and report the outcome.`,
-  });
+  } };
+}
+export function addUmeWatch(artifact: string, opts: Parameters<typeof prepareUmeWatch>[1] = {}): Watch {
+  const plan = prepareUmeWatch(artifact, opts);
+  return addWatch(plan.key, plan.check, plan.options);
 }
 export function registerUmeReview(id: string, lane: Lane, entry: StatusEntry, env = process.env): Watch | undefined {
   try {

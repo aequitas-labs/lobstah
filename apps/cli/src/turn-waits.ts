@@ -20,7 +20,7 @@ import {
   readTurnOwner,
   readSessionClaim,
   readTurnWaits,
-  readWatch,
+  registerWatchEvent,
   sendMessage,
   sendTrapMessage,
   storedDescriptor,
@@ -31,7 +31,7 @@ import {
   unhandled,
 } from '@lobstah/core';
 import type { Lane, StatusEntry, TrapRegistration, TurnWait } from '@lobstah/core';
-import { addUmeWatch, umeTurnArtifact } from './ume-watch.js';
+import { createCliWatchRegistry } from './watch-automation.js';
 import { throwTrap } from './throw.js';
 
 /**
@@ -198,8 +198,10 @@ export function syncTurnWaitRecords(now = Date.now()): string[] {
     const dispatch = retargeted ? (hasOpenCatch(trap) ? trap.claimed : existing.dispatch) : existing?.dispatch ?? (hasOpenCatch(trap) ? trap.claimed : undefined);
     const previous = existing ?? readTurnWaitRecords().find(record => record.dispatch === dispatch &&
       record.from === w.from && record.read === w.read && turnWaitOwnerId(record) === trap.trapId);
-    const artifact = umeTurnArtifact(w);
-    const watchKey = artifact && dispatch ? (readWatch(`ume:${artifact}`) ?? addUmeWatch(artifact, { forId: dispatch, cwd, cursor: w.cursor })).key : undefined;
+    const watchKey = dispatch ? registerWatchEvent({
+      event: 'turn-wait', fields: JSON.parse(JSON.stringify(w)), options: {}, cwd, cursor: w.cursor,
+      owner: { kind: 'dispatch', chainId: dispatch, grounds: 'home' },
+    }, createCliWatchRegistry(() => {}))?.key : undefined;
     const parkContext = savedParkContext(dispatch, w.context ?? (previous?.dispatch === dispatch ? previous?.parkContext?.instructions : undefined));
     if (dispatch) {
       const lane = laneOf(dispatch);

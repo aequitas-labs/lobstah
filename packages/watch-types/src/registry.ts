@@ -1,5 +1,6 @@
 import { BaseWatchType } from './base.js';
 import type {
+  WatchRegistrationPolicy,
   WatchSnapshot,
   WatchValue,
   WatchContext,
@@ -22,6 +23,7 @@ import type {
 
 /** Runtime type erasure happens only after each adapter validates its own schemas. */
 export interface InstalledWatchType {
+  registration?: WatchRegistrationPolicy;
   descriptor: WatchTypeDescriptor;
   bindings: readonly WatchRegistrationBinding[];
   batchObserver?: WatchBatchObserver<WatchValue, WatchValue, WatchValue, WatchValue>;
@@ -89,6 +91,7 @@ export class WatchRegistry {
     this.types.set(id, {
       descriptor: { ...adapter.descriptor },
       bindings: adapter.bindings,
+      ...(adapter.registration ? { registration: adapter.registration } : {}),
       ...(adapter.noticePolicy ? { noticePolicy: adapter.noticePolicy } : {}),
       ...(adapter.subscriber ? { subscriber: {
         subscribe(context) {

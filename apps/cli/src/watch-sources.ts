@@ -1,20 +1,18 @@
-import { syncLocalWatchSources, syncWatchSubscriptions } from '@lobstah/core';
+import { syncLocalWatchSources, syncWatchSubscriptions, syncWatchRegistrations, registerWatchEvent } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { syncRegisteredWatches } from './watch-observation.js';
-import { prWatchEffects } from './pr-watch-effects.js';
-import { clearFinishedUmeWatches, registerUmeReview, syncUmeWatches } from './ume-watch.js';
 
 /** Builtin source composition is separate from daemon scheduling and helm presentation. */
 export function runCliWatchSources(now: number, log: (message: string) => void): void {
   const passes: Array<() => void> = [
-    () => syncUmeWatches(),
+    () => syncWatchRegistrations(createCliWatchRegistry(log), now, log),
     () => syncWatchSubscriptions(createCliWatchRegistry(log), now),
     () => syncLocalWatchSources(createCliWatchRegistry(log), now),
     () => {
       syncRegisteredWatches(now);
     },
-    () => prWatchEffects(now, log),
+    () => syncWatchRegistrations(createCliWatchRegistry(log), now, log, 'after-observe'),
   ];
   for (const pass of passes) {
     try {
@@ -27,6 +25,7 @@ export function runCliWatchSources(now: number, log: (message: string) => void):
 
 /** Source registration handlers share the report boundary; the CLI owns no source cleanup policy. */
 export function registerCliReportWatches(id: string, lane: Lane, entry: StatusEntry, enabled: boolean): void {
-  if (enabled) registerUmeReview(id, lane, entry);
-  clearFinishedUmeWatches();
+  const registry = createCliWatchRegistry(() => {});
+  if (enabled) registerWatchEvent({ event: 'report', fields: JSON.parse(JSON.stringify(entry)), options: {}, owner: { kind: 'dispatch', chainId: id, grounds: 'home' } }, registry);
+  syncWatchRegistrations(registry, Date.now(), () => {}, 'report');
 }

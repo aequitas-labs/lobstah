@@ -1,11 +1,11 @@
-import { builtinWatchRegistry, listWatches, restoreLegacyWatch, WatchAutomationRunner, WatchRuntime, watchSourceType } from '@lobstah/core';
-import { prRepairWatchServices } from './watch-sources/pr-repair.js';
+import { listWatches, restoreLegacyWatch, WatchAutomationRunner, WatchRuntime, watchSourceType } from '@lobstah/core';
+import { cliWatchRegistry } from './watch-adapters/index.js';
 import type { WatchRegistry } from '@lobstah/watch-types';
-import type { RepairOptions } from './pr-repair.js';
+import type { RepairOptions } from './watch-adapters/index.js';
 
 /** CLI hosts install the same source services for daemon and pickup execution. */
 export function createCliWatchRegistry(log: (message: string) => void, options: RepairOptions = {}): WatchRegistry {
-  return builtinWatchRegistry({ pr: prRepairWatchServices(log, options) });
+  return cliWatchRegistry(log, options);
 }
 
 /** Source capabilities select work; this host only preserves ordering and the scheduler cap. */

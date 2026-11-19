@@ -6,12 +6,12 @@ import {
   BaseWatchType,
   CommandWatchType,
   WatchRegistry,
-  type WatchContext,
   type CommandWatchOptions,
   type CommandWatchReference,
   type CommandWatchState,
   type WatchContext,
   type WatchObservationBatch,
+  type WatchCloseReason,
   type WatchResult,
   type WatchSnapshot,
 } from '@lobstah/watch-types';
@@ -40,7 +40,7 @@ class FixtureWatch extends BaseWatchType<CommandWatchReference, CommandWatchStat
   reads = 0;
   closes = 0;
   read: () => WatchResult<WatchObservationBatch<string>> = () => batch();
-  cleanup: () => void = () => {};
+  cleanup: (context?: WatchContext<CommandWatchReference, CommandWatchState, string, CommandWatchOptions>, reason?: WatchCloseReason) => WatchResult<void> = () => {};
   identify(input: string) {
     return this.command.identify(input);
   }
@@ -69,9 +69,9 @@ class FixtureWatch extends BaseWatchType<CommandWatchReference, CommandWatchStat
   failure(error: unknown) {
     return this.command.failure(error);
   }
-  close() {
+  close(context?: WatchContext<CommandWatchReference, CommandWatchState, string, CommandWatchOptions>, reason?: WatchCloseReason) {
     this.closes++;
-    this.cleanup();
+    return this.cleanup(context, reason);
   }
 }
 
@@ -222,6 +222,37 @@ describe('watch runtime durability', () => {
     expect(await service.close(snapshot.key)).toBe(true);
     expect(service.journal.read(snapshot.key)?.status).toBe('retired');
     expect(await service.close(snapshot.key)).toBe(false);
+  });
+
+  it('removal cleans the original generation and retries with the removal reason', async () => {
+    const adapter = new FixtureWatch(), service = runtime(adapter);
+    const original = service.register('fixture', 'build:one', { check: 'unused' }, owner);
+    const calls: Array<{ generation: string; reason?: WatchCloseReason }> = [];
+    adapter.cleanup = (context, reason) => {
+      calls.push({ generation: context!.snapshot.generation, reason });
+      if (calls.length === 1) throw new Error('Resource unavailable');
+    };
+    service.retire(original.key);
+    expect(service.journal.read(original.key)?.status).toBe('closing');
+    expect(() => service.register('fixture', original.key, { check: 'unused' }, owner)).toThrow(/cleanup is pending/);
+    expect(await service.close(original.key)).toBe(true);
+    expect(calls).toEqual([
+      { generation: original.generation, reason: 'removed' },
+      { generation: original.generation, reason: 'removed' },
+    ]);
+    expect(service.journal.read(original.key)?.status).toBe('retired');
+  });
+
+  it('keeps an asynchronously removed source closing until its cleanup completes', async () => {
+    const adapter = new FixtureWatch(), service = runtime(adapter);
+    let finish!: () => void;
+    adapter.cleanup = () => new Promise<void>(resolve => { finish = resolve; });
+    const original = service.register('fixture', 'build:one', { check: 'unused' }, owner);
+    service.retire(original.key);
+    expect(service.journal.read(original.key)?.status).toBe('closing');
+    finish();
+    await Promise.resolve();
+    expect(service.journal.read(original.key)?.status).toBe('retired');
   });
 
   it('unknown or newer adapter state is held without changing its cursor', async () => {

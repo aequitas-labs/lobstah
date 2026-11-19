@@ -1,6 +1,6 @@
 import * as readline from 'node:readline';
 import type { BaseWatchType } from './base.js';
-import type { WatchCloseReason, WatchContext, WatchSnapshot, WatchValue } from './model.js';
+import type { WatchRegistrationRequest, WatchCloseReason, WatchContext, WatchSnapshot, WatchValue } from './model.js';
 import {
   pluginDto,
   validateWatchFailure,
@@ -23,6 +23,7 @@ export function watchPluginManifest<Reference, State, Cursor, Options>(
   options: WatchPluginServerOptions = {},
 ): WatchPluginManifest {
   const capabilities: WatchPluginManifest['capabilities'] = {};
+  if (adapter.registration) capabilities.registration = true;
   if (adapter.batchObserver) capabilities.batch = true;
   if (adapter.subscriber) capabilities.subscribe = true;
   if (adapter.effectHandler) {
@@ -86,6 +87,17 @@ export async function serveWatchPlugin<Reference, State, Cursor, Options>(
     switch (request.method) {
       case 'watch.handshake':
         return pluginDto(manifest);
+      case 'watch.registration.prepare':
+        if (!adapter.registration) throw new Error('Watch plugin registration capability is unavailable');
+        return pluginDto(adapter.registration.prepare(body.request as unknown as WatchRegistrationRequest) ?? null);
+      case 'watch.registration.registered':
+        if (!adapter.registration) throw new Error('Watch plugin registration capability is unavailable');
+        adapter.registration.registered?.(body.request as unknown as WatchRegistrationRequest, body.snapshot as unknown as WatchSnapshot);
+        return null;
+      case 'watch.registration.sync':
+        if (!adapter.registration) throw new Error('Watch plugin registration capability is unavailable');
+        adapter.registration.sync?.(String(body.now), body.phase as 'before-observe' | 'after-observe' | 'report');
+        return null;
       case 'watch.identify':
         return pluginDto(adapter.identify(String(body.input), adapter.optionsSchema.parse(body.options)) ?? null);
       case 'watch.key':

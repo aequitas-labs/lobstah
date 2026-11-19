@@ -6,7 +6,7 @@ import { watchJson } from './registry.js';
 
 export const WATCH_PLUGIN_PROTOCOL = 1 as const;
 export const WATCH_PRESENTATION_PROTOCOL = 1 as const;
-export const WATCH_PLUGIN_CAPABILITIES = ['poll', 'batch', 'subscribe', 'actions', 'automation', 'dispatch', 'derived', 'notices'] as const;
+export const WATCH_PLUGIN_CAPABILITIES = ['poll', 'batch', 'subscribe', 'actions', 'automation', 'dispatch', 'derived', 'notices', 'registration'] as const;
 export type WatchPluginCapability = (typeof WATCH_PLUGIN_CAPABILITIES)[number];
 export type PluginJsonSchema = Record<string, WatchValue>;
 
@@ -33,6 +33,7 @@ export interface WatchPluginManifest {
   schemas: { reference: PluginJsonSchema; options: PluginJsonSchema; state: PluginJsonSchema; cursor: PluginJsonSchema };
   bindings: WatchRegistrationBinding[];
   capabilities: {
+    registration?: boolean;
     batch?: boolean;
     subscribe?: boolean;
     actions?: { authorityRequired: true; arguments: PluginJsonSchema; result: PluginJsonSchema };
@@ -290,6 +291,7 @@ const manifestSchema: PluginJsonSchema = {
       type: 'object',
       additionalProperties: false,
       properties: {
+        registration: { type: 'boolean' },
         batch: { type: 'boolean' },
         subscribe: { type: 'boolean' },
         automation: { type: 'boolean' },
@@ -511,3 +513,12 @@ export function watchPluginDefaults(value: Record<string, unknown>): Record<stri
   ]);
   return Object.fromEntries(Object.entries(value).filter(([key]) => !transport.has(key)));
 }
+
+/** Registration results cannot change ownership or carry executable host callbacks. */
+export const watchRegistrationPlanSchema: PluginJsonSchema = {
+  anyOf: [
+    { type: 'null' },
+    { type: 'object', required: ['input', 'options'], additionalProperties: false,
+      properties: { input: { type: 'string', minLength: 1 }, options: {} } },
+  ],
+};

@@ -1,3 +1,4 @@
+import type { WatchRegistrationPolicy } from '../model.js';
 import type { WatchNoticePolicy } from '../model.js';
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
@@ -62,6 +63,7 @@ export const prWatchReferenceSchema: WatchSchema<PrWatchReference> = {
 
 /** Host services supply GitHub IO and existing evidence projections, never runtime policy. */
 export interface PrWatchServices {
+  registration?: WatchRegistrationPolicy;
   noticePolicy?: WatchNoticePolicy;
   effectHandler?: WatchEffectHandler<PrWatchReference>;
   automation?: WatchAutomation<PrWatchReference, PrWatchState, string, PrWatchOptions>;
@@ -74,6 +76,7 @@ export interface PrWatchServices {
 
 /** The PR source owns identity, observation, checkpoints, errors and instructions. */
 export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, string, PrWatchOptions> {
+  readonly registration: WatchRegistrationPolicy | undefined;
   readonly descriptor = {
     id: 'pr',
     apiVersion: 1 as const,
@@ -88,7 +91,7 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, s
     ],
   };
   readonly bindings = [
-    { event: 'explicit' as const, field: 'key' },
+    { event: 'explicit' as const, field: 'key', pattern: '^(?:(?:pr:)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+|https?://github\\.com/[^/]+/[^/]+/pull/[0-9]+(?:[/?#].*)?)$' },
     { event: 'report' as const, field: 'pr' },
     { event: 'legacy-command' as const, field: 'check', importsType: 'command', pattern: '[\\s\\S]+' },
   ];
@@ -129,6 +132,7 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, s
   readonly dispatchPolicy: PrWatchServices['dispatchPolicy'];
   constructor(private readonly services: PrWatchServices) {
     super();
+    this.registration = services.registration;
     this.batchObserver = services.batchObserver;
     this.effectHandler = services.effectHandler;
     this.noticePolicy = services.noticePolicy;

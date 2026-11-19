@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { registerInstalledWatch } from '@lobstah/core';
-import { addUmeWatch, runUmeCheck } from './ume-watch.js';
+import { runUmeCheck } from './ume-watch.js';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { runCliWatchSources, registerCliReportWatches } from './watch-sources.js';
 import { presentRegisteredWatch } from './watch-presenters/index.js';
@@ -296,7 +296,6 @@ import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, rest
 import { appendRepoBlock, configuredRepoKeys, configuredRepoPaths, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
 import {
-  addPrWatch,
   autoRegisterPrWatch,
   backfillPrWatches,
   runDueManWatches,
@@ -4159,35 +4158,14 @@ async function mainCli(): Promise<void> {
         const check = opt('--check');
         const forId = opt('--for');
         const every = opt('--every');
-        // Preset: a PR key or URL with no --check installs the shipped check.
-        const prRef = !check && !opt('--type') && key ? parsePrRef(key) : undefined;
-        if (prRef) {
-          const w = addPrWatch(prRef, { forId, everySecs: every ? Number(every) : undefined });
-          console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
-          console.log(
-            toonHelp([
-              w.owner === 'man'
-                ? 'lobstah man wait   (its events wake you)'
-                : 'lobstah catch ' + forId + '   (the pr object once observed; CI-fix continuations need `lobstah pick`)',
-              'lobstah watch   (list watches)',
-            ]),
-          );
-          break;
-        }
-        if (!check && !opt('--type') && key?.startsWith('ume:')) {
-          const w = addUmeWatch(key.slice(4), { forId, everySecs: every ? Number(every) : undefined, cursor: opt('--cursor') });
-          console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
-          break;
-        }
         if (!check && key) {
           const trapOwner = opt('--owner');
           if (trapOwner && !/^wt:[^\s]+$/.test(trapOwner)) throw new Error('Watch --owner must name a stable wt:<id> trap');
           if (forId && trapOwner) throw new Error('Select either --for or --owner for a watch');
-          if (forId) findLane(forId);
           const grounds = resolveGrounds(loadConfig(), opt('--grounds')).name;
           const owner = forId ? { kind: 'dispatch' as const, chainId: forId, grounds }
             : trapOwner ? { kind: 'trap' as const, trapId: trapOwner.slice(3), grounds } : { kind: 'helm' as const, grounds };
-          const installed = registerInstalledWatch(key, owner, opt('--options') ? JSON.parse(opt('--options')!) : {}, opt('--type'));
+          const installed = registerInstalledWatch(key, owner, opt('--options') ? JSON.parse(opt('--options')!) : {}, opt('--type'), createCliWatchRegistry(() => {}), { ...(every ? { everySecs: Number(every) } : {}), ...(opt('--cursor') ? { cursor: opt('--cursor') } : {}) });
           if (installed) {
             console.log(toonKV({ key: installed.key, type: installed.type.id, owner: forId ? `dispatch:${forId}` : trapOwner ?? 'man', cursor: JSON.stringify(installed.cursor), registered: true }));
             break;

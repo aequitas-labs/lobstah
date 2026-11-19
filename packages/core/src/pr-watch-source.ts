@@ -105,6 +105,7 @@ function presentPrSnapshot(snapshot: PrWatchSnapshot): WatchPresentation {
 
 /** Composition lives beside the source; the generic runtime has no GitHub branches. */
 export interface PrWatchSourceOptions {
+  registration?: PrWatchServices['registration'];
   run?: PrBatchRun;
   effectHandler?: PrWatchServices['effectHandler'];
   automation?: PrWatchServices['automation'];
@@ -113,6 +114,7 @@ export interface PrWatchSourceOptions {
 
 export function createPrWatchType(options: PrWatchSourceOptions = {}): PrWatchType {
   return new PrWatchType({
+    registration: options.registration,
     noticePolicy: { kinds: [], current: () => true, relatedDispatches(notice) {
       const ids: string[] = [];
       for (const value of [notice.refId, notice.url]) {

@@ -88,6 +88,7 @@ export class WatchRuntime {
     for (let attempt = 0; attempt < 8; attempt++) {
       const prior = this.journal.read(identified.key);
       const active = prior && prior.status !== 'retired' ? prior : undefined;
+      if (active?.status === 'closing') throw new Error('Watch cleanup is pending; retry registration after cleanup.');
       if (active?.type.id && active.type.id !== typeId) throw new Error(`Watch key belongs to another type: ${identified.key}`);
       if (active && !ownerEqual(active.owner, owner)) throw new Error('Watch ownership requires an explicit transfer');
       const prepared: WatchSnapshot = active
@@ -261,17 +262,33 @@ export class WatchRuntime {
     return { snapshot: structuredClone(execution.snapshot), now: new Date(execution.now).toISOString(), everySecs: execution.everySecs };
   }
 
-  /** Explicit removal cancels delivery and invalidates outstanding observation leases. */
+  /** Explicit removal fences observation and releases the source outside journal locks. */
   retire(key: string): void {
-    this.journal.update(key, (snapshot) => {
-      if (!snapshot) return { result: undefined };
-      snapshot.generation = randomUUID();
-      snapshot.status = 'retired';
-      snapshot.lease = undefined;
-      snapshot.subscriptionLease = undefined;
-      for (const delivery of snapshot.deliveries) delivery.status = 'delivered';
-      return { snapshot, result: undefined };
+    const snapshot = this.journal.update<WatchSnapshot | undefined>(key, (current) => {
+      if (!current || current.status === 'retired') return { result: undefined };
+      current.status = 'closing';
+      current.closeReason = 'removed';
+      current.lease = undefined;
+      current.subscriptionLease = undefined;
+      for (const delivery of current.deliveries) delivery.status = 'delivered';
+      return { snapshot: current, result: structuredClone(current) };
     });
+    if (!snapshot) return;
+    let source: InstalledWatchType | undefined;
+    const finish = (failure?: WatchFailure): void => {
+      this.journal.update(key, (current) => {
+        if (!current || current.generation !== snapshot.generation || current.status !== 'closing') return { result: undefined };
+        current.status = failure ? 'closing' : 'retired';
+        current.failure = failure;
+        return { snapshot: current, result: undefined };
+      });
+    };
+    try {
+      source = this.registry.get(snapshot.type.id);
+      const closed = source.close({ snapshot, now: new Date().toISOString() }, 'removed');
+      if (isPromise(closed)) void closed.then(() => finish(), (error) => finish(sourceWatchFailure(source, error)));
+      else finish();
+    } catch (error) { finish(sourceWatchFailure(source, error)); }
   }
 
   private begin(key: string, now: number, everySecs: number, force = false): Execution | undefined {
@@ -458,7 +475,7 @@ export class WatchRuntime {
     let adapter: InstalledWatchType | undefined;
     try {
       adapter = this.registry.get(snapshot.type.id);
-      await adapter.close({ snapshot: structuredClone(snapshot), now: new Date().toISOString() }, reason);
+      await adapter.close({ snapshot: structuredClone(snapshot), now: new Date().toISOString() }, snapshot.closeReason ?? reason);
     } catch (error) {
       const failure = sourceWatchFailure(adapter, error);
       this.journal.update(key, (current) => {
