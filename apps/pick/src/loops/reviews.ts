@@ -119,6 +119,7 @@ interface ReviewPrSnapshot {
   headRefOid?: string; baseRefOid?: string; isDraft?: boolean;
   headRefName?: string; baseRefName?: string; isCrossRepository?: boolean;
   reviews?: SearchPr['reviews'];
+  reviewRequests?: { nodes?: Array<{ requestedReviewer?: { __typename?: string; login?: string } | null }> };
 }
 
 type ReviewPrBatch = Record<string, { pullRequest?: ReviewPrSnapshot | null } | null>;
@@ -212,6 +213,9 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
   const missing = listReviews().filter((item) => (!found.seen.has(item.key) || latestRound(item)?.staged) && found.inScope(item) &&
     !['merged', 'closed'].includes(latestRound(item)?.state ?? ''));
   const confirmed = new Set<string>();
+  // Still asked though the search missed it: a direct request, or a requested team the person is on.
+  const asked = new Set(found.seen);
+  const teams: ReviewItem[] = [];
   for (let start = 0; start < missing.length; start += 50) {
     if (githubBlockedUntil(gh.now)) break;
     const batch = missing.slice(start, start + 50);
@@ -225,6 +229,7 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
         state headRefOid baseRefOid isDraft headRefName baseRefName isCrossRepository reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
           nodes { databaseId state submittedAt commit { oid } }
         }
+        reviewRequests(first: 100) { nodes { requestedReviewer { __typename ... on User { login } } } }
       } }`);
     });
     const data = reviewQuery<ReviewPrBatch>(
@@ -234,6 +239,9 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
       const pr = data[`pr${index}`]?.pullRequest;
       if (!pr || !['OPEN', 'MERGED', 'CLOSED'].includes(pr.state)) continue;
       confirmed.add(item.key);
+      const reviewers = (pr.reviewRequests?.nodes ?? []).map((node) => node.requestedReviewer);
+      if (pr.state === 'OPEN' && reviewers.some((r) => r?.__typename === 'User' && r.login?.toLowerCase() === identity.toLowerCase())) asked.add(item.key);
+      else if (pr.state === 'OPEN' && reviewers.some((r) => r?.__typename === 'Team')) teams.push(item);
       const observedPr = {
         ...item.pr, state: pr.state,
         ...(pr.headRefName !== undefined ? { headRefName: pr.headRefName } : {}),
@@ -251,6 +259,7 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
       }
     }
   }
+  for (const key of teamRequestsIncluding(teams, identity, gh, run, log)) asked.add(key);
   for (const item of listReviews()) {
     const r = latestRound(item);
     if (!confirmed.has(item.key) || !r?.staged || !['drafted', 'stale', 'withdrawn'].includes(r.state) || item.pr.state !== 'OPEN') continue;
@@ -265,8 +274,39 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
     if (out === 'posted') log(`${item.key}: review sent from the review tool`);
     if (out === 'deleted') log(`${item.key}: pending review deleted in the review tool; round dismissed`);
   }
-  for (const key of withdrawUnseenReviews(found.seen, (item) => confirmed.has(item.key), gh.now))
+  for (const key of withdrawUnseenReviews(asked, (item) => confirmed.has(item.key), gh.now))
     log(`${key}: review request gone; round ${latestRound(readReview(key)!)!.state}`);
+}
+
+/**
+ * The PRs among `items` with a requested team that includes the identity.
+ * Reading team members needs the token's `read:org` scope; when the check
+ * fails, every PR in it counts as still asked rather than dropped.
+ */
+function teamRequestsIncluding(items: ReviewItem[], identity: string, gh: { token: () => string; now: number }, run: GhGraphql, log: (m: string) => void): string[] {
+  const out: string[] = [];
+  const me = identity.toLowerCase();
+  for (let start = 0; start < items.length; start += 50) {
+    const batch = items.slice(start, start + 50);
+    const declarations = ['$identity: String!'];
+    const fields: string[] = [];
+    const variables: Record<string, unknown> = { identity };
+    batch.forEach((item, index) => {
+      declarations.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
+      Object.assign(variables, { [`owner${index}`]: item.pr.owner, [`repo${index}`]: item.pr.repo, [`number${index}`]: item.pr.number });
+      fields.push(`pr${index}: repository(owner: $owner${index}, name: $repo${index}) { pullRequest(number: $number${index}) {
+        reviewRequests(first: 100) { nodes { requestedReviewer { ... on Team { members(query: $identity, first: 10) { nodes { login } } } } } }
+      } }`);
+    });
+    type TeamBatch = Record<string, { pullRequest?: { reviewRequests?: { nodes?: Array<{ requestedReviewer?: { members?: { nodes?: Array<{ login?: string }> } } | null }> } } | null } | null>;
+    const data = githubBlockedUntil(gh.now) ? undefined : reviewQuery<TeamBatch>(
+      { query: `query(${declarations.join(', ')}) { rateLimit { cost } ${fields.join('\n')} }`, variables }, gh.token, run, gh.now, log, 'team request check');
+    for (const [index, item] of batch.entries()) {
+      const requests = data?.[`pr${index}`]?.pullRequest?.reviewRequests?.nodes;
+      if (!requests || requests.some((request) => request.requestedReviewer?.members?.nodes?.some((member) => member.login?.toLowerCase() === me))) out.push(item.key);
+    }
+  }
+  return out;
 }
 
 /** Submitted approvals, change requests, and comments all finish work on their reviewed head. */
@@ -284,7 +324,7 @@ function settleSubmittedReview(item: ReviewItem, reviews: SearchPr['reviews']): 
 export async function refreshReviewDrafts(gh: { now: number }, log: (message: string) => void = () => {}): Promise<void> {
   for (const item of listReviews()) {
     const round = latestRound(item);
-    if (!round || item.mutedAt || ['MERGED', 'CLOSED'].includes(item.pr.state ?? '') ||
+    if (!round || item.mutedAt || item.unseenAt || ['MERGED', 'CLOSED'].includes(item.pr.state ?? '') ||
         (round.wharf && !round.wharf.mine)) continue;
     const stageFailed = round.state === 'drafted' && round.reason?.startsWith('stage failed');
     const draft = round.state === 'drafted' ? readRoundDraft(item.key, round.id) : undefined;
@@ -603,6 +643,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     }
 
     if (r.state === 'requested' && !r.dispatch) {
+      // No one asks for this review any more; only the person's own New review or Draft click runs.
+      if (item.unseenAt && !manual && (r.refresh || !r.localRequest)) continue;
       if (r.refresh && now < Date.parse(r.refresh.retryAt)) continue;
       if (!manual && r.changesObservedAt && now - Date.parse(r.changesObservedAt) < 30_000) continue;
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.

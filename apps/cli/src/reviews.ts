@@ -51,6 +51,8 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const name = person.name;
     const avatar = person.avatarUrl;
     const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
+    // Submitting a review ends its request too; that round and a re-review are not removed requests.
+    const requestRemoved = !!item.unseenAt && item.pr.state === 'OPEN' && r.state !== 'posted' && !r.reReview;
     out.push({
       ...(stack ? { stack: { id: stack.id, title: stack.title, keys: stack.members.map(member => items.find(item => item.pr.url === member.url)!.key) } } : {}),
       updatedAt: item.updatedAt,
@@ -79,7 +81,8 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       requestedBy: asker,
       requestedAt: r.requestedAt,
       state: r.state,
-      stands: reviewStands(r),
+      ...(requestRemoved ? { requestRemoved } : {}),
+      stands: !requestRemoved && reviewStands(r),
       ...(!r.refresh && r.reason ? { reason: r.reason } : {}),
       headSha: r.headSha,
       prHeadSha: item.pr.headSha,

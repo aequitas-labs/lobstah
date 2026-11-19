@@ -213,7 +213,7 @@ describe('a review card', () => {
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
     // The menu keeps recovery and secondary actions beside the main action; Open stays on the bar.
     const bar = [...card(7).querySelectorAll('.gactions button, .gactions a')].map((b) => text(b) || b.getAttribute('aria-label'));
-    expect(bar).toEqual(['Publish', 'More actions', 'Open draft']);
+    expect(bar).toEqual(['Approve', 'More actions', 'Open draft']);
     await click(g, card(7).querySelector('.gactions .splitcaret'));
     expect(card(7).querySelector('.cmenulist')?.parentElement).toBe(card(7).querySelector('.split'));
     expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Approve anyway', 'Skip', 'Re-draft', 'Mute PR']);
@@ -240,7 +240,7 @@ describe('a review card', () => {
     // The requester is absent from the card.
     expect(text(card(7))).not.toContain('maya');
     // Sending a review verdict is one click; the card never opens.
-    const approve = () => [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Publish');
+    const approve = () => [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Approve');
     await click(g, approve());
     expect(g.$('#overlay')!.className).not.toBe('open');
     const sends = () => g.posts().filter((p) => JSON.parse(p.body).kind !== 'review-seen');
