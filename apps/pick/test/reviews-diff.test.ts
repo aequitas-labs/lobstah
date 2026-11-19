@@ -80,7 +80,7 @@ const compare = async (url: string) => {
 };
 
 describe('review diffs', () => {
-  it.each(['dismissed', 'posted', 'stale'] as const)('retains the %s request across equivalent base updates and opens a round for changed PR code', async (state) => {
+  it.each(['dismissed', 'posted', 'stale'] as const)('equivalent updates keep the %s round, repairing stale drafts; a real change opens one', async (state) => {
     const h = history();
     const fetch = vi.fn(compare);
     const poll = (head: string, base: string) => reviewsLoop('chris', () => 'token', () => {}, { run: search(head, base), fetch, now: NOW });
