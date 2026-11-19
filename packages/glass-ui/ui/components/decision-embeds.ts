@@ -13,7 +13,7 @@ const leaveDecision = () => {
   routeDecision(null);
 };
 
-function ReportEmbed({ reference }: { reference: DecisionReference }) {
+export function ReportEmbed({ reference, onOpen }: { reference: DecisionReference; onOpen?: () => void }) {
   const cached = viewOf(getState())?.reports.find((report) => report.key === reference.key);
   const [loaded, setLoaded] = useState<GlassReport>();
   const [pending, setPending] = useState(!cached);
@@ -36,7 +36,7 @@ function ReportEmbed({ reference }: { reference: DecisionReference }) {
   }, [reference.key, !!cached]);
   const report = cached ?? loaded;
   return report
-    ? reportCard(report, leaveDecision)
+    ? reportCard(report, onOpen)
     : html`<div class="dim" role="status">${pending ? 'Loading report' : 'Report unavailable'} · <code>${reference.key}</code></div>`;
 }
 
@@ -44,7 +44,8 @@ function ReportEmbed({ reference }: { reference: DecisionReference }) {
 export function DecisionEmbeds({ references }: { references: readonly DecisionReference[] }) {
   const view = viewOf(getState());
   return html`<section class="decision-embeds cards" aria-label="Reports and PRs">${references.map((reference, i) => {
-    if (reference.kind === 'report') return html`<${ReportEmbed} key=${i + reference.key} reference=${reference} />`;
+    if (reference.kind === 'report')
+      return html`<${ReportEmbed} key=${i + reference.key} reference=${reference} onOpen=${leaveDecision} />`;
     const pr = view?.prs.find((pr) => pr.key === reference.key);
     return pr
       ? prCard(pr, { onOpen: leaveDecision })

@@ -1,3 +1,4 @@
+import { DecisionRow } from './decision-row.js';
 import { ThreadNotes } from './helm.js';
 import { Composer } from './composer.js';
 import { DesktopStartAction } from './common.js';
@@ -150,17 +151,14 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   const status = runIcon
     ? html`<span class="dsent"><${RunStatusIcon} status=${runIcon} result=${run?.latest?.result} startedAt=${run?.latest?.startedAt} /></span>`
     : state === 'answered' && html`<span class="dsent ok">sent</span>`;
-  return html`<li key=${c.key} class=${'drow ' + state + (focused ? ' focus' : '')} data-decision=${c.key}>
-    <button type="button" class="dopen" onClick=${open} aria-label=${`${STATE_WORD[state]}: ${c.kind === 'decision' ? c.title : c.note}`}>
-      ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
-      ${run && RunKindIcon}
-      <b class="dtitle">${titleOf(c)}</b>
-      ${c.kind === 'decision' && c.thread && html`<span class="dim">${getState().snapshot?.threads?.find((t) => t.id === c.thread)?.title ?? 'Conversation'}</span>`}
-      <span class="dmeta dim">${meta}</span>
-      ${boat && html`<span class="dboat dim">⛵ ${boat}</span>`}
-      ${status}
-    </button>
-  </li>`;
+  return html`<${DecisionRow}
+    key=${c.key} state=${state} focused=${focused} attrs=${{ 'data-decision': c.key }} onOpen=${open}
+    label=${`${STATE_WORD[state]}: ${c.kind === 'decision' ? c.title : c.note}`}
+    title=${titleOf(c)}
+    prefix=${[c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`, run && RunKindIcon]}
+    context=${c.kind === 'decision' && c.thread && html`<span class="dim">${getState().snapshot?.threads?.find((t) => t.id === c.thread)?.title ?? 'Conversation'}</span>`}
+    meta=${meta} boat=${boat && `⛵ ${boat}`} status=${status}
+  />`;
 }
 
 /** How a finished run ended, as the run card's status icon shows it: its status, and the result its words name. */

@@ -248,7 +248,7 @@ h2 {
   color: var(--fg);
 }
 @media (max-width: 1199px) {
-  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='helm']) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='helm'], [data-tab='prs']) {
     display: none;
   }
   .nav-toggle {
@@ -4203,7 +4203,7 @@ footer .glass-brand {
 }
 
 /* One message entry, above the phone navigation and outside its hit targets. */
-.fish-fab {
+.message-fab {
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -4213,7 +4213,7 @@ footer .glass-brand {
   height: 52px;
   box-shadow: 0 4px 18px #0008;
 }
-.fish-fab svg {
+.message-fab svg {
   width: 28px;
   height: 28px;
 }
@@ -4246,14 +4246,66 @@ footer .glass-brand {
   max-width: 100%;
 }
 @media (max-width: 699px) {
-  .fish-fab {
+  .message-fab {
     right: 16px;
     bottom: calc(76px + env(safe-area-inset-bottom, 0px));
   }
 }
 
 @media (max-width: 699px) {
-  .fish-fab.above-alert {
+  .message-fab.above-alert {
     bottom: calc(144px + env(safe-area-inset-bottom, 0px));
   }
+}
+
+/* Conversation summaries share the decision row and its unread treatment. */
+.drow .dpreview {
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+.thread-card .dopen {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+}
+.thread-card .dtitle {
+  grid-column: 1;
+  grid-row: 1;
+}
+.thread-card .thread-state {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+}
+.thread-card .dpreview,
+.thread-card .dmeta {
+  grid-column: 1 / -1;
+}
+.thread-resolved {
+  margin-top: 24px;
+}
+.thread-resolved > summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.thread-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.thread-checklist li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 4px 0;
+}
+.thread-checklist input {
+  flex: 0 0 auto;
+}
+.thread-links {
+  margin: 12px 0;
 }

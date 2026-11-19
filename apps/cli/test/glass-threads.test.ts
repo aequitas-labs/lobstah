@@ -15,21 +15,21 @@ function fleet() { const d = emptyFleet(); d.focusToken = 'tok'; d.threads = [su
 async function page(d: GlassSnapshot, options: Partial<GlassDomOptions> = {}) { const p = await loadGlass(GLASS_PAGE, d, { now: NOW, get: url => url === `/threads/${ID}` ? { status: 200, body: view() } : undefined, ...options, prepare: w => { Object.defineProperty(w, 'IntersectionObserver', { value: undefined, configurable: true }); options.prepare?.(w); } }); pages.push(p); return p; }
 async function click(g: GlassDom, selector: string) { (g.$(selector) as HTMLElement).click(); await g.settle(); }
 async function type(g: GlassDom, text: string) { const input = g.$('textarea[aria-label="Your message"]') as HTMLTextAreaElement; input.value = text; input.dispatchEvent(new g.window.Event('input', { bubbles: true })); await g.settle(); }
-it('opens one card composer from the fish button and retains its draft after closing', async () => {
+it('opens one card composer from the message button and retains its draft after closing', async () => {
   const g = await page(fleet());
-  await click(g, '.fish-fab');
+  await click(g, '.message-fab');
   expect(g.$('[role="dialog"]')?.textContent).toContain('Message the helm');
   expect(g.$$('.dcompose')).toHaveLength(1);
   expect(g.$('input[aria-label="Attach"]')).not.toBeNull();
   expect(g.$('[role="dialog"] select')).toBeNull();
   await type(g, 'Keep reviews in the bar');
-  await click(g, '.dialog-close'); await click(g, '.fish-fab');
+  await click(g, '.dialog-close'); await click(g, '.message-fab');
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('Keep reviews in the bar');
 });
 it('keeps a failed send for retry and opens its stored conversation after success', async () => {
   const d = fleet(); let tries = 0;
   const g = await page(d, { post: (_url, req) => { const body = JSON.parse(req.body); if (body.kind !== 'thread-start') return { status: 404, body: {} }; return ++tries === 1 ? { status: 503, body: { ok: false, reason: 'Try again' } } : { status: 201, body: { ok: true, item: view() } }; } });
-  await click(g, '.fish-fab'); await type(g, 'Where should Helm go?');
+  await click(g, '.message-fab'); await type(g, 'Where should Helm go?');
   await click(g, '.dsend'); expect(g.$('.derr')?.textContent).toBe('Try again');
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('Where should Helm go?');
   await click(g, '.dsend');
@@ -47,7 +47,7 @@ it('shows current notes, cards, collapsed past rounds, chat provenance, and the 
   expect(g.$$('.thread-round[open]')).toHaveLength(1);
   expect(g.$('#helm')?.textContent).toContain('In chat');
   expect(g.$('.dcompose')).not.toBeNull();
-  await g.go('#helm'); expect(g.$('#helm')?.textContent).toContain('Card for you');
+  await g.go('#helm'); expect(g.$('#helm [aria-label="Waiting for you"]')).not.toBeNull();
   expect(g.$('.bbitem[href="#helm"]')).not.toBeNull();
   expect(g.$('.bbitem[href="#prs"]')).toBeNull();
 });
@@ -93,14 +93,16 @@ it('counts one unread response per thread, marks only its displayed sequence rea
     return {status:404,body:{}};
   }});
   expect(g.$('.bbitem[href="#helm"] .dbadge')?.textContent).toBe('1');
-  expect(g.$('#helm')?.textContent).toContain('Response waiting');
+  expect(g.$('#helm .page-head h1')?.textContent).toBe('Threads');
+  expect(g.$('#helm .drow.unread')).not.toBeNull();
   expect(g.$$('#helm .drow')).toHaveLength(1);
   await click(g,'#helm .drow .dopen');
   expect(g.posts().map(p=>JSON.parse(p.body))).toContainEqual({kind:'thread-seen',payload:{id:ID,through:5}});
   expect(g.posts().some(p=>JSON.parse(p.body).kind==='decision-answer')).toBe(false);
   await g.go('#helm');
   expect(g.$('.bbitem[href="#helm"] .dbadge')).toBeNull();
-  expect(g.$('#helm')?.textContent).toContain('Card for you');
+  expect(g.$('#helm [aria-label="Waiting for you"]')).not.toBeNull();
+  expect(g.$('#helm .drow.unread')).toBeNull();
   expect(g.$$('#helm .drow')).toHaveLength(1);
 });
 it('retains message and thread drafts when read receipts or polls replace the snapshot', async () => {
@@ -108,7 +110,7 @@ it('retains message and thread drafts when read receipts or polls replace the sn
   await type(g,'A thread draft');
   d.threads![0]={...summary(),openLine:'A fresh note'}; g.serve(d); await g.poll();
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('A thread draft');
-  await g.go('#helm'); await click(g,'.fish-fab'); await type(g,'A new message draft');
+  await g.go('#helm'); await click(g,'.message-fab'); await type(g,'A new message draft');
   d.threads![0]={...summary(),openLine:'Another note'}; g.serve(d); await g.poll();
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('A new message draft');
 });
@@ -134,4 +136,44 @@ it('waits until the response enters the viewport before acknowledging it', async
   expect(g.posts().some(p=>JSON.parse(p.body).kind==='thread-seen')).toBe(false);
   expect(show).toBeDefined(); show!(); await g.settle();
   expect(g.posts().map(p=>JSON.parse(p.body))).toContainEqual({kind:'thread-seen',payload:{id:ID,through:2}});
+});
+
+it('groups all open conversation kinds together and keeps resolved unread responses in the collapsed section', async () => {
+  const d = fleet();
+  d.threads = [
+    { ...summary(), id: 'open-bait', kind: 'bait', title: 'Queued work', cards: [], waitingForHelm: true },
+    { ...summary(), id: 'unread-thread', unreadResponse: true, responseText: 'Please choose a target', title: 'A discussion' },
+    { ...summary(), id: 'acked-thread', cards: [], title: 'Acknowledged work' },
+    { ...summary(), id: 'resolved-thread', state: 'resolved', unreadResponse: true, title: 'Finished work' },
+  ];
+  const g = await page(d, { hash: '#helm' });
+  expect(g.$$('#helm > section > .dlist .drow').map((row) => row.getAttribute('data-thread')).sort()).toEqual(['acked-thread', 'open-bait', 'unread-thread']);
+  expect(g.$('#helm .thread-resolved')?.hasAttribute('open')).toBe(false);
+  expect(g.$('#helm .thread-resolved [data-thread="resolved-thread"]')).not.toBeNull();
+  expect(g.$('#helm [data-thread="unread-thread"].unread')).not.toBeNull();
+  expect(g.$('#helm [data-thread="acked-thread"].unread')).toBeNull();
+  expect(g.$('#helm [aria-label="Waiting for helm"]')).not.toBeNull();
+  expect(g.$('#helm [aria-label="Waiting for you"]')).not.toBeNull();
+  expect(g.$('#helm [aria-label="Acknowledged"]')).not.toBeNull();
+  expect(g.$('#helm [data-thread="unread-thread"] .dpreview')?.textContent).toBe('Please choose a target');
+  expect(g.$('#helm')?.textContent).not.toContain('Bait');
+  expect(g.posts().some((p) => JSON.parse(p.body).kind === 'thread-seen')).toBe(false);
+});
+
+it('shows checklist notes and existing dispatch, report and PR cards in conversation rounds', async () => {
+  const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [summary()];
+  const dispatch = d.dispatches[0]!, report = d.reports[0]!, pr = d.prs[0]!; dispatch.title = 'Implement the navigation change';
+  const detail = view();
+  detail.rounds = [{ at: AT, entries: [
+    { link: 'dispatched', ref: dispatch.id, text: 'Dispatch link' },
+    { link: 'report', ref: report.key, text: 'Report link' },
+    { link: 'planned', ref: pr.url, text: 'PR link' },
+  ] }];
+  const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  expect(g.$('.thread-checklist input[aria-label="Open"]')?.hasAttribute('checked')).toBe(false);
+  expect((g.$('.thread-checklist input[aria-label="Decided"]') as HTMLInputElement).checked).toBe(true);
+  expect(g.$$('.thread-links .card')).toHaveLength(3);
+  expect(g.$('.thread-links')?.textContent).toContain(dispatch.title);
+  expect(g.$('#helm')?.textContent).toContain(report.title);
+  expect(g.$('#helm')?.textContent).toContain(pr.title);
 });

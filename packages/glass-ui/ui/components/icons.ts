@@ -16,6 +16,11 @@ const svg = (body: string) =>
 /** The dispatch kind: the selected simple side-view fish for Dispatches navigation. */
 export const DispatchIcon = html`<svg class="dispatch-icon navicon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12-4-4v8z"/><ellipse cx="13" cy="12" rx="8" ry="5"/><circle cx="17" cy="11.5" r=".8" fill="currentColor" stroke="none"/></svg>`;
 
+/** The helm's wheel, used for the message entry point. */
+export const HelmIcon = svg(
+  '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v8M12 14v8M2 12h8M14 12h8M5 5l5.5 5.5M13.5 13.5 19 19M5 19l5.5-5.5M13.5 10.5 19 5"/>',
+);
+
 /** Each view's icon. Configuration (the `settings` tab) is lobstah's own settings: sliders, apart from the glass's gear. */
 export const TAB_ICON: Record<GlassTab, Children> = {
   deck: svg(
