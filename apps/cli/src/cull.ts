@@ -572,8 +572,10 @@ export function runCull(days: number, apply: boolean, freeBytes: FreeBytesReader
   if (apply) recoverTrapCaches(loadConfig(), worktreesDir(), freeBytes, (message) => lines.push(message));
   const plan = planCull(days, now, { measure: !apply, keepOpenPrs: true });
   if (!apply) {
-    const caches = [...planReviewWaitCaches(), ...planTrapCaches()];
-    if (caches.length > 0) lines.push(`caches: ${formatGB(caches.reduce((bytes, cache) => bytes + cache.bytes, 0))} clearable in ${caches.length} idle worktree(s)`);
+    const caches = planTrapCaches();
+    if (caches.length > 0) lines.push(`caches: ${formatGB(caches.reduce((bytes, cache) => bytes + cache.bytes, 0))} clearable in ${caches.length} idle trap(s)`);
+    const reviewCaches = planReviewWaitCaches();
+    if (reviewCaches.length > 0) lines.push(`review caches: ${formatGB(reviewCaches.reduce((bytes, cache) => bytes + cache.bytes, 0))} clearable in ${reviewCaches.length} checkout(s) waiting for review`);
     lines.push(toonTable('cull', plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays, bytes: i.bytes })), ['kind', 'id', 'ageDays', 'bytes']));
     lines.push(...keptWorktreeSummary(new Set(plan.filter((item) => item.kind === 'worktree').map((item) => item.id))));
     const total = plan.reduce((sum, item) => sum + item.bytes, 0);

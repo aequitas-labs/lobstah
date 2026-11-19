@@ -26,7 +26,7 @@ function onlyWaitingForReview(pr: PrRecord): boolean {
   return !!pr.checks && pr.state === 'OPEN' && !pr.draft && !pr.discoveryPending &&
     !pr.checks.unknown && pr.checks.failed === 0 && pr.checks.pending === 0 &&
     pr.checks.passed === pr.checks.total &&
-    ['', 'REVIEW_REQUIRED'].includes(pr.reviewDecision) &&
+    pr.reviewDecision === 'REVIEW_REQUIRED' &&
     ['CLEAN', 'BLOCKED'].includes(pr.mergeStateStatus) &&
     pr.review?.unresolvedThreads === 0 && !pr.review.changesRequested &&
     pr.repair === undefined;
@@ -81,9 +81,10 @@ export function reviewWaitWorktrees(cfg: Config = loadConfig()): ReviewWaitWorkt
       const relative = path.relative(canonical(worktree), trap);
       return !relative.startsWith('..') && !path.isAbsolute(relative);
     })) continue;
-    const prs = [...usage.refs].map((key) => records.get(key));
-    if (prs.some((pr) => !pr || !onlyWaitingForReview(pr))) continue;
-    result.push({ owner, repo: usage.repo, worktree, heads: prs.map((pr) => pr!.headSha) });
+    const prs = [...usage.refs].flatMap((key) => { const pr = records.get(key); return pr ? [pr] : []; });
+    if (prs.length !== usage.refs.size || !prs.some((pr) => pr.state === 'OPEN')) continue;
+    if (prs.some((pr) => pr.state === 'OPEN' ? !onlyWaitingForReview(pr) : !['MERGED', 'CLOSED'].includes(pr.state))) continue;
+    result.push({ owner, repo: usage.repo, worktree, heads: prs.map((pr) => pr.headSha) });
   }
   return result;
 }

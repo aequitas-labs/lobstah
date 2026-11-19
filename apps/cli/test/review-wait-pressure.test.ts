@@ -110,7 +110,7 @@ it('explains open-PR retention and sizes it in both previews', () => {
   expect(fs.existsSync(directory)).toBe(true);
 });
 
-it.each(['pending', 'failed', 'unknown', 'conflict', 'feedback', 'draft', 'approved', 'unobserved'])('preserves PR checkouts that are %s rather than only waiting for review', (condition) => {
+it.each(['pending', 'failed', 'unknown', 'conflict', 'feedback', 'draft', 'approved', 'not-required', 'unobserved'])('preserves PR checkouts that are %s rather than only waiting for review', (condition) => {
   waiting();
   const pr = readPr('pr:o/r#1')!;
   if (condition === 'pending') pr.checks.pending = 1;
@@ -120,6 +120,7 @@ it.each(['pending', 'failed', 'unknown', 'conflict', 'feedback', 'draft', 'appro
   if (condition === 'feedback') pr.review!.unresolvedThreads = 1;
   if (condition === 'draft') pr.draft = true;
   if (condition === 'approved') pr.reviewDecision = 'APPROVED';
+  if (condition === 'not-required') pr.reviewDecision = '';
   if (condition === 'unobserved') pr.discoveryPending = true;
   writePr(pr);
   expect(reviewWaitWorktrees()).toEqual([]);
@@ -161,4 +162,14 @@ it.each(['dirty', 'unpushed'])('preserves work that becomes %s after the pressur
   if (reason === 'unpushed') { git(directory, 'add', 'new-work.txt'); git(directory, 'commit', '-qm', 'new local work'); }
   expect(applyCull(plan)).toEqual([]);
   expect(fs.existsSync(path.join(directory, 'new-work.txt'))).toBe(true);
+});
+
+
+it('allows terminal PR history when every remaining open PR only awaits review', () => {
+  waiting();
+  const previous = { ...readPr('pr:o/r#1')!, url: 'https://github.com/o/r/pull/2', number: 2, state: 'MERGED' };
+  upsertPr(previous, 'implementation');
+  expect(reviewWaitWorktrees()).toHaveLength(1);
+  expect(planPressureCull()).toHaveLength(1);
+  expect(runCull(0, false)).toContain('clearable in 1 checkout(s) waiting for review');
 });
