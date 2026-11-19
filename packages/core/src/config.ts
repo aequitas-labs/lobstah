@@ -481,6 +481,8 @@ export interface GroundsConfig {
 }
 
 export interface Config {
+  /** Additional parent directories containing agent worktrees for manual server cleanup. */
+  cull?: { worktreeRoots: string[] };
   /** Named repo-less profiles; absent leaves repo traps unchanged. */
   traps?: Record<string, ConfiguredTrapProfile>;
   repos: Record<string, RepoConfig>;
@@ -739,6 +741,12 @@ export function loadConfig(): Config {
   const raw = fs.existsSync(file) ? (parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
   const questionWaitSecs = (raw.limits as Partial<LimitsConfig> | undefined)?.questionWaitSecs;
   if (questionWaitSecs !== undefined && (typeof questionWaitSecs !== 'number' || !Number.isFinite(questionWaitSecs) || questionWaitSecs < 0)) throw new Error('[limits].questionWaitSecs must be a non-negative number');
+
+  const cull = raw.cull as { worktreeRoots?: unknown } | undefined;
+  if (cull !== undefined && (!cull || typeof cull !== 'object' || Array.isArray(cull))) throw new Error('[cull] must be a table');
+  if (cull?.worktreeRoots !== undefined && (!Array.isArray(cull.worktreeRoots) || cull.worktreeRoots.some((root) => typeof root !== 'string' || !root.trim() || (!path.isAbsolute(root) && !root.startsWith('~/'))))) {
+    throw new Error('[cull].worktreeRoots must contain absolute paths or paths starting with ~/');
+  }
   const cacheMinFreeGB = (raw.limits as Partial<LimitsConfig> | undefined)?.cacheMinFreeGB ?? DEFAULT_LIMITS.cacheMinFreeGB;
   if (typeof cacheMinFreeGB !== 'number' || !Number.isFinite(cacheMinFreeGB) || cacheMinFreeGB < 0)
     throw new Error('[limits].cacheMinFreeGB must be a non-negative number');
@@ -825,6 +833,7 @@ export function loadConfig(): Config {
     repos,
     harness: parseHarness(raw.harness, '[harness]') ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
+    cull: { worktreeRoots: (cull?.worktreeRoots as string[] | undefined) ?? [] },
     soak: parseSoak(raw.soak),
     heavy: parseHeavy(raw.heavy),
     helm,

@@ -113,13 +113,20 @@ The three loops are tracker-agnostic and drive whichever sources are configured.
 A dispatch reports `done` when its PR opens, so the reviewer's side of the
 conversation has to re-enter the queue as its own work. Feedback pickup
 covers all of it: a `CHANGES_REQUESTED` review on any sha (a review of a
-slightly stale head still asks for changes), a comment review with a body,
-an inline review-thread comment, or a conversation comment — from anyone,
-the configured identity included, but never a comment lobstah wrote.
-`APPROVED` reviews are the merge loop's signal, not feedback.
+slightly stale head still asks for changes), a comment review with a body or
+inline comments, a standalone inline review-thread comment, or a conversation
+comment. A submitted review and its initial inline comments share one round
+key (`pr<n>@rv<review id>`). Review feedback waits for 30 seconds without new
+feedback before opening a round, so a burst of inline comments starts one
+round. `APPROVED`, `DISMISSED`, and pending reviews never start rounds, nor do
+their initial inline comments. Reviews and inline comments from the configured
+identity or PR author never start rounds. Marked comments never start rounds.
+The brief includes the triggering review's body and all unresolved inline
+discussions, with file, line, text and thread links. Resolved threads are omitted.
 
-The configured identity counts because lobstah's workers post as that
-account: the owner's own "also handle X" on a trap's PR differs from a worker's
+Conversation comments keep their existing pickup behavior, including bot
+comments and immediate pickup. The configured identity counts here because
+lobstah's workers post as that account: the owner's own "also handle X" on a trap's PR differs from a worker's
 reply only by the marker. An **active-round guard** covers a worker that
 forgets the marker. An unmarked identity comment made while a lobstah run on
 the PR works (the implementation dispatch or a round) is held: it waits for

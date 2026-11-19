@@ -114,7 +114,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '["<text>"|<id>]',
   },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
-  cull: { flags: { '--older-than': { value: '<days>' }, '--apply': {} } },
+  cull: { flags: { '--older-than': { value: '<days>' }, '--idle-hours': { value: '<hours>' }, '--apply': {} } },
   cancel: { flags: { '--session': { value: '<id>' } }, positionals: '<uuid>' },
   report: {
     flags: {
@@ -372,11 +372,12 @@ hides the item from the desktop pet and glass lobs until its state changes — n
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
 watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
 the same items and fields as man tend --json (the desktop pet reads it), less questions held on the helm's turn (the held column).`,
-  cull: `Sweep aged done entries, orphaned worktrees, and stale state. Dry run
-without --apply (default 14 days): it measures each target (one du per
-worktree). --apply measures nothing; it deletes and prints the count and the
-free-space change. The daemon culls on its own with [limits].retentionDays, and
-frees a merged PR's clean, pushed worktree with [limits].releaseOnMerge.`,
+  cull: `Stop idle worktree servers and containers, then sweep aged catch and state.
+Dry run by default. --apply stops services and deletes aged files (--older-than defaults to 14 days).
+Busy worktrees are kept. --idle-hours sets the external worktree edit window (default 12).
+[cull].worktreeRoots adds agent worktree parents. Servers receive SIGTERM, then SIGKILL after 5 seconds; containers receive docker stop.
+Disk previews measure targets; --apply reports free-space changes.
+Daemon disk cleanup uses [limits].retentionDays and [limits].releaseOnMerge.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,

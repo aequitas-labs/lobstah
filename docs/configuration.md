@@ -674,3 +674,32 @@ it does not start a feedback round. Bot replies and the configured GitHub
 identity never count as answers. Terminal sends, glass answers, and PR replies
 share a first-answer rule. An answer removes the glass question/card and marks
 the PR comment answered. The daemon polls replies even when pickup is disabled.
+
+## Worktree server cleanup
+
+`lobstah cull` previews listening TCP servers, dedicated server tmux sessions,
+and running containers from agent worktrees. `--apply` stops them before the
+existing disk cleanup. Servers receive SIGTERM, then SIGKILL after a 5-second
+grace period. Containers use `docker stop`; cull never removes containers.
+
+The default worktree parents are `~/.lobstah/worktrees` (or
+`$LOBSTAH_HOME/worktrees`), `~/.codex/worktrees`, and `.claude/worktrees` in each
+configured repository. Add other parent directories with:
+
+```toml
+[cull]
+worktreeRoots = ["~/agent-worktrees"]
+```
+
+A busy trap keeps its worktree's services. For worktrees outside lobstah's
+parent directory, cull also keeps services when any file or directory was
+edited within the last 12 hours; `--idle-hours <hours>` changes that window.
+Unreadable worktrees are kept. Agent CLIs, glass, the daemon, Docker itself,
+and shared tmux sessions are preserved. A shared process group is never
+signalled as a group; an eligible listener can still be stopped individually.
+Containers qualify through a Compose project working-directory label or a
+host bind mount inside a worktree. Containers spanning several worktrees are
+kept if any of those worktrees is busy or recently edited.
+
+This pass runs only for the manual `cull` command. Windows supports container
+cleanup; process cleanup requires macOS or Linux with `ps` and `lsof`.
