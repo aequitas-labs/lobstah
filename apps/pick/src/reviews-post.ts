@@ -346,8 +346,13 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
       fs.rmSync(lock, { force: true });
       return { posted: false, why: refused };
     }
+    const pendingBody = r.staged && existing.find(review => String(review.id) === r.staged!.reviewId)?.body;
+    const decisions = reviewDecisionBody(draft.decisions, latestRound(readReview(key)!)!.decisionAnswers);
+    const body = typeof pendingBody === 'string'
+      ? [pendingBody, ...(decisions && !pendingBody.includes(decisions) ? [decisions] : [])].join('\n\n')
+      : reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions);
     const posted = r.staged
-      ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body: existing.find(review => String(review.id) === r.staged!.reviewId)?.body ?? reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions) })
+      ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body })
       : await github<{ id: number }>(f, token(), 'POST', base, {
           commit_id: targetHead,
           event,

@@ -194,9 +194,10 @@ describe('review decision posting gate', () => {
     expect(await stageReview(KEY, { token: tok, fetch: github(calls) })).toMatchObject({ staged: true });
     const r = latestRound(readReview(KEY)!)!;
     expect(answerReviewDecision(KEY, { roundId: r.id, headSha: r.headSha, draftedAt: r.draftedAt! }, 'rollout-owner', { text: 'Chris will own the rollout.' })).toBeUndefined();
-    expect(await postReview(KEY, { by: 'glass', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+    expect(await postReview(KEY, { by: 'glass', token: tok, fetch: github(calls, [{ id: 99, state: 'PENDING', body: 'My edited summary' }]) })).toMatchObject({ posted: true });
     expect(posts(calls).at(-1)?.url).toContain('/99/events');
     expect(posts(calls).at(-1)?.body?.body).toContain('Chris will own the rollout.');
+    expect(posts(calls).at(-1)?.body?.body).toContain('My edited summary');
   });
 
   it.each(['approve', 'request_changes'] as const)('the loop never auto-posts %s with unanswered decisions', async verdict => {
