@@ -394,8 +394,8 @@ work (humans and agents):
   reviews dismiss <key>           drop the review and its pending draft
   prs [sync]                      list known PRs, or refresh due PR watches
   cull [--older-than <days>] [--idle-hours <hours>] [--apply]
-                                  sweep aged catch and lost gear — old done/
-                                  entries, orphaned worktrees, stale state.
+                                  stop idle worktree servers and containers;
+                                  sweep aged catch, worktrees, and state.
                                   Dry run by default (14 days).
   cancel <uuid>                   request cancellation
   watch [add <key> --check <cmd> [--for <uuid>] [--cursor <c>] [--every <s>]
