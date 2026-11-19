@@ -80,7 +80,7 @@ const compare = async (url: string) => {
 };
 
 describe('review diffs', () => {
-  it.each(['dismissed', 'posted', 'stale'] as const)('a base merge keeps the %s round; an equivalent rebase also keeps it; a real change opens one', async (state) => {
+  it.each(['dismissed', 'posted', 'stale'] as const)('equivalent updates keep the %s round, repairing stale drafts; a real change opens one', async (state) => {
     const h = history();
     const fetch = vi.fn(compare);
     const poll = (head: string, base: string) => reviewsLoop('chris', () => 'token', () => {}, { run: search(head, base), fetch, now: NOW });
@@ -93,14 +93,18 @@ describe('review diffs', () => {
     }
     await poll(h.merged, h.nextBase);
     expect(readReview(KEY)!.rounds).toHaveLength(1);
-    expect(latestRound(readReview(KEY)!)).toMatchObject({ state, headSha: h.head });
+    expect(latestRound(readReview(KEY)!)).toMatchObject(state === 'stale'
+      ? { state: 'drafting', headSha: h.merged, manualPublishOnly: true }
+      : { state, headSha: h.head });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch.mock.calls[0]![0]).toContain(`${h.base}...${h.head}`);
     await poll(h.merged, h.nextBase);
     expect(fetch).toHaveBeenCalledTimes(2); // repeated polls reuse the fingerprints
     await poll(h.rebased, h.nextBase);
     expect(readReview(KEY)!.rounds).toHaveLength(1);
-    expect(latestRound(readReview(KEY)!)).toMatchObject({ state, headSha: h.head });
+    expect(latestRound(readReview(KEY)!)).toMatchObject(state === 'stale'
+      ? { state: 'drafting', headSha: h.merged, manualPublishOnly: true }
+      : { state, headSha: h.head });
     await poll(h.real, h.nextBase);
     expect(readReview(KEY)!.rounds).toHaveLength(2);
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'requested', headSha: h.real });
