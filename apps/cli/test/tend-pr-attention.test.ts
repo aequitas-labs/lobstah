@@ -272,15 +272,21 @@ describe('the on-the-hook rule', () => {
   });
 
   it('a pickup feedback round in flight suppresses pr:review', () => {
-    prDispatch({ review: { unresolvedThreads: 2, changesRequested: true } });
+    const requested = pr({ review: { unresolvedThreads: 2, changesRequested: true } });
+    prDispatch(requested);
+    upsertPr(requested, P);
+    addWatch('pr:acme/web#9', 'echo {}', { owner: `dispatch:${P}` });
+    stampRepairerBeat();
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:review')?.note).toContain('repair not yet claimed');
     enqueue({ id: FIX, repo: 'web', brief: 'address review', followUp: P }, 'work');
     fs.mkdirSync(path.join(home, 'pickup'), { recursive: true });
     fs.writeFileSync(
       path.join(home, 'pickup', 'state.json'),
-      JSON.stringify({ map: { 'gh:acme/web#9:review:1': { uuid: FIX, kind: 'review', createdAt: new Date().toISOString() } } }),
+      JSON.stringify({ map: { 'gh:acme/web#pr9@rv91': { uuid: FIX, kind: 'review', createdAt: new Date().toISOString() } } }),
     );
     expect(kinds()).toEqual([]);
     claimNext('work');
+    expect(kinds()).toEqual([]);
     appendStatus(FIX, 'work', 'done', 'addressed');
     complete(FIX, 'work');
     expect(kinds()).toEqual(['pr:review']);

@@ -12,6 +12,7 @@ import { readSessionClaim, readTrap } from './soak.js';
 import { withTrapCacheLock } from './cache-paths.js';
 import { clearFinishedTrapCaches, repoCachesConfigured } from './cache-cleanup.js';
 import { wakeHeavyWait } from './heavy-waits.js';
+import { answeredAt } from './inbox.js';
 
 export function isVerb(v: string): v is Verb {
   return (VERBS as readonly string[]).includes(v);
@@ -102,8 +103,13 @@ export function appendStatus(
     throw new Error(`invalid status verb "${verb}" — must be one of: ${VERBS.join(', ')}`);
   }
   const extra = waiting ? waitingFields(verb, waiting) : {};
+  // Question timestamps identify first-answer receipts, including two reports in one millisecond.
+  const personQuestion = verb === 'needs-decision' || verb === 'blocked';
+  const previousQuestion = personQuestion && at === undefined
+    ? readStatusLog(id, lane).reduce((latest, status) => status.verb === 'needs-decision' || status.verb === 'blocked' ? Math.max(latest, Date.parse(status.at) || 0) : latest, 0)
+    : 0;
   const entry: StatusEntry = {
-    at: at ?? new Date().toISOString(),
+    at: at ?? new Date(Math.max(Date.now(), previousQuestion + 1)).toISOString(),
     verb,
     ...(note ? { note } : {}),
     ...extra,
@@ -220,6 +226,17 @@ export function pausedWaiting(entry: StatusEntry | undefined): boolean {
   return entry?.verb === 'paused' && entry.waitingOn !== undefined;
 }
 
+/** A person's unanswered question stops active-work time, including permission questions. */
+export function personWaiting(id: string, lane: Lane, entry = readStatusLog(id, lane).at(-1)): boolean {
+  return !!entry && (entry.verb === 'needs-decision' || entry.verb === 'blocked') &&
+    !answeredAt(id, lane, entry.at, { permissionAnswers: !!entry.permissionRequest });
+}
+
+/** External waits keep their existing semantics; a person's answer immediately restarts the clock. */
+export function workClockWaiting(id: string, lane: Lane, entry = readStatusLog(id, lane).at(-1)): boolean {
+  return pausedWaiting(entry) || personWaiting(id, lane, entry);
+}
+
 /** How a waiting entry reads: `waiting on review`, or undefined when it says nothing. */
 export function waitingLabel(entry: StatusEntry | undefined): string | undefined {
   return entry?.waitingOn ? `waiting on ${entry.waitingOn}` : undefined;
@@ -237,9 +254,11 @@ export interface WaitingView {
 }
 
 export function waitingView(entry: StatusEntry | undefined, now = Date.now()): WaitingView | undefined {
-  if (!entry?.waitingOn || !WAITING_ON_VERBS.includes(entry.verb)) return undefined;
+  if (!entry || !WAITING_ON_VERBS.includes(entry.verb)) return undefined;
+  const on = entry.waitingOn ?? (entry.verb === 'needs-decision' || entry.verb === 'blocked' ? 'person' : undefined);
+  if (!on) return undefined;
   return {
-    on: entry.waitingOn,
+    on,
     ...(entry.link ? { link: entry.link } : {}),
     ...(entry.until ? { until: entry.until } : {}),
     since: entry.at,

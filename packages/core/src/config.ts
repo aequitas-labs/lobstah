@@ -254,6 +254,8 @@ export interface LimitsConfig {
   wedgeThresholdSecs: number;
   maxRestartAttempts: number;
   wallClockSecs: number;
+  /** Unanswered person waits park after this many seconds, without failing (default 24 hours). */
+  questionWaitSecs?: number;
   /** Hard ceiling for progress-extended wall-clock time (default 4× wallClockSecs). */
   maxWallClockSecs?: number;
   pushEarly: boolean;
@@ -480,6 +482,8 @@ export interface GroundsConfig {
 }
 
 export interface Config {
+  /** Additional parent directories containing agent worktrees for manual server cleanup. */
+  cull?: { worktreeRoots: string[] };
   /** Named repo-less profiles; absent leaves repo traps unchanged. */
   traps?: Record<string, ConfiguredTrapProfile>;
   repos: Record<string, RepoConfig>;
@@ -703,6 +707,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   wedgeThresholdSecs: 600,
   maxRestartAttempts: 2,
   wallClockSecs: 3600,
+  questionWaitSecs: 86400,
   pushEarly: true,
   draftPr: true,
   checkpointOnStop: true,
@@ -741,6 +746,15 @@ export function loadConfig(options: { upgrade?: boolean } = {}): Config {
   const raw = upgrade.raw;
   const watches = (raw.watches ?? {}) as WatchConfiguration;
   const watchTypes = (raw.watchTypes ?? {}) as Record<string, WatchTypeConfiguration>;
+  const questionWaitSecs = (raw.limits as Partial<LimitsConfig> | undefined)?.questionWaitSecs;
+  if (questionWaitSecs !== undefined && (typeof questionWaitSecs !== 'number' || !Number.isFinite(questionWaitSecs) || questionWaitSecs < 0)) throw new Error('[limits].questionWaitSecs must be a non-negative number');
+
+  const cull = raw.cull as { worktreeRoots?: unknown } | undefined;
+  if (cull !== undefined && (!cull || typeof cull !== 'object' || Array.isArray(cull))) throw new Error('[cull] must be a table');
+  if (cull?.worktreeRoots !== undefined && (!Array.isArray(cull.worktreeRoots) || cull.worktreeRoots.some((root) => typeof root !== 'string' || !root.trim() || (!path.isAbsolute(root) && !root.startsWith('~/'))))) {
+    throw new Error('[cull].worktreeRoots must contain absolute paths or paths starting with ~/');
+  }
+
   const cacheMinFreeGB = (raw.limits as Partial<LimitsConfig> | undefined)?.cacheMinFreeGB ?? DEFAULT_LIMITS.cacheMinFreeGB;
   if (typeof cacheMinFreeGB !== 'number' || !Number.isFinite(cacheMinFreeGB) || cacheMinFreeGB < 0)
     throw new Error('[limits].cacheMinFreeGB must be a non-negative number');
@@ -827,6 +841,7 @@ export function loadConfig(options: { upgrade?: boolean } = {}): Config {
     repos,
     harness: parseHarness(raw.harness, '[harness]') ?? {},
     limits: { ...DEFAULT_LIMITS, ...((raw.limits as Partial<LimitsConfig>) ?? {}) },
+    cull: { worktreeRoots: (cull?.worktreeRoots as string[] | undefined) ?? [] },
     soak: parseSoak(raw.soak),
     heavy: parseHeavy(raw.heavy),
     helm,

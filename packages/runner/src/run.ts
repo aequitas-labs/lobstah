@@ -21,7 +21,8 @@ import {
   modelForHarness,
   originProgress,
   liveHeavyTickets,
-  pausedWaiting,
+  workClockWaiting,
+  questionPark,
   isFinished,
   readActivity,
   readEvidence,
@@ -181,6 +182,7 @@ async function runMain(activeDir: string, lane: Lane, seams: Partial<RunnerDeps>
   const attempts = Number(process.env.LOBSTAH_ATTEMPTS ?? '1');
   // The daemon resumes a parked dispatch when its wait ends: why it woke.
   const wake = process.env.LOBSTAH_WAKE;
+  const questionWake = questionPark(id, lane);
   const runnerInfo: RunnerInfo = {
     pid: process.pid,
     startedAt: new Date().toISOString(),
@@ -350,7 +352,7 @@ async function runMain(activeDir: string, lane: Lane, seams: Partial<RunnerDeps>
     const msgs = unhandled(id, lane);
     for (const m of msgs) acknowledge(id, lane, m.file);
     return [
-      `You were paused and this dispatch was parked. The wait ended: ${wake}. Continue the work, and report as before.`,
+      `You were ${questionWake ? "waiting on a person" : "paused"} and this dispatch was parked. The wait ended: ${wake}. Continue the work, and report as before.`,
       ...msgs.map((m) => m.text),
     ].join('\n\n');
   };
@@ -405,8 +407,7 @@ async function runMain(activeDir: string, lane: Lane, seams: Partial<RunnerDeps>
     }
     return false;
   };
-  // The wall clock does not run while the worker is paused on something
-  // external (`report paused --waiting-on`): waiting on a review is not work.
+  // External pauses and unanswered person questions spend no active-work time.
   const wallTimer = resolved.limits.wallClockSecs
     ? startWallClock({
         limitMs: resolved.limits.wallClockSecs * 1000,
@@ -419,7 +420,7 @@ async function runMain(activeDir: string, lane: Lane, seams: Partial<RunnerDeps>
           const last = readStatusLog(id, lane).at(-1);
           // In line isn't working, but holding a slot is.
           const inLine = liveHeavyTickets({ dispatch: id }).some((t) => t.state === 'waiting');
-          return pausedWaiting(last) || isFinished(id, lane) || inLine;
+          return workClockWaiting(id, lane, last) || isFinished(id, lane) || inLine;
         },
         progress: madeProgress,
         onTick: persistWall,
@@ -474,6 +475,7 @@ async function runMain(activeDir: string, lane: Lane, seams: Partial<RunnerDeps>
       cwd,
       stopped: () => wallClockHit,
       backgroundWaitMs: cfg.limits.backgroundWaitSecs * 1000,
+      questionWaitMs: (cfg.limits.questionWaitSecs ?? 86400) * 1000,
       exitGraceMs: (cfg.limits.exitGraceSecs ?? 30) * 1000,
       onFinal: () => wallTimer?.stop(),
       onPark: () => wallTimer?.stop(),
@@ -550,12 +552,12 @@ async function runMain(activeDir: string, lane: Lane, seams: Partial<RunnerDeps>
     // verb is added, the worktree stays locked to it, and it stays active.
     // The daemon resumes the session when a message, the --until time, or
     // the end of its PR ends the wait.
-    if (outcome.parked && !cancelled && !wallClockHit && readStatusLog(id, lane).at(-1)?.verb === 'paused') {
+    if (outcome.parked && !cancelled && !wallClockHit && (readStatusLog(id, lane).at(-1)?.verb === 'paused' || questionPark(id, lane))) {
       parkedExit = true;
       await remote.stop();
       const gitEvidence = await deps.collectEvidence(repo, cwd).catch(() => ({}));
       mergeEvidence(id, lane, { ...gitEvidence, sessionId: result.sessionId ?? readEvidence(id, lane).sessionId });
-      console.log('[runner] worker paused: session ended, dispatch parked');
+      console.log(`[runner] ${questionPark(id, lane) ? 'unanswered question' : 'worker paused'}: session ended, dispatch parked`);
       return;
     }
 
