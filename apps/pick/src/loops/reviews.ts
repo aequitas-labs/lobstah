@@ -205,7 +205,7 @@ export async function reviewsLoop(
  * A failed or incomplete state check leaves unconfirmed rounds untouched.
  */
 async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem) => boolean }, identity: string, gh: { token: () => string; fetch?: FetchLike; now: number }, run: GhGraphql, log: (m: string) => void): Promise<void> {
-  const missing = listReviews().filter((item) => !found.seen.has(item.key) && found.inScope(item) &&
+  const missing = listReviews().filter((item) => (!found.seen.has(item.key) || latestRound(item)?.staged) && found.inScope(item) &&
     !['merged', 'closed'].includes(latestRound(item)?.state ?? ''));
   const confirmed = new Set<string>();
   for (let start = 0; start < missing.length; start += 50) {

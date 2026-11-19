@@ -144,7 +144,8 @@ function reviewBody(body: string, r: ReviewRound, decisions: ReviewDecision[]): 
  * shows it only to the configured identity, who opens the PR in their
  * review tool, edits it, and sends it from there. Nothing is posted. Once
  * per round: `staged.json` guards the write, and a pending review that
- * already carries the round's marker is adopted instead of staged again.
+ * already carries the round's marker is adopted and updated instead of duplicated.
+ * Existing body text and inline comments survive re-requests and redrafts.
  */
 export async function stageReview(key: string, opts: Opts = {}): Promise<{ staged: true; reviewId: string } | { staged: false; why: string }> {
   const c = context(key, opts);
@@ -369,7 +370,7 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
  * The request is gone and the round was staged: did the person send the
  * review from their tool? A submitted review marks the round posted (by
  * `review tool`); a review deleted there dismisses it; a still-pending one
- * is left alone, for the caller to withdraw the round.
+ * stays in the inbox until it is submitted or dismissed.
  */
 export async function settleStagedReview(key: string, opts: Opts = {}): Promise<'posted' | 'pending' | 'deleted' | 'unknown'> {
   const c = context(key, opts);
