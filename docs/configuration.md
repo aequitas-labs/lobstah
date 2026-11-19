@@ -68,7 +68,7 @@ The descriptor's `repo` field resolves here; the key is what dispatchers name.
 | `mergeMethod` | no (`[pickup.github.merge].method`, else `squash`) | How the glass's Merge when green merges this repo's PRs: `merge`, `squash` or `rebase`. A request keeps the method it was asked with. |
 | `reviewTool` | no (`"github"`) | Destination for PR links in the glass and PR pet clicks, independent of `[pet].open`: `github`, `graphite`, `linear` (browser: `https://linear.review/{owner}/{repo}/pull/{number}`), `linear-app` (Linear desktop app: `linear://review/{owner}/{repo}/pull/{number}`), or an HTTPS template containing `{owner}`, `{repo}`, and `{number}`. Example: `"https://review.example/{owner}/{repo}/{number}"`. The configured `origin` (else the checkout's git origin) identifies the repo; canonical GitHub URLs remain the watch identity. Linear reviews require its GitHub integration; `linear-app` also requires the installed app. Custom templates remain HTTPS-only. |
 | `setup` | no | Commands run in each fresh worktree, in order (e.g. `["pnpm install"]`). A follow-up that reuses its origin's worktree does not run them again unless a lockfile at the worktree root (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Cargo.lock`, `go.sum`, and others) or the commands changed since they last ran there. |
-| `cacheDirs` | no | Disposable cache-directory globs relative to trap worktrees, e.g. `["apps/*/.next/cache", ".temp/*DerivedData*"]`. No absolute paths or `..`; symlinks, Git metadata and matches containing tracked files are preserved. Cleared on sign-off or terminal dispatch reports, and in idle traps under disk pressure. Omit to disable. |
+| `cacheDirs` | no | Disposable cache-directory globs relative to linked worktrees, e.g. `["apps/*/.next/cache", ".temp/*DerivedData*"]`. No absolute paths or `..`; symlinks, Git metadata and matches containing tracked files are preserved. Cleared on sign-off or terminal dispatch reports, and in idle traps or finished PR checkouts waiting only for review under disk pressure. Omit to disable. |
 | `scratch` | no | Repo-relative paths (e.g. `["tmp", ".cache"]`) whose untracked files do not count as uncommitted changes when a follow-up decides whether to reuse its origin's worktree. Tracked changes anywhere, and untracked files elsewhere, still do. |
 | `env` | no | Environment merged into every dispatch for this repo. |
 | `pickup` | no (`false`) | Opt this repo into `[pickup.github]` multi-repo mode. Explicit per repo — nothing becomes pickable by being configured. |
@@ -207,11 +207,12 @@ loaded; the runner handles reports, waits, and job completion.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. A dispatch whose worker reported `done` or `failed` does not spend a slot, even while its runner is still exiting. A dispatch whose worker reported `paused` is parked: its runner ends the session and exits, and it spends no slot. An operator message, or the time given with `--until`, wakes it into the same session when a slot is free; a waking dispatch takes the slot before queued work. `man tend`, `daemon status`, `doctor`, and the glass list parked dispatches. |
+| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. A dispatch whose worker reported `done` or `failed` does not spend a slot, even while its runner is still exiting. A dispatch whose worker reported `paused`, or whose unanswered question reached `questionWaitSecs`, is parked: its runner ends the session and exits, and it spends no slot. An operator message, or the time given with `--until`, wakes it into the same session when a slot is free; a waking dispatch takes the slot before queued work. `man tend`, `daemon status`, `doctor`, and the glass list parked dispatches. |
 | `choreConcurrent` | `1` | Headless chore-lane runner ceiling (rebases and other machine-originated runs). |
 | `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
-| `wallClockSecs` | `3600` | Initial active-work window. Progress extends it, up to `maxWallClockSecs`; time paused with `report paused --waiting-on` does not count. |
+| `wallClockSecs` | `3600` | Initial active-work window. Progress extends it, up to `maxWallClockSecs`; time paused with `report paused --waiting-on`, or waiting on an unanswered `needs-decision` / `blocked` report, does not count. A terminal send, glass answer, or matched human PR reply starts the clock again. |
+| `questionWaitSecs` | `86400` | An unanswered `needs-decision` or `blocked` report parks after this many seconds. The question stays visible as `parked: no answer in 24h`; no failure is recorded. The headless session remains resumable and holds no slot. A trap releases its claim. A late answer resumes the same dispatch when its runner slot or trap is free. `0` parks immediately. |
 | `maxWallClockSecs` | `4 × wallClockSecs` | Hard active-work ceiling across restarts. |
 | `pushEarly` | `true` | For a new chain, push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. A follow-up whose chain already has a PR, and a dispatch whose descriptor names a PR (a repair, a rebase chore, or `lobstah dispatch --pr <url|number>`), does not push automatically; its worker pushes to the existing PR's head branch. A brief that only mentions a PR in prose does not name it: dispatch with `--pr` (`dispatch` warns when the brief names a PR of the repo without it). |
 | `draftPr` | `true` | For a new chain, after first push, adopt an existing PR or open one draft PR when `gh` is available, titled `lobstah <short id>` (never from the brief); the worker gives it its real title. A follow-up with a chain PR, and a dispatch whose descriptor names a PR (`--pr`), keeps that PR and its watch; it does not open another. |
@@ -230,9 +231,9 @@ send a continuation.
 | `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach`, `send --attach`, or a decision answer. Picked files and images pasted into a glass answer box use this limit. |
 | `retentionDays` | `0` (off) | The daemon culls finished dispatches (done and failed) older than this many days: their `done/` entries, worktrees, state files, and stale PR records and acks. Branches are kept. A dispatch whose PR is still open is kept. Queued and active dispatches are never culled. At most once per hour, the daemon starts a detached worker that drains the eligible backlog without a count limit. Worktrees go before metadata; groups within each set are oldest first. The claim loop keeps running while the worker removes files. A worktree with no dispatch record ages from its directory's modification time; retention and the free-space cull keep it unless Git verifies that it is clean and all commits are on remote-tracking branches. Suggested: `14`, the same window as `lobstah cull`. |
 | `releaseOnMerge` | `false` (off) | When a PR watch records `merged` for a PR, the daemon's next cull pass removes the worktree of the dispatch that owns the PR, and of every dispatch in its follow-up chain that ran on that PR (its own worktree or a shared one). It uses the retention cull's removal path and detached worker, with the same hourly throttle and no count limit, and runs even when `retentionDays` is `0`. It releases a worktree only when every dispatch in the chain is finished (done or failed) and none is queued or active, `git status --porcelain` is empty, and after a fetch `git branch -r --contains HEAD` is not empty. Otherwise it keeps the worktree, records why, and `lobstah doctor`'s `disk` row shows `kept: unpushed work`; the next pass checks again. Uncommitted changes and unpushed commits are never deleted. A PR closed without merge releases nothing. A trap's worktree is never released. Branches (local and remote), `done/` entries, state, and evidence are kept; `lobstah catch` prints `worktree: released on merge (<time>)`. One `worktree-released` notice per pass lists what was released. |
-| `reuseWorktree` | `true` | A follow-up (`--follow-up <id>`) runs in the worktree of the newest dispatch in its chain whose worktree still exists, on the branch and HEAD where that dispatch stopped. Trunk is fetched; `setup` runs again only if a lockfile changed. It reuses only when the worktree is clean (untracked files under the repo's `scratch` paths excepted), belongs to the same repo, and no other dispatch runs in it; otherwise it allocates a fresh worktree as usual. A dirty worktree is never cleaned or reset. The first status note says which: `reusing worktree of <origin>` or `fresh worktree (<reason>)`. A lock file in the worktree's git dir (`lobstah.lock`) keeps a second runner out; a lock whose dispatch has finished is stale. A shared worktree is kept by the cull and the free-space guard while any dispatch in the chain is queued or active, and it ages from the newest dispatch that used it. `false` allocates a fresh worktree for every dispatch. Headless dispatches only: a trap works in its own worktree. |
-| `minFreeGB` | `0` (off) | Free space the worktrees volume (`~/.lobstah/worktrees`) must have before the daemon claims work, because each claim creates a worktree (1 to 8 GB). Below the limit, the daemon schedules its background cull worker to remove finished worktrees, oldest first, until the limit is met or none are left (this runs even when `retentionDays` is `0`; open-PR and live worktrees are kept, branches are kept). If space is still short, the work stays in the queue and is not failed: `man tend` and the glass show it as `held: 3.2 GB free, needs 10 GB`. The daemon checks again on every tick. One `disk-held` notice marks the start of a hold and one `disk-cleared` notice marks its end. Suggested: `10`. |
-| `cacheMinFreeGB` | `50` | Below this free space, clear opted-in idle traps' `cacheDirs`, biggest first, before whole-worktree culling or refusing new worktrees. Uses at least `minFreeGB` when enabled; `0` disables pressure cleanup. Pressure cleanup clears each trap at most once per hour unless free space is below `minFreeGB`. It posts a notice only when it recovers at least 1 GB or free space is below `minFreeGB` before or after cleanup; smaller recoveries are logged only. Working traps are preserved; paused traps qualify. `lobstah cull` previews clearable cache space. |
+| `reuseWorktree` | `true` | A follow-up (`--follow-up <id>`) runs in the worktree of the newest dispatch in its chain whose worktree still exists, on the branch and HEAD where that dispatch stopped. Trunk is fetched; `setup` runs again if a lockfile changed or disk-pressure cleanup cleared its caches. It reuses only when the worktree is clean (untracked files under the repo's `scratch` paths excepted), belongs to the same repo, and no other dispatch runs in it; otherwise it allocates a fresh worktree as usual. A dirty worktree is never cleaned or reset. The first status note says which: `reusing worktree of <origin>` or `fresh worktree (<reason>)`. A lock file in the worktree's git dir (`lobstah.lock`) keeps a second runner out; a lock whose dispatch has finished is stale. A shared worktree is kept by the cull and the free-space guard while any dispatch in the chain is queued or active, and it ages from the newest dispatch that used it. `false` allocates a fresh worktree for every dispatch. Headless dispatches only: a trap works in its own worktree. |
+| `minFreeGB` | `0` (off) | Free space the worktrees volume (`~/.lobstah/worktrees`) must have before the daemon claims work, because each claim creates a worktree (1 to 8 GB). Below the limit, the daemon schedules its background cull worker to remove finished worktrees, oldest first, until the limit is met or none are left (this runs even when `retentionDays` is `0`; live worktrees and PRs needing work are kept; a clean, fully pushed checkout waiting only for review can be removed after its caches; branches and dispatch records stay). If space is still short, the work stays in the queue and is not failed: `man tend` and the glass show it as `held: 3.2 GB free, needs 10 GB`. The daemon checks again on every tick. A `disk-held` notice wakes the helm with elapsed hold time at the start and every thirty minutes; one `disk-cleared` notice marks its end. Suggested: `10`. |
+| `cacheMinFreeGB` | `50` | Below this free space, first clear opted-in `cacheDirs` in finished checkouts whose PRs only await review, then idle traps, biggest first in each group. If space is still short, remove clean, fully pushed review-wait checkouts; records and branches stay for the next round. Uses at least `minFreeGB`; `0` disables the cache threshold but `minFreeGB` still applies. Pressure cleanup clears each trap at most once per hour unless free space is below `minFreeGB`. It posts a notice only when it recovers at least 1 GB or free space is below `minFreeGB` before or after cleanup; smaller recoveries are logged only. Working traps are preserved; paused traps qualify. `lobstah cull` previews clearable cache space. Doctor and cull previews group retained worktrees by reason and show their sizes. Disk holds wake the helm with elapsed wait time when they start and every thirty minutes until cleared. |
 
 ## `[soak]` — soaking sessions (`lobstah soak`)
 
@@ -666,3 +667,45 @@ answers cannot. `apply`, `remove` and grants remain person-only actions.
 Configure opt-in adapters in `[watchTypes.<id>]` with `module = "process"`, a pinned
 release and an executable argv list. See [the watch adapter guide](watch-plugins.md)
 for capability grants, environment access, registration and the versioned protocol.
+
+## PR questions
+
+A `needs-decision` report tied to a GitHub PR posts its question as a separate
+conversation comment, with a hidden dispatch/question marker. Retries reuse
+that comment. Permission requests stay on their permission cards.
+
+Answer by quoting the question, linking its conversation comment, or replying
+in the originating review thread. A human reply reaches the existing worker;
+it does not start a feedback round. Bot replies and the configured GitHub
+identity never count as answers. Terminal sends, glass answers, and PR replies
+share a first-answer rule. An answer removes the glass question/card and marks
+the PR comment answered. The daemon polls replies even when pickup is disabled.
+
+## Worktree server cleanup
+
+`lobstah cull` previews listening TCP servers, dedicated server tmux sessions,
+and running containers from agent worktrees. `--apply` stops them before the
+existing disk cleanup. Servers receive SIGTERM, then SIGKILL after a 5-second
+grace period. Containers use `docker stop`; cull never removes containers.
+
+The default worktree parents are `~/.lobstah/worktrees` (or
+`$LOBSTAH_HOME/worktrees`), `~/.codex/worktrees`, and `.claude/worktrees` in each
+configured repository. Add other parent directories with:
+
+```toml
+[cull]
+worktreeRoots = ["~/agent-worktrees"]
+```
+
+A busy trap keeps its worktree's services. For worktrees outside lobstah's
+parent directory, cull also keeps services when any file or directory was
+edited within the last 12 hours; `--idle-hours <hours>` changes that window.
+Unreadable worktrees are kept. Agent CLIs, glass, the daemon, Docker itself,
+and shared tmux sessions are preserved. A shared process group is never
+signalled as a group; an eligible listener can still be stopped individually.
+Containers qualify through a Compose project working-directory label or a
+host bind mount inside a worktree. Containers spanning several worktrees are
+kept if any of those worktrees is busy or recently edited.
+
+This pass runs only for the manual `cull` command. Windows supports container
+cleanup; process cleanup requires macOS or Linux with `ps` and `lsof`.

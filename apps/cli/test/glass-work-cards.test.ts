@@ -207,13 +207,13 @@ describe('a review card', () => {
     // The PR card's four parts.
     expect(card(7).querySelector('.gtop')!.firstElementChild?.querySelector('.pricon')).toBeTruthy();
     expect(card(7).querySelector('.gtop .gword, .gtop .gchip')).toBeNull();
-    expect(chips(7)).toEqual(['Open', '● draft ready']);
+    expect(chips(7)).toEqual(['Open', '● Ready to post']);
     expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #7 · 🪤 wt:t1');
     expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
     // The menu keeps recovery and secondary actions beside the main action; Open stays on the bar.
     const bar = [...card(7).querySelectorAll('.gactions button, .gactions a')].map((b) => text(b) || b.getAttribute('aria-label'));
-    expect(bar).toEqual(['Approve', 'More actions', 'Open draft']);
+    expect(bar).toEqual(['Publish', 'More actions', 'Open draft']);
     await click(g, card(7).querySelector('.gactions .splitcaret'));
     expect(card(7).querySelector('.cmenulist')?.parentElement).toBe(card(7).querySelector('.split'));
     expect([...card(7).querySelectorAll('.cmenulist [role="menuitem"]')].map(text)).toEqual(['Approve anyway', 'Skip', 'Re-draft', 'Mute PR']);
@@ -240,27 +240,28 @@ describe('a review card', () => {
     // The requester is absent from the card.
     expect(text(card(7))).not.toContain('maya');
     // Sending a review verdict is one click; the card never opens.
-    const approve = () => [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Approve');
+    const approve = () => [...card(7).querySelectorAll('.gactions button')].find((b) => text(b) === 'Publish');
     await click(g, approve());
     expect(g.$('#overlay')!.className).not.toBe('open');
     const sends = () => g.posts().filter((p) => JSON.parse(p.body).kind !== 'review-seen');
     expect(sends().map((p) => JSON.parse(p.body))).toEqual([{ kind: 'review-approve', payload: { key: 'review:acme/web#7' } }]);
   });
 
-  it('opens the PR view and marks it seen, with the reason, the pending review and the actions', async () => {
+  it('opens an updating draft quietly, keeping its pending review link and dismissal actions', async () => {
     const r = review(9, { state: 'stale', reason: 'the head moved', staged: true });
     const g = await page({ ...emptyFleet(), focusToken: 'tok', reviews: [r] }, '#reviews', () => ({ status: 200, body: { ok: true } }));
     await click(g, g.$('#reviews .card'));
     expect(g.opened()).toEqual([]);
-    expect(g.posts().map(post => JSON.parse(post.body))).toEqual([{ kind: 'review-seen', payload: { key: 'review:acme/web#9' } }]);
+    expect(g.posts()).toEqual([]);
     const box = g.$('#modalbox')!;
     expect(text(box.querySelector('h2'))).toBe('pr 9');
     expect(text(box)).toContain('acme/web#9');
-    expect(text(box)).toContain('the head moved');
+    expect(text(box)).toContain('Updating');
+    expect(text(box)).not.toContain('the head moved');
     expect(text(box.querySelector('.rv-staged'))).toBe('Open draft');
     // Its actions; the modal's close is a button too.
-    expect(text(box.querySelector('.detail-actions'))).toContain('Re-draft');
+    expect(text(box.querySelector('.detail-actions'))).toContain('Updating…');
     await click(g, box.querySelector('.splitcaret'));
-    expect([...box.querySelectorAll('[role=menuitem]')].map(text)).toEqual(['Approve anyway', 'Dismiss', 'Mute PR']);
+    expect([...box.querySelectorAll('[role=menuitem]')].map(text)).toEqual(['Dismiss', 'Mute PR']);
   });
 });

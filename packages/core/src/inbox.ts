@@ -7,6 +7,7 @@ import { postNotice } from './notices.js';
 import { readRoster } from './roster.js';
 import { listSignedOff, readTrap, releaseSignedOff, trapRepoLabel } from './soak.js';
 import { trapNameForId } from './trap-names.js';
+import { questionEntry, readStatusLog } from './status.js';
 
 export interface InboxMessage {
   file: string;
@@ -15,6 +16,8 @@ export interface InboxMessage {
 
 /** The shared NNN.meta.json sidecar: sender, timestamp, and optional attachments. */
 export interface MessageMeta {
+  /** The exact question this message won; later messages cannot replace its answer. */
+  questionAt?: string;
   from: string;
   at: string;
   attachments?: Attachment[];
@@ -32,7 +35,25 @@ function inboxDir(id: string, lane: Lane): string {
 
 /** Queue a message. The sidecar lands before its sequenced message. */
 export function sendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = []): string {
-  return withInboxWrite(id, lane, () => appendMessage(id, lane, text, from, attachments));
+  return withInboxWrite(id, lane, () => {
+    const question = questionEntry(readStatusLog(id, lane));
+    const questionAt = (from !== undefined || attachments.length > 0) && question && !answeredAt(id, lane, question.at) ? question.at : undefined;
+    return appendMessage(id, lane, text, from, attachments, undefined, undefined, questionAt);
+  });
+}
+
+/** A question answer committed under the same lock as terminal sends and PR replies. */
+export interface QuestionAnswerCommit<T> { value: T; text: string; from: string; attachments?: Attachment[] }
+
+/** First answer wins across all surfaces; a stale question runs no callback and sends nothing. */
+export function commitQuestionAnswer<T>(id: string, lane: Lane, questionAt: string, commit: () => QuestionAnswerCommit<T>): { accepted: true; value: T } | { accepted: false } {
+  return withInboxWrite(id, lane, () => {
+    const current = questionEntry(readStatusLog(id, lane));
+    if (current?.at !== questionAt || answeredAt(id, lane, questionAt)) return { accepted: false };
+    const answer = commit();
+    appendMessage(id, lane, answer.text, answer.from, answer.attachments ?? [], undefined, undefined, questionAt);
+    return { accepted: true, value: answer.value };
+  });
 }
 
 function withInboxWrite<T>(id: string, lane: Lane, action: () => T): T {
@@ -63,18 +84,19 @@ export function sendMessageOnce(id: string, lane: Lane, deliveryId: string, text
   });
 }
 
-function appendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = [], deliveryId?: string, permissionCard?: string): string {
+function appendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = [], deliveryId?: string, permissionCard?: string, questionAt?: string): string {
   const dir = inboxDir(id, lane);
   fs.mkdirSync(path.join(dir, 'handled'), { recursive: true });
   const existing = fs.readdirSync(dir).filter((f) => f.endsWith('.msg')).length;
   const handled = fs.readdirSync(path.join(dir, 'handled')).filter((f) => f.endsWith('.msg')).length;
   const name = `${String(existing + handled + 1).padStart(3, '0')}.msg`;
   const tmp = uniqueTempPath(path.join(dir, name));
-  if (from !== undefined || attachments.length > 0) {
+  if (from !== undefined || attachments.length > 0 || questionAt !== undefined) {
     const meta: MessageMeta = {
       ...(deliveryId ? { deliveryId } : {}),
       from: from ?? 'unknown',
-      at: new Date().toISOString(),
+      at: new Date(Math.max(Date.now(), questionAt ? Date.parse(questionAt) + 1 : 0)).toISOString(),
+      ...(questionAt ? { questionAt } : {}),
       ...(attachments.length ? { attachments } : {}),
       ...(permissionCard ? { permissionCard } : {}),
     };
@@ -111,7 +133,7 @@ export function messageMetas(id: string, lane: Lane): MessageMeta[] {
       try {
         const m = JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')) as Partial<MessageMeta>;
         if (typeof m.from === 'string' && m.from !== '' && typeof m.at === 'string')
-          out.push({ from: m.from, at: m.at, ...(typeof m.permissionCard === 'string' ? { permissionCard: m.permissionCard } : {}) });
+          out.push({ from: m.from, at: m.at, ...(typeof m.questionAt === 'string' ? { questionAt: m.questionAt } : {}), ...(typeof m.permissionCard === 'string' ? { permissionCard: m.permissionCard } : {}) });
       } catch {
         // unreadable sidecar: no provenance, never counts
       }
@@ -137,8 +159,11 @@ export interface AnsweredAtOptions {
  */
 export function answeredAt(id: string, lane: Lane, since: string, options: AnsweredAtOptions = {}): string | undefined {
   const t = Date.parse(since) || 0;
-  return messageMetas(id, lane)
-    .filter((m) => (Date.parse(m.at) || 0) > t && (options.permissionAnswers || m.permissionCard === undefined))
+  const messages = messageMetas(id, lane);
+  const winner = messages.find((message) => message.questionAt === since);
+  if (winner) return winner.at;
+  return messages
+    .filter((m) => (Date.parse(m.at) || 0) > t && (m.questionAt === undefined || m.questionAt === since) && (options.permissionAnswers || m.permissionCard === undefined))
     .map((m) => m.at)
     .sort()
     .at(-1);

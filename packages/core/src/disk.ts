@@ -41,6 +41,8 @@ export interface DiskHold {
   since: string;
   /** When free space was last read. */
   checkedAt: string;
+  /** Last loud notice, so a continuing hold reminds the helm without waking every tick. */
+  lastNoticedAt?: string;
   freeBytes: number;
   needBytes: number;
   dir: string;

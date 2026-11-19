@@ -25,7 +25,7 @@ import {
 import type { NormalizedEvent, PrEvidence } from '@lobstah/core';
 import { AsyncQueue } from '@lobstah/adapters';
 import type { Adapter, AdapterRun, AdapterStartOpts } from '@lobstah/adapters';
-import { main } from '../src/run.js';
+import { main as runnerMain } from '../src/run.js';
 import { allocate } from '@lobstah/worktree';
 import { processTest as it } from '../../../test/process-test.js';
 import { stubGh } from '../../../test/stub-gh.js';
@@ -36,6 +36,18 @@ import { removeTempDir } from '../../../test/temp-dir.js';
  * bare repo is the origin, the configured repo is a clone of it, and the
  * worktrees are real linked worktrees. Only the harness is a mock.
  */
+
+// A test timeout does not cancel an async runner. Drain it before removing
+// its home or restoring PATH, so its final status can never reach the fleet.
+const runners = new Set<ReturnType<typeof runnerMain>>();
+const releaseGates = new Set<() => void>();
+let previousHome: string | undefined;
+function main(...args: Parameters<typeof runnerMain>): ReturnType<typeof runnerMain> {
+  const running = runnerMain(...args);
+  runners.add(running);
+  void running.then(() => runners.delete(running), () => runners.delete(running));
+  return running;
+}
 
 let root: string;
 let home: string;
@@ -65,6 +77,7 @@ function writeConfig(extra = ''): void {
 }
 
 beforeEach(() => {
+  previousHome = process.env.LOBSTAH_HOME;
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-reuse-'));
   home = path.join(root, 'home');
   fs.mkdirSync(home);
@@ -88,12 +101,15 @@ beforeEach(() => {
   // about PRs: none of them starts the machine's own gh.
   gh = stubGh(path.join(root, 'bin'));
 });
-afterEach(() => {
-  gh.restore();
+afterEach(async () => {
+  for (const release of releaseGates) release();
+  releaseGates.clear();
+  await Promise.allSettled([...runners]);
+  gh?.restore();
   removeTempDir(root);
-  delete process.env.LOBSTAH_HOME;
+  process.env.LOBSTAH_HOME = previousHome ?? home;
   delete process.env.CODEX_HOME;
-});
+}, 30_000);
 
 const setupRuns = () => (fs.existsSync(setupLog) ? fs.readFileSync(setupLog, 'utf8').length : 0);
 
@@ -369,7 +385,7 @@ describe('a follow-up reuses its origin chain’s worktree', () => {
     expect(claimNext('work')).toBeTruthy();
     expect(claimNext('work')).toBeTruthy();
     let open!: () => void;
-    const gate = new Promise<void>((r) => (open = r));
+    const gate = new Promise<void>((r) => { open = r; releaseGates.add(r); });
     const a = harness(() => {}, gate);
     const b = harness(() => {}, gate);
     const runs = [

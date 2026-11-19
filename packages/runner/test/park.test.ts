@@ -11,6 +11,9 @@ import {
   readEvidence,
   readStatusLog,
   readWorktreeLock,
+  isParked,
+  questionPark,
+  slotUsage,
   sendMessage,
   unhandled,
 } from '@lobstah/core';
@@ -104,6 +107,27 @@ function deps(adapter: Adapter, reaps: { n: number }): Partial<RunnerDeps> {
 }
 
 describe('a paused headless dispatch parks without a harness', () => {
+  it('parks an unanswered question without failing, frees its slot, and resumes its session with a late answer', async () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), 'questionWaitSecs = 0\n');
+    enqueue({ id: 'question', repo: 'r', brief: 'Do the thing' });
+    claimNext('work');
+    const dir = path.join(laneDirs('work').active, 'question');
+    const first = harness((id) => appendStatus(id, 'work', 'needs-decision', 'Which option?'));
+    const reaps = { n: 0 };
+    await main(dir, 'work', deps(first.adapter, reaps));
+    expect(readStatusLog('question', 'work').at(-1)?.verb).toBe('needs-decision');
+    expect(questionPark('question', 'work')?.note).toContain('no answer');
+    expect(isParked('question', 'work')).toBe(true);
+    expect(slotUsage('work')).toEqual({ headless: 0, traps: 0, parked: 1 });
+    expect(readEvidence('question', 'work').sessionId).toBe('sess');
+    sendMessage('question', 'work', 'Use the late answer', 'glass');
+    process.env.LOBSTAH_RESUME = 'sess'; process.env.LOBSTAH_WAKE = 'operator answer arrived';
+    const second = harness((id) => appendStatus(id, 'work', 'done', 'Finished'));
+    await main(dir, 'work', deps(second.adapter, reaps));
+    expect(second.calls.starts[0]?.resumeSession).toBe('sess');
+    expect(second.calls.starts[0]?.prompt).toContain('Use the late answer');
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'question'))).toBe(true);
+  });
   it('pause, then wake on a message: the same session resumes with the message, and done finishes it', async () => {
     enqueue({ id: 'p1', repo: 'r', brief: 'do the thing' });
     expect(claimNext('work')).toBe('p1');
