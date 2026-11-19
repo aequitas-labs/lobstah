@@ -325,7 +325,7 @@ their review tool (`[repos.<key>].reviewTool`), edits the draft there, and
 sends it, with whatever event they choose. When the request then disappears from the
 search, pick reads that review once: submitted marks the round `posted` (by
 `review tool`), deleted or dismissed dismisses it, and still pending keeps it in
-`lobstah reviews` and Glass as “Ready to post” with a Publish button. Previously withdrawn
+`lobstah reviews` and Glass as “Ready to post” with its verdict’s send button. Previously withdrawn
 staged drafts return to the inbox when GitHub confirms they are still pending.
 A fresh draft replaces only unchanged content that lobstah generated in the
 identity's pending review. Hand-written comments, summaries, and edits stay.
@@ -334,7 +334,7 @@ hand-written inline comments carry over verbatim with file and line context in
 the summary. A local backup survives failed replacement attempts.
 
 With `mode = "auto-review"` (also legacy `post = "auto"`), pick publishes fresh drafts as REQUEST_CHANGES when there are blocking findings, otherwise COMMENT. An approve verdict is staged pending with a needs-you marker and always waits for the person’s Approve click; approval is never automatic. The glass Publish toggle selects draft or publish, including for on-demand jobs; the row action reads Review (draft) or Review (publish). The repo filter scopes both settings to `[repos.<key>.reviews]`, otherwise they change the global `[reviews]` default. Jobs started with publishing off stay draft-only even if the toggle changes later. Manual drafting respects `maxPerDay`, including retries of the same round. `lobstah reviews post <key>` explicitly sends a staged review as a
-comment review. The glass shows Publish; that explicit click submits the draft’s verdict and summary as the identity. The glass shows requester names/avatars cached from the same authenticated search; workflow requests show the PR author with an automatic badge. Cards and rows open the configured review tool; drafted rounds link to their pending review. Skip (formerly Dismiss) means “Handle it yourself; removes lobstah’s draft”: it deletes any staged pending review without declining the request on GitHub. Redraft starts a stale round again. Every row action acknowledges and clears its notification and needs-you marker; opening a row only marks it seen and dims it. A stale draft is never staged or posted, including by hand. Publishing checks the live PR head immediately before submission; a changed or closed PR requires a new draft. Each round is staged at most once and posted at
+comment review. The glass shows Approve, Request changes, or Publish comment according to the verdict; that explicit click submits the draft’s verdict and summary as the identity. The glass shows requester names/avatars cached from the same authenticated search; workflow requests show the PR author with an automatic badge. Cards and rows open the configured review tool; drafted rounds link to their pending review. Skip (formerly Dismiss) means “Handle it yourself; removes lobstah’s draft”: it deletes any staged pending review without declining the request on GitHub. Redraft starts a stale round again. Every row action acknowledges and clears its notification and needs-you marker; opening a row only marks it seen and dims it. A stale draft is never staged or posted, including by hand. Publishing checks the live PR head immediately before submission; a changed or closed PR requires a new draft. Each round is staged at most once and posted at
 most once: `staged.json` and `posted.json` in the round's directory are
 created with `wx` before the call and removed if it fails, and a review on
 the PR that already carries the round's marker is adopted (pending) or
@@ -343,7 +343,7 @@ reason on the round. Failed publishing is not retried on its own; failed staging
 deletes the round’s pending review; a review already sent is never deleted.
 Redraft keeps the pending review and unsent edits for the next staging pass.
 Stale drafts and staging failures automatically start a replacement draft, with
-persisted backoff between failed attempts. Repairs always require a Publish
+persisted backoff between failed attempts. Repairs always require a send
 click, including when the repo otherwise enables automatic posting. While
 repair runs, Glass shows only a quiet Updating state without a new attention
 badge. Muting, dismissing, closing, or explicitly cancelling stops the repair.
