@@ -138,9 +138,9 @@ function muteMenuAction(r: GlassReview): MenuAction | undefined {
 
 /** Sending a drafted review: the request, the button, and what a card's second tap says it posts. */
 const SEND = {
-  approve: { kind: 'review-approve', label: 'Publish', posts: 'approval' },
-  request_changes: { kind: 'review-request-changes', label: 'Publish', posts: 'changes request' },
-  comment: { kind: 'review-comment', label: 'Publish', posts: 'comment' },
+  approve: { kind: 'review-approve', label: 'Approve', posts: 'approval' },
+  request_changes: { kind: 'review-request-changes', label: 'Request changes', posts: 'changes request' },
+  comment: { kind: 'review-comment', label: 'Publish comment', posts: 'comment' },
 } as const satisfies Record<string, { kind: ReviewRequestKind; label: string; posts: string }>;
 
 /** The icon beside each verdict's send button: approve, request changes, publish a comment. */
