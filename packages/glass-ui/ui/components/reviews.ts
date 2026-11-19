@@ -10,7 +10,7 @@ import { can } from '../backend.js';
 import { getState, setState } from '../store.js';
 import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone, MenuAction } from './card.js';
-import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, dispatchTrap, prShapedCard } from './prs.js';
+import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, StackCard, dispatchTrap, prShapedCard } from './prs.js';
 import type { PrIconState } from './prs.js';
 import { Button } from './button.js';
 import { showToast } from './toast.js';
@@ -492,24 +492,31 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
     ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
       const contents = groups.map(
-        ({
-          stack,
-          reviews,
-        }) => html`<section class=${stack ? 'rv-group rv-stack' : 'rv-group'} data-review-stack=${stack?.id} aria-label=${stack ? (stack.title ?? 'Review stack') : undefined}>
-        ${stack && html`<header class="rv-stack-head"><h3>${stack.title ?? 'Review stack'}</h3><p class="sub">Bottom → top · ${reviews.map((review) => `#${review.number}`).join(' → ')} · ${reviewStackState(reviews)}</p></header>`}
-        ${
-          stack || inp.view === 'cards'
-            ? html`<div class="cards">${reviews.map((review) => card(review, canDraft, publish))}</div>`
-            : Table(
-                ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
-                reviews.map((review) => row(review, canDraft, publish)),
-                'no review requests match',
-              )
-        }
-      </section>`,
+        ({ stack, reviews }) =>
+          html`<section class="rv-group">${
+            stack
+              ? html`<${StackCard}
+              id=${`review-stack:${stack.id}`}
+              prState=${reviews.some((review) => ['open', 'draft'].includes(reviewPrState(review))) ? 'open' : reviews.some((review) => reviewPrState(review) === 'merged') ? 'merged' : 'closed'}
+              header=${{
+                title: stack.title ?? reviews.at(-1)!.title,
+                titleAttr: stack.title ?? reviews.at(-1)!.title,
+                context: reviews.length === 1 ? `#${reviews[0]!.number}` : `#${reviews[0]!.number} → #${reviews.at(-1)!.number}`,
+                attrs: { 'data-review-stack': stack.id, 'aria-label': stack.title ?? reviews.at(-1)!.title },
+              }}
+              members=${() => reviews.map((review) => card(review, canDraft, publish))}
+            />`
+              : inp.view === 'cards'
+                ? html`<div class="cards">${reviews.map((review) => card(review, canDraft, publish))}</div>`
+                : Table(
+                    ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
+                    reviews.map((review) => row(review, canDraft, publish)),
+                    'no review requests match',
+                  )
+          }</section>`,
       );
       return id === 'needs'
-        ? html`<section class="rv-section" data-review-section=${id}><h2>${title} (${count})</h2>${count ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
+        ? html`<section class="rv-section" data-review-section=${id}><h2>${title} (${count})</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
         : html`<details class="rv-section" data-review-section=${id} open=${inp.expanded?.[id] === true} onToggle=${(event: Event) => {
             const expanded = (event.currentTarget as HTMLDetailsElement).open;
             if ((getState().prefs.reviewSections?.[id] === true) !== expanded)
@@ -534,14 +541,17 @@ export function reviewGroups(reviews: readonly GlassReview[]): Array<{ stack?: G
   return groups;
 }
 
-/** Summarize review progress independently of merge checks. */
-export function reviewStackState(reviews: readonly GlassReview[]): string {
-  if (reviews.some(reviewUpdating)) return 'Updating reviews';
-  if (reviews.some((review) => review.reReview || review.state === 'stale')) return 'Needs re-review';
-  if (reviews.some((review) => review.state === 'posted' && review.verdict === 'request_changes')) return 'Changes requested';
-  if (reviews.every((review) => review.state === 'posted' && review.verdict === 'approve')) return 'Approved';
-  const ready = reviews.filter((review) => review.state === 'drafted' || review.state === 'posted').length;
-  return `${ready} of ${reviews.length} reviews ready`;
+/** Actionable reviews stay counted after opening; automatic work and waiting rounds do not. */
+export function reviewNeedsViewer(review: GlassReview): boolean {
+  if (
+    review.mutedAt ||
+    reviewUpdating(review) ||
+    ['MERGED', 'CLOSED'].includes(review.prState ?? '') ||
+    ['merged', 'closed'].includes(review.state)
+  )
+    return false;
+  if (review.reReview) return true;
+  return review.state === 'drafted' || review.state === 'failed' || (review.state === 'requested' && !!(review.stands || review.needsYou));
 }
 
 /** A whole stack follows its most urgent PR, so its review order stays intact. */
@@ -572,7 +582,7 @@ export function reviewSections(reviews: readonly GlassReview[]): Array<{
     const previous = section.groups.at(-1);
     if (!('stack' in group && group.stack) && previous && !previous.stack) previous.reviews.push(...group.reviews);
     else section.groups.push(group);
-    section.count += group.reviews.length;
+    section.count += group.reviews.filter(reviewNeedsViewer).length;
   }
   return sections;
 }

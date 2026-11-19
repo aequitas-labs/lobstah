@@ -693,8 +693,13 @@ it.each(['cards', 'table'])('keeps stack actions on its PR cards in %s view', as
   const container = g.$('[data-review-stack="pr:acme/web#7"]')!;
   expect(container.getAttribute('aria-label')).toBe('Files');
   expect(g.$$('#reviews [data-review-stack]')).toHaveLength(1);
-  expect(container.querySelector('header')!.textContent).toContain('FilesBottom → top · #7 → #8 · 2 of 2 reviews ready');
-  expect(container.querySelector('header')!.querySelector('button, a, input, select, [role="button"]')).toBeNull();
+  expect(container.getAttribute('aria-expanded')).toBe('false');
+  expect(container.textContent).toBe('Files#7 → #8');
+  expect(container.querySelector('svg')).not.toBeNull();
+  expect(container.querySelector('button, a, input, select')).toBeNull();
+  expect(container.querySelector('[data-review]')).toBeNull();
+  (container as unknown as HTMLElement).click(); await g.settle();
+  expect(container.getAttribute('aria-expanded')).toBe('true');
   expect(Array.from(container.querySelectorAll('[data-review]')).map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
   expect(container.querySelector('table')).toBeNull();
   for (const key of stack.keys) {
@@ -717,6 +722,8 @@ it.each(['needs', 'waiting', 'done'] as const)('places a complete stack only in 
   expect(g.$$('#reviews [data-review-stack]')).toHaveLength(1);
   const container = g.$(`[data-review-section="${section}"] [data-review-stack]`)!;
   expect(container).toBeTruthy();
+  expect(g.$(`[data-review-section="${section}"] > ${section === 'needs' ? 'h2' : 'summary'}`)!.textContent).toContain(`(${section === 'needs' ? 1 : 0})`);
+  (container as unknown as HTMLElement).click(); await g.settle();
   expect(Array.from(container.querySelectorAll('[data-review]')).map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
   expect(container.querySelector('[data-review="review:acme/web#7"]')!.textContent).toContain('Merged');
   for (const other of ['needs', 'waiting', 'done'].filter(id => id !== section))
@@ -728,7 +735,8 @@ it('groups stacks in bottom-to-top order and navigates with buttons, arrows, swi
   const reviews = [9, 7, 8].map(number => review(number, { stack, state: 'drafted' }));
   const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
   open.push(g);
-  expect(g.$('#reviews')!.textContent).toContain('Bottom → top · #7 → #8 → #9');
+  expect(g.$('#reviews')!.textContent).toContain('#7 → #9');
+  (g.$('[data-review-stack]') as unknown as HTMLElement).click(); await g.settle();
   expect(g.$$('#reviews [data-review]').map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
   (g.$('#reviews [data-review="review:acme/web#7"]') as unknown as HTMLElement).click();
   await g.settle();
@@ -759,12 +767,13 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
   const reviews = [review(7, { stack, state: 'posted', verdict: 'approve' }), review(8, { stack, state: 'stale', reReview: { headSha: 'new', at: ago(0) } }), review(9, { state: 'posted', verdict: 'request_changes' }), review(10, { state: 'merged', prState: 'MERGED' })];
   const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
   open.push(g);
-  expect(g.$('[data-review-section="needs"]')!.textContent).toContain('Needs your review (2)');
+  expect(g.$('[data-review-section="needs"]')!.textContent).toContain('Needs your review (0)');
+  (g.$('[data-review-stack]') as unknown as HTMLElement).click(); await g.settle();
   expect(g.$('[data-review-section="needs"] [data-review="review:acme/web#7"]')).toBeTruthy();
   const waiting = g.$('[data-review-section="waiting"]')!;
   const done = g.$('[data-review-section="done"]')!;
-  expect(waiting.textContent).toContain('Waiting on response (1)');
-  expect(done.textContent).toContain('Done (1)');
+  expect(waiting.textContent).toContain('Waiting on response (0)');
+  expect(done.textContent).toContain('Done (0)');
   expect(waiting.hasAttribute('open')).toBe(false);
   expect(done.hasAttribute('open')).toBe(false);
   waiting.setAttribute('open', '');
@@ -776,4 +785,31 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
   open.push(reload);
   expect(reload.$('[data-review-section="waiting"]')!.hasAttribute('open')).toBe(true);
   expect(reload.$('[data-review-section="done"]')!.hasAttribute('open')).toBe(false);
+});
+
+
+it('counts only actionable stack members and preserves disclosure across polls and PR actions', async () => {
+  const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8, 9, 10, 11, 12].map(number => `review:acme/web#${number}`) };
+  const reviews = [
+    review(7, { stack, state: 'drafted', seenAt: ago(0), staged: true }),
+    review(8, { stack, state: 'posted', verdict: 'approve' }),
+    review(9, { stack, state: 'merged', prState: 'MERGED' }),
+    review(10, { stack, state: 'drafted', mutedAt: ago(0) }),
+    review(11, { stack, state: 'requested', updating: true }),
+    review(12, { stack, state: 'drafting' }),
+  ];
+  const snapshot = { ...fleet(), reviews };
+  const g = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } }); open.push(g);
+  expect(g.$('[data-review-section="needs"] > h2')!.textContent).toBe('Needs your review (1)');
+  const container = g.$('[data-review-stack]')!;
+  container.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await g.settle();
+  expect(container.getAttribute('aria-expanded')).toBe('true');
+  await g.poll();
+  expect(container.getAttribute('aria-expanded')).toBe('true');
+  (container.querySelector('[data-review="review:acme/web#7"] button[aria-label="More actions"]') as unknown as HTMLElement).click(); await g.settle();
+  expect(container.getAttribute('aria-expanded')).toBe('true');
+  container.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: ' ', bubbles: true })); await g.settle();
+  expect(container.getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelector('[data-review]')).toBeNull();
+  expect(g.posts().filter(post => JSON.parse(post.body).kind === 'review-seen')).toHaveLength(0);
 });

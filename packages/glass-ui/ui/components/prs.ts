@@ -29,7 +29,7 @@ import { can } from '../backend.js';
 import { getState, setState } from '../store.js';
 import type { Children } from '../html.js';
 import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
-import type { CardPerson, CardTone } from './card.js';
+import type { CardPerson, CardProps, CardTone } from './card.js';
 import { Button, type ButtonSize } from './button.js';
 import { reviewStatus } from './reviews.js';
 
@@ -379,6 +379,47 @@ export function toggleStack(id: string): void {
 /** A stack, as a three-layer octicon (stack-16, @primer/octicons, MIT) in the text's color. */
 const StackIcon = html`<svg class="pricon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M7.122.392a1.75 1.75 0 0 1 1.756 0l5.003 2.902c.83.481.83 1.68 0 2.162L8.878 8.358a1.75 1.75 0 0 1-1.756 0L2.119 5.456a1.251 1.251 0 0 1 0-2.162ZM8.125 1.69a.248.248 0 0 0-.25 0l-4.63 2.685 4.63 2.685a.248.248 0 0 0 .25 0l4.63-2.685ZM1.601 7.789a.75.75 0 0 1 1.025-.273l5.249 3.044a.248.248 0 0 0 .25 0l5.249-3.044a.75.75 0 0 1 .752 1.298l-5.248 3.044a1.75 1.75 0 0 1-1.756 0L1.874 8.814A.75.75 0 0 1 1.6 7.789Zm0 3.5a.75.75 0 0 1 1.025-.273l5.249 3.044a.248.248 0 0 0 .25 0l5.249-3.044a.75.75 0 0 1 .752 1.298l-5.248 3.044a1.75 1.75 0 0 1-1.756 0l-5.248-3.044a.75.75 0 0 1-.273-1.025Z" /></svg>`;
 
+/** Header content and member cards share one expandable stack surface on both pages. */
+export interface StackCardProps {
+  id: string;
+  prState: PrIconState;
+  header: Omit<CardProps, 'icon' | 'iconFirst' | 'extra' | 'cls' | 'onClick'>;
+  /** Render members only while expanded; each member owns its actions. */
+  members: () => Children;
+  /** PR stacks acknowledge attention when opened; review stacks leave reviews unread. */
+  onOpen?: () => void;
+}
+
+/** The shared stack card: one icon, surface and keyboard/click disclosure, with member cards below. */
+export function StackCard({ id, prState, header, members, onOpen }: StackCardProps): Children {
+  const open = stackOpen(id);
+  const toggle = (): void => {
+    if (!open) onOpen?.();
+    toggleStack(id);
+  };
+  return Card({
+    ...header,
+    icon: html`<span class=${'prstate pr-' + prState}>${StackIcon}</span>`,
+    iconFirst: true,
+    cls: ['prcard stackcard', open && 'open'].filter(Boolean).join(' '),
+    attrs: {
+      ...header.attrs,
+      'data-stack': id,
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': String(open),
+      onKeyDown: (event: KeyboardEvent): void => {
+        if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+          event.preventDefault();
+          toggle();
+        }
+      },
+    },
+    onClick: toggle,
+    extra: open && html`<div class="stackmembers" onClick=${(event: Event) => event.stopPropagation()}>${members()}</div>`,
+  });
+}
+
 /**
  * A stack of several PRs as one card, in the PR card's layout: the stack's
  * title; its summary and how many PRs it holds; its repo and last change;
@@ -386,7 +427,7 @@ const StackIcon = html`<svg class="pricon" viewBox="0 0 16 16" width="14" height
  * every member's own PR card, the bottom of the stack first; another click
  * closes it. The avatar is the top PR's author.
  */
-export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]; attention: readonly DeckAttention[] }) {
+export function PrStackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]; attention: readonly DeckAttention[] }) {
   const members = stackMembers(s, prs);
   const top = members.at(-1)!;
   const summary = stackSummary(s, prs);
@@ -397,51 +438,32 @@ export function StackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr[]
       : 'closed';
   const actionable = prState === 'open';
   const at = stackUpdatedAt(prs);
-  const open = stackOpen(s.id);
   const title = s.title || top.title || `#${top.number}`;
   const pending = shownPrAttention(attention, prs, [s]).filter((a) => !a.acked);
-  // Opening the stack acks what it shows; closing it acks nothing.
-  const toggle = () => {
-    if (!open) ackOnOpen(pending);
-    toggleStack(s.id);
-  };
-  return Card({
-    // A stack with a title of its own carries it as the stack title, as the table and the deck do.
-    title: s.title ? html`<span class="stacktitle">${LinkedText(s.title)}</span>` : LinkedText(title),
-    titleAttr: title,
-    icon: html`<span class=${'prstate pr-' + prState}>${StackIcon}</span>`,
-    iconFirst: true,
-    state: actionable ? { word: '', tone: summary.tone, mark: 'edge' } : undefined,
-    status: [
-      s.mergeRequest && StatusChip(s.mergeRequest.merging ? 'merging' : 'merges when green', s.mergeRequest.merging ? 'warn' : 'dim'),
-      html`<${PrTags} state=${!actionable ? prState : undefined} tags=${actionable ? [{ word: summary.text, tone: summary.tone }] : []} />`,
-      StatusChip(`${members.length} PRs`, 'dim'),
-    ],
-    context: [RepoName(s.repo), at && [' · updated ', Age(at), ' ago']],
-    contextTitle: [s.repo, at && `updated ${ageText(at)} ago`].filter(Boolean).join(' · '),
-    // The Open icon (the top of the stack, as GitHub shows a stack) at the bar's right; opening the stack, or Open, acks it.
-    actions: [
-      html`<${MergeStackWhenGreen} s=${s} prs=${members} />`,
-      html`<${CardLink} href=${reviewLink(top.url)} onOpen=${() => ackOnOpen(pending)} />`,
-    ],
-    person: prAuthor(top),
-    cls: ['prcard stackcard', open && 'open'].filter(Boolean).join(' '),
-    attrs: {
-      'data-stack': s.id,
-      role: 'button',
-      tabindex: '0',
-      'aria-expanded': String(open),
-      onKeyDown: (e: KeyboardEvent) => {
-        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
-          e.preventDefault();
-          toggle();
-        }
-      },
+  return StackCard({
+    id: s.id,
+    prState,
+    onOpen: () => ackOnOpen(pending),
+    members: () => members.map((p) => prCard(p, { attention })),
+    header: {
+      // A stack with a title of its own carries it as the stack title, as the table and the deck do.
+      title: s.title ? html`<span class="stacktitle">${LinkedText(s.title)}</span>` : LinkedText(title),
+      titleAttr: title,
+      state: actionable ? { word: '', tone: summary.tone, mark: 'edge' } : undefined,
+      status: [
+        s.mergeRequest && StatusChip(s.mergeRequest.merging ? 'merging' : 'merges when green', s.mergeRequest.merging ? 'warn' : 'dim'),
+        html`<${PrTags} state=${!actionable ? prState : undefined} tags=${actionable ? [{ word: summary.text, tone: summary.tone }] : []} />`,
+        StatusChip(`${members.length} PRs`, 'dim'),
+      ],
+      context: [RepoName(s.repo), at && [' · updated ', Age(at), ' ago']],
+      contextTitle: [s.repo, at && `updated ${ageText(at)} ago`].filter(Boolean).join(' · '),
+      // The Open icon (the top of the stack, as GitHub shows a stack) at the bar's right; opening the stack, or Open, acks it.
+      actions: [
+        html`<${MergeStackWhenGreen} s=${s} prs=${members} />`,
+        html`<${CardLink} href=${reviewLink(top.url)} onOpen=${() => ackOnOpen(pending)} />`,
+      ],
+      person: prAuthor(top),
     },
-    onClick: toggle,
-    extra:
-      open &&
-      html`<div class="stackmembers" onClick=${(e: Event) => e.stopPropagation()}>${members.map((p) => prCard(p, { attention }))}</div>`,
   });
 }
 
@@ -451,7 +473,7 @@ function prCards(inp: PrsInputs, older: unknown) {
   const stacksOf = (groups: ReturnType<typeof prGroups>) =>
     html`<div class="cards">${groups.map(({ s, prs }) =>
       prs.length > 1
-        ? html`<${StackCard} key=${'stack:' + s.id} s=${s} prs=${prs} attention=${inp.prAttention} />`
+        ? html`<${PrStackCard} key=${'stack:' + s.id} s=${s} prs=${prs} attention=${inp.prAttention} />`
         : prCard(prs[0]!, { attention: inp.prAttention, stack: s }),
     )}</div>`;
   return [groups.length ? stacksOf(groups) : html`<div class="empty">${PRS_EMPTY}</div>`, older, otherWatches(inp)];

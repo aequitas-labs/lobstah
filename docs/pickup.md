@@ -337,9 +337,10 @@ click, including when the repo otherwise enables automatic posting. While
 repair runs, Glass shows only a quiet Updating state without a new attention
 badge. Muting, dismissing, closing, or explicitly cancelling stops the repair.
 
-Reviews sharing an unambiguous branch stack appear in one stack card, bottom
-to top, with per-PR status and overall review progress. The stack container
-has only its title and progress; actions stay on each PR card inside it.
+Reviews sharing an unambiguous branch stack use the PRs page's expandable
+stack card, with the same stack icon and disclosure behavior. Its header shows
+only the title and the starting and ending PR numbers. Click it, or press Enter
+or Space, to show the PR cards in stack order. Actions stay on those PR cards.
 Stacks keep their PR cards in both card and table views. In a stack review,
 Previous and Next buttons, left/right arrow keys, and horizontal mobile swipes
 move between PRs. Each move updates the URL; browser Back returns through prior PRs.
@@ -347,7 +348,9 @@ Standalone PRs keep their existing layout. “Needs your review” stays open.
 “Waiting on response” holds submitted comments, change requests, and approvals
 on open PRs; “Done” holds merged and closed PRs, newest first. Both sections
 start collapsed with counts and remember this viewer’s disclosure choices.
-A stack stays together in the section of its most urgent PR.
+A stack stays together in the section of its most urgent PR. Section counts
+include only PRs that need your action, even when other stack members are
+shown alongside them. Opening a draft does not remove it from that count.
 
 **On wharf grounds.** A review item whose repo belongs to a grounds with a
 wharf is that boat's to publish: before drafting, pick creates the round's

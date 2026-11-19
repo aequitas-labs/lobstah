@@ -2966,30 +2966,14 @@ a.lob {
 .rv-group + .rv-group {
   margin-top: calc(2 * var(--space-4));
 }
-.rv-stack {
-  background: var(--inset);
-  border: 1px solid var(--line);
-  border-radius: var(--card-radius);
-  padding: var(--space-4);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .rv-stack-nav {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-4);
 }
-.rv-stack-head {
-  display: grid;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-}
-.rv-stack-head h3,
-.rv-stack-head p {
-  margin: 0;
-}
-.rv-section .cards {
+.rv-section .cards,
+.rv-section .stackmembers {
   gap: var(--space-4);
 }
 .rv-card {
