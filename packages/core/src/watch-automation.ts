@@ -67,7 +67,7 @@ export class WatchAutomationRunner {
     if (pending.length) return pending.map((receipt) => receipt.request);
     return (adapter.automation?.propose({ snapshot, now: new Date(now).toISOString() }) ?? [])
       .map((proposal) =>
-        this.actions.authorize(key, proposal, { id: proposal.authority, by: 'configuration', at: new Date(now).toISOString() }),
+        this.actions.authorize(key, proposal, { id: proposal.authority, by: proposal.by ?? 'configuration', at: proposal.authorizedAt ?? new Date(now).toISOString() }),
       )
       .filter(
         (request) =>

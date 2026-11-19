@@ -15,6 +15,7 @@ import type {
   WatchEffectHandler,
   WatchAutomation,
   WatchDispatchPolicy,
+  WatchDerivation,
 } from './model.js';
 
 /** Every source implements policy and presentation as well as observation. */
@@ -27,6 +28,7 @@ export abstract class BaseWatchType<Reference, State, Cursor, Options> {
   /** Optional capabilities are composed with the required source contract. */
   readonly subscriber?: WatchSubscriber<Reference, State, Cursor, Options>;
   readonly batchObserver?: WatchBatchObserver<Reference, State, Cursor, Options>;
+  readonly derived?: WatchDerivation;
   readonly effectHandler?: WatchEffectHandler<Reference>;
   readonly automation?: WatchAutomation<Reference, State, Cursor, Options>;
   readonly dispatchPolicy?: WatchDispatchPolicy<Reference, State, Cursor, Options>;

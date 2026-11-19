@@ -63,6 +63,7 @@ export async function prepareStackMerges(
         }
         const dispositions = await Promise.all(pending.members.map((number) => source.disposition(number)));
         if (dispositions.every((status) => status === 'merged')) {
+          pending.approvals?.forEach((approval) => state.consumeApproval(approval));
           state.clearStackMerge(key);
           log(`Stack through #${pending.number} merged into the default branch.`);
         } else if (dispositions.includes('closed')) {
@@ -144,14 +145,17 @@ export async function prepareStackMerges(
         continue;
       }
       const currentTop = members.find((pr) => pr.number === top.number)!;
+      const requestKey = `${source.name}:stack:${number}`;
+      state.setStackMerge(requestKey, { number: top.number, members: numbers, approvals: reviews.map((review) => review!.key), submitting: true });
       const result = await source.mergeLinked(top.number, policy.method, currentTop.headSha);
       if (!['pending', 'merged', 'enqueued', 'failed'].includes(result.status)) throw new Error('GitHub returned an unknown merge result.');
       if (result.status === 'failed') {
+        state.clearStackMerge(requestKey);
         blocked('stack-stopped', result.details.message ?? 'GitHub refused the stack merge.', true);
         continue;
       }
       if (result.status === 'pending' && !result.details.uuid) throw new Error('GitHub accepted a merge without a request id.');
-      state.setStackMerge(`${source.name}:stack:${number}`, {
+      state.setStackMerge(requestKey, {
         number: top.number,
         members: numbers,
         ...(result.details.uuid ? { uuid: result.details.uuid } : {}),

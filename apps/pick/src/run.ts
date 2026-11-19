@@ -11,7 +11,7 @@ import { dispatchLoop } from './loops/dispatch.js';
 import { reportLoop } from './loops/report.js';
 import type { ReportNotification } from './loops/report.js';
 import { reconcileLoop } from './loops/reconcile.js';
-import { mergeLoop } from './loops/merge.js';
+import { mergeWatchPasses } from './watch-merge-policy.js';
 import { reviewWatchPasses } from './watch-review-requests.js';
 import type { WatchRegistry, WatchSourcePass } from '@lobstah/watch-types';
 import type { GhGraphql } from './loops/reviews.js';
@@ -141,14 +141,7 @@ export async function cycle(
       }
     }
   }
-  for (const { source, policy } of merges) {
-    try {
-      await mergeLoop(source, policy, state, log);
-    } catch (err) {
-      log(`${source.name} merge: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  for (const pass of sourcePasses) {
+  for (const pass of [...mergeWatchPasses(merges, state, log), ...sourcePasses]) {
     try {
       await pass.run();
     } catch (err) {

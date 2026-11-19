@@ -41,6 +41,16 @@ export interface PendingStackMerge {
   uuid?: string;
   enqueued?: boolean;
   members: number[];
+  /** Qualified approvals saved before remote submission. */
+  approvals?: string[];
+  submitting?: boolean;
+}
+
+/** An immediate merge whose result must be reconciled after a lost response. */
+export interface PendingPrMerge {
+  number: number;
+  headSha: string;
+  approval: string;
 }
 
 interface StateFile {
@@ -49,6 +59,7 @@ interface StateFile {
   requestedReviews: Record<string, string>;
   stackHolds?: Record<string, string>;
   stackAdvances?: Record<string, StackAdvance>;
+  mergeSubmissions?: Record<string, PendingPrMerge>;
   stackMerges?: Record<string, PendingStackMerge>;
   rebases: Record<string, { uuid: string; failed?: boolean }>;
 }
@@ -144,6 +155,13 @@ export class PickupState {
   setStackMerge(key: string, pending: PendingStackMerge): void { (this.data.stackMerges ??= {})[key] = pending; this.save(); }
   /** Remove a completed native request. */
   clearStackMerge(key: string): void { delete this.data.stackMerges?.[key]; this.save(); }
+
+  /** Unknown submissions are checked by disposition before another remote call. */
+  mergeSubmissions(source: string): Array<[string, PendingPrMerge]> {
+    return Object.entries(this.data.mergeSubmissions ?? {}).filter(([key]) => key.startsWith(source + '#'));
+  }
+  setMergeSubmission(key: string, pending: PendingPrMerge): void { (this.data.mergeSubmissions ??= {})[key] = pending; this.save(); }
+  clearMergeSubmission(key: string): void { delete this.data.mergeSubmissions?.[key]; this.save(); }
 
   rebase(prKey: string): { uuid: string; failed?: boolean } | undefined {
     return this.data.rebases[prKey];

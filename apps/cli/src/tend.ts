@@ -1,5 +1,5 @@
-import { presentRegisteredWatch } from './watch-presenters/index.js';
-import { evidencePrs, observedPrs, prAttention, type ChainMember } from './watch-presenters/pr.js';
+import { presentRegisteredWatch, presentationSources } from './watch-presenters/index.js';
+import { evidencePrs, observedPrs, type ChainMember } from './watch-presenters/pr.js';
 export { onTheHook, prKinds, humanPrAttention } from './watch-presenters/pr.js';
 export type { ChainMember } from './watch-presenters/pr.js';
 import { prMergeStatus } from '@lobstah/core';
@@ -14,6 +14,7 @@ import {
   presentWatchCondition,
   watchConditionKey,
   journalWatchViews,
+  presentedWatchViews,
   watchInstructionLines,
   workerLabel,
   questionViewedAt,
@@ -782,35 +783,6 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     }
   }
 
-  const legacyWatchKeys = new Set(watches.map((watch) => watch.key));
-  for (const view of journalWatchViews(legacyWatchKeys)) {
-    const { snapshot, watch, pending, events } = view;
-    watches.push({ key: watch.key, owner: watch.owner, cursor: watch.cursor, pendingEvents: pending.length,
-      presentation: snapshot.presentation, lastSummary: events.at(-1)?.summary, lastAt: events.at(-1)?.at,
-      ...(watch.heldAt ? { heldAt: watch.heldAt, heldReason: watch.heldReason } : {}),
-      ...(watch.lastError ? { error: watchErrorCell(watch) } : {}),
-    });
-    for (const condition of snapshot.presentation.attention) {
-      const key = watchConditionKey(snapshot.key, condition.id);
-      const display = condition.presentation ?? presentWatchCondition(key, condition.kind, condition.summary, snapshot.presentation);
-      attention.push({
-        kind: condition.kind as TendAttentionKind, key, stateHash: condition.stateHash,
-        id: snapshot.key, lane: 'work', verb: condition.kind, ageSecs: Math.max(0, Math.round((now - Date.parse(condition.since ?? snapshot.createdAt)) / 1000)),
-        at: condition.since ?? snapshot.createdAt, standingSince: condition.since ?? snapshot.createdAt,
-        note: condition.summary, quiet: condition.quiet,
-        presentation: { ...display, blocking: condition.blocking },
-      });
-    }
-    if (snapshot.owner.kind === 'helm' && pending.length && !snapshot.presentation.attention.length) {
-      const key = `watch:${snapshot.key}`;
-      attention.push({ kind: 'watch', key, id: snapshot.key, lane: 'work', verb: 'watch', ageSecs: 0,
-        stateHash: String(pending.at(-1)?.seq ?? ''), at: pending[0]?.at,
-        note: snapshot.presentation.summary,
-        presentation: { ...presentWatchCondition(key, 'watch', snapshot.presentation.summary, snapshot.presentation), always: true, blocking: true },
-      });
-    }
-  }
-
   // Stalled means claiming is broken, not that the queue is deep: work is
   // waiting, capacity is free, the daemon heartbeats, and nothing claims.
   // Addressed (sticky) bait is excluded — it waits for its trap by design
@@ -902,6 +874,38 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const records = readPrs();
   const legacy = evidencePrs();
   const observed = observedPrs(records, legacy);
+  const sourcePresentation = presentationSources(now, observed, cfg, { chainOf, repoOf });
+  const legacyWatchKeys = new Set(watches.map((watch) => watch.key));
+  for (const view of presentedWatchViews(now, legacyWatchKeys, sourcePresentation.registry)) {
+    const { snapshot, watch, pending, events } = view;
+    watches.push({ key: watch.key, owner: watch.owner, cursor: watch.cursor, pendingEvents: pending.length,
+      presentation: snapshot.presentation, lastSummary: events.at(-1)?.summary, lastAt: events.at(-1)?.at,
+      ...(watch.heldAt ? { heldAt: watch.heldAt, heldReason: watch.heldReason } : {}),
+      ...(watch.lastError ? { error: watchErrorCell(watch) } : {}),
+    });
+    for (const condition of snapshot.presentation.attention) {
+      const key = condition.key ?? watchConditionKey(snapshot.key, condition.id);
+      const display = condition.presentation ?? presentWatchCondition(key, condition.kind, condition.summary, snapshot.presentation);
+      attention.push({
+        id: snapshot.key, lane: 'work', verb: condition.kind,
+        ...(condition.fields as Partial<TendAttention> | undefined),
+        kind: condition.kind as TendAttentionKind, key, stateHash: condition.stateHash, ageSecs: Math.max(0, Math.round((now - Date.parse(condition.since ?? snapshot.createdAt)) / 1000)),
+        at: condition.since ?? snapshot.createdAt, standingSince: condition.since ?? snapshot.createdAt,
+        note: condition.summary, quiet: condition.quiet,
+        presentation: { ...display, blocking: condition.blocking },
+      });
+    }
+    if (snapshot.owner.kind === 'helm' && pending.length && !snapshot.presentation.attention.length) {
+      const key = `watch:${snapshot.key}`;
+      attention.push({ kind: 'watch', key, id: snapshot.key, lane: 'work', verb: 'watch', ageSecs: 0,
+        stateHash: String(pending.at(-1)?.seq ?? ''), at: pending[0]?.at,
+        note: snapshot.presentation.summary,
+        presentation: { ...presentWatchCondition(key, 'watch', snapshot.presentation.summary, snapshot.presentation), always: true, blocking: true },
+      });
+    }
+  }
+
+
   // Stories with a PR take the shared PR order (first seen, newest first) in
   // the slots PR stories hold; a story whose PR has no observation goes last.
   const byPrUrl = new Map(observed.map(({ pr }) => [pr.url, pr]));
@@ -920,7 +924,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     records,
     { readySettleSecs: cfg.readySettleSecs, now },
   ).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg, { chainOf, repoOf }), ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
+  attention.push(...landedAttention(cfg, now), ...sourcePresentation.attention, ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
   attention.push(...dispatchProgress(now, cfg).map((p): TendAttention => ({
     kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
     id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,
@@ -929,6 +933,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     ...(cfg.attentionKinds.includes('dispatch-progress') ? {} : { quiet: true }),
   })));
   const displayOf = (item: TendAttention) => item.presentation ?? presentLegacyAttention(item);
+  const suppressedConditions = new Set(attention.flatMap((item) => (displayOf(item).suppresses ?? []).map((rule) => `${rule.kind}\0${rule.key}`)));
   const suppressed = new Set(attention.flatMap((item) => displayOf(item).suppressesKeys ?? []));
   const enabled = new Set<string>(cfg.attentionKinds);
   if (cfg.watches?.attention?.enabledKinds === undefined) {
@@ -936,7 +941,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   }
   const walking = attention.filter((item) => {
     const display = displayOf(item);
-    return !suppressed.has(item.key) && (display.always || enabled.has(item.kind) || display.enabledBy?.some((kind) => enabled.has(kind)));
+    return !suppressed.has(item.key) && !suppressedConditions.has(`${item.kind}\0${item.key}`) && (display.always || enabled.has(item.kind) || display.enabledBy?.some((kind) => enabled.has(kind)));
   });
   // A question the helm framed as a decision shows as that decision.
   const shown = enabled.has('decision') ? hideFramedQuestions(walking, [...listDecisions(), ...hostedDecisionFrames(cfg)]) : walking;

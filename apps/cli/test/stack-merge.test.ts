@@ -234,3 +234,39 @@ describe('the boat merging a stack', () => {
     expect(log.at(-1)).toMatch(/will try again: HTTP 502/);
   });
 });
+
+it('recovers a native stack submission with a lost response without a second merge call', () => {
+  stack(); requestStackMerge(key(41), 'glass', { viewer: me });
+  let submissions = 0;
+  const api: GithubApi = (method) => {
+    if (method === 'GET') return { ok: true, json: { stack: { number: 7 } } };
+    submissions++; throw new Error('response lost after GitHub accepted the stack');
+  };
+  mergeRequestedStacks(say, { api });
+  expect(readPr(key(41))!.stackMergeRequest!.submission).toMatchObject({ number: 43, headSha: 'sha43' });
+  expect(cancelStackMerge(key(41))).toBe('merging');
+  const recovery = github({ 'GET repos/acme/web/pulls/43': { ok: true, json: { merged: true } } });
+  mergeRequestedStacks(say, { api: recovery.api });
+  expect(submissions).toBe(1);
+  expect(recovery.calls.map((call) => call.method)).toEqual(['GET']);
+  expect(readPr(key(41))!.stackMergeRequest!.merging!.id).toBe('merged');
+  mergeRequestedStacks(say, { api: recovery.api });
+  expect(recovery.calls).toHaveLength(1);
+});
+
+it('makes zero provider calls for a stack without a valid recorded request', () => {
+  stack(); const root = readPr(key(41))!;
+  writePr({ ...root, stackMergeRequest: { at: new Date().toISOString(), by: '', method: 'merge', numbers: [41, 42, 43] } });
+  const gh = github({}); mergeRequestedStacks(say, { api: gh.api });
+  expect(gh.calls).toEqual([]);
+});
+
+it('keeps an accepted stack request observable after only one open member remains', () => {
+  stack(); requestStackMerge(key(41), 'glass', { viewer: me });
+  const root = readPr(key(41))!;
+  writePr({ ...root, stackMergeRequest: { ...root.stackMergeRequest!, merging: { id: 'accepted', number: 43, headSha: 'sha43', at: new Date().toISOString() } } });
+  for (const number of [41, 42]) upsertPr(obs(number, { state: 'MERGED' }));
+  const gh = github({ 'GET repos/acme/web/pulls/43/merge-async/accepted': { ok: true, json: { status: 'pending' } } });
+  mergeRequestedStacks(say, { api: gh.api });
+  expect(gh.calls).toHaveLength(1);
+});

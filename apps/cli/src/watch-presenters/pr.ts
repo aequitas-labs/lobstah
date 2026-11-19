@@ -5,7 +5,6 @@ import {
   prNote,
   prStandingKinds,
   prBadge,
-  cutPrTitle,
   queuedDescriptor,
   laneDirs,
   readStatusLog,
@@ -22,7 +21,6 @@ import {
   humanGatesFor,
   matchesGate,
   repoKey as forgeRepoKey,
-  stackStateHash,
 } from '@lobstah/core';
 import type { Config, Lane, PrEvidence, TendAttention, TendAttentionKind, Watch, WatchPresentation } from '@lobstah/core';
 import { readPickupMap } from '@lobstah/pick';
@@ -72,9 +70,6 @@ const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
   'pr:conflict': (pr) => prNote(pr, `conflicts with ${pr.baseRefName ?? 'its base'}`),
   'pr:ready': (pr) => prNote(pr, 'ready to merge'),
 };
-
-/** How long a stack's title runs in its headline: the count and state must still fit a pet's bubble. */
-const STACK_HEADLINE_TITLE_MAX = 40;
 
 /** Hide a repairable problem only after a live repairer has claimed safe work. */
 export function humanPrAttention(
@@ -191,7 +186,6 @@ export function prAttention(now: number, observed: ReturnType<typeof observedPrs
       },
     ),
   );
-  const epochs = readStackEpochs();
   for (const { id, lane, pr, dispatch } of observed) {
     const kinds = prKinds(pr, { readySettleSecs: cfg.readySettleSecs, now });
     if (kinds.length === 0) continue;
@@ -237,49 +231,6 @@ export function prAttention(now: number, observed: ReturnType<typeof observedPrs
         ...(pr.review ? { review: pr.review } : {}),
       });
     }
-  }
-  for (const s of stacks) {
-    const members = s.members.map((pr) => {
-      const items = out.filter((a) => a.prUrl === pr.url);
-      return {
-        key: parsePrRef(pr.url)!.key,
-        url: pr.url,
-        number: pr.number,
-        ...(pr.title ? { title: pr.title } : {}),
-        note: items.map((a) => a.note).join('; ') || prNote(pr, prBadge(pr).text),
-        kinds: items.map((a) => a.kind),
-      };
-    });
-    // Member readiness lives only in the stack item. A member's own problem
-    // (conflicts, checks, review, draft) keeps standing as its own pr:* item.
-    for (let i = out.length - 1; i >= 0; i--)
-      if (out[i]!.kind === 'pr:ready' && s.members.some((p) => p.url === out[i]!.prUrl)) out.splice(i, 1);
-    const top = s.members.at(-1)!,
-      source = observed.find((x) => x.pr.url === top.url)!;
-    const at = epochs[s.id]?.at ?? s.members[0]!.observedAt;
-    out.push({
-      kind: 'stack-ready',
-      key: `stack:${s.id}`,
-      stateHash: stackStateHash(s, epochs[s.id]?.epoch),
-      id: source.id,
-      lane: source.lane,
-      verb: 'stack-ready',
-      at,
-      standingSince: at,
-      ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)),
-      note: s.text,
-      ...(s.title
-        ? {
-            headline: `${cutPrTitle(s.title, STACK_HEADLINE_TITLE_MAX)} (${s.allReady ? `${members.length} PRs, all green` : `${s.ready} of ${members.length} ready`})`,
-          }
-        : {}),
-      // Only an all-ready stack (every member past its settle window) walks;
-      // a partly ready one is a quiet standing row in tend and the glass.
-      quiet: !s.allReady || !!epochs[s.id]?.silent || !!s.legacy,
-      stack: { ...(s.title ? { title: s.title } : {}), ready: s.ready, total: members.length, allReady: s.allReady, members },
-      repo: forgeRepoKey(cfg, s.repo),
-      prUrl: top.url,
-    });
   }
   return out;
 }

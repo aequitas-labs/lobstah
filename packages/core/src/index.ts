@@ -138,3 +138,8 @@ export { restoreCommandWatch as restoreLegacyWatch } from './watch-command-runti
 export { createReviewWatchType, reviewWatchRevision } from './review-watch-source.js';
 
 export { reservedWatchDispatch } from './watch-command-runtime.js';
+
+export * from './watch-derived.js';
+export { createStackWatchType, presentStackWatch, stackWatchViews } from './stack-watch-source.js';
+
+export { createPrMergeWatchType } from './pr-merge-watch-source.js';

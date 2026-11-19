@@ -3,7 +3,7 @@ import { observeWaitedPrs, finishResolvedWaits } from './pr-waits.js';
 import { deliverRegisteredWatchActions } from './watch-automation.js';
 import { pollSecs } from './pr-watch.js';
 import { stampRepairerBeat } from './pr-repair.js';
-import { mergeRequestedPrs, mergeRequestedStacks } from './pr-merge.js';
+import { deliverMergeWatchActions } from './watch-sources/merge.js';
 
 /** Existing PR effects stay source-owned while their policy and authority slices migrate. */
 export function legacyPrWatchEffects(now: number, log: (message: string) => void): void {
@@ -13,7 +13,6 @@ export function legacyPrWatchEffects(now: number, log: (message: string) => void
   // Release on merge needs the chain's completed wait before the cull pass.
   finishResolvedWaits(log);
   deliverRegisteredWatchActions(now, loadConfig().watch.maxForksPerCycle, log);
-  mergeRequestedPrs(log);
-  mergeRequestedStacks(log);
+  deliverMergeWatchActions(log, { pr: {}, stack: {} }, now);
   stampRepairerBeat(now);
 }

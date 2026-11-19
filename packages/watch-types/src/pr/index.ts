@@ -46,6 +46,19 @@ export function parsePrWatchReference(input: string): PrWatchReference | undefin
   return { owner, repo, number, key: `pr:${owner}/${repo}#${number}`, url: `https://github.com/${owner}/${repo}/pull/${number}` };
 }
 
+export const prWatchReferenceSchema: WatchSchema<PrWatchReference> = {
+    json: { type: 'object', required: ['key', 'owner', 'repo', 'number', 'url'] },
+    parse(value) {
+      if (!value || typeof value !== 'object' || !('key' in value) || typeof value.key !== 'string')
+        throw new Error('Expected a PR watch reference');
+      const reference = parsePrWatchReference(value.key);
+      if (!reference) throw new Error('Invalid PR watch reference');
+      for (const field of ['owner', 'repo', 'number', 'url'] as const)
+        if ((value as Record<string, unknown>)[field] !== reference[field]) throw new Error('PR watch identity does not match its key');
+      return reference;
+    },
+  };
+
 /** Host services supply GitHub IO and existing evidence projections, never runtime policy. */
 export interface PrWatchServices {
   effectHandler?: WatchEffectHandler<PrWatchReference>;
@@ -106,18 +119,7 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, s
       return rounds ? { ...base, legacy: { checkRounds: rounds } } : base;
     },
   };
-  readonly referenceSchema: WatchSchema<PrWatchReference> = {
-    json: { type: 'object', required: ['key', 'owner', 'repo', 'number', 'url'] },
-    parse(value) {
-      if (!value || typeof value !== 'object' || !('key' in value) || typeof value.key !== 'string')
-        throw new Error('Expected a PR watch reference');
-      const reference = parsePrWatchReference(value.key);
-      if (!reference) throw new Error('Invalid PR watch reference');
-      for (const field of ['owner', 'repo', 'number', 'url'] as const)
-        if ((value as Record<string, unknown>)[field] !== reference[field]) throw new Error('PR watch identity does not match its key');
-      return reference;
-    },
-  };
+  readonly referenceSchema = prWatchReferenceSchema;
   readonly batchObserver: PrWatchServices['batchObserver'];
   readonly effectHandler: PrWatchServices['effectHandler'];
   readonly automation: PrWatchServices['automation'];

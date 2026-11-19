@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { PrRecord } from './prs.js';
 
 /** How a PR merges on GitHub. A repo sets its own with `[repos.<key>].mergeMethod`. */
@@ -57,6 +58,8 @@ export interface StackMergeRequest {
   linked?: number;
   /** The merge GitHub accepted for the top PR: its id, the top's head, and when. It can't be called back. */
   merging?: { id: string; number: number; headSha: string; at: string };
+  /** Saved before submission so a lost response is reconciled without a second merge call. */
+  submission?: { number: number; headSha: string; at: string };
   /** Repairs filed for a member no dispatch owns, by PR number: the head each was filed for. */
   repairs?: Record<string, string>;
   /** The last reason the helm was told the stack is stuck: told once per reason. */
@@ -130,4 +133,19 @@ export function prMergeStatus(pr: PrRecord): string {
   if (request.status === 'merging') return 'Merging';
   if (request.error) return `Merge failed: ${request.error}`;
   return 'Waiting on CI';
+}
+
+/** Standing requests, rather than readiness alone, authorize a merge effect. */
+export function mergeRequestAuthority(key: string, request: PrMergeRequest | StackMergeRequest | undefined): string | undefined {
+  if (!request?.by?.trim() || !Number.isFinite(Date.parse(request.at)) || !PR_MERGE_METHODS.includes(request.method)) return undefined;
+  const scope = { key, at: request.at, by: request.by, method: request.method, ...('numbers' in request ? { numbers: request.numbers } : { hold: request.hold ?? '' }) };
+  return `merge-request:${createHash('sha256').update(JSON.stringify(scope)).digest('hex')}`;
+}
+
+/** Every member head is part of a stack action’s checked revision. */
+export function stackMergeRevision(root: PrRecord, records: readonly PrRecord[]): string {
+  return createHash('sha256').update(JSON.stringify((root.stackMergeRequest?.numbers ?? []).map((number) => {
+    const member = number === root.number ? root : records.find((pr) => pr.repo === root.repo && pr.number === number);
+    return [number, member?.headSha ?? 'missing'];
+  }))).digest('hex');
 }

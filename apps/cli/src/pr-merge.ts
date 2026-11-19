@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import {
   enqueue,
   loadConfig,
+  mergeRequestAuthority,
+  stackMergeRevision,
   parsePrRef,
   postNotice,
   prMergeStep,
@@ -21,6 +23,7 @@ import {
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
 import { addPrWatch } from './pr-watch.js';
+import { deliverMergeWatchActions } from './watch-sources/merge.js';
 
 /** A merge request the boat refuses, with the HTTP status the glass answers. */
 export class PrMergeRefused extends Error {
@@ -133,6 +136,14 @@ export function openPrBelow(pr: PrRecord, records: readonly PrRecord[]): boolean
 /** Test seams for the merge pass. */
 export interface PrMergeDeps {
   api?: GithubApi;
+  /** Scope a recorded source action to one authorization and head. */
+  keys?: readonly string[];
+  records?: readonly PrRecord[];
+  expectedHead?: string;
+  authority?: string;
+  dispatchId?: string;
+  /** Read the outcome of a submission whose response was not persisted. */
+  readMerge?: (pr: PrRecord) => { merged: boolean; sha?: string };
   merge?: (pr: PrRecord, method: PrMergeMethod) => { ok: true; sha?: string } | { ok: false; why: string };
   retarget?: (pr: PrRecord, base: string) => { ok: boolean; why?: string };
   now?: number;
@@ -163,14 +174,21 @@ function ghRetarget(pr: PrRecord, base: string, api: GithubApi = ghApi): { ok: b
  * - anything else waits for the next check.
  */
 export function mergeRequestedPrs(log: (message: string) => void, deps: PrMergeDeps = {}): void {
-  const records = readPrs();
+  deliverMergeWatchActions(log, { pr: deps });
+}
+
+/** Reconcile only the merge request admitted by the source effect handler. */
+export function reconcileRequestedPrs(log: (message: string) => void, deps: PrMergeDeps = {}): void {
+  const records = deps.records ?? readPrs();
   const cfg = loadConfig();
   for (const record of records) {
-    if (!record.mergeRequest) continue;
+    if (!record.mergeRequest || (deps.keys && !deps.keys.includes(record.key))) continue;
     withPrLock(record.key, () => {
       const pr = readPr(record.key);
       const request = pr?.mergeRequest;
-      if (!pr || !request) return;
+      if (!pr || !request || !mergeRequestAuthority(pr.key, request)) return;
+      if (deps.expectedHead && pr.headSha !== deps.expectedHead) return;
+      if (deps.authority && mergeRequestAuthority(pr.key, request) !== deps.authority) return;
       // A batch fetched before our successful merge can still report OPEN.
       if (request.status === 'merged' && pr.state === 'OPEN') return;
       const failure = pr.mergeStateStatus === 'DIRTY' ? 'conflict' : (pr.checks?.failed ?? 0) > 0 ? 'checks' : undefined;
@@ -197,6 +215,24 @@ export function mergeRequestedPrs(log: (message: string) => void, deps: PrMergeD
         }
         return complete;
       };
+      if (request.status === 'merging' && pr.state === 'OPEN') {
+        const result = deps.readMerge ? deps.readMerge(pr) : (() => {
+          const read = (deps.api ?? ghApi)('GET', `repos/${pr.repo}/pulls/${pr.number}`);
+          return read.ok ? { merged: read.json.merged === true, sha: typeof read.json.merge_commit_sha === 'string' ? read.json.merge_commit_sha : undefined } : { merged: false };
+        })();
+        if (!result.merged) {
+          log(`${pr.key}: merge submission outcome is not confirmed; checking again next tick`);
+          return;
+        }
+        const mergedAt = new Date(deps.now ?? Date.now()).toISOString();
+        writePr({ ...pr, state: 'MERGED', mergedAt, mergeRequest: { ...request, status: 'merged', mergeSha: result.sha, mergedAt, retargetPending: true } });
+        const complete = retargetChildren(), merged = readPr(pr.key)!;
+        writePr({ ...merged, mergeRequest: { ...merged.mergeRequest!, retargetPending: !complete } });
+        postNotice({ kind: 'pr-merged', text: `Merged ${pr.key} (${request.method})${result.sha ? ` at ${result.sha}` : ''}, authorized by ${request.by}.`,
+          refId: pr.key, dedupeKey: `merge-complete-${pr.key}-${pr.headSha}` });
+        log(`recovered accepted merge for ${pr.key} without submitting again`);
+        return;
+      }
       if (step.kind === 'done') {
         if (pr.state === 'MERGED') {
           const complete = request.retargetPending ? retargetChildren() : true;
@@ -256,7 +292,7 @@ export function mergeRequestedPrs(log: (message: string) => void, deps: PrMergeD
           log(`cannot repair ${pr.key} for its merge: no configured repo has ${pr.repo} as its origin`);
           return;
         }
-        const id = randomUUID();
+        const id = deps.dispatchId ?? randomUUID();
         enqueue({ id, repo, trapAny: true, brief: repairBrief(pr, step.why) });
         writePr({ ...pr, mergeRequest: { ...request, repair: { dispatchId: id, headSha: pr.headSha } } });
         log(`filed repair ${id.slice(0, 8)} for ${pr.key} (${step.why}), so its merge can go ahead`);
@@ -346,7 +382,7 @@ export function cancelStackMerge(stackKey: string): 'cancelled' | 'none' | 'merg
   return withPrLock(stackKey, () => {
     const pr = readPr(stackKey);
     if (!pr?.stackMergeRequest) return 'none';
-    if (pr.stackMergeRequest.merging) return 'merging';
+    if (pr.stackMergeRequest.merging || pr.stackMergeRequest.submission) return 'merging';
     const { stackMergeRequest: _gone, ...rest } = pr;
     writePr(rest);
     return 'cancelled';
@@ -379,6 +415,11 @@ function ghApi(method: 'GET' | 'POST' | 'PUT' | 'PATCH', path: string, body?: un
 /** Test seams for the stack merge pass. */
 export interface StackMergeDeps {
   api?: GithubApi;
+  /** A source receipt binds the stored request and every member head. */
+  keys?: readonly string[];
+  expectedRevision?: string;
+  authority?: string;
+  dispatchId?: string;
   now?: number;
 }
 
@@ -397,14 +438,21 @@ export interface StackMergeDeps {
  *   repo's way, on the head that was checked.
  */
 export function mergeRequestedStacks(log: (message: string) => void, deps: StackMergeDeps = {}): void {
+  deliverMergeWatchActions(log, { stack: deps });
+}
+
+/** Reconcile a source-authorized stack while retaining the existing native merge path. */
+export function reconcileRequestedStacks(log: (message: string) => void, deps: StackMergeDeps = {}): void {
   const api = deps.api ?? ghApi;
   const cfg = loadConfig();
   for (const record of readPrs()) {
-    if (!record.stackMergeRequest) continue;
+    if (!record.stackMergeRequest || (deps.keys && !deps.keys.includes(record.key))) continue;
     withPrLock(record.key, () => {
       const root = readPr(record.key);
       const request = root?.stackMergeRequest;
-      if (!root || !request) return;
+      if (!root || !request || !mergeRequestAuthority(root.key, request)) return;
+      if (deps.authority && mergeRequestAuthority(root.key, request) !== deps.authority) return;
+      if (deps.expectedRevision && stackMergeRevision(root, readPrs()) !== deps.expectedRevision) return;
       const save = (patch: Partial<StackMergeRequest>) => writePr({ ...root, stackMergeRequest: { ...request, ...patch } });
       const clear = () => {
         const { stackMergeRequest: _gone, ...rest } = root;
@@ -429,6 +477,7 @@ export function mergeRequestedStacks(log: (message: string) => void, deps: Stack
       }
       if (step.kind === 'closed') return tell(`#${step.number} closed without merging, so the stack merge stopped.`, true);
       if (request.merging) {
+        if (request.merging.id === 'merged') return;
         const result = api(
           'GET',
           `repos/${root.repo}/pulls/${request.merging.number}/merge-async/${encodeURIComponent(request.merging.id)}`,
@@ -441,6 +490,14 @@ export function mergeRequestedStacks(log: (message: string) => void, deps: Stack
         // Pending or queued: the PRs' own records say when each merges.
         return;
       }
+      if (request.submission) {
+        const result = api('GET', `repos/${root.repo}/pulls/${request.submission.number}`);
+        if (result.ok && result.json.merged === true) {
+          save({ submission: undefined, merging: { ...request.submission, id: 'merged' } });
+          log(`recovered accepted stack merge through #${request.submission.number} without submitting again`);
+        } else log(`stack through #${request.submission.number}: submission outcome is not confirmed; checking again next tick`);
+        return;
+      }
       if (step.kind === 'stuck') return tell(`${step.why}. It needs you.`, false);
       if (step.kind === 'wait') return;
       if (step.kind === 'repair') {
@@ -450,7 +507,7 @@ export function mergeRequestedStacks(log: (message: string) => void, deps: Stack
         if (request.repairs?.[pr.number] === pr.headSha) return;
         const repo = repoKeyForForge(cfg, pr.repo);
         if (!repo) return log(`cannot repair ${pr.key} for its stack's merge: no configured repo has ${pr.repo} as its origin`);
-        const id = randomUUID();
+        const id = deps.dispatchId ?? randomUUID();
         enqueue({ id, repo, trapAny: true, brief: repairBrief(pr, step.why) });
         save({ repairs: { ...request.repairs, [pr.number]: pr.headSha } });
         return log(`filed repair ${id.slice(0, 8)} for ${pr.key} (${step.why}), so its stack can merge`);
@@ -471,13 +528,16 @@ export function mergeRequestedStacks(log: (message: string) => void, deps: Stack
           log(`linked ${root.repo} #${prs[0]!.number}..#${top.number} as stack ${linked} on GitHub, to merge it`);
         }
       }
+      // Persist intent before the remote call: a lost response must never submit twice.
+      const submission = { number: top.number, headSha: top.headSha, at: new Date(deps.now ?? Date.now()).toISOString() };
+      save({ linked, submission });
       const merge = api('PUT', `repos/${root.repo}/pulls/${top.number}/merge-async`, {
         merge_method: request.method,
         sha: top.headSha,
         merge_action: 'default',
       });
       if (!merge.ok) {
-        if (linked !== request.linked) save({ linked });
+        save({ linked, submission: undefined });
         return log(`could not ask GitHub to merge the stack through #${top.number}, will try again: ${merge.why}`);
       }
       const details = merge.json.details as { uuid?: string; message?: string } | undefined;
@@ -486,6 +546,7 @@ export function mergeRequestedStacks(log: (message: string) => void, deps: Stack
         log(`GitHub merged the stack through #${top.number} (${root.repo}), as asked from the glass`);
         return save({
           linked,
+          submission: undefined,
           merging: {
             id: details?.uuid ?? 'merged',
             number: top.number,
@@ -494,9 +555,10 @@ export function mergeRequestedStacks(log: (message: string) => void, deps: Stack
           },
         });
       }
-      if (!details?.uuid) return log(`GitHub took the stack merge through #${top.number} but named no id; will ask again`);
+      if (!details?.uuid) return log(`GitHub took the stack merge through #${top.number} but named no id; checking its disposition next tick`);
       save({
         linked,
+        submission: undefined,
         merging: { id: details.uuid, number: top.number, headSha: top.headSha, at: new Date(deps.now ?? Date.now()).toISOString() },
       });
       log(`asked GitHub to merge the stack through #${top.number} (${root.repo}) as ${request.method}, as asked from the glass`);

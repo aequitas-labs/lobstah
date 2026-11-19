@@ -20,6 +20,8 @@ export interface WatchAttentionDisplay {
   blocking: boolean;
   enabledBy?: string[];
   suppressesKeys?: string[];
+  /** Source rules can suppress one condition without hiding another kind on the same key. */
+  suppresses?: Array<{ key: string; kind: string }>;
 }
 
 /** The compatibility adapter accepts legacy wire records without importing any app. */

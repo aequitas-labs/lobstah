@@ -1,3 +1,4 @@
+import { runMergePolicyWatch } from '../watch-merge-policy.js';
 import { prepareStackMerges } from '../stack-merge.js';
 import { randomUUID } from 'node:crypto';
 import { conflictUpdate, enqueue, postNotice, laneDirs, loadConfig, pushRule, readStatusLog, standalonePr, storedDescriptor, withBriefHooks } from '@lobstah/core';
@@ -81,11 +82,16 @@ function choreVerdict(uuid: string, pr: PrCandidate): { state: 'active' | 'done'
   return { state: 'failed' };
 }
 
+/** Compatibility entry point; source reconciliation runs through recorded watch actions. */
+export async function mergeLoop(ms: MergeSource, policy: MergePolicy, state: PickupState, log: (message: string) => void = () => {}): Promise<void> {
+  await runMergePolicyWatch(ms, policy, state, log);
+}
+
 /**
  * Deterministic until the moment resolution requires judgment — then it
  * becomes a chore-lane dispatch, bounded at one attempt.
  */
-export async function mergeLoop(
+export async function reconcileMergePolicy(
   ms: MergeSource,
   policy: MergePolicy,
   state: PickupState,
@@ -130,6 +136,21 @@ export async function mergeLoop(
   };
 
   const candidates = await ms.mergeCandidates();
+  const submissions = new Set<number>();
+  for (const [key, pending] of state.mergeSubmissions(ms.name)) {
+    submissions.add(pending.number);
+    const disposition = await ms.disposition(pending.number);
+    if (disposition === 'merged') {
+      state.consumeApproval(pending.approval);
+      state.clearMergeSubmission(key);
+      log(`${key}: recovered accepted merge without submitting again`);
+    } else if (disposition === 'closed') state.clearMergeSubmission(key);
+    else {
+      const candidate = candidates.find((pr) => pr.number === pending.number);
+      if (candidate) observe(candidate, 'merge-submission-pending');
+      log(`${key}: merge submission outcome is not confirmed; checking again next tick`);
+    }
+  }
   const stack = await prepareStackMerges(ms, candidates, policy, state, (pr) => {
     const review = qualifiedApproval(policy, pr);
     if (!review) return undefined;
@@ -137,7 +158,7 @@ export async function mergeLoop(
     return state.approvalConsumed(key) ? undefined : { key, author: review.author };
   }, observe, log);
   for (const candidate of candidates) {
-    if (stack.handled.has(candidate.number)) continue;
+    if (stack.handled.has(candidate.number) || submissions.has(candidate.number)) continue;
     const prKey = `${ms.name}#${candidate.number}`;
 
     // A rebase chore in flight owns this PR until it completes.
@@ -234,9 +255,11 @@ export async function mergeLoop(
       default: {
         const child = stack.children.get(pr.number);
         if (child) state.setStackAdvance(`${ms.name}#${child.number}`, { parent: pr.number, from: pr.headRef });
+        state.setMergeSubmission(prKey, { number: pr.number, headSha: pr.headSha, approval: dedupKey });
         await ms.merge(pr.number, policy.method, pr.headSha);
         state.clearStackAdvance(prKey);
         state.consumeApproval(dedupKey);
+        state.clearMergeSubmission(prKey);
         log(`${prKey}: merged (${policy.method}) on approval by ${approval.author}`);
       }
     }

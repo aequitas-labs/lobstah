@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, appendWatchEvents, ensureLayout, listWatches, parsePrRef, prEvidence, readPrs, readStackEpochs, syncStackReadiness, upsertPr } from '@lobstah/core';
+import { addWatch, appendWatchEvents, ensureLayout, listNotices, WatchJournal, listWatches, parsePrRef, prEvidence, readPrs, readStackEpochs, syncStackReadiness, upsertPr } from '@lobstah/core';
 import type { GhPrView } from '@lobstah/core';
 import { discoverPrStack } from '../src/pr-stack-watch.js';
 import { legacyPrWatchEffects } from '../src/pr-watch-effects.js';
@@ -364,4 +364,23 @@ it.each(['helm', 'daemon'])('%s observation preserves stack settle transitions w
     expect(Object.values(readStackEpochs())[0]?.ready).toBe(true);
     expect(buildTendReport(now + 11_000).attention.some((item) => item.kind === 'stack-ready' && !item.quiet)).toBe(true);
   } finally { vi.useRealTimers(); }
+});
+
+
+it('checkpoints one derived stack while preserving the growth and bottom-merge wake sequence', () => {
+  put(1); put(2); syncStackReadiness(undefined, now);
+  const journal = new WatchJournal(), key = 'stack:pr:acme/web#1';
+  const first = journal.read(key)!;
+  const initialNotice = listNotices().find((notice) => notice.kind === 'stack-ready')!;
+  put(3); syncStackReadiness(undefined, now + 1000);
+  const grown = buildTendReport(now + 1000).attention.filter((item) => item.kind === 'stack-ready');
+  const growthNotice = listNotices().find((notice) => notice.kind === 'stack-ready')!;
+  expect(grown).toEqual([expect.objectContaining({ key, prUrl: view(3).url })]);
+  expect(growthNotice.seq).not.toBe(initialNotice.seq);
+  put(1, { state: 'MERGED' }); put(2, { baseRefName: 'main' }); syncStackReadiness(undefined, now + 2000);
+  expect(listNotices().filter((notice) => notice.kind === 'stack-ready')).toEqual([expect.objectContaining({ seq: growthNotice.seq, url: view(3).url })]);
+  expect(journal.read(key)).toMatchObject({ generation: first.generation, type: { id: 'stack' }, events: [], state: { view: { rootKey: 'pr:acme/web#1', members: [expect.objectContaining({ number: 2 }), expect.objectContaining({ number: 3 })] } } });
+  const before = journal.read(key);
+  buildTendReport(now + 3000);
+  expect(journal.read(key)).toEqual(before);
 });

@@ -217,3 +217,46 @@ it('stops when native membership order changes between listing and the merge gat
   expect(forge.events).toEqual([]);
   expect(listNotices().some((notice) => notice.text.includes('changed order'))).toBe(true);
 });
+
+it('recovers a native stack accepted before its response was saved', async () => {
+  const forge = new Forge();
+  forge.open.forEach((pr, index, members) => { pr.linkedStack = { number: 7, position: members.length - index, size: members.length, base: 'main' }; });
+  let submissions = 0;
+  forge.mergeLinked = async () => {
+    submissions++;
+    [1, 2, 3].forEach((number) => forge.merged.add(number));
+    throw new Error('accepted remotely, response lost');
+  };
+  await tick(forge);
+  expect(new PickupState().stackMergeEntries(forge.name)[0]![1]).toMatchObject({ submitting: true, members: [1, 2, 3] });
+  forge.open = [];
+  await tick(forge); await tick(forge);
+  expect(submissions).toBe(1);
+  expect(new PickupState().stackMergeEntries(forge.name)).toEqual([]);
+});
+
+it('recovers a single PR accepted before its response was saved', async () => {
+  const forge = new Forge(); forge.open = [candidate(1)];
+  let submissions = 0;
+  forge.merge = async (number) => { submissions++; forge.merged.add(number); throw new Error('response lost'); };
+  await tick(forge);
+  expect(new PickupState().mergeSubmissions(forge.name)).toHaveLength(1);
+  forge.open = [];
+  await tick(forge); await tick(forge);
+  expect(submissions).toBe(1);
+  expect(new PickupState().mergeSubmissions(forge.name)).toEqual([]);
+  expect(new PickupState().approvalConsumed('1#1@sha1')).toBe(true);
+});
+
+it('holds an uncertain submission across restarts and never merges from readiness alone', async () => {
+  const forge = new Forge(); forge.open = [candidate(1)];
+  let submissions = 0;
+  forge.merge = async () => { submissions++; throw new Error('unknown outcome'); };
+  await tick(forge); await tick(forge);
+  expect(submissions).toBe(1);
+  const unauthorized = new Forge(); unauthorized.open = [{ ...candidate(4), reviews: [] }];
+  await tick(unauthorized);
+  expect(unauthorized.events).toEqual([]);
+  await mergeLoop(unauthorized, { ...policy, enabled: false }, new PickupState());
+  expect(unauthorized.events).toEqual([]);
+});

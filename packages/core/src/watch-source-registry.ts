@@ -1,9 +1,13 @@
-import { CommandWatchType, WatchRegistry } from '@lobstah/watch-types';
+import { CommandWatchType, MergePolicyWatchType, WatchRegistry } from '@lobstah/watch-types';
 import type { Watch } from './watch.js';
+import { createStackWatchType, type StackWatchSourceOptions } from './stack-watch-source.js';
+import { createPrMergeWatchType, type PrMergeWatchSourceOptions } from './pr-merge-watch-source.js';
 import { createPrWatchType, type PrWatchSourceOptions } from './pr-watch-source.js';
 import { createReviewWatchType, type ReviewWatchSourceOptions } from './review-watch-source.js';
 
 export interface BuiltinWatchServices {
+  stack?: StackWatchSourceOptions;
+  prMerge?: PrMergeWatchSourceOptions;
   pr?: PrWatchSourceOptions;
   review?: ReviewWatchSourceOptions;
 }
@@ -13,6 +17,9 @@ export function builtinWatchRegistry(options: BuiltinWatchServices = {}): WatchR
   const registry = new WatchRegistry();
   registry.register(createPrWatchType(options.pr));
   registry.register(createReviewWatchType(options.review));
+  registry.register(createStackWatchType(options.stack));
+  registry.register(createPrMergeWatchType(options.prMerge));
+  registry.register(new MergePolicyWatchType());
   registry.register(new CommandWatchType());
   return registry;
 }

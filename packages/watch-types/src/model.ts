@@ -51,6 +51,8 @@ export interface WatchObservationBatch<Cursor> {
   failure?: WatchFailure;
   /** A shared provider claim or budget prevented observation; progress stays untouched. */
   deferred?: boolean;
+  /** Source checkpoint data for a pure reducer, separate from owner-delivered events. */
+  payload?: WatchValue;
 }
 
 /** Source-independent retry advice; provider budgets remain adapter-owned. */
@@ -100,6 +102,9 @@ export interface WatchPresentation {
   actions: WatchAction[];
   attention: Array<{
     id: string;
+    /** A migrated source can preserve its existing attention identity and wire fields. */
+    key?: string;
+    fields?: Record<string, WatchValue>;
     kind: string;
     stateHash: string;
     /** The condition began at this time; equal hashes retain it across polls. */
@@ -216,6 +221,9 @@ export interface WatchActionProposal {
   expectedRevision: string;
   idempotencyKey: string;
   authority: string;
+  /** Existing human requests retain their original provenance in the generic receipt. */
+  by?: string;
+  authorizedAt?: string;
   arguments: WatchValue;
 }
 export interface WatchAutomation<Reference, State, Cursor, Options> {
@@ -251,3 +259,15 @@ export interface WatchSourcePass {
   label: string;
   run(): WatchResult<void>;
 }
+
+/** Derived views use cached observations only; rendering performs no provider IO or writes. */
+export interface WatchDerivedView {
+  key: string;
+  input: string;
+  options: WatchValue;
+  owner: WatchOwner;
+  revision: string;
+  since: string;
+  presentation: WatchPresentation;
+}
+export interface WatchDerivation { views(now: string): WatchDerivedView[] }

@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, listNotices, loadConfig, pendingIds, prMergeStatus, prMergeStep, queuedDescriptor, readPr, readWatch, upsertPr, writePr } from '@lobstah/core';
+import { builtinWatchRegistry, WatchActionRunner, WatchRuntime, ensureLayout, listNotices, loadConfig, pendingIds, prMergeStatus, prMergeStep, queuedDescriptor, readPr, readWatch, upsertPr, writePr } from '@lobstah/core';
 import type { PrEvidence, PrMergeMethod, PrRecord } from '@lobstah/core';
 import { PrMergeRefused, cancelPrMerge, mergeRequestedPrs, openPrBelow, prMergeMethod, repoKeyForForge, requestPrMerge } from '../src/pr-merge.js';
+import { prMergeWatchServices } from '../src/watch-sources/merge.js';
 import { deriveGlassPrs } from '../src/glass-prs.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -306,4 +307,54 @@ it('notifies about failed checks while a non-CI hold still prevents merging', ()
   requestPrMerge(key(1), 'chat', { authorized: true, hold: 'DB steps' });
   mergeRequestedPrs(() => {}, { merge: () => { throw new Error('held'); } });
   expect(listNotices(50).some((n) => n.text.includes('waiting on checks'))).toBe(true);
+});
+
+it('recovers an accepted merge after its response is lost without submitting twice', () => {
+  upsertPr(obs(1));
+  requestPrMerge(key(1), 'chat', { authorized: true });
+  let submissions = 0;
+  mergeRequestedPrs(() => {}, { merge: () => { submissions++; throw new Error('response lost after acceptance'); } });
+  expect(readPr(key(1))!.mergeRequest!.status).toBe('merging');
+  // A fresh pass builds a new runtime and reads GitHub's accepted result.
+  mergeRequestedPrs(() => {}, {
+    merge: () => { submissions++; return { ok: true, sha: 'wrong' }; },
+    readMerge: () => ({ merged: true, sha: 'accepted' }),
+  });
+  expect(submissions).toBe(1);
+  expect(readPr(key(1))).toMatchObject({ state: 'MERGED', mergeRequest: { by: 'chat', status: 'merged', mergeSha: 'accepted', retargetPending: false } });
+});
+
+it('holds an unknown submission and performs no merge without recorded authority', () => {
+  upsertPr(obs(1));
+  let submissions = 0;
+  const merge = () => { submissions++; return { ok: true as const, sha: 'accepted' }; };
+  mergeRequestedPrs(() => {}, { merge });
+  const pr = readPr(key(1))!;
+  writePr({ ...pr, mergeRequest: { by: '', at: new Date().toISOString(), method: 'merge' } });
+  mergeRequestedPrs(() => {}, { merge });
+  expect(submissions).toBe(0);
+  requestPrMerge(key(1), 'chat', { authorized: true });
+  writePr({ ...readPr(key(1))!, mergeRequest: { at: new Date().toISOString(), by: 'chat', method: 'merge', status: 'merging' } });
+  mergeRequestedPrs(() => {}, { merge, readMerge: () => ({ merged: false }) });
+  expect(submissions).toBe(0);
+  expect(readPr(key(1))!.mergeRequest!.status).toBe('merging');
+});
+
+
+it('rejects a recorded action after its human request is withdrawn or the checked head changes', () => {
+  upsertPr(obs(1));
+  requestPrMerge(key(1), 'chat', { authorized: true });
+  let submissions = 0;
+  const registry = builtinWatchRegistry({ prMerge: prMergeWatchServices(() => {}, { merge: () => { submissions++; return { ok: true }; } }) });
+  const runtime = new WatchRuntime(registry), mergeKey = 'pr-merge:acme/web#1';
+  runtime.register('pr-merge', key(1), {}, { kind: 'helm', grounds: 'home' });
+  const snapshot = runtime.journal.read(mergeKey)!;
+  const proposal = registry.get('pr-merge').automation!.propose({ snapshot, now: new Date().toISOString() })[0]!;
+  const actions = new WatchActionRunner(registry, runtime.journal);
+  const request = actions.authorize(mergeKey, proposal, { id: proposal.authority, by: 'chat', at: readPr(key(1))!.mergeRequest!.at });
+  upsertPr(obs(1, { headSha: 'new-head' }));
+  expect(() => actions.executeSync(mergeKey, request)).toThrow(/changed/);
+  cancelPrMerge(key(1));
+  expect(() => actions.executeSync(mergeKey, request)).toThrow(/changed/);
+  expect(submissions).toBe(0);
 });
