@@ -344,6 +344,21 @@ click, including when the repo otherwise enables automatic posting. While
 repair runs, Glass shows only a quiet Updating state without a new attention
 badge. Muting, dismissing, closing, or explicitly cancelling stops the repair.
 
+**Earlier threads.** A re-review job gets the identity's own unresolved
+inline threads and judges each against the new head as `addressed`,
+`partly`, or `not` (`"threads"` in `verdict.json`, each with a one-line
+reason). An addressed thread is listed in the draft under **Threads to
+resolve**, with its reason and a link; untick any you want left open. A
+partly or not addressed thread stays open, and its short reply, if any,
+goes into the review body under **Earlier threads**. Publishing (Publish,
+`lobstah reviews post`, or automatic posting) posts the review, then
+resolves the ticked threads with GraphQL `resolveReviewThread`. Each thread
+is read again first and resolved only if the identity opened it on this PR;
+threads opened by other reviewers or bots are never resolved. A thread that
+fails to resolve is named on the round and in the post's output, and the
+review still counts as posted. A review sent from the review tool resolves
+nothing.
+
 Reviews sharing an unambiguous branch stack use the PRs page's expandable
 stack card, with the same stack icon and disclosure behavior. Its header shows
 the title, starting and ending PR numbers, and the same repo and last-updated

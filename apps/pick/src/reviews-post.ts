@@ -17,9 +17,11 @@ import {
   writeReview,
   acknowledgeReview,
   reviewDecisionBody,
+  reviewThreadReplies,
+  reviewThreadsToResolve,
   unansweredReviewDecisions,
 } from '@lobstah/core';
-import type { ReviewComment, ReviewDecision, ReviewRound, ReviewMemory } from '@lobstah/core';
+import type { ReviewComment, ReviewDecision, ReviewRound, ReviewMemory, ReviewThreadCall, ReviewThreadToResolve } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 
 const API = 'https://api.github.com';
@@ -31,7 +33,10 @@ export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<Response>;
 
-export type PostResult = { posted: true; reviewId: string; by: string } | { posted: false; why: string };
+/** A ticked thread that publishing could not resolve; the review itself still counts as posted. */
+export type UnresolvedThread = { id: string; path: string; line: number | null; url: string; why: string };
+
+export type PostResult = { posted: true; reviewId: string; by: string; unresolved?: UnresolvedThread[] } | { posted: false; why: string };
 
 /** Who asked for the post: the CLI, a glass button, or automatic publishing. */
 export type PostBy = 'cli' | 'auto' | 'glass';
@@ -134,9 +139,10 @@ function draftComments(draft: { comments: ReviewComment[]; blocking: ReviewComme
   ];
 }
 
-function reviewBody(body: string, r: ReviewRound, decisions: ReviewDecision[]): string {
+function reviewBody(body: string, r: ReviewRound, decisions: ReviewDecision[], threads?: readonly ReviewThreadCall[]): string {
   const staleLine = r.state === 'stale' ? `\n\n_Drafted at ${r.headSha.slice(0, 7)}; the PR has moved since._` : '';
-  return `${[publishableBody(body), reviewDecisionBody(decisions, r.decisionAnswers)].filter(Boolean).join('\n\n')}${staleLine}\n\n${reviewMarker(r.id)}`;
+  const replies = reviewThreadReplies(r, threads, loadConfig().reviews.identity);
+  return `${[publishableBody(body), reviewDecisionBody(decisions, r.decisionAnswers), replies].filter(Boolean).join('\n\n')}${staleLine}\n\n${reviewMarker(r.id)}`;
 }
 
 /** Known generated text is replaceable; anything edited or added by a person stays. */
@@ -150,11 +156,11 @@ function generatedDraftContent(key: string): { bodies: string[]; comments: Set<s
       for (const body of receipt?.generatedComments ?? []) comments.add(body.trim());
     }
     const current = readRoundDraft(key, round.id);
-    const drafts: Array<Pick<ReviewMemory, 'body' | 'comments' | 'blocking' | 'decisions' | 'decisionAnswers'>> = [
+    const drafts: Array<Pick<ReviewMemory, 'body' | 'comments' | 'blocking' | 'decisions' | 'decisionAnswers'> & { threads?: ReviewThreadCall[] }> = [
       ...(round.previousReviews ?? []), ...('error' in current ? [] : [current]),
     ];
     for (const draft of drafts) {
-      bodies.push(reviewBody(draft.body, { ...round, state: 'drafted', decisionAnswers: draft.decisionAnswers }, draft.decisions ?? []));
+      bodies.push(reviewBody(draft.body, { ...round, state: 'drafted', decisionAnswers: draft.decisionAnswers }, draft.decisions ?? [], draft.threads));
       bodies.push(draftComments(draft).map(comment => `${comment.path}:${comment.line}\n\n${publishableBody(comment.body)}`).join('\n\n'));
       for (const comment of inlineComments(draftComments(draft), round)) comments.add(comment.body.trim());
     }
@@ -233,7 +239,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
     const pending = prior ?? (identity
       ? existing.find(review => review.state === 'PENDING' && review.user?.login.toLowerCase() === identity)
       : undefined);
-    let generatedBody = reviewBody(draft.body, r, draft.decisions);
+    let generatedBody = reviewBody(draft.body, r, draft.decisions, draft.threads);
     let created = false;
     let id: number;
     const createPending = async (preservedBody = ''): Promise<number> => {
@@ -442,25 +448,72 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
     const decisions = reviewDecisionBody(draft.decisions, latestRound(readReview(key)!)!.decisionAnswers);
     const body = typeof pendingBody === 'string'
       ? [pendingBody, ...(decisions && !pendingBody.includes(decisions) ? [decisions] : [])].join('\n\n')
-      : reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions);
+      : reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions, draft.threads);
     const posted = r.staged
       ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body })
       : await github<{ id: number }>(f, token(), 'POST', base, {
           commit_id: targetHead,
           event,
-          body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions),
+          body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions, draft.threads),
           comments: inlineComments(draftComments(draft), r),
         });
+    const ticked = reviewThreadsToResolve(latestRound(readReview(key)!)!, draft.threads, loadConfig().reviews.identity).filter(thread => thread.resolve);
     fs.writeFileSync(lock, JSON.stringify({ reviewId: String(posted.id), by: opts.by, at }));
     markReviewPosted(key, r.id, { reviewId: String(posted.id), by: opts.by, at, event });
     if (opts.by !== 'auto') acknowledgeReview(key, opts.now);
-    return { posted: true, reviewId: String(posted.id), by: opts.by };
+    const unresolved = await resolvePublishedThreads(key, r.id, ticked, { f, token, at });
+    return { posted: true, reviewId: String(posted.id), by: opts.by, ...(unresolved.length ? { unresolved } : {}) };
   } catch (err) {
     fs.rmSync(lock, { force: true });
     const why = err instanceof Error ? err.message : String(err);
     saveRound(key, r.id, (x) => (x.reason = `post failed: ${why}`), at);
     return { posted: false, why };
   }
+}
+
+const THREAD_QUERY = `query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread {
+  isResolved pullRequest { number repository { nameWithOwner } } comments(first: 1) { nodes { author { login } } } } } }`;
+const RESOLVE_THREAD = 'mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }';
+
+async function graphql<T>(f: FetchLike, token: string, query: string, variables: Record<string, unknown>): Promise<T> {
+  const answer = await github<{ data?: T; errors?: Array<{ message: string }> }>(f, token, 'POST', '/graphql', { query, variables });
+  if (answer.errors?.length || !answer.data) throw new Error(answer.errors?.map(error => error.message).join('; ') || 'GitHub returned no data');
+  return answer.data;
+}
+
+/**
+ * After a review is posted, resolve the ticked threads. Each thread is read
+ * again first: it must belong to this PR and have been opened by the
+ * configured identity. A thread that fails is reported, and the review stays posted.
+ */
+async function resolvePublishedThreads(key: string, roundId: string, threads: readonly ReviewThreadToResolve[],
+  gh: { f: FetchLike; token: () => string; at: string }): Promise<UnresolvedThread[]> {
+  if (!threads.length) return [];
+  const item = readReview(key)!;
+  const identity = loadConfig().reviews.identity?.toLowerCase();
+  const resolved: string[] = [];
+  const failed: UnresolvedThread[] = [];
+  for (const thread of threads) {
+    try {
+      if (!identity) throw new Error('no reviewer identity is configured');
+      const { node } = await graphql<{ node?: { isResolved?: boolean; pullRequest?: { number: number; repository: { nameWithOwner: string } }; comments?: { nodes: Array<{ author: { login: string } | null }> } } | null }>(
+        gh.f, gh.token(), THREAD_QUERY, { id: thread.id });
+      if (!node?.pullRequest) throw new Error('the thread is gone');
+      if (node.pullRequest.number !== item.pr.number || node.pullRequest.repository.nameWithOwner.toLowerCase() !== `${item.pr.owner}/${item.pr.repo}`.toLowerCase())
+        throw new Error('the thread is not on this PR');
+      if (node.comments?.nodes[0]?.author?.login.toLowerCase() !== identity) throw new Error('someone else opened the thread');
+      if (!node.isResolved) await graphql(gh.f, gh.token(), RESOLVE_THREAD, { id: thread.id });
+      resolved.push(thread.id);
+    } catch (err) {
+      failed.push({ id: thread.id, path: thread.path, line: thread.line, url: thread.url, why: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  saveRound(key, roundId, (round) => {
+    round.threadResolution = { resolved, failed };
+    if (failed.length) round.reason = `Posted. ${failed.length === 1 ? '1 thread' : `${failed.length} threads`} couldn't be resolved: ${
+      failed.map(thread => `${thread.path}${thread.line ? `:${thread.line}` : ''} (${thread.why})`).join('; ')}. Resolve ${failed.length === 1 ? 'it' : 'them'} on GitHub.`;
+  }, gh.at);
+  return failed;
 }
 
 /**

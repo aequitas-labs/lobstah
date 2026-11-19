@@ -343,7 +343,7 @@ describe('drafts', () => {
     fs.writeFileSync(path.join(dir, 'comments.json'), '[]');
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ error: expect.stringContaining('comment verdict needs an inline comment') });
     fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [] }));
-    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ body: '', comments: [], verdict: 'approve', blocking: [], decisions: [] });
+    expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toEqual({ body: '', comments: [], verdict: 'approve', blocking: [], decisions: [], threads: [] });
     fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'comment', blocking: [] }));
     expect(readRoundDraft('review:acme/web#7', 'RRE_1')).toMatchObject({ error: expect.stringContaining('comment verdict needs an inline comment') });
   });

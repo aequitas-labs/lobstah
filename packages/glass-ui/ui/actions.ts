@@ -660,6 +660,7 @@ export type ReviewRequestKind =
   | 'review-request-changes'
   | 'review-comment'
   | 'review-decision-answer'
+  | 'review-thread-resolve'
   | 'review-new'
   | 'review-dismiss'
   | 'review-mute'
@@ -677,7 +678,8 @@ export async function reviewRequest(kind: ReviewRequestKind, payload: Record<str
   if (!can('review-request') && !can('review-dismiss') && !can('review-mute') && !can('review-unmute'))
     return 'Reviews are read-only here.';
   const key = typeof payload.key === 'string' ? payload.key : undefined;
-  if (!key || kind === 'review-seen' || kind === 'review-decision-answer') return glassRequest(kind, payload);
+  if (!key || kind === 'review-seen' || kind === 'review-decision-answer' || kind === 'review-thread-resolve')
+    return glassRequest(kind, payload);
   if (getState().reviewActions?.[key]) return 'A review action is already running.';
   setState({ reviewActions: { ...getState().reviewActions, [key]: kind } });
   try {

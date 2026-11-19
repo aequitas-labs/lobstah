@@ -386,6 +386,8 @@ export interface GlassReview {
   roundId?: string;
   decisions?: import('./reviews.js').ReviewDecision[];
   decisionAnswers?: import('./reviews.js').ReviewDecisionAnswers;
+  /** The reviewer's own earlier threads this draft resolves on publish; each can be unticked. */
+  threadsToResolve?: import('./review-threads.js').ReviewThreadToResolve[];
   needsYou?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;

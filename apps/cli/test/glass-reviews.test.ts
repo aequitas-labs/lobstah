@@ -566,7 +566,7 @@ describe('review requests on /requests', () => {
 
   it('refuses the review kinds without the page token, and has no post or edit', async () => {
     const { base, token } = await start();
-    for (const kind of ['review-dismiss', 'review-skip', 'review-seen', 'review-approve', 'review-approve-anyway', 'review-request-changes', 'review-comment', 'review-decision-answer', 'review-new', 'review-redraft', 'review-draft', 'review-mode']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
+    for (const kind of ['review-dismiss', 'review-skip', 'review-seen', 'review-approve', 'review-approve-anyway', 'review-request-changes', 'review-comment', 'review-decision-answer', 'review-thread-resolve', 'review-new', 'review-redraft', 'review-draft', 'review-mode']) expect((await send(base, 'wrong', kind, { key: 'review:acme/web#7' })).status).toBe(403);
     for (const kind of ['review-post', 'review-edit']) expect((await send(base, token, kind, { key: 'review:acme/web#7' })).status).toBe(400);
   });
 
@@ -599,6 +599,27 @@ describe('review requests on /requests', () => {
     expect(glassReviews()[0]).toMatchObject({ roundId: 'round1', decisions: REVIEW_DECISIONS, decisionAnswers: { 'rollout-owner': { optionId: 'product' }, 'existing-users': { text: 'Ask each user.' } } });
     expect((await send(base, token, 'review-decision-answer', { ...payload, headSha: 'old' })).status).toBe(409);
     expect((await send(base, token, 'review-decision-answer', { ...payload, answer: { optionId: 'bad' } })).status).toBe(409);
+  });
+
+  it('lists the threads a draft resolves, and unticks one through the guarded API', async () => {
+    fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "on-demand"\nidentity = "chris"\n');
+    const key = 'review:acme/web#7';
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaa' }, round: { id: 'round1', requestedAt: ago(60) } }).item;
+    const draftedAt = ago(30);
+    const openThread = (id: string, author: string) => ({ id, path: 'a.ts', line: 3, isOutdated: false, comments: [{ author, body: 'Race?', url: `https://github.com/acme/web/pull/7#${id}` }] });
+    Object.assign(item.rounds[0]!, { state: 'drafted', draftedAt, openThreads: [openThread('T1', 'chris'), openThread('T2', 'sam')] }); writeReview(item);
+    const dir = reviewRoundDir(key, 'round1')!; fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review.md'), '');
+    fs.writeFileSync(path.join(dir, 'verdict.json'), JSON.stringify({ verdict: 'approve', blocking: [], threads: [
+      { id: 'T1', status: 'addressed', reason: 'The lock is held.' }, { id: 'T2', status: 'addressed', reason: 'Also fixed.' },
+    ] }));
+    expect(glassReviews()[0]!.threadsToResolve).toEqual([{ id: 'T1', path: 'a.ts', line: 3, url: 'https://github.com/acme/web/pull/7#T1', reason: 'The lock is held.', resolve: true }]);
+    const { base, token } = await start();
+    const payload = { key, roundId: 'round1', headSha: 'aaa', draftedAt, threadId: 'T1', resolve: false };
+    expect((await send(base, token, 'review-thread-resolve', payload)).status).toBe(200);
+    expect(glassReviews()[0]!.threadsToResolve).toMatchObject([{ id: 'T1', resolve: false }]);
+    expect((await send(base, token, 'review-thread-resolve', { ...payload, threadId: 'T2' })).status).toBe(409);
+    expect((await send(base, token, 'review-thread-resolve', { ...payload, resolve: 'no' })).status).toBe(400);
   });
 
   it('New review reports unavailable credentials without changing the skipped history', async () => {

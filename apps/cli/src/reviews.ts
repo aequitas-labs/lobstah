@@ -1,4 +1,4 @@
-import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot, derivePrStacks } from '@lobstah/core';
+import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot, derivePrStacks, reviewThreadsToResolve } from '@lobstah/core';
 import type { GlassReview, PrEvidence } from '@lobstah/core';
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -51,6 +51,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const name = person.name;
     const avatar = person.avatarUrl;
     const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
+    const threadsToResolve = draft && !('error' in draft) ? reviewThreadsToResolve(r, draft.threads, config.identity) : [];
     out.push({
       ...(stack ? { stack: { id: stack.id, title: stack.title, keys: stack.members.map(member => items.find(item => item.pr.url === member.url)!.key) } } : {}),
       updatedAt: item.updatedAt,
@@ -59,6 +60,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       roundId: r.id, decisions: r.decisions, decisionAnswers: r.decisionAnswers,
       verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
       ...(draft && !('error' in draft) ? { summary: draft.body, comments: draft.comments, decisions: draft.decisions } : {}),
+      ...(threadsToResolve.length ? { threadsToResolve } : {}),
       mode: reviewSettings(config, item.pr.repoKey).mode,
       publish: reviewSettings(config, item.pr.repoKey).publish,
       key: item.key,

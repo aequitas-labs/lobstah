@@ -9,6 +9,9 @@ import type { TendAttention } from './glass.js';
 import { carryReviewDecisionAnswers, isReviewDecisionAnswer, parseReviewDecisions, unansweredReviewDecisions } from './review-decisions.js';
 import type { ReviewDecision, ReviewDecisionAnswer, ReviewDecisionAnswers } from './review-decisions.js';
 export * from './review-decisions.js';
+import { ownReviewThreads, parseReviewThreadCalls, reviewThreadsToResolve } from './review-threads.js';
+import type { ReviewThreadCall } from './review-threads.js';
+export * from './review-threads.js';
 
 /**
  * Review requests: a PR on which someone asked the configured identity
@@ -270,6 +273,10 @@ export interface ReviewRound {
   previousReviews?: ReviewMemory[];
   /** Fresh GitHub thread snapshot for this draft; absent means the job must fetch it. */
   openThreads?: ReviewThread[];
+  /** Threads the draft marked addressed that the person unticked: publishing leaves them open. */
+  threadsKeptOpen?: string[];
+  /** What publishing did to the ticked threads. */
+  threadResolution?: { resolved: string[]; failed: Array<{ id: string; path: string; line: number | null; url: string; why: string }> };
   /** Last observed push time; automatic drafts wait briefly to combine push bursts. */
   changesObservedAt?: string;
   state: ReviewRoundState;
@@ -643,6 +650,8 @@ export interface ReviewDraft {
   verdict: ReviewVerdict;
   blocking: BlockingFinding[];
   decisions: ReviewDecision[];
+  /** Calls on the reviewer's own earlier threads: resolve, or keep open with an optional reply. */
+  threads: ReviewThreadCall[];
 }
 
 /** Only an approval without inline anchors can follow an equivalent patch to another head. */
@@ -676,6 +685,7 @@ export function readRoundDraft(key: string, roundId: string): ReviewDraft | { er
   let verdict: ReviewVerdict = 'comment';
   let blocking: BlockingFinding[] = [];
   let decisions: ReviewDecision[] = [];
+  let threads: ReviewThreadCall[] = [];
   const meta = path.join(dir, 'verdict.json');
   if (fs.existsSync(meta)) {
     try {
@@ -683,6 +693,9 @@ export function readRoundDraft(key: string, roundId: string): ReviewDraft | { er
       const calls = parseReviewDecisions(raw.decisions);
       if (typeof calls === 'string') return { error: `verdict.json ${calls}` };
       decisions = calls;
+      const threadCalls = parseReviewThreadCalls(raw.threads);
+      if (typeof threadCalls === 'string') return { error: `verdict.json ${threadCalls}` };
+      threads = threadCalls;
       verdict = oneOf(raw.verdict, REVIEW_VERDICTS, 'verdict.json verdict');
       const findings = parseReviewComments(raw.blocking);
       if (typeof findings === 'string') return { error: `verdict.json blocking: ${findings}` };
@@ -693,12 +706,13 @@ export function readRoundDraft(key: string, roundId: string): ReviewDraft | { er
       return { error: err instanceof Error ? err.message : 'invalid verdict.json' };
     }
   }
-  if (verdict === 'comment' && !comments.length && !decisions.length)
+  const replies = threads.some(thread => thread.reply);
+  if (verdict === 'comment' && !comments.length && !decisions.length && !replies)
     return { error: 'A comment verdict needs an inline comment. Fix verdict.json or add a code finding to comments.json.' };
   if (verdict === 'comment' && blocking.length)
     return { error: 'A comment verdict cannot have blocking findings. Fix verdict.json.' };
-  if (!body.trim() && verdict !== 'approve' && !decisions.length) return { error: 'review.md is empty' };
-  return { body, comments, verdict, blocking, decisions };
+  if (!body.trim() && verdict !== 'approve' && !decisions.length && !replies) return { error: 'review.md is empty' };
+  return { body, comments, verdict, blocking, decisions, threads };
 }
 
 /** Save one call against the exact draft shown, refusing stale pages and in-flight posts. */
@@ -719,6 +733,27 @@ export function answerReviewDecision(key: string, draft: { roundId: string; head
   round.decisionAnswers = carryReviewDecisionAnswers(current.decisions, round.decisionAnswers);
   if (answer === null) delete round.decisionAnswers[decisionId];
   else round.decisionAnswers[decisionId] = 'text' in answer ? { text: answer.text!.trim() } : { optionId: answer.optionId };
+  writeReview({ ...item, updatedAt: new Date(now).toISOString() });
+  return undefined;
+}
+
+/** Tick or untick one thread the exact draft shown would resolve, refusing stale pages and in-flight posts. */
+export function chooseReviewThread(key: string, draft: { roundId: string; headSha: string; draftedAt: string }, threadId: string, resolve: boolean, now = Date.now()): string | undefined {
+  const item = readReview(key);
+  const round = item && latestRound(item);
+  if (!item || !round) return 'This review is no longer available.';
+  if (round.id !== draft.roundId || round.headSha !== draft.headSha || round.draftedAt !== draft.draftedAt || round.state !== 'drafted')
+    return 'This draft has changed. Reload it before choosing threads.';
+  if (fs.existsSync(path.join(reviewRoundDir(key, round.id)!, 'posted.json'))) return 'This review is already being posted.';
+  const current = readRoundDraft(key, round.id);
+  if ('error' in current) return 'This draft could not be read. Redraft the review.';
+  if (!reviewThreadsToResolve(round, current.threads, loadConfig().reviews.identity).some(thread => thread.id === threadId))
+    return 'This thread is no longer in the draft. Reload it before choosing threads.';
+  const kept = new Set(round.threadsKeptOpen ?? []);
+  if (resolve) kept.delete(threadId);
+  else kept.add(threadId);
+  if (kept.size) round.threadsKeptOpen = [...kept];
+  else delete round.threadsKeptOpen;
   writeReview({ ...item, updatedAt: new Date(now).toISOString() });
   return undefined;
 }
@@ -760,6 +795,9 @@ export function reviewBrief(item: ReviewItem, round: ReviewRound, opts: { identi
     `6. Write three files in ${opts.outDir}: \`review.md\`, the review's summary body in markdown; and \`comments.json\`, the inline comments as a JSON array of \`{"path": "<file>", "line": <line in the PR head's version>, "side": "RIGHT", "body": "<markdown>"}\` (\`[]\` when there are none); and \`verdict.json\` as \`{"verdict":"approve|comment|request_changes","blocking":[{"path":"<file>","line":<positive line>,"body":"<blocking finding>"}]}\`. Every blocking finding needs a file and line. Use request_changes for blockers in the code, comment only for real non-blocking findings in the diff, and approve when there are no blockers or inline comments worth posting. For approve, leave review.md empty or use at most one short line. Approve must have no blockers; request_changes must have at least one.`,
     'In verdict.json, also write "decisions": [] when no calls are needed, or [{"id":"stable-question-id","question":"<one-line question for Chris>","options":[{"id":"option-a","label":"<short option>","consequence":"<one-line consequence>"},{"id":"option-b","label":"<short option>","consequence":"<one-line consequence>"}],"recommendation":"option-a"}]. Only real product or ownership calls that Chris must make belong here. Code findings stay in the body, comments, and blocking findings. Never bury these questions or option lists in the review body. Free-text answers are always allowed. Use stable question and option ids across redrafts; change an id if its meaning changes. A recommendation is not an answer. Decisions alone may use a comment verdict with an empty review.md.',
     ...(round.decisions?.length ? [`Previous calls (preserve ids for the same question and option meanings): ${JSON.stringify(round.decisions)}`] : []),
+    ...(ownReviewThreads(round.openThreads, opts.identity).length ? [
+      `Threads ${opts.identity} opened that are still unresolved (ids): ${JSON.stringify(ownReviewThreads(round.openThreads, opts.identity).map(thread => thread.id))}. For each one, judge against this head whether its concern is fully addressed, partly addressed, or not addressed. In verdict.json, also write "threads": [{"id":"<thread id>","status":"addressed|partly|not","reason":"<one line>","reply":"<short reply>"}] with one entry per listed thread. Use addressed only when the concern is fully fixed at this head; lobstah resolves those threads when the review is published. For partly or not, the thread stays open: add a short reply only when it tells the author something new, otherwise omit reply. Never list any other thread.`,
+    ] : []),
     'Give each finding a stable findingId in comments.json and verdict.json blocking. If both entries describe the same problem, use the same findingId and write it only once if possible. Different problems on the same line need different ids. Write publishable review text; omit draft-only notices such as "Draft only; nothing was posted".',
     '7. Do not post, approve, request changes, comment on, push to, or edit the PR. If you cannot review it (too large, missing context), say so in review.md.',
     `8. Report done: \`lobstah report ${opts.id} done "<one line>"\`.`,

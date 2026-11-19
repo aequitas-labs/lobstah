@@ -346,7 +346,7 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
     const publish = reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r, draft.verdict);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
-      log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
+      log(out.posted ? `${item.key}: review published (${out.reviewId})${out.unresolved ? `; ${out.unresolved.length} thread(s) not resolved: ${out.unresolved.map(thread => `${thread.url} (${thread.why})`).join('; ')}` : ''}` : `${item.key}: not published: ${out.why}`);
     } else if (!r.staged) {
       const out = await stageReview(item.key, gh);
       log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${out.why}`);
