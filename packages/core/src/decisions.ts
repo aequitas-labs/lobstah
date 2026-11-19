@@ -13,7 +13,7 @@ import { ReportError, attachSources, linkAttachedImages } from './reports.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { newRequestId, readRequest, requestFilesDir, requestsDir, writeRequest } from './requests.js';
 import type { DecisionAnswerPayload } from './requests.js';
-import type { Attachment, Lane } from './types.js';
+import type { Attachment, Lane, StatusEntry } from './types.js';
 import { runScriptFile, type RunCard } from './run-cards.js';
 import { withDirLock } from './dir-lock.js';
 import { answeredAt, commitQuestionAnswer } from './inbox.js';
@@ -357,6 +357,29 @@ export function standingDecisions(now = Date.now()): DecisionMeta[] {
   });
 }
 
+/** Whether a card frames this exact question, by dispatch or an explicit glass link. */
+export function cardCoversQuestion(
+  card: Pick<DecisionMeta, 'dispatch' | 'lane' | 'askedAt' | 'permission' | 'permissionsProposal'> & Partial<Pick<DecisionMeta, 'key' | 'questionAt'>>,
+  id: string,
+  lane: Lane,
+  entry: Pick<StatusEntry, 'verb' | 'at' | 'link'>,
+): boolean {
+  if (card.permission || card.permissionsProposal || (entry.verb !== 'needs-decision' && entry.verb !== 'blocked')) return false;
+  if (entry.link && card.key) {
+    try {
+      const match = /^#decision\/(.+)$/.exec(new URL(entry.link).hash);
+      if (match && decodeURIComponent(match[1]!) === card.key) return true;
+    } catch { /* An invalid or unrelated link covers no question. */ }
+  }
+  return card.dispatch === id && (card.lane ?? 'work') === lane &&
+    (card.questionAt ? card.questionAt === entry.at : card.askedAt >= entry.at);
+}
+
+/** The unanswered card covering a question; permission cards never take over its wait. */
+export function questionCard(id: string, lane: Lane, entry: StatusEntry, cards = standingDecisions()): DecisionMeta | undefined {
+  return cards.find(card => cardCoversQuestion(card, id, lane, entry));
+}
+
 /** A finished run's card stands this long after its run ends, so its result can be read; then it leaves. */
 export const RUN_DONE_GRACE_MS = 2 * 60_000;
 
@@ -606,7 +629,9 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
   const lane = decision?.lane ?? 'work';
   const question = decision?.dispatch && !decision.permission ? questionEntry(readStatusLog(decision.dispatch, lane)) : undefined;
   const since = decision?.questionAt ?? (question && decision!.askedAt >= question.at ? question.at : undefined);
-  if (decision?.dispatch && since) {
+  // A retained card can outlive its worker question. Store that answer without
+  // delivering it to a newer question or resuming finished work. Prior answers still win.
+  if (decision?.dispatch && since && (question?.at === since || answeredAt(decision.dispatch, lane, since))) {
     const result = commitQuestionAnswer(decision.dispatch, lane, since, () => {
       const answer = storeDecisionAnswer(input);
       return { value: answer, text: [answer.option, answer.text, ...answer.attachments.map((file) => `${file.name}: ${file.path}`)].filter(Boolean).join('\n\n'), from: input.by, attachments: answer.attachments };

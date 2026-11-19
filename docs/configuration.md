@@ -13,7 +13,7 @@ keys of that section.
 | Key | Default | Meaning |
 |---|---|---|
 | `attentionKinds` | `["question", "decision", "pr:ready", "pr:review", "pr:conflict", "pr:checks"]` | Which kinds `man tend`, the glass, and the desktop pet show. `decision` is a question the helm put to the human with `lobstah man ask`; the glass shows it as a card to answer, and it hides the raw `question` it frames. Without `decision`, framed decisions do not show and raw questions do. `pr:draft`, `landed`, `report`, `review`, and `dispatch-progress` are valid opt-in kinds. `dispatch-progress` (queued too long, stalled, idle while working) always reaches the helm; named here, it also walks on the pet and shows on the glass. An explicit list is used unchanged. Unknown kinds are errors. See the [attention contract](vocabulary.md#attention-contract). |
-| `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. `0` = report once only. |
+| `remindSecs` | `900` | An unanswered `needs-decision`/`blocked` re-fires to `man wait`/`man haul` on this interval until answered. A question covered by an unanswered card wakes once; the card holds the human wait. A new worker question still wakes. `0` = report once only. |
 | `readySettleSecs` | `600` | `pr:ready` stands after continuously meeting the ready conditions on the same head for this many seconds. Any not-ready observation or new head resets the timer. Each attention read re-evaluates expiry from the persisted start, even without a new forge event. `0` restores immediate ready attention; other `pr:*` kinds are unchanged. |
 
 ## `[traps.<name>]` — repo-less workers

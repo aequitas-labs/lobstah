@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { activeIds, answeredAt, reviewDispatchIds, laneDirs, lastEventAt, questionHeld, quietWait, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
+import { activeIds, answeredAt, reviewDispatchIds, laneDirs, lastEventAt, questionHeld, questionCard, quietWait, readStatusLog, reconcile, standingQuestion } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 
 export interface NotifyEvent {
@@ -126,6 +126,7 @@ function readAttnCursor(file: string): AttnCursor {
  * it: a message to the dispatch newer than the question (answeredAt — any
  * sender with provenance) means it no longer stands, before the worker has
  * even read it; a newer needs-decision stands again. Acks never matter here.
+ * A question covered by an unanswered card wakes once; the card owns the human wait.
  * remindMs of 0 disables reminders (pure at-most-once).
  * Pass consume=false to peek without touching cursors.
  * Pauses use the same delivery cursor and remind on the configured cadence;
@@ -155,7 +156,7 @@ export function attentionNow(
       const file = attnCursorPath(id, lane);
       const cursor = readAttnCursor(file);
       const fresh = index >= cursor.seen;
-      const remind = !fresh && remindMs > 0 && now - cursor.at >= remindMs;
+      const remind = !fresh && remindMs > 0 && now - cursor.at >= remindMs && !questionCard(id, lane, entry);
       if (!fresh && !remind) continue;
       out.push({ id, lane, entry });
       if (consume) fs.writeFileSync(file, JSON.stringify({ seen: Math.max(cursor.seen, index + 1), at: now }));
@@ -188,8 +189,8 @@ export function freshWakeEvents(
           // A question already answered by the time we look is not a wake.
           if ((entry.verb === 'needs-decision' || entry.verb === 'blocked') && answeredAt(id, lane, entry.at) !== undefined) continue;
           out.push({ id, lane, entry });
-          // A pause delivered during a wait must not wake again on re-arm.
-          if (entry.verb === 'paused') {
+          // Both delivery paths share the cursor: re-arming must not replay a question.
+          if (entry.verb === 'paused' || entry.verb === 'needs-decision' || entry.verb === 'blocked') {
             const file = attnCursorPath(id, lane);
             const cursor = readAttnCursor(file);
             fs.writeFileSync(file, JSON.stringify({ seen: Math.max(cursor.seen, seen + offset + 1), at: Date.now() }));

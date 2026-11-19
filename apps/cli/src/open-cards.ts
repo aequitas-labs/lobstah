@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicRenameSync, displayGrounds, lobstahHome, storageGrounds, uniqueTempPath } from '@lobstah/core';
 import type { Config, HelmRegistration } from '@lobstah/core';
-import { openCardRows, renderOpenCards } from './tend.js';
+import { openCardRows, renderOpenCards, renderWaitingCards } from './tend.js';
 import type { TendOpenCard } from './tend.js';
 
 /** The last Stop listing of a particular version of a card. */
@@ -45,7 +45,7 @@ export function openCardsAtStop(helm: HelmRegistration, config: Config, consume:
   const grounds = storageGrounds(helm.grounds, config);
   const file = listingsFile(grounds);
   const listings = readListings(file);
-  const cards = openCardRows(config, now).filter((card) => card.grounds === displayGrounds(grounds, config));
+  const cards = openCardRows(config, now).filter((card) => card.grounds === displayGrounds(grounds, config) && !card.waitingDispatches?.length);
   const remindMs = (config.remindSecs ?? 900) * 1000;
   const due = cards.filter((card) => isDue(card, listings[card.key], remindMs, now));
   if (due.length === 0) return '';
@@ -58,4 +58,9 @@ export function openCardsAtStop(helm: HelmRegistration, config: Config, consume:
     atomicRenameSync(temporary, file);
   }
   return renderOpenCards(due);
+}
+
+/** Human waits remain visible at Stop without blocking the helm's turn. */
+export function waitingCardsAtStop(helm: HelmRegistration, config: Config): string {
+  return renderWaitingCards(openCardRows(config).filter(card => card.grounds === displayGrounds(helm.grounds, config)));
 }

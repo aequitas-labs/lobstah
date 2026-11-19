@@ -58,6 +58,7 @@ import {
   readPrs,
   readSessionClaim,
   readTrap,
+  cardCoversQuestion,
   questionEntry,
   readStatusLog,
   queuedAt,
@@ -666,6 +667,8 @@ export interface TendReport {
 export interface TendOpenCard {
   /** `run` for a run card the glass runs once confirmed; `card` for any other card. */
   kind: 'card' | 'run';
+  /** Active questions already handed to the human on this card. */
+  waitingDispatches?: string[];
   /** `decision:<rid>`. */
   key: string;
   title: string;
@@ -697,11 +700,21 @@ export function cardGrounds(card: DecisionMeta, cfg: Config): string | undefined
 /** Every standing card on this machine, oldest first, as tend lists it. */
 export function openCardRows(cfg: Config, now: number = Date.now()): TendOpenCard[] {
   const base = glassUrl(glassPort());
-  return standingDecisions(now)
+  const cards = standingDecisions(now);
+  const waiting = new Map<string, string[]>();
+  for (const lane of ['work', 'chore'] as Lane[]) for (const id of activeIds(lane)) {
+    const entry = questionEntry(readStatusLog(id, lane));
+    if (!entry || answeredAt(id, lane, entry.at)) continue;
+    for (const card of cards.filter(card => cardCoversQuestion(card, id, lane, entry))) {
+      waiting.set(card.key, [...(waiting.get(card.key) ?? []), id]);
+    }
+  }
+  return cards
     .map((card): TendOpenCard => {
       const grounds = cardGrounds(card, cfg);
       return {
         kind: card.run ? 'run' : 'card',
+        ...(waiting.has(card.key) ? { waitingDispatches: waiting.get(card.key)! } : {}),
         key: card.key,
         title: card.title.replace(/\s+/g, ' '),
         ...(grounds ? { grounds: displayGrounds(grounds, cfg) } : {}),
@@ -714,10 +727,20 @@ export function openCardRows(cfg: Config, now: number = Date.now()): TendOpenCar
     .sort((a, b) => a.askedAt.localeCompare(b.askedAt));
 }
 
-/** The "Open cards" section: tend prints it, and the Stop hook prints the same section for its own cards. */
+/** One human-wait line per dispatch, even when several cards cover its question. */
+export function renderWaitingCards(cards: readonly TendOpenCard[]): string {
+  const waiting = new Map<string, string>();
+  for (const card of cards) for (const id of card.waitingDispatches ?? []) waiting.set(id, card.key);
+  return [...waiting].map(([id, key]) => `- ${id} · waiting on human · card ${key}`).join('\n');
+}
+
+/** Tend lists every open card; covered questions use the human-wait line. */
 export function renderOpenCards(cards: readonly TendOpenCard[]): string {
+  const waiting = renderWaitingCards(cards);
+  cards = cards.filter(card => !card.waitingDispatches?.length);
+  if (!cards.length) return waiting;
   const withGrounds = new Set(cards.map((card) => card.grounds)).size > 1;
-  return toonTable(
+  return [waiting, toonTable(
     'open-cards',
     cards.map((card) => ({
       kind: card.kind,
@@ -728,7 +751,7 @@ export function renderOpenCards(cards: readonly TendOpenCard[]): string {
       link: card.link,
     })),
     ['kind', 'key', ...(withGrounds ? ['grounds'] : []), 'title', 'age', 'link'],
-  );
+  )].filter(Boolean).join('\n');
 }
 
 function readJson<T>(file: string): T | undefined {
@@ -939,6 +962,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
         at: last.at,
         standingSince: last.at,
         note: last.note,
+        ...(last.link ? { link: last.link } : {}),
         ...(repo ? { repo } : {}),
         // On the helm's turn: listed here, kept from the pet and the glass.
         ...(questionHeld({ key, stateHash, repo }, now) ? { held: true } : {}),

@@ -265,7 +265,7 @@ import { backgroundCuller, runCullWorker } from './background-cull.js';
 import { MANUAL } from './manual.js';
 import { decisionEventFields, decisionLine } from './decisions.js';
 import { readHelmPassRequest, requestHelmPass } from '@lobstah/core';
-import { openCardsAtStop } from './open-cards.js';
+import { openCardsAtStop, waitingCardsAtStop } from './open-cards.js';
 import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
@@ -3072,12 +3072,12 @@ async function mainCli(): Promise<void> {
       // workers, `man wait` for the lobstah man.
       // A helm's turn end always says the card reminder, in the block when
       // there is one. A Stop hook prints one JSON object, so the rest stays silent.
-      let stopHelm = false;
+      let stopHelm: ReturnType<typeof helmOf>;
       let stopBlocked = false;
       try {
         const hook = readHookStdin();
         const trapReg = hook?.session_id ? trapBySession(hook.session_id) : undefined;
-        stopHelm = !trapReg && !!hook?.session_id && !!helmOf(hook.session_id);
+        stopHelm = !trapReg && hook?.session_id ? helmOf(hook.session_id) : undefined;
         if (trapReg) {
           // Cancellation and inbox steering keep their existing priority.
           // This is a single peek, not the automatic background park.
@@ -3118,7 +3118,7 @@ async function mainCli(): Promise<void> {
           const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
           const rule = helmChatRule(helmNow?.grounds);
           stopBlocked = true;
-          console.log(JSON.stringify({ decision: 'block', reason: [reason, cardsAtStop(true), rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
+          console.log(JSON.stringify({ decision: 'block', reason: [reason, cardsAtStop(true), helmNow ? waitingCardsAtStop(helmNow, loadConfig()) : '', rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
         };
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
@@ -3330,7 +3330,7 @@ async function mainCli(): Promise<void> {
       } catch {
         // never break a stop
       } finally {
-        if (stopHelm && !stopBlocked) console.log(JSON.stringify({ systemMessage: HELM_STOP_REMINDER }));
+        if (stopHelm && !stopBlocked) console.log(JSON.stringify({ systemMessage: [waitingCardsAtStop(stopHelm, loadConfig()), HELM_STOP_REMINDER].filter(Boolean).join('\n') }));
       }
       break;
     }

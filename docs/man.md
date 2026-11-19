@@ -803,7 +803,9 @@ the same rule.
   it with `lobstah man ask --withdraw <key>`, which retains a read-only archive. A
   newer `man ask` on the same dispatch keeps the older decisions: each shows
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
-  standing decision; a key that is not standing is refused.
+  standing decision; a key that is not standing is refused. A card stays visible
+  if its worker reports `paused`, `working`, `done`, or `failed`, and can still
+  be answered after the dispatch finishes.
 - **Attention.** A standing decision is attention of kind `decision`, in
   the default `attentionKinds`. It makes the verdict `needs-attention`. A
   worker's raw `needs-decision` or `blocked` stays a `question` until the
@@ -1016,7 +1018,12 @@ for pure at-most-once.
 The helm's Stop block lists standing items that need action, open cards at
 their reminder cadence, and one-line trap state changes since the previous
 block. A paused dispatch is reported once, then again every `remindSecs` while
-it remains paused. Use `lobstah man tend` for the full trap roster.
+it remains paused. A question covered by an unanswered card, through its
+dispatch id or the question’s `--link` to the card, wakes the helm once.
+After that, tend and Stop show `waiting on human · card <key>` without
+blocking on that question or reminding the helm to answer it. A new worker
+question still wakes, and a card answer wakes as usual. Withdrawing the card
+restores question reminders. Use `lobstah man tend` for the full trap roster.
 
 A send still waiting on its reply is listed in the `man haul` block as
 `sent · <id> · <first line> · <age>`. Alone, it blocks a stop only when no

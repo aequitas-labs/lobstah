@@ -14,7 +14,7 @@ anything else. The status log is append-only; the last entry wins.
 | Verb | Meaning | Who acts next |
 | --- | --- | --- |
 | `working` | Making progress; nothing needed. | Nobody. |
-| `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. Its active-work clock stops until answered through `lobstah send`, glass, or a matched human PR reply. After `questionWaitSecs` without an answer, the dispatch parks without failing and keeps its session resumable. | Human — re-fires every `remindSecs` until answered. |
+| `needs-decision` | Blocked on a judgment call only a human (or the orchestrator) can make. The note carries the question. Its active-work clock stops until answered through `lobstah send`, glass, or a matched human PR reply. After `questionWaitSecs` without an answer, the dispatch parks without failing and keeps its session resumable. | Human — wakes once when covered by an unanswered card; otherwise re-fires every `remindSecs` until answered. |
 | `blocked` | Cannot proceed for an external reason (missing access, broken dependency). Its unanswered person wait stops the clock and parks after `questionWaitSecs`, like `needs-decision`. | Human. |
 | `paused` | Intentionally idle; resume is expected. With `--waiting-on`, the worker says what it waits on outside lobstah (see [Waiting on](#waiting-on)). A state, not a question: it raises no attention and does not walk the pet. A paused headless dispatch is **parked**: no process and no slot (see [Parked](#parked)). | Whoever paused it, or the thing it waits on. |
 | `done` | The brief is fulfilled. Terminal. Merging is never the dispatch's job. | Merge loop / reviewer. |
@@ -570,7 +570,7 @@ never until someone acknowledges it.
 | Kind | Stands while | Clears when |
 | ---- | ------------ | ----------- |
 | `question` | The dispatch's last status is `needs-decision` or `blocked`. Held (`held: true`; not in the pet, the glass, or `[hooks.notify]`) while a live helm for its grounds has not ended a turn since it was filed. Hidden while a decision on the same dispatch, asked at or after it, is on disk (when `decision` is enabled). | Any newer status entry, or a message newer than it. |
-| `decision` | The helm asked the human with `lobstah man ask` and no answer is recorded. Key `decision:<rid>`. | Answered (the glass or `man answer`), withdrawn (`man ask --withdraw`), or replaced by a newer ask on the same dispatch. |
+| `decision` | The helm asked the human with `lobstah man ask` and no answer is recorded. Key `decision:<rid>`. | Answered (the glass or `man answer`), withdrawn (`man ask --withdraw`), or explicitly replaced (`man ask --replace`). Worker verb changes and completion do not resolve a card. |
 | `landed` | The dispatch is `done` or `failed` after its grounds' reported-through cursor (the grounds listing the repo, else `home`; at most 24 h back). Opt-in. | `man report` (or the helm park's digest) advances the cursor. |
 | `pr:draft` | An open PR is a draft, and the user opted into this kind. | Ready for review, merged, or closed. |
 | `pr:review` | An open PR has unresolved review questions, or requested changes that lobstah cannot repair, has exhausted, or is configured not to repair. | Every thread resolved and no changes requested, or merged / closed. |

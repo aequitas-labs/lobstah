@@ -1,5 +1,5 @@
 import { runSealKey } from './run-seal.js';
-import { archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, readDecision, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
+import { answeredAt, cardCoversQuestion, archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, readDecision, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
 import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, GlassRunCard, LobstahRequest, TendAttention } from '@lobstah/core';
 
 /**
@@ -32,20 +32,20 @@ export function decisionAttention(now: number, decisions: DecisionMeta[] = stand
 
 /**
  * A raw `question` is hidden while a decision frames it: a decision on the
- * same dispatch, asked at or after the question, that has not been
- * withdrawn. An answered one keeps hiding it until the worker reports
+ * same dispatch for that question, or one linked from its report, that has
+ * not been withdrawn. An answered one keeps hiding it until the worker reports
  * again or the helm sends the answer on.
  */
 export function hideFramedQuestions(
   attention: TendAttention[],
-  decisions: Array<Pick<DecisionMeta, 'dispatch' | 'lane' | 'askedAt' | 'permission' | 'permissionsProposal'>> = listDecisions(),
+  decisions: Array<Pick<DecisionMeta, 'dispatch' | 'lane' | 'askedAt' | 'permission' | 'permissionsProposal'> & Partial<Pick<DecisionMeta, 'key' | 'questionAt'>>> = listDecisions(),
 ): TendAttention[] {
   // A permission card frames nothing: it stands beside the trap's question, never in place of it.
   const frames = decisions.filter((d) => !d.permission && !d.permissionsProposal);
   return attention.filter(
     (a) =>
       a.kind !== 'question' ||
-      !frames.some((d) => d.dispatch === a.id && (d.lane ?? 'work') === a.lane && d.askedAt >= (a.at ?? '')),
+      !frames.some((d) => cardCoversQuestion(d, a.id, a.lane, { verb: a.verb === 'blocked' ? 'blocked' : 'needs-decision', at: a.at ?? '', link: a.link })),
   );
 }
 
@@ -119,6 +119,8 @@ export function decisionEventFields(r: LobstahRequest): Record<string, string> {
 /** A `man haul` line for a decision answer. */
 export function decisionLine(r: LobstahRequest): string {
   const p = r.payload as unknown as DecisionAnswerPayload;
+  const decision = readDecision(p.key);
+  const delivered = decision?.dispatch && decision.questionAt && answeredAt(decision.dispatch, decision.lane ?? 'work', decision.questionAt);
   const what = [
     p.option && `option "${p.option}"`,
     p.text && `text: ${p.text}`,
@@ -128,6 +130,6 @@ export function decisionLine(r: LobstahRequest): string {
     .join(' · ');
   return (
     `- decision-answer ${p.key}${p.dispatch ? ` (${p.dispatch})` : ''} — ${p.title} · ${what} (request ${r.id}). ` +
-    (readDecision(p.key)?.questionAt ? 'The answer was delivered to the worker’s inbox.' : 'Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.')
+    (delivered ? 'The answer was delivered to the worker’s inbox.' : 'Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.')
   );
 }
