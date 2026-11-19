@@ -282,8 +282,12 @@ Diff comparisons run once per observed head and use the shared GitHub
 budget; an unavailable comparison
 waits for a later poll.
 When the search stops returning a PR (the request was withdrawn, the
-person reviewed it on GitHub, or the PR closed), its open round is `withdrawn`. A
-truncated search (more than 50 results) withdraws nothing.
+person reviewed it on GitHub, or the PR closed), pick re-reads the PR's
+current requests. A direct request, or a requested team that includes the
+person, keeps the round. Otherwise its open round is `withdrawn`. A pending
+review or a draft the person asked for stays, but nothing drafts or
+refreshes it automatically. The Reviews tab lists it under Done, not Needs
+your review. A truncated search (more than 50 results) withdraws nothing.
 
 **Drafting.** `[reviews].mode = "notify"` starts no jobs. `"on-demand"` enables the glass Review action for requested, stale, or failed rounds and starts no new requested reviews automatically. Existing drafts are repaired automatically when stale or staging fails. `"auto-draft"` and `"auto-review"` start a review job for each requested round in
 a configured repo: a chore-lane dispatch with the
