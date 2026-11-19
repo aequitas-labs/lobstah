@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { addWatch, readWatch, recordWatchFailure, DEFAULT_LIMITS, enqueue, holdWatch, writeHold, ensureLayout, executorPath, GB, laneDirs, listNotices, loadConfig, readHold } from '@lobstah/core';
+import { addWatch, readWatch, recordWatchFailure, DEFAULT_LIMITS, enqueue, holdWatch, writeHold, ensureLayout, executorPath, GB, laneDirs, listNotices, loadConfig, readHold, noticeStands, QUIET_NOTICE_KINDS } from '@lobstah/core';
 import type { Config } from '@lobstah/core';
-import { CULL_INTERVAL_MS, retentionPass, spaceGuard, tick } from '@lobstah/supervisor';
+import { CULL_INTERVAL_MS, DISK_HOLD_NOTICE_INTERVAL_MS, retentionPass, spaceGuard, tick } from '@lobstah/supervisor';
 import type { DaemonCuller } from '@lobstah/supervisor';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { diskRow } from '../src/doctor.js';
@@ -87,6 +87,30 @@ describe('minFreeGB — the free-space guard', () => {
     expect(spaceGuard(loadConfig(), hooks, () => {})).toBe(true);
     expect(kinds()).toEqual(['disk-held', 'disk-cleared']);
     expect(buildTendReport().stories.flatMap((s) => s.dispatches).find((x) => x.id === 'held-1')?.state).toBe('queued');
+  });
+
+  it('wakes the helm with elapsed hold time and repeats attention after thirty minutes', () => {
+    limits({ minFreeGB: 10 });
+    enqueue({ id: 'disk-wait', repo: 'r', brief: 'wait' });
+    let now = Date.now();
+    const hooks = { freeBytes: () => GB, now: () => now };
+    spaceGuard(loadConfig(), hooks, () => {});
+    const first = listNotices().find((notice) => notice.kind === 'disk-held')!;
+    expect(first.quiet).not.toBe(true);
+    expect(QUIET_NOTICE_KINDS).not.toContain(first.kind);
+    expect(noticeStands(first)).toBe(true);
+    expect(first.text).toContain('1 queued dispatch(es) held for 0 min');
+    now += DISK_HOLD_NOTICE_INTERVAL_MS - 1;
+    spaceGuard(loadConfig(), hooks, () => {});
+    expect(kinds()).toEqual(['disk-held']);
+    now++;
+    spaceGuard(loadConfig(), hooks, () => {});
+    const notices = listNotices().filter((notice) => notice.kind === 'disk-held');
+    expect(notices).toHaveLength(2);
+    expect(notices[1]!.text).toContain('held for 30 min');
+    expect(notices[1]!.text).toContain('Free disk space to resume dispatches.');
+    spaceGuard(loadConfig(), { ...hooks, freeBytes: () => 20 * GB }, () => {});
+    expect(noticeStands(first)).toBe(false);
   });
 
   it('tend shows a disk hold, a fork-cap watch hold, and a watch error side by side', () => {
