@@ -48,6 +48,43 @@ interface GhComment {
   created_at: string;
 }
 
+/** REST keeps every reply; GraphQL supplies the thread's resolution state. */
+interface GhReviewComment extends GhComment {
+  node_id: string;
+  pull_request_review_id: number | null;
+  in_reply_to_id?: number;
+}
+
+interface GhReviewThread {
+  path: string;
+  line: number | null;
+  originalLine: number | null;
+  isResolved: boolean;
+  comments: { nodes: Array<{ id: string; url: string }> };
+}
+
+interface GhThreadPage {
+  nodes: GhReviewThread[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+/** A submitted review and its initial inline comments share one event. */
+interface FeedbackEvent {
+  at: string;
+  tag: string;
+  own: boolean;
+  review?: GhReview;
+}
+
+interface PrFeedback {
+  tag: string;
+  heldOnly: boolean;
+  context: string;
+}
+
+/** Wait for a quiet interval before claiming a burst of review feedback. */
+const REVIEW_FEEDBACK_SETTLE_MS = 30_000;
+
 interface GhPull {
   number: number;
   title: string;
@@ -140,7 +177,7 @@ export class GithubSource implements Source, MergeSource {
       const uuid = m?.[1] ?? evidence.get(prUrlKey(pr.html_url));
       if (!uuid) continue;
       const subject = `gh:${this.cfg.repo}#pr${pr.number}`;
-      const feedback = await this.latestFeedback(pr.number, ctx?.runs(subject, uuid) ?? []);
+      const feedback = await this.latestFeedback(pr.number, pr.user.login, ctx?.runs(subject, uuid) ?? []);
       if (!feedback) continue;
       items.push({
         key: `${subject}@${feedback.tag}`,
@@ -151,7 +188,7 @@ export class GithubSource implements Source, MergeSource {
         followUp: uuid,
         ...(feedback.heldOnly ? { heldOnly: true } : {}),
         brief: withBriefHooks(
-          `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. ${markRepliesRule(uuid)} When the feedback is addressed, report status done.`,
+          `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. ${markRepliesRule(uuid)} When the feedback is addressed, report status done.${feedback.context}`,
           loadConfig(),
           this.cfg.key,
           'review',
@@ -162,40 +199,101 @@ export class GithubSource implements Source, MergeSource {
   }
 
   /**
-   * The newest human feedback event on a PR, as an opaque round tag —
+   * The newest actionable feedback event on a PR, as an opaque round tag —
    * `rv<id>` for a submitted review, `rc<id>` for an inline review-thread
    * comment, `ic<id>` for a conversation comment. Feedback means: a
    * CHANGES_REQUESTED review on any sha (a review of a slightly stale head
-   * still asks for changes), a COMMENTED review with a body, or any comment
-   * — always by someone other than the configured identity, and never a
-   * comment or review lobstah wrote (either marker). APPROVED reviews are
-   * the merge loop's signal, not feedback. Returns undefined when no one
-   * has spoken.
+   * still asks for changes), a COMMENTED review with a body or inline
+   * comments, or a standalone inline comment. Reviews and inline comments
+   * from the PR author or configured identity never count. Initial comments
+   * on APPROVED, DISMISSED, pending or marked reviews never count either.
    *
-   * The configured identity's own unmarked comments count too: lobstah's
-   * workers post as that account, so the owner's own "also handle X" on a trap PR
-   * looks like theirs except for the marker. The active-round guard covers
+   * The configured identity's own unmarked conversation comments count too:
+   * workers post as that account, so the owner's own "also handle X" on a
+   * trap PR looks like theirs except for the marker. The active-round guard covers
    * a worker that forgets it: an identity comment made while a lobstah run
    * on the PR works is held (rounds on a subject serialize, so it waits) and
    * counts once the run ends, unless that run was itself opened only by
    * held comments, in which case it is dropped.
    */
-  private async latestFeedback(n: number, runs: readonly PrRun[]): Promise<{ tag: string; heldOnly: boolean } | undefined> {
-    const events: Array<{ at: string; tag: string; own: boolean }> = [];
-    const own = (login: string): boolean => login === this.cfg.identity;
-    const reviews = await this.paged<GhReview>(`/repos/${this.cfg.repo}/pulls/${n}/reviews`);
-    for (const r of reviews) {
-      if (lobstahWrote(r.body)) continue;
-      const actionable = r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && (r.body ?? '').trim() !== '');
-      if (actionable) events.push({ at: r.submitted_at, tag: `rv${r.id}`, own: own(r.user.login) });
+  private async latestFeedback(pullNumber: number, workerLogin: string, runs: readonly PrRun[]): Promise<PrFeedback | undefined> {
+    const events: FeedbackEvent[] = [];
+    const isOwnIdentity = (login: string): boolean => login.toLowerCase() === this.cfg.identity.toLowerCase();
+    const isWorker = (login: string): boolean => isOwnIdentity(login) || login.toLowerCase() === workerLogin.toLowerCase();
+    const reviews = await this.paged<GhReview>(`/repos/${this.cfg.repo}/pulls/${pullNumber}/reviews`);
+    const comments = await this.paged<GhReviewComment>(`/repos/${this.cfg.repo}/pulls/${pullNumber}/comments`);
+    const byReview = new Map(reviews.map((review) => [review.id, review]));
+    const isExternalComment = (comment: GhReviewComment): boolean => !isWorker(comment.user.login) && !lobstahWrote(comment.body);
+    for (const review of reviews) {
+      if (!review.submitted_at || isWorker(review.user.login) || lobstahWrote(review.body)) continue;
+      const inline = comments.some((comment) => comment.pull_request_review_id === review.id &&
+        ms(comment.created_at) <= ms(review.submitted_at) && isExternalComment(comment));
+      const actionable = review.state === 'CHANGES_REQUESTED' || (review.state === 'COMMENTED' && ((review.body ?? '').trim() !== '' || inline));
+      if (actionable) events.push({ at: review.submitted_at, tag: `rv${review.id}`, own: false, review });
     }
-    for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/pulls/${n}/comments`)) {
-      if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `rc${c.id}`, own: own(c.user.login) });
+    for (const c of comments) {
+      if (!isExternalComment(c)) continue;
+      const review = c.pull_request_review_id == null ? undefined : byReview.get(c.pull_request_review_id);
+      // A submitted review owns its initial comments, including non-actionable
+      // reviews. A later reply is new feedback even when GitHub reuses its id.
+      if (review && (!review.submitted_at || ms(c.created_at) <= ms(review.submitted_at))) continue;
+      events.push({ at: c.created_at, tag: `rc${c.id}`, own: false,
+        ...(review && !isWorker(review.user.login) && !lobstahWrote(review.body) &&
+          ['CHANGES_REQUESTED', 'COMMENTED'].includes(review.state) ? { review } : {}),
+      });
     }
-    for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${n}/comments`)) {
-      if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}`, own: own(c.user.login) });
+    for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${pullNumber}/comments`)) {
+      if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}`, own: isOwnIdentity(c.user.login) });
     }
-    return guardFeedback(events, runs);
+    const feedback = guardFeedback(events, runs);
+    if (!feedback) return undefined;
+    const trigger = events.find((event) => event.tag === feedback.tag)!;
+    // Conversation comments retain their existing immediate pickup behavior.
+    if (trigger.tag.startsWith('ic')) return { ...feedback, context: '' };
+    if (Date.now() - ms(trigger.at) < REVIEW_FEEDBACK_SETTLE_MS) return undefined;
+    const threads = await this.unresolvedFeedbackThreads(pullNumber, comments);
+    const review = trigger.review;
+    const body = review ? `\n\nReview by ${review.user.login} (${review.state}):\n${review.body?.trim() || '(No review body.)'}` : '';
+    return { ...feedback, context: `${body}${threads}` };
+  }
+
+  /** Read all thread pages; never dispatch a brief that silently lost a page. */
+  private async unresolvedFeedbackThreads(pullNumber: number, comments: readonly GhReviewComment[]): Promise<string> {
+    const [owner, repo] = this.cfg.repo.split('/');
+    const threads: string[] = [];
+    const visited = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const result: { data?: { repository?: { pullRequest?: { reviewThreads: GhThreadPage } } }; errors?: Array<{ message: string }> } =
+        await this.api('POST', '/graphql', {
+          query: `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+            repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+              reviewThreads(first: 100, after: $cursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes { path line originalLine isResolved comments(first: 1) { nodes { id url } } }
+              }
+            } }
+          }`,
+          variables: { owner, repo, number: pullNumber, cursor },
+        });
+      const page = result.data?.repository?.pullRequest?.reviewThreads;
+      if (result.errors?.length || !page?.pageInfo || !Array.isArray(page.nodes)) throw new Error('github review feedback: could not read complete review threads');
+      for (const thread of page.nodes) {
+        if (thread.isResolved) continue;
+        const root = thread.comments.nodes[0];
+        if (!root) throw new Error('github review feedback: missing thread comment');
+        const rootComment = comments.find((comment) => comment.node_id === root.id);
+        if (!rootComment) throw new Error('github review feedback: missing thread discussion');
+        const discussion = comments.filter((comment) => comment.id === rootComment.id || comment.in_reply_to_id === rootComment.id);
+        const line = thread.line ?? thread.originalLine;
+        threads.push(`${thread.path}${line == null ? '' : `:${line}`} — ${root.url}\n${discussion.map((comment) => `${comment.user.login}: ${comment.body}`).join('\n\n')}`);
+      }
+      if (!page.pageInfo.hasNextPage) break;
+      cursor = page.pageInfo.endCursor;
+      if (!cursor || visited.has(cursor)) throw new Error('github review feedback: repeated or missing thread cursor');
+      visited.add(cursor);
+    } while (cursor);
+    return threads.length ? `\n\nUnresolved review threads:\n\n${threads.join('\n\n')}` : '';
   }
 
   private async paged<T>(url: string): Promise<T[]> {
