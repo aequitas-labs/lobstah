@@ -58,6 +58,7 @@ export function serverWorktreeRoots(config: Config = loadConfig()): ServerWorktr
 
 /** Locate a checkout below a configured parent, including Codex's <id>/<repo> nesting. */
 export function serverWorktree(directory: string, roots: ServerWorktreeRoot[]): { directory: string; lobstah: boolean } | undefined {
+  if (!path.isAbsolute(directory)) return undefined;
   const cwd = canonical(directory);
   for (const root of [...roots].sort((a, b) => canonical(b.directory).length - canonical(a.directory).length)) {
     const parent = canonical(root.directory);

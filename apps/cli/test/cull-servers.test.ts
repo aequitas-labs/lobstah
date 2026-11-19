@@ -83,6 +83,7 @@ describe('worktree scope and idle gates', () => {
   it('rejects parent directories, prefix collisions and symlink escapes', () => {
     const outside = path.join(home, 'personal'); fs.mkdirSync(outside);
     expect(serverWorktree(path.dirname(worktree), options.roots!)).toBeUndefined();
+    expect(serverWorktree('.', options.roots!)).toBeUndefined();
     expect(serverWorktree(path.join(home, 'worktrees-personal/app'), options.roots!)).toBeUndefined();
     if (process.platform !== 'win32') {
       fs.symlinkSync(outside, path.join(home, 'worktrees/escape'));
