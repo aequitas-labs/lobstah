@@ -655,7 +655,8 @@ it('repairs a previously withdrawn draft when GitHub confirms it is pending', as
   const item = readReview(KEY)!;
   Object.assign(latestRound(item)!, { state: 'withdrawn', staged: { reviewId: '77', at: 'now' } });
   writeReview(item);
-  const run: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 0, nodes: [] }, pr0: { pullRequest: { state: 'OPEN' } } } }) });
+  const run: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 0, nodes: [] }, pr0: { pullRequest: { state: 'OPEN', headRefName: 'files-upload', baseRefName: 'files-core', isCrossRepository: false } } } }) });
   await reviewsLoop('chris', tok, () => {}, { run, fetch: github([], [{ id: 77, state: 'PENDING', body: MARKER }]) });
   expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', staged: { reviewId: '77' } });
+  expect(readReview(KEY)!.pr).toMatchObject({ headRefName: 'files-upload', baseRefName: 'files-core' });
 });

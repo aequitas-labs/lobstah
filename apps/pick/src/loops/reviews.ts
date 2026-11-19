@@ -116,6 +116,7 @@ interface SubmittedReview {
 interface ReviewPrSnapshot {
   state: NonNullable<ReviewItem['pr']['state']>;
   headRefOid?: string; baseRefOid?: string; isDraft?: boolean;
+  headRefName?: string; baseRefName?: string; isCrossRepository?: boolean;
   reviews?: SearchPr['reviews'];
 }
 
@@ -218,7 +219,7 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
       declarations.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
       Object.assign(variables, { [`owner${index}`]: item.pr.owner, [`repo${index}`]: item.pr.repo, [`number${index}`]: item.pr.number });
       fields.push(`pr${index}: repository(owner: $owner${index}, name: $repo${index}) { pullRequest(number: $number${index}) {
-        state headRefOid baseRefOid isDraft reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
+        state headRefOid baseRefOid isDraft headRefName baseRefName isCrossRepository reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
           nodes { databaseId state submittedAt commit { oid } }
         }
       } }`);
@@ -230,7 +231,13 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
       const pr = data[`pr${index}`]?.pullRequest;
       if (!pr || !['OPEN', 'MERGED', 'CLOSED'].includes(pr.state)) continue;
       confirmed.add(item.key);
-      if (item.pr.state !== pr.state) writeReview({ ...item, pr: { ...item.pr, state: pr.state }, updatedAt: new Date(gh.now).toISOString() });
+      const observedPr = {
+        ...item.pr, state: pr.state,
+        ...(pr.headRefName !== undefined ? { headRefName: pr.headRefName } : {}),
+        ...(pr.baseRefName !== undefined ? { baseRefName: pr.baseRefName } : {}),
+        ...(pr.isCrossRepository !== undefined ? { isCrossRepository: pr.isCrossRepository } : {}),
+      };
+      if (JSON.stringify(item.pr) !== JSON.stringify(observedPr)) writeReview({ ...item, pr: observedPr, updatedAt: new Date(gh.now).toISOString() });
       settleSubmittedReview(item, pr.reviews);
       const submitted = [...(pr.reviews?.nodes ?? [])].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
       if (pr.state === 'OPEN' && pr.headRefOid && pr.baseRefOid && submitted?.state === 'APPROVED' && submitted.commit?.oid !== pr.headRefOid) {
