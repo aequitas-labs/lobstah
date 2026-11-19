@@ -7,8 +7,8 @@ plugins implement the same `BaseWatchType<Reference, State, Cursor, Options>`
 contract.
 
 Use composition for optional capabilities. Adding a provider must not require a
-branch in the daemon, helm, Stop hook, report renderer or glass. The deployment
-example in the next slice demonstrates both hosts with one adapter class.
+branch in the daemon, helm, Stop hook, report renderer or glass. The [deployment example](deployment-watch-example.md) demonstrates both hosts
+with one adapter class.
 
 ## Install a process plugin
 
@@ -18,13 +18,13 @@ and argv in `config.toml`. Arguments are passed directly without a shell.
 ```toml
 schemaVersion = 2
 
-[watchTypes.deploy]
+[watchTypes.deployment]
 enabled = true
 module = "process"
 command = ["node", "/opt/watch-adapters/deployment.js"]
 version = "1.0.0"
 apiVersion = 1
-envAllow = ["DEPLOY_TOKEN"]
+envAllow = []
 allowCapabilities = ["poll", "subscribe"]
 requestTimeoutMs = 30000
 startupTimeoutMs = 5000
@@ -34,7 +34,7 @@ restartWindowMs = 60000
 restartBackoffMs = 1000
 
 # Remaining fields are adapter-owned defaults, checked against its options schema.
-endpoint = "https://deploy.example.test"
+fixturePath = "/absolute/deployment-history.json"
 ```
 
 `envAllow` names the only ambient credentials the child receives. The host also

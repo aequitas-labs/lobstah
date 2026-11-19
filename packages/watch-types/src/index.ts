@@ -20,3 +20,5 @@ export * from './local/notice-policy.js';
 export * from './plugin-model.js';
 export * from './plugin.js';
 export * from './plugin-server.js';
+
+export * from './deployment/index.js';
