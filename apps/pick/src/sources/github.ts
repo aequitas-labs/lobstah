@@ -1,4 +1,5 @@
-import { dispatchPrLines } from '@lobstah/core';
+import { dispatchPrLines, parsePrRef, routePrQuestionReply, syncDispatchPrQuestions, laneOf } from '@lobstah/core';
+import type { PrQuestionReply, PrQuestionTransport, PrRef } from '@lobstah/core';
 import type { Evidence, Verb } from '@lobstah/core';
 import { loadConfig, markRepliesRule, withBriefHooks } from '@lobstah/core';
 import { MARKER, lobstahWrote, marker } from '../types.js';
@@ -44,8 +45,10 @@ interface GhReview {
 interface GhComment {
   id: number;
   body: string;
-  user: { login: string };
+  user: { login: string; type?: string };
   created_at: string;
+  html_url?: string;
+  in_reply_to_id?: number;
 }
 
 /** REST keeps every reply; GraphQL supplies the thread's resolution state. */
@@ -80,6 +83,8 @@ interface PrFeedback {
   tag: string;
   heldOnly: boolean;
   context: string;
+  /** Root inline thread that opened the selected feedback event, when unambiguous. */
+  reviewThreadId?: number;
 }
 
 /** Wait for a quiet interval before claiming a burst of review feedback. */
@@ -186,6 +191,7 @@ export class GithubSource implements Source, MergeSource {
         repoKey: this.cfg.key,
         title: pr.title,
         followUp: uuid,
+        pr: { url: pr.html_url, headRefName: pr.head.ref, headSha: pr.head.sha, ...(feedback.reviewThreadId ? { reviewThreadId: feedback.reviewThreadId } : {}) },
         ...(feedback.heldOnly ? { heldOnly: true } : {}),
         brief: withBriefHooks(
           `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. ${markRepliesRule(uuid)} When the feedback is addressed, report status done.${feedback.context}`,
@@ -217,11 +223,21 @@ export class GithubSource implements Source, MergeSource {
    * held comments, in which case it is dropped.
    */
   private async latestFeedback(pullNumber: number, workerLogin: string, runs: readonly PrRun[]): Promise<PrFeedback | undefined> {
+    const pr = parsePrRef(`https://github.com/${this.cfg.repo}/pull/${pullNumber}`)!;
     const events: FeedbackEvent[] = [];
     const isOwnIdentity = (login: string): boolean => login.toLowerCase() === this.cfg.identity.toLowerCase();
     const isWorker = (login: string): boolean => isOwnIdentity(login) || login.toLowerCase() === workerLogin.toLowerCase();
     const reviews = await this.paged<GhReview>(`/repos/${this.cfg.repo}/pulls/${pullNumber}/reviews`);
-    const comments = await this.paged<GhReviewComment>(`/repos/${this.cfg.repo}/pulls/${pullNumber}/comments`);
+    const discussion = await this.paged<GhReviewComment>(`/repos/${this.cfg.repo}/pulls/${pullNumber}/comments`);
+    const conversation = await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${pullNumber}/comments`);
+    const replies = [...discussion.map((reply) => ({ reply, kind: 'review' as const })), ...conversation.map((reply) => ({ reply, kind: 'conversation' as const }))]
+      .sort((left, right) => ms(left.reply.created_at) - ms(right.reply.created_at) || left.reply.id - right.reply.id);
+    const answers = new Set<string>();
+    for (const { reply, kind } of replies) {
+      if (routePrQuestionReply(pr, reply, this.cfg.identity, kind)) answers.add(`${kind}:${reply.id}`);
+    }
+    // Answers must leave the candidate set before an inline-only review can wake a round.
+    const comments = discussion.filter((comment) => !answers.has(`review:${comment.id}`));
     const byReview = new Map(reviews.map((review) => [review.id, review]));
     const isExternalComment = (comment: GhReviewComment): boolean => !isWorker(comment.user.login) && !lobstahWrote(comment.body);
     for (const review of reviews) {
@@ -242,7 +258,8 @@ export class GithubSource implements Source, MergeSource {
           ['CHANGES_REQUESTED', 'COMMENTED'].includes(review.state) ? { review } : {}),
       });
     }
-    for (const c of await this.paged<GhComment>(`/repos/${this.cfg.repo}/issues/${pullNumber}/comments`)) {
+    for (const c of conversation) {
+      if (answers.has(`conversation:${c.id}`)) continue;
       if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}`, own: isOwnIdentity(c.user.login) });
     }
     const feedback = guardFeedback(events, runs);
@@ -251,10 +268,14 @@ export class GithubSource implements Source, MergeSource {
     // Conversation comments retain their existing immediate pickup behavior.
     if (trigger.tag.startsWith('ic')) return { ...feedback, context: '' };
     if (Date.now() - ms(trigger.at) < REVIEW_FEEDBACK_SETTLE_MS) return undefined;
-    const threads = await this.unresolvedFeedbackThreads(pullNumber, comments);
+    const threads = await this.unresolvedFeedbackThreads(pullNumber, discussion);
     const review = trigger.review;
+    const origin = comments.find((comment) => trigger.tag === `rc${comment.id}`);
+    const initialThreads = review ? [...new Set(comments.filter((comment) => comment.pull_request_review_id === review.id &&
+      ms(comment.created_at) <= ms(review.submitted_at) && isExternalComment(comment)).map((comment) => comment.in_reply_to_id ?? comment.id))] : [];
+    const reviewThreadId = origin ? origin.in_reply_to_id ?? origin.id : initialThreads.length === 1 ? initialThreads[0] : undefined;
     const body = review ? `\n\nReview by ${review.user.login} (${review.state}):\n${review.body?.trim() || '(No review body.)'}` : '';
-    return { ...feedback, context: `${body}${threads}` };
+    return { ...feedback, context: `${body}${threads}`, ...(reviewThreadId !== undefined ? { reviewThreadId } : {}) };
   }
 
   /** Read all thread pages; never dispatch a brief that silently lost a page. */
@@ -317,11 +338,27 @@ export class GithubSource implements Source, MergeSource {
 
   async report(key: string, verb: Verb, evidence: Evidence & { uuid: string }): Promise<void> {
     const n = this.numberOf(key.replace(/@.*$/, '').replace('#pr', '#'));
+    if (key.includes('#pr') && verb === 'needs-decision') {
+      await syncDispatchPrQuestions(evidence.uuid, laneOf(evidence.uuid) ?? 'work', this.questionTransport(), parsePrRef(`https://github.com/${this.cfg.repo}/pull/${n}`)!);
+      return;
+    }
     const lines = [`${marker(evidence.uuid)} **${verb}**`];
     lines.push(...dispatchPrLines(evidence));
     if (evidence.branch) lines.push(`branch: \`${evidence.branch}\``);
     if (evidence.note) lines.push(evidence.note);
     await this.api('POST', `/repos/${this.cfg.repo}/issues/${n}/comments`, { body: lines.join('\n') });
+  }
+
+  /** Reuse pickup's authenticated API while keeping question writes separate from tracker comments. */
+  private questionTransport(): PrQuestionTransport {
+    const repo = (pr: PrRef) => `/repos/${pr.owner}/${pr.repo}`;
+    return {
+      identity: this.cfg.identity,
+      comments: (pr) => this.paged<PrQuestionReply>(`${repo(pr)}/issues/${pr.number}/comments`),
+      reviewComments: (pr) => this.paged<PrQuestionReply>(`${repo(pr)}/pulls/${pr.number}/comments`),
+      post: (pr, body) => this.api('POST', `${repo(pr)}/issues/${pr.number}/comments`, { body }),
+      edit: (pr, id, body) => this.api('PATCH', `${repo(pr)}/issues/comments/${id}`, { body }),
+    };
   }
 
   async createLiveComment(key: string, body: string): Promise<string> {

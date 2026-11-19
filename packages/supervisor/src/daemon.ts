@@ -55,7 +55,8 @@ import {
   expireReservations,
   heavyDaemonPass,
   liveHeavyTickets,
-  pausedWaiting,
+  workClockWaiting,
+  reconcileTrapQuestions,
   poolDir,
   poolWaits,
   poolWarmDue,
@@ -214,12 +215,13 @@ export function reconcileOne(
   }
 
   const seen = classify({
+    parked: isParked(st.id, st.lane),
     hasRunner: st.runner !== undefined,
     alive,
     lastVerb,
     // Paused on something external (--waiting-on): silence is expected.
     // So is a command in the heavy line: it may not start for a while.
-    pausedWaiting: pausedWaiting(statusLog.at(-1)) || liveHeavyTickets({ dispatch: st.id }).length > 0,
+    pausedWaiting: workClockWaiting(st.id, st.lane, statusLog.at(-1)) || liveHeavyTickets({ dispatch: st.id }).length > 0,
     lastEventAt: lastEventAt(st.id, st.lane),
     startedAt: st.runner ? Date.parse(st.runner.startedAt) : undefined,
     now: Date.now(),
@@ -434,6 +436,8 @@ export function poolPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => vo
 }
 
 export interface DaemonHooks {
+  /** Posts durable PR questions and delivers PR answers without starting feedback rounds. */
+  prQuestions?: (now: number, log: (message: string) => void) => void;
   /** Detects provider limits before ghost sweeping and delivers due reset wakes without holding the tick. */
   usageLimits?: (now: number, log: (message: string) => void) => void;
   culler?: DaemonCuller;
@@ -614,6 +618,10 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   // Wedge handling waits one wedge threshold after a resume for events to flow again.
   const wedgeGrace = resumed !== undefined && now - resumed <= wedgeMs;
   writeHeartbeat(cfg);
+  try { reconcileTrapQuestions(now, cfg.limits.questionWaitSecs ?? 86400); }
+  catch (error) { log(`person questions: ${error instanceof Error ? error.message : String(error)}`); }
+  try { hooks.prQuestions?.(now, log); }
+  catch (error) { log(`PR questions: ${error instanceof Error ? error.message : String(error)}`); }
   try { hooks.usageLimits?.(now, log); }
   catch (error) { log(`usage limits: ${error instanceof Error ? error.message : String(error)}`); }
   try {

@@ -207,11 +207,12 @@ loaded; the runner handles reports, waits, and job completion.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. A dispatch whose worker reported `done` or `failed` does not spend a slot, even while its runner is still exiting. A dispatch whose worker reported `paused` is parked: its runner ends the session and exits, and it spends no slot. An operator message, or the time given with `--until`, wakes it into the same session when a slot is free; a waking dispatch takes the slot before queued work. `man tend`, `daemon status`, `doctor`, and the glass list parked dispatches. |
+| `maxConcurrent` | `2` | Headless work-lane runners the daemon may run at once. Trap-claimed catches use their own sessions and do not spend these slots. A dispatch whose worker reported `done` or `failed` does not spend a slot, even while its runner is still exiting. A dispatch whose worker reported `paused`, or whose unanswered question reached `questionWaitSecs`, is parked: its runner ends the session and exits, and it spends no slot. An operator message, or the time given with `--until`, wakes it into the same session when a slot is free; a waking dispatch takes the slot before queued work. `man tend`, `daemon status`, `doctor`, and the glass list parked dispatches. |
 | `choreConcurrent` | `1` | Headless chore-lane runner ceiling (rebases and other machine-originated runs). |
 | `wedgeThresholdSecs` | `600` | No tool activity for this long while alive = wedged → killed and forked with a nudge. Also the age past which `status`, `ls`, `man tend`, and the glass show a dispatch's activity line as stale. |
 | `maxRestartAttempts` | `2` | Bounded restart ladder for dead and wedged runners. |
-| `wallClockSecs` | `3600` | Initial active-work window. Progress extends it, up to `maxWallClockSecs`; time paused with `report paused --waiting-on` does not count. |
+| `wallClockSecs` | `3600` | Initial active-work window. Progress extends it, up to `maxWallClockSecs`; time paused with `report paused --waiting-on`, or waiting on an unanswered `needs-decision` / `blocked` report, does not count. A terminal send, glass answer, or matched human PR reply starts the clock again. |
+| `questionWaitSecs` | `86400` | An unanswered `needs-decision` or `blocked` report parks after this many seconds. The question stays visible as `parked: no answer in 24h`; no failure is recorded. The headless session remains resumable and holds no slot. A trap releases its claim. A late answer resumes the same dispatch when its runner slot or trap is free. `0` parks immediately. |
 | `maxWallClockSecs` | `4 × wallClockSecs` | Hard active-work ceiling across restarts. |
 | `pushEarly` | `true` | For a new chain, push each new committed HEAD to its non-trunk branch on `origin` within 10 seconds. A rejected push is noted and retried only after HEAD moves. A follow-up whose chain already has a PR, and a dispatch whose descriptor names a PR (a repair, a rebase chore, or `lobstah dispatch --pr <url|number>`), does not push automatically; its worker pushes to the existing PR's head branch. A brief that only mentions a PR in prose does not name it: dispatch with `--pr` (`dispatch` warns when the brief names a PR of the repo without it). |
 | `draftPr` | `true` | For a new chain, after first push, adopt an existing PR or open one draft PR when `gh` is available, titled `lobstah <short id>` (never from the brief); the worker gives it its real title. A follow-up with a chain PR, and a dispatch whose descriptor names a PR (`--pr`), keeps that PR and its watch; it does not open another. |
@@ -660,6 +661,19 @@ answers cannot. `apply`, `remove` and grants remain person-only actions.
 | `LOBSTAH_MAN` | `=1` designates a session as the lobstah man for the `man haul` Stop hook. |
 | `LOBSTAH_TRAP_TICKET` | A ticket `man throw` reserved. `lobstah soak` redeems it and signs the session on as the reserved trap. `--ticket` takes precedence. |
 | `LOBSTAH_TERMINAL_TITLE` | `=0` stops soak from naming the terminal tab after the trap, and stow from clearing it. |
+
+## PR questions
+
+A `needs-decision` report tied to a GitHub PR posts its question as a separate
+conversation comment, with a hidden dispatch/question marker. Retries reuse
+that comment. Permission requests stay on their permission cards.
+
+Answer by quoting the question, linking its conversation comment, or replying
+in the originating review thread. A human reply reaches the existing worker;
+it does not start a feedback round. Bot replies and the configured GitHub
+identity never count as answers. Terminal sends, glass answers, and PR replies
+share a first-answer rule. An answer removes the glass question/card and marks
+the PR comment answered. The daemon polls replies even when pickup is disabled.
 
 ## Worktree server cleanup
 

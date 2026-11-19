@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { appendStatus, claimNext, complete, ensureLayout, laneDirs, pendingIds, readDescriptor } from '@lobstah/core';
+import { appendStatus, capturePrQuestions, claimNext, complete, enqueue, ensureLayout, laneDirs, pendingIds, readDescriptor, unhandled } from '@lobstah/core';
 import { GithubSource, guardFeedback } from '../src/sources/github.js';
 import type { GithubConfig } from '../src/sources/github.js';
 import { lobstahWrote, markedNote, marker } from '../src/types.js';
@@ -349,7 +349,9 @@ describe('post-PR feedback pickup', () => {
         issueComments: [{ id: 52, login: 'chris', body: markedNote('reset'), at: '2026-09-21T13:00:00Z' }],
       },
     ]);
-    expect((await source().poll()).map((i) => i.key)).toEqual(['gh:o/r#pr12@rc42']);
+    const items = await source().poll();
+    expect(items.map((i) => i.key)).toEqual(['gh:o/r#pr12@rc42']);
+    expect(items[0]?.pr).toMatchObject({ url: 'https://github.com/o/r/pull/12', reviewThreadId: 42 });
   });
 
   it('the review-feedback brief tells the worker to mark its replies', async () => {
@@ -503,4 +505,94 @@ describe('review re-request', () => {
       { method: 'POST', path: '/repos/o/r/pulls/17/requested_reviewers', body: { reviewers: ['alice', 'bob'] } },
     ]);
   });
+});
+
+it('delivers a PR question quote reply as an answer, without opening or reopening a feedback round', async () => {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9' } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`, issueComments: [{ id: 201, login: 'reviewer', body: '> Which option should I use?\n\nUse option A.', at: '2026-11-02T00:00:00Z' }] }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option A.');
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+});
+
+it('ignores a bot question reply in feedback selection and leaves the person wait unanswered', async () => {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9' } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`, reviewComments: [{ id: 202, login: 'automation[bot]', body: '> Which option should I use?\n\nUse A.', at: '2026-11-02T00:00:00Z' }] }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toEqual([]);
+});
+
+/** A live question tied to one precise review thread, independent of feedback wake grouping. */
+function pendingThreadQuestion(threadId = 88): void {
+  enqueue({ id: UUID, repo: 'demo', brief: 'Work on the PR', pr: { url: 'https://github.com/o/r/pull/9', reviewThreadId: threadId } });
+  claimNext('work');
+  appendStatus(UUID, 'work', 'needs-decision', 'Which option should I use?', '2026-11-01T00:00:00Z');
+  capturePrQuestions(UUID, 'work');
+}
+
+it('delivers an inline question answer without waking its bodyless submitted review as a feedback round', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 200, login: 'reviewer', state: 'COMMENTED', at: '2026-11-02T00:00:00Z' }],
+    reviewComments: [{ id: 201, login: 'reviewer', body: 'Use option A.', at: '2026-11-01T23:59:59Z', reviewId: 200, replyTo: 88 }],
+  }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option A.');
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+});
+
+it('delivers a later question answer in an approved review thread without waking an inline feedback event', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 190, login: 'reviewer', state: 'APPROVED', body: 'Looks good', at: '2026-10-31T00:00:00Z' }],
+    reviewComments: [
+      { id: 88, login: 'reviewer', body: 'Original thread', at: '2026-10-31T00:00:00Z', reviewId: 190 },
+      { id: 201, login: 'reviewer', body: 'Use option B.', at: '2026-11-02T00:00:00Z', reviewId: 190, replyTo: 88 },
+    ],
+  }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option B.');
+});
+
+it('keeps unrelated inline feedback actionable and its full discussion after routing a question answer', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 200, login: 'reviewer', state: 'COMMENTED', at: '2026-11-02T00:00:00Z' }],
+    reviewComments: [
+      { id: 88, login: IDENTITY, body: 'Question context', at: '2026-10-31T00:00:00Z' },
+      { id: 201, login: 'reviewer', body: 'Use option A.', at: '2026-11-01T23:59:58Z', reviewId: 200, replyTo: 88 },
+      { id: 202, login: 'reviewer', body: 'Fix pagination.', at: '2026-11-01T23:59:59Z', reviewId: 200 },
+    ],
+    threads: [{ root: 88, path: 'a.ts', line: 1 }, { root: 202, path: 'b.ts', line: 2 }],
+  }]);
+  const items = await source().poll();
+  expect(items.map((item) => item.key)).toEqual(['gh:o/r#pr9@rv200']);
+  expect(items[0]?.pr?.reviewThreadId).toBe(202);
+  expect(items[0]?.brief).toContain('Fix pagination.');
+  expect(items[0]?.brief).toContain('Use option A.');
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+});
+
+it('delivers the earlier conversation answer before a later inline answer in the same poll', async () => {
+  pendingThreadQuestion();
+  stubApi([{ number: 9, branch: `lobstah/${UUID}`,
+    reviews: [{ id: 205, login: 'reviewer', state: 'COMMENTED', at: '2026-11-02T00:00:02Z' }],
+    issueComments: [{ id: 200, login: 'reviewer', body: '> Which option should I use?\n\nUse option A.', at: '2026-11-02T00:00:00Z' }],
+    reviewComments: [{ id: 201, login: 'reviewer', body: 'Use option B.', at: '2026-11-02T00:00:01Z', reviewId: 205, replyTo: 88 }],
+  }]);
+  expect(await source().poll()).toEqual([]);
+  expect(unhandled(UUID, 'work')).toHaveLength(1);
+  expect(unhandled(UUID, 'work')[0]?.text).toContain('Use option A.');
+  expect(unhandled(UUID, 'work')[0]?.text).not.toContain('Use option B.');
 });
