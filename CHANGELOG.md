@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.8.14 — 2026-11-19
+
+### Glass actions and views
+
+- Browser Back and Forward follow decision cards and restore the selected tab
+  and scroll position when returning to the list. (#529)
+- Review action errors appear in plain toasts. Re-draft stays available on
+  review cards, rows and PR views; publishing waits until drafting finishes.
+  (#530)
+- Running cards show elapsed time and recent output. Stop asks for confirmation,
+  keeps captured output and stops descendant processes. (#531)
+
+### Reviews and PR feedback
+
+- Verified base-only updates can automatically restore the configured reviewer's
+  approval. Uncertain updates show that another review is needed. (#533)
+- Pending review drafts stay visible and refresh automatically when stale.
+  Edited comments survive replacement, and repaired drafts require Publish.
+  Reviews group branch stacks in expandable cards with per-PR actions and
+  navigation between drafts. (#539)
+- Stack merges retry transient GitHub failures with backoff and refresh PR
+  state before each attempt. (#537)
+- Submitted reviews and inline comments wake feedback rounds, with related
+  comments grouped and unresolved thread context included in the brief. (#545)
+
+### Dispatch and trap sessions
+
+- Headless work clocks pause while waiting for a person's answer. Unanswered
+  questions park without failure and release their slot; late answers resume
+  the same session. PR-bound questions accept answers through terminal, Glass
+  or matched human PR replies. (#548)
+
+### Maintenance
+
+- Small cache cleanups stay quiet. Above the dispatch disk floor, pressure
+  cleanup runs at most once per trap per hour. (#534)
+- Finished review chores release clean, published checkouts. A background cull
+  worker drains eligible worktrees while preserving dirty or unpushed work.
+  (#535)
+- Disk pressure can clear caches and remove clean, published PR checkouts
+  waiting only for review. Branches and records remain available, and disk
+  holds report their elapsed wait. (#540)
+- Cull previews and stops idle worktree servers and containers while protecting
+  active workers and shared services. (#544)
+- Doctor checks GitHub with the configured pickup token and keeps token values
+  out of diagnostics. (#538)
+
 ## 0.8.13 — 2026-11-17
 
 ### Glass actions and views
