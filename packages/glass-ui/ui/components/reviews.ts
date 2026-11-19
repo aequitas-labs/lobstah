@@ -492,7 +492,10 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
     ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
       const contents = groups.map(
-        ({ stack, reviews }) => html`<section class=${stack ? 'rv-group rv-stack' : 'rv-group'} data-review-stack=${stack?.id} aria-label=${stack ? stack.title ?? 'Review stack' : undefined}>
+        ({
+          stack,
+          reviews,
+        }) => html`<section class=${stack ? 'rv-group rv-stack' : 'rv-group'} data-review-stack=${stack?.id} aria-label=${stack ? (stack.title ?? 'Review stack') : undefined}>
         ${stack && html`<header class="rv-stack-head"><h3>${stack.title ?? 'Review stack'}</h3><p class="sub">Bottom → top · ${reviews.map((review) => `#${review.number}`).join(' → ')} · ${reviewStackState(reviews)}</p></header>`}
         ${
           stack || inp.view === 'cards'
