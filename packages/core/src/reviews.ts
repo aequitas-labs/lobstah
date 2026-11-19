@@ -231,6 +231,10 @@ export interface ReviewRound {
   humanRequester?: ReviewPerson;
   /** Compatibility receipt: a draft-only job must not be automatically submitted. */
   draftOnly?: boolean;
+  /** Repairs update a pending draft only; submitting still requires the person's click. */
+  manualPublishOnly?: boolean;
+  /** Automatic repair backoff, retained across pickup restarts until staging succeeds. */
+  refresh?: { attempts: number; retryAt: string; cancelledDispatch?: string };
   /** Whether this job was explicitly started with publishing enabled. */
   publish?: boolean;
   /** The per-verdict posting choices captured when this draft job started. */
@@ -286,7 +290,9 @@ export interface ReviewRound {
    * the configured identity sees: the person opens the PR in their review
    * tool, edits it, and sends it from there.
    */
-  staged?: { reviewId: string; at: string };
+  staged?: { reviewId: string; at: string; generatedBody?: string; generatedComments?: string[]; preservedBody?: string };
+  /** The previous pending draft's ownership receipt, retained while its replacement is drafted. */
+  pendingReview?: ReviewRound['staged'];
   /** Why the round is where it is: a skip rule, the daily cap, a failure, a withdrawal. */
   reason?: string;
   /**
@@ -499,6 +505,11 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
       headSha: seen.pr.headSha, baseSha: seen.pr.baseSha, diffId: seen.pr.diffId, changesObservedAt: at });
     return { item: writeReview({ ...item, updatedAt: at }), opened: false };
   }
+  // A pending draft already has permission to be maintained when its PR changes.
+  // Preserve its ownership receipt, but never carry automatic publishing into repair.
+  const refreshPending = !authorAskedAgain && latest && latest.headSha !== seen.pr.headSha &&
+    ['drafting', 'drafted', 'stale', 'failed', 'requested'].includes(latest.state) &&
+    (latest.staged || latest.draftedAt || latest.refresh || latest.state === 'drafting');
   // A drafting round is superseded too: pick cancels its job, then removes its checkout.
   for (const r of item.rounds) {
     if (OPEN_STATES.includes(r.state)) {
@@ -516,6 +527,10 @@ export function observeReviewRequest(seen: ReviewRequestSeen, now = Date.now()):
     ...(seen.pr.baseSha ? { baseSha: seen.pr.baseSha } : {}),
     ...(seen.pr.diffId ? { diffId: seen.pr.diffId } : {}),
     state: 'requested',
+    ...(refreshPending ? { refresh: { attempts: (latest.refresh?.attempts ?? 0) + 1, retryAt: at },
+      manualPublishOnly: true, localRequest: true, draftOnly: true, publish: false,
+      autoPostApprove: 'ask' as const, autoPostRequestChanges: 'ask' as const,
+      ...((latest.staged ?? latest.pendingReview) ? { pendingReview: latest.staged ?? latest.pendingReview } : {}) } : {}),
     ...(latest && latest.headSha !== seen.pr.headSha ? { changesObservedAt: at } : {}),
     ...(seen.skip ? { reason: seen.skip } : {}),
   });
@@ -764,7 +779,7 @@ export function redraftReview(key: string, now = Date.now()): ReviewItem | strin
   const { dispatch: _d, dispatchedAt: _a, draftedAt: _t, reason: _r, staged: _s, verdict: _v, blocking: _b, notification: _n, needsYou: _y, seenAt: _seen, acknowledgedAt: _ack, ...rest } = r;
   const memory = reviewMemory(item, r);
   delete rest.openThreads;
-  item.rounds[item.rounds.length - 1] = { ...rest, ...(memory ? { previousReviews: [...(r.previousReviews ?? []), memory] } : {}), ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha, baseSha: item.pr.baseSha, diffId: item.pr.diffId, byHand: true };
+  item.rounds[item.rounds.length - 1] = { ...rest, ...(_s ? { pendingReview: _s } : {}), ...(memory ? { previousReviews: [...(r.previousReviews ?? []), memory] } : {}), ...(_a && !rest.draftStarts ? { draftStarts: [_a] } : {}), state: 'requested', headSha: item.pr.headSha, baseSha: item.pr.baseSha, diffId: item.pr.diffId, byHand: true };
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
 
@@ -797,6 +812,7 @@ export function dismissReview(key: string, by: string, now = Date.now()): Review
   if (!item || !r) return `no review item ${key}`;
   if (!OPEN_STATES.includes(r.state)) return `${key}: the newest round is already ${r.state}`;
   Object.assign(r, { state: 'dismissed', by });
+  delete r.refresh;
   delete r.reason;
   return writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 }
@@ -806,6 +822,8 @@ export function markReviewPosted(key: string, roundId: string, post: { reviewId:
   const item = readReview(key);
   const r = item?.rounds.find((x) => x.id === roundId);
   if (!item || !r) return undefined;
+  delete r.refresh;
+  delete r.pendingReview;
   Object.assign(r, { state: 'posted', postedAt: post.at, postedReviewId: post.reviewId, by: post.by });
   if (post.verdict) r.verdict = post.verdict;
   if (post.event) r.postedEvent = post.event;
@@ -821,7 +839,7 @@ export function markReviewPosted(key: string, roundId: string, post: { reviewId:
 
 /** Whether a round waits on the person: drafted, stale, failed, or requested with no job to draft it; never a round another boat on the wharf has. */
 export function reviewStands(round: ReviewRound | undefined): boolean {
-  if (!round) return false;
+  if (!round || round.refresh) return false;
   // Another boat on the wharf has this round: it waits on the person there, not here.
   if (round.wharf && !round.wharf.mine) return false;
   if (round.reReview) return true;
@@ -874,7 +892,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
   for (const item of listReviews()) {
     if (clearFinishedReviewNotifications(item)) writeReview(item);
     const r = latestRound(item);
-    if (!r || r.wharf || (!r.reReview && r.state !== 'drafted') || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
+    if (!r || r.refresh || r.reason?.startsWith('stage failed') || r.wharf || (!r.reReview && r.state !== 'drafted') || ['CLOSED', 'MERGED'].includes(item.pr.state ?? '')) continue;
     const generation = `${r.reReview?.headSha ?? ''}:${r.id}:${r.dispatch ?? ''}:${r.state}:${r.postedAt ?? r.draftedAt ?? r.headSha}`;
     if (r.notificationGeneration === generation) continue;
     r.notificationGeneration = generation;
@@ -897,7 +915,7 @@ export function refreshReviewNotifications(now = Date.now()): Array<{ key: strin
 
 /** Current repo policy can lower a round's publishing permission; it cannot upgrade a draft-only receipt. */
 export function reviewCanPublish(config: ReviewsConfig, repoKey: string | undefined, round: ReviewRound, verdict?: ReviewVerdict): boolean {
-  if (unansweredReviewDecisions(round).length) return false;
+  if (round.manualPublishOnly || round.refresh || unansweredReviewDecisions(round).length) return false;
   const settings = reviewSettings(config, repoKey);
   const selected = verdict ?? round.verdict;
   const configured = selected === 'approve' ? settings.autoPostApprove : selected === 'request_changes' ? settings.autoPostRequestChanges : 'ask';

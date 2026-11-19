@@ -19,7 +19,7 @@ import {
   reviewDecisionBody,
   unansweredReviewDecisions,
 } from '@lobstah/core';
-import type { ReviewComment, ReviewDecision, ReviewRound } from '@lobstah/core';
+import type { ReviewComment, ReviewDecision, ReviewRound, ReviewMemory } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 
 const API = 'https://api.github.com';
@@ -139,6 +139,65 @@ function reviewBody(body: string, r: ReviewRound, decisions: ReviewDecision[]): 
   return `${[publishableBody(body), reviewDecisionBody(decisions, r.decisionAnswers)].filter(Boolean).join('\n\n')}${staleLine}\n\n${reviewMarker(r.id)}`;
 }
 
+/** Known generated text is replaceable; anything edited or added by a person stays. */
+function generatedDraftContent(key: string): { bodies: string[]; comments: Set<string> } {
+  const item = readReview(key)!;
+  const bodies: string[] = [];
+  const comments = new Set<string>();
+  for (const round of item.rounds) {
+    for (const receipt of [round.staged, round.pendingReview]) {
+      if (receipt?.generatedBody) bodies.push(receipt.generatedBody);
+      for (const body of receipt?.generatedComments ?? []) comments.add(body.trim());
+    }
+    const current = readRoundDraft(key, round.id);
+    const drafts: Array<Pick<ReviewMemory, 'body' | 'comments' | 'blocking' | 'decisions' | 'decisionAnswers'>> = [
+      ...(round.previousReviews ?? []), ...('error' in current ? [] : [current]),
+    ];
+    for (const draft of drafts) {
+      bodies.push(reviewBody(draft.body, { ...round, state: 'drafted', decisionAnswers: draft.decisionAnswers }, draft.decisions ?? []));
+      bodies.push(draftComments(draft).map(comment => `${comment.path}:${comment.line}\n\n${publishableBody(comment.body)}`).join('\n\n'));
+      for (const comment of inlineComments(draftComments(draft), round)) comments.add(comment.body.trim());
+    }
+  }
+  return { bodies: [...new Set(bodies.filter(Boolean))].sort((left, right) => right.length - left.length), comments };
+}
+
+/** Strip only exact generated passages, keeping unsent summaries and edits intact. */
+function replaceGeneratedDraft(body: string, generated: readonly string[], replacement: string): string {
+  let retained = body;
+  for (const passage of generated) retained = retained.split(passage).join('');
+  retained = retained.replace(/^(?:\s*---\s*)+|(?:\s*---\s*)+$/g, '').trim();
+  return [retained, replacement].filter(Boolean).join('\n\n---\n\n');
+}
+
+interface PendingComment { id: number; body: string; path: string; line?: number | null; original_line?: number | null }
+
+/** Read every pending comment before replacing a review; private comments never leave this draft. */
+async function pendingComments(reviewId: number, gh: { f: FetchLike; token: () => string; base: string }): Promise<PendingComment[]> {
+  const comments: PendingComment[] = [];
+  for (let page = 1; ; page++) {
+    const batch = await github<PendingComment[]>(gh.f, gh.token(), 'GET', `${gh.base}/${reviewId}/comments?per_page=100&page=${page}`);
+    comments.push(...batch);
+    if (batch.length < 100) return comments;
+  }
+}
+
+/** Remove unchanged lobstah inline findings, never human comments or edited findings. */
+async function clearGeneratedComments(key: string, round: ReviewRound, reviewId: number, known: ReadonlySet<string>,
+  gh: { f: FetchLike; token: () => string; base: string }): Promise<void> {
+  const endpoint = gh.base.replace(/\/pulls\/\d+\/reviews$/, '/pulls/comments');
+  for (const comment of await pendingComments(reviewId, gh)) {
+    if (!comment.path || !known.has(comment.body?.trim())) continue;
+    const pending = await github<{ state: string }>(gh.f, gh.token(), 'GET', `${gh.base}/${reviewId}`);
+    if (pending.state !== 'PENDING') throw new Error('This review was already sent from the review tool.');
+    const current = await github<{ body: string }>(gh.f, gh.token(), 'GET', `${endpoint}/${comment.id}`);
+    if (current.body?.trim() !== comment.body.trim()) continue;
+    const refused = postRefusal(key, round, 'cli');
+    if (refused) throw new Error(refused);
+    await github(gh.f, gh.token(), 'DELETE', `${endpoint}/${comment.id}`);
+  }
+}
+
 /**
  * Stage the newest round's draft on the PR as a pending review: GitHub
  * shows it only to the configured identity, who opens the PR in their
@@ -161,7 +220,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   if (!lock) return { staged: false, why: `${key}: staging this round is already in flight or done` };
   try {
     const existing = await github<Array<{ id: number; state: string; body?: string | null; user?: { login: string } }>>(f, token(), 'GET', `${base}?per_page=100`);
-    const prior = existing.find((x) => x.body?.includes(reviewMarker(r.id)));
+    const prior = existing.find((x) => String(x.id) === r.pendingReview?.reviewId) ?? existing.find((x) => x.body?.includes(reviewMarker(r.id)));
     if (prior && prior.state !== 'PENDING') {
       markReviewPosted(key, r.id, { reviewId: String(prior.id), by: 'review tool', at });
       return { staged: false, why: `${key}: already sent (review ${prior.id})` };
@@ -174,31 +233,63 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
     const pending = prior ?? (identity
       ? existing.find(review => review.state === 'PENDING' && review.user?.login.toLowerCase() === identity)
       : undefined);
-    if (pending) {
-      const findings = draftComments(draft).map(comment => `${comment.path}:${comment.line}\n\n${publishableBody(comment.body)}`).join('\n\n');
-      const additions = [reviewBody(draft.body, r, draft.decisions), findings].filter(part => part && !pending.body?.includes(part));
-      const body = [pending.body, ...additions].filter(Boolean).join('\n\n---\n\n');
+    let generatedBody = reviewBody(draft.body, r, draft.decisions);
+    let created = false;
+    let id: number;
+    const createPending = async (preservedBody = ''): Promise<number> => {
       const refused = postRefusal(key, r, 'cli');
-      if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
-      if (body !== pending.body) await github(f, token(), 'PUT', `${base}/${pending.id}`, { body });
-    }
-    const id = prior
-      ? prior.id
-      : pending ? pending.id : (
-          await github<{ id: number }>(f, token(), 'POST', base, {
-            commit_id: readReview(key)!.pr.headSha,
-            body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions),
-            comments: inlineComments(draftComments(draft), r),
-          })
-        ).id;
+      if (refused) throw new Error(refused);
+      created = true;
+      return (await github<{ id: number }>(f, token(), 'POST', base, {
+        commit_id: readReview(key)!.pr.headSha,
+        body: [preservedBody, generatedBody].filter(Boolean).join('\n\n---\n\n'),
+        comments: inlineComments(draftComments(draft), r),
+      })).id;
+    };
+    if (pending) {
+      const live = await github<{ state: string; body?: string | null; commit_id?: string }>(f, token(), 'GET', `${base}/${pending.id}`);
+      if (live.state !== 'PENDING') {
+        markReviewPosted(key, r.id, { reviewId: String(pending.id), by: 'review tool', at });
+        return { staged: false, why: `${key}: already sent (review ${pending.id})` };
+      }
+      const generated = generatedDraftContent(key);
+      if (live.commit_id && live.commit_id !== readReview(key)!.pr.headSha) {
+        const comments = await pendingComments(pending.id, { f, token, base });
+        const handwritten = comments.filter(comment => comment.path && !generated.comments.has(comment.body.trim()));
+        const preservedBody = [replaceGeneratedDraft(live.body ?? '', generated.bodies, ''),
+          ...handwritten.map(comment => `${comment.path}:${comment.line ?? comment.original_line ?? '?'}\n\n${comment.body}`),
+        ].filter(Boolean).join('\n\n---\n\n');
+        // Save human work before deleting the old commit-bound review. A failed
+        // replacement reuses this backup on the next staging attempt.
+        saveRound(key, r.id, round => { round.pendingReview = { reviewId: String(pending.id), at, preservedBody }; }, at);
+        const confirmed = await github<{ state: string; body?: string | null }>(f, token(), 'GET', `${base}/${pending.id}`);
+        const currentComments = await pendingComments(pending.id, { f, token, base });
+        if (confirmed.state !== 'PENDING' || confirmed.body !== live.body || JSON.stringify(currentComments) !== JSON.stringify(comments))
+          throw new Error('The pending review changed during refresh. It will be checked again.');
+        const refused = postRefusal(key, r, 'cli');
+        if (refused) throw new Error(refused);
+        await github(f, token(), 'DELETE', `${base}/${pending.id}`);
+        id = await createPending(preservedBody);
+      } else {
+        const findings = draftComments(draft).map(comment => `${comment.path}:${comment.line}\n\n${publishableBody(comment.body)}`).join('\n\n');
+        generatedBody = [generatedBody, findings].filter(Boolean).join('\n\n');
+        const body = replaceGeneratedDraft(live.body ?? '', generated.bodies, generatedBody);
+        const refused = postRefusal(key, r, 'cli');
+        if (refused) throw new Error(refused);
+        if (body !== live.body) await github(f, token(), 'PUT', `${base}/${pending.id}`, { body });
+        await clearGeneratedComments(key, r, pending.id, generated.comments, { f, token, base });
+        id = pending.id;
+      }
+    } else id = await createPending(r.pendingReview?.preservedBody);
     fs.writeFileSync(lock, JSON.stringify({ reviewId: String(id), at }));
     saveRound(
       key,
       r.id,
       (x) => {
-        x.staged = { reviewId: String(id), at };
-        if (pending) x.reason = 'Your existing pending review and comments are kept alongside the new draft.';
-        else delete x.reason;
+        x.staged = { reviewId: String(id), at, generatedBody, generatedComments: !created ? [] : inlineComments(draftComments(draft), r).map(comment => comment.body) };
+        delete x.pendingReview;
+        delete x.refresh;
+        delete x.reason;
       },
       at,
     );
@@ -259,6 +350,7 @@ async function approveWithoutDraft(key: string, opts: Opts & { by: PostBy }): Pr
     if (current.state !== 'open' || !current.head?.sha) throw new Error('This PR is closed or merged.');
     const pendingIds = new Set([
       ...(r.staged ? [r.staged.reviewId] : []),
+      ...(r.pendingReview ? [r.pendingReview.reviewId] : []),
       ...existing.filter(review => review.state === 'PENDING' && review.body?.includes(reviewMarker(r.id))).map(review => String(review.id)),
     ]);
     for (const reviewId of pendingIds) {
@@ -399,23 +491,25 @@ export async function settleStagedReview(key: string, opts: Opts = {}): Promise<
 /** Delete the round's staged pending review, if it is still pending. Nothing a person sent is ever deleted. */
 async function discardStaged(key: string, opts: Opts): Promise<string | undefined> {
   const item = readReview(key);
-  if (!(item && latestRound(item))?.staged) return undefined;
+  const newest = item && latestRound(item);
+  if (!(newest?.staged ?? newest?.pendingReview)) return undefined;
   const c = context(key, opts);
   if (typeof c === 'string') return c;
   const { r, token, f, at, base } = c;
-  if (!r.staged) return undefined;
+  const pending = r.staged ?? r.pendingReview;
+  if (!pending) return undefined;
   try {
-    const review = await github<{ state: string }>(f, token(), 'GET', `${base}/${r.staged.reviewId}`);
+    const review = await github<{ state: string }>(f, token(), 'GET', `${base}/${pending.reviewId}`);
     if (review.state !== 'PENDING') {
-      markReviewPosted(key, r.id, { reviewId: r.staged.reviewId, by: 'review tool', at });
+      markReviewPosted(key, r.id, { reviewId: pending.reviewId, by: 'review tool', at });
       return `${key}: this review was already sent from the review tool`;
     }
-    await github(f, token(), 'DELETE', `${base}/${r.staged.reviewId}`);
+    await github(f, token(), 'DELETE', `${base}/${pending.reviewId}`);
   } catch (err) {
     if (!(err instanceof GitHubError && err.status === 404)) return err instanceof Error ? err.message : String(err);
   }
   fs.rmSync(path.join(reviewRoundDir(key, r.id)!, 'staged.json'), { force: true });
-  saveRound(key, r.id, (x) => delete x.staged, at);
+  saveRound(key, r.id, (x) => { delete x.staged; delete x.pendingReview; delete x.refresh; }, at);
   return undefined;
 }
 

@@ -2952,6 +2952,40 @@ a.lob {
   color: var(--dim);
   white-space: nowrap;
 }
+/* Review sections use the shared spacing scale from headings through card actions. */
+.rv-section {
+  margin-block: calc(2 * var(--space-4));
+}
+.rv-section > h2,
+.rv-section > summary {
+  margin-bottom: var(--space-4);
+}
+.rv-section > summary {
+  cursor: pointer;
+}
+.rv-group + .rv-group {
+  margin-top: calc(2 * var(--space-4));
+}
+.rv-stack-head {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.rv-stack-head h3,
+.rv-stack-head p {
+  margin: 0;
+}
+.rv-section .cards {
+  gap: var(--space-4);
+}
+.rv-card {
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+.rv-card .gactions {
+  padding-top: var(--space-3);
+  gap: var(--space-2);
+}
 .rv-person {
   display: inline-flex;
   align-items: center;

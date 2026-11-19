@@ -54,6 +54,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     out.push({
       ...(stack ? { stack: { id: stack.id, title: stack.title, keys: stack.members.map(member => items.find(item => item.pr.url === member.url)!.key) } } : {}),
       updatedAt: item.updatedAt,
+      ...(r.refresh ? { updating: true } : {}),
       reReview: r.reReview, autoReapproved: r.autoReapprovals?.at(-1)?.headSha === item.pr.headSha,
       roundId: r.id, decisions: r.decisions, decisionAnswers: r.decisionAnswers,
       verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
@@ -79,7 +80,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       requestedAt: r.requestedAt,
       state: r.state,
       stands: reviewStands(r),
-      ...(r.reason ? { reason: r.reason } : {}),
+      ...(!r.refresh && r.reason ? { reason: r.reason } : {}),
       headSha: r.headSha,
       prHeadSha: item.pr.headSha,
       ...(r.draftedAt ? { draftedAt: r.draftedAt } : {}),

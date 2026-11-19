@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
   classifyGhError,
+  cancelQueued,
   reviewAutomationCutoff,
   reviewCanPublish,
   dispatchWasCancelled,
@@ -179,8 +180,10 @@ export async function reviewsLoop(
   }
   // On wharf grounds, a round is claimed (its document created) before it is drafted.
   if (wharf) await claimReviewDocs(log, w);
+  await refreshReviewDrafts(gh, log);
   draftReviews(identity, log, now, undefined, { token, run: opts.run ?? runGraphql });
   if (!githubBlockedUntil(now)) await postOrStage(gh, log);
+  await refreshReviewDrafts(gh, log);
   for (const event of refreshReviewNotifications(now)) {
     const port = Number(process.env.LOBSTAH_GLASS_PORT ?? cfg.glass.port);
     const url = `http://127.0.0.1:${port}/${event.hash}`;
@@ -277,10 +280,55 @@ function settleSubmittedReview(item: ReviewItem, reviews: SearchPr['reviews']): 
     verdict: SUBMITTED_VERDICTS[submitted.state] });
 }
 
+/** Refresh an existing draft without inheriting any automatic publishing permission. */
+export async function refreshReviewDrafts(gh: { now: number }, log: (message: string) => void = () => {}): Promise<void> {
+  for (const item of listReviews()) {
+    const round = latestRound(item);
+    if (!round || item.mutedAt || ['MERGED', 'CLOSED'].includes(item.pr.state ?? '') ||
+        (round.wharf && !round.wharf.mine)) continue;
+    const stageFailed = round.state === 'drafted' && round.reason?.startsWith('stage failed');
+    const draft = round.state === 'drafted' ? readRoundDraft(item.key, round.id) : undefined;
+    const staleDraft = round.state === 'stale' || (draft && !('error' in draft) && !reviewDraftCoversHead(item, round, draft));
+    if (!staleDraft && !stageFailed && !(round.refresh && round.state === 'failed')) continue;
+    if (round.refresh && gh.now < Date.parse(round.refresh.retryAt)) continue;
+    const job = round.dispatch ? verbOf(round.dispatch) : undefined;
+    if (job && round.dispatch && dispatchWasCancelled(round.dispatch, job.lane) && round.refresh?.cancelledDispatch !== round.dispatch) {
+      delete round.refresh;
+      round.state = 'failed';
+      round.reason = 'the review job was cancelled';
+      writeReview(item);
+      continue;
+    }
+    if (job && job.verb !== 'done' && job.verb !== 'failed' && !cancelQueued(round.dispatch!, job.lane)) {
+      round.refresh ??= { attempts: 0, retryAt: new Date(gh.now).toISOString() };
+      round.refresh.cancelledDispatch = round.dispatch;
+      round.manualPublishOnly = true;
+      delete round.notification;
+      delete round.needsYou;
+      writeReview(item);
+      try { if (!dispatchWasCancelled(round.dispatch!, job.lane)) requestCancel(round.dispatch!, job.lane); }
+      catch { /* A finishing claimant is rechecked on the next poll. */ }
+      continue;
+    }
+    const attempts = (round.refresh?.attempts ?? 0) + 1;
+    const delay = stageFailed || round.state === 'failed' ? Math.min(30_000 * 2 ** Math.min(attempts - 1, 5), 15 * 60_000) : 0;
+    const why = await redraftReviewRound(item.key, gh);
+    if (why) { log(`${item.key}: draft refresh deferred: ${why}`); continue; }
+    const fresh = readReview(item.key)!;
+    const next = latestRound(fresh)!;
+    Object.assign(next, { refresh: { attempts, retryAt: new Date(gh.now + delay).toISOString() },
+      manualPublishOnly: true, localRequest: true, draftOnly: true, publish: false,
+      autoPostApprove: 'ask', autoPostRequestChanges: 'ask' });
+    delete next.byHand;
+    delete next.reReview;
+    writeReview(fresh);
+    log(`${item.key}: refreshing the pending draft (attempt ${attempts})`);
+  }
+}
+
 /**
  * A fresh draft is staged pending or published with its verdict according to
- * the repo policy and the job's publishing receipt. Stale drafts and failed
- * attempts are not retried automatically.
+ * the repo policy and the job's publishing receipt. Repairs only stage pending drafts.
  */
 async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: number }, log: (m: string) => void): Promise<void> {
   for (const item of listReviews()) {
@@ -536,7 +584,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     if (!r) continue;
     // A round a person asked for (this Draft click, or a redraft) starts as a Draft click does, past the daily cap and in any mode.
     const manual = manualKey !== undefined || r.byHand === true;
-    const settings = reviewSettings(cfg.reviews, item.pr.repoKey, manual);
+    const repairing = r.refresh !== undefined;
+    const settings = reviewSettings(cfg.reviews, item.pr.repoKey, manual || repairing);
     const save = () => writeReview({ ...item, updatedAt: new Date(now).toISOString() });
 
     // Stop work the person already submitted, withdrew, or dismissed; remove its checkout once the job ends.
@@ -545,7 +594,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       const oldJob = verbOf(old.dispatch);
       if (oldJob && oldJob.verb !== 'done' && oldJob.verb !== 'failed') {
         try {
-          requestCancel(old.dispatch, oldJob.lane);
+          if (!cancelQueued(old.dispatch, oldJob.lane)) requestCancel(old.dispatch, oldJob.lane);
           log(`${item.key}: round ${old.state}; cancelled the review job ${old.dispatch}`);
         } catch {
           // still queued or already gone
@@ -554,12 +603,13 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
     }
 
     if (r.state === 'requested' && !r.dispatch) {
+      if (r.refresh && now < Date.parse(r.refresh.retryAt)) continue;
       if (!manual && r.changesObservedAt && now - Date.parse(r.changesObservedAt) < 30_000) continue;
       // On wharf grounds, only the boat whose document it is drafts the round, once the document exists.
       if (reviewScope(item, scopes) && !r.wharf?.mine) continue;
       const cutoff = reviewAutomationCutoff(cfg.reviews, item.pr.repoKey, now);
-      const oldRequest = !manual && settings.work !== 'off' && Date.parse(r.requestedAt) < Date.parse(cutoff);
-      const why = oldRequest ? `no job: requested before ${cutoff}; start a draft from Reviews` : settings.work === 'off' ? undefined : noJob(item, r, started, manual);
+      const oldRequest = !manual && !repairing && settings.work !== 'off' && Date.parse(r.requestedAt) < Date.parse(cutoff);
+      const why = oldRequest ? `no job: requested before ${cutoff}; start a draft from Reviews` : settings.work === 'off' ? undefined : noJob(item, r, started, manual || repairing);
       if (settings.work === 'off' || why) {
         if (why && r.reason !== why) {
           r.reason = why;
@@ -594,10 +644,10 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       Object.assign(r, { state: 'drafting', dispatch: id, dispatchedAt: at });
       r.onDemand = manual;
       delete r.byHand;
-      r.publish = settings.publish;
-      r.draftOnly = !settings.publish;
-      r.autoPostApprove = settings.autoPostApprove;
-      r.autoPostRequestChanges = settings.autoPostRequestChanges;
+      r.publish = repairing ? false : settings.publish;
+      r.draftOnly = repairing || !settings.publish;
+      r.autoPostApprove = repairing ? 'ask' : settings.autoPostApprove;
+      r.autoPostRequestChanges = repairing ? 'ask' : settings.autoPostRequestChanges;
       delete r.reason;
       save();
       started++;
@@ -644,6 +694,7 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       Object.assign(r, { verdict: draft.verdict, blocking: draft.blocking, state: 'drafted', draftedAt: job.at ?? new Date(now).toISOString() });
       r.decisions = draft.decisions;
       r.decisionAnswers = carryReviewDecisionAnswers(draft.decisions, r.decisionAnswers);
+      if (unansweredReviewDecisions(r).length) delete r.refresh;
       delete r.reason;
       // The head moved while the job ran: the draft reviews an older head.
       if (!reviewDraftCoversHead(item, r, draft)) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });

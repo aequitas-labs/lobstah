@@ -369,6 +369,8 @@ export interface GlassReview {
   postedReviewUrl?: string;
   reReview?: { headSha: string; at: string };
   autoReapproved?: boolean;
+  /** Lobstah is replacing a stale or failed pending draft; publishing is disabled meanwhile. */
+  updating?: boolean;
   requestedBy?: string;
   asker?: string;
   askerName?: string;
