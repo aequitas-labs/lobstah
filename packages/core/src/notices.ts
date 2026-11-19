@@ -45,6 +45,7 @@ export type NoticeKind =
   | 'trap-start-failed'
   | 'trap-request'
   | 'decision-answer'
+  | 'thread'
   | 'bait-orphaned'
   | 'message-bounced'
   | 'pr-merged'

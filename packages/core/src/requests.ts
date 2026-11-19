@@ -29,6 +29,7 @@ export interface LobstahRequest {
  * Its files are stored in the request's own directory, `requests/<id>/`.
  */
 export interface DecisionAnswerPayload {
+  thread?: string;
   key: string;
   title: string;
   dispatch?: string;

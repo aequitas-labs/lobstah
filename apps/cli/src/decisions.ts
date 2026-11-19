@@ -76,6 +76,7 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
     return {
     key: d.key,
     title: d.title,
+    ...(d.thread ? { thread: d.thread } : {}),
     ...(d.appStart ? { appStart: d.appStart } : {}),
     detail: readDecisionDetail(d.key) ?? '',
     options: d.options,
@@ -105,6 +106,7 @@ export function decisionEventFields(r: LobstahRequest): Record<string, string> {
     key: p.key,
     ...(p.dispatch ? { dispatch: p.dispatch } : {}),
     title: p.title,
+    ...(p.thread ? { thread: p.thread } : {}),
     option: p.option ?? '',
     text: p.text ?? '',
     ...(p.run ? { runState: p.run.state, exitCode: String(p.run.exitCode), tail: p.run.tail } : {}),

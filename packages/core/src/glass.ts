@@ -485,6 +485,7 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
 
 /** A standing decision as the glass renders it: the record plus its detail page. */
 export interface GlassDecision {
+  thread?: string;
   references?: import('./backend-model.js').DecisionReference[];
   /** Closed cards are available through their deep link, without answer controls. */
   readOnly?: boolean;
@@ -583,6 +584,7 @@ export interface GlassRepoTraps {
 }
 
 export interface GlassSnapshot {
+  threads?: import('./thread-model.js').ThreadSummary[];
   /** One banner per provider account and limit, shared by desktop and phone. */
   usageLimits?: import('./usage-limits.js').UsageLimitGroup[];
   helmPasses?: HelmPassView[];

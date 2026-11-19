@@ -103,6 +103,7 @@ import { glassDecisions } from './decisions.js';
 import { visibleGoals } from './goals.js';
 import { helmPassViews } from './helm-pass.js';
 import { answerKey, viewKey } from './decision-answer.js';
+import { startThread, postThread, reopenThread, readThread, threadView, threadSummaries, resolveThreadFile, ThreadError } from '@lobstah/core';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, readMergeView, redraftReviewRound } from '@lobstah/pick';
@@ -855,6 +856,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     ...glassTodos(),
     mergeView,
     decisions: glassDecisions(),
+    threads: threadSummaries(),
     ...glassRecentRuns(),
     runPasskeys: { ...runPasskeyStatus(), hosted: runPasskeyStatus(hostedPasskeysFile()).count },
     answerLimits: {
@@ -1122,6 +1124,30 @@ export function serveGlass(
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
+          case 'thread-start':
+          case 'thread-post':
+          case 'thread-reopen': {
+            try {
+              if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) throw new ThreadError('Enter a message');
+              const payload = body.payload as Record<string, unknown>;
+              if (body.kind === 'thread-reopen') {
+                if (typeof payload.id !== 'string') throw new ThreadError('Choose a conversation');
+                return reply(200, { ok: true, item: threadView(reopenThread(payload.id)) });
+              }
+              const message = decisionAnswerRequest({ ...payload, key: 'decision:00000000' });
+              if (body.kind === 'thread-post') {
+                if (typeof payload.id !== 'string') throw new ThreadError('Choose a conversation');
+                return reply(201, { ok: true, item: threadView(postThread(payload.id, { text: message.text, uploads: message.uploads, maxBytes: attachmentLimit() })) });
+              }
+              if (payload.grounds !== undefined && typeof payload.grounds !== 'string') throw new ThreadError('Choose a grounds');
+              if (payload.about !== undefined && typeof payload.about !== 'string') throw new ThreadError('Choose a dispatch');
+              const config = loadConfig();
+              const grounds = displayGrounds(resolveGrounds(config, payload.grounds as string | undefined).name, config);
+              return reply(201, { ok: true, item: threadView(startThread({ grounds, text: message.text, uploads: message.uploads, maxBytes: attachmentLimit(), about: payload.about as string | undefined })) });
+            } catch (error) {
+              return reply(error instanceof ThreadError || error instanceof DecisionError ? error.status : 400, { ok: false, reason: error instanceof Error ? error.message : 'The message could not be saved' });
+            }
+          }
           // Glass settings are read-only, including requests with a valid page token.
           case 'helm-chat':
           case 'review-mode':
@@ -1447,6 +1473,29 @@ export function serveGlass(
     }
     // The hosted glass, open in a browser on this machine, asks whether it runs here, and raises a trap's window from here.
     if (req.url === '/api/mirror/probe' || req.url?.startsWith('/api/mirror/focus/')) return mirrorFocus(req, res);
+    if (req.method === 'GET' && req.url?.startsWith('/threads/')) {
+      if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
+      try {
+        const parts = req.url.split('/');
+        const item = readThread(parts[2] ?? '');
+        if (!item) throw new ThreadError('Conversation not found', 404);
+        if (parts.length === 3) {
+          res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          res.end(JSON.stringify(threadView(item)));
+        } else if (parts.length === 5 && parts[3] === 'files') {
+          const name = decodeURIComponent(parts[4]!);
+          const file = resolveThreadFile(item.id, name);
+          if (!file) throw new ThreadError('Attachment not found', 404);
+          const attachment = item.rounds.flatMap((round) => round.entries.flatMap((entry) => 'attachments' in entry ? entry.attachments : [])).find((a) => a.name === name)!;
+          res.writeHead(200, { 'content-type': attachment.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+          fs.createReadStream(file).pipe(res);
+        } else throw new ThreadError('Conversation not found', 404);
+      } catch (error) {
+        res.writeHead(error instanceof ThreadError ? error.status : 400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ reason: error instanceof Error ? error.message : 'Conversation not found' }));
+      }
+      return;
+    }
     if (req.method === 'GET' && (req.url?.startsWith('/api/checklist?') || req.url?.startsWith('/data/decision/'))) {
       if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
       try {

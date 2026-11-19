@@ -1,0 +1,97 @@
+import { beforeEach, afterEach, describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ensureLayout, startThread, postThread, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
+let home: string;
+const at = new Date('2026-11-19T10:00:00Z');
+const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-threads-')); process.env.LOBSTAH_HOME = home; ensureLayout(); });
+afterEach(() => { removeTempDir(home); delete process.env.LOBSTAH_HOME; });
+const start = () => startThread({ grounds: 'home', text: 'Can we rethink the deck?', now: at });
+describe('helm conversations', () => {
+  it('starts untriaged, wakes once with the message, and retains identity through triage and notes', () => {
+    const item = start();
+    expect(item.kind).toBe('untriaged');
+    expect(listNotices()).toMatchObject([{ kind: 'thread', refId: item.id, grounds: 'home', text: expect.stringContaining(item.text) }]);
+    expect(triageThread(item.id, 'thread', at).id).toBe(item.id);
+    noteThread(item.id, { decided: ['Keep reviews'], open: ['Where does Helm go?'] }, at);
+    expect(threadSummaries('home')[0]).toMatchObject({ kind: 'thread', openLine: 'Where does Helm go?', waitingForHelm: false });
+    postThread(item.id, { text: 'Use the middle tab', now: at });
+    expect(threadSummaries('home')[0]?.waitingForHelm).toBe(true);
+    noteThread(item.id, { decided: ['Keep reviews', 'Helm in the middle'], open: [] }, at);
+    expect(readThread(item.id)?.notes).toEqual({ decided: ['Keep reviews', 'Helm in the middle'], open: [] });
+    expect(listThreads('other')).toEqual([]);
+    expect(readThread(item.id, 'other')).toBeUndefined();
+  });
+  it('joins cards and answers by reference without copying answers into rounds', () => {
+    const item = start();
+    const { meta } = askDecision({ title: 'Which tab?', thread: item.id, options: ['Helm'], askedBy: 'helm', maxBytes: 100 });
+    expect(meta.grounds).toBe('home');
+    expect(threadView(readThread(item.id)!).cards).toMatchObject([{ key: meta.key, standing: true }]);
+    answerDecision({ key: meta.key, option: 'Helm', text: 'Middle tab', by: 'glass', maxBytes: 100 });
+    expect(threadView(readThread(item.id)!).cards).toMatchObject([{ standing: false, answer: { option: 'Helm', text: 'Middle tab' } }]);
+    expect(listRequests()).toMatchObject([{ payload: { thread: item.id, key: meta.key } }]);
+    expect(readThread(item.id)?.rounds.at(-1)?.entries.at(-1)).toEqual({ card: meta.key });
+    expect(() => askDecision({ title: 'Wrong grounds', thread: item.id, grounds: 'other', askedBy: 'helm', maxBytes: 100 })).toThrow('open conversation');
+  });
+  it('requires a linked outcome and note, closes, reopens, and retains chat rounds as chat', () => {
+    const item = startThread({ grounds: 'home', title: 'Navigation', text: 'Chris and helm discussed the deck', via: 'chat', now: at });
+    expect(listNotices()).toEqual([]);
+    expect(item.kind).toBe('thread');
+    expect(() => resolveThread(item.id, 'planned:http://example.test', 'Plan')).toThrow('HTTPS');
+    expect(() => resolveThread(item.id, 'dispatched', 'Work')).toThrow('dispatch id');
+    expect(() => resolveThread(item.id, 'answered', '')).toThrow('outcome note');
+    noteThread(item.id, { link: 'planned:https://app.ume.so/a/test', text: 'Review the plan' }, at);
+    resolveThread(item.id, 'planned:https://app.ume.so/a/test', 'Navigation plan ready', at);
+    expect(() => postThread(item.id, { text: 'One more' })).toThrow('Reopen');
+    expect(reopenThread(item.id, at)).toMatchObject({ state: 'open', outcome: undefined });
+    expect(postThread(item.id, { text: 'Another exchange', via: 'chat', now: at }).rounds.at(-1)?.entries[0]).toMatchObject({ via: 'chat' });
+  });
+  it('validates attachments before writing and serves only listed basenames', () => {
+    expect(() => startThread({ grounds: '../outside', text: 'No' })).toThrow('grounds');
+    expect(() => startThread({ grounds: 'home', text: 'No', uploads: [{ name: '../shot.png', data: png }] })).toThrow('valid name');
+    expect(() => startThread({ grounds: 'home', text: 'No', uploads: [{ name: 'shot.png', data: png }], maxBytes: 1 })).toThrow('too large');
+    expect(() => startThread({ grounds: 'home', text: 'No', uploads: [{ name: 'shot.png', data: Buffer.from('bad') }] })).toThrow();
+    expect(listThreads()).toEqual([]);
+    const item = startThread({ grounds: 'home', text: 'Look at this', uploads: [{ name: 'shot.png', data: png }] });
+    postThread(item.id, { text: 'Again', uploads: [{ name: 'shot.png', data: png }] });
+    expect(fs.readFileSync(resolveThreadFile(item.id, 'shot-2.png')!)).toEqual(png);
+    expect(resolveThreadFile(item.id, '../shot.png')).toBeUndefined();
+    expect(resolveThreadFile(item.id, 'missing.png')).toBeUndefined();
+    const summary = threadSummaries()[0]!;
+    expect(summary).not.toHaveProperty('rounds'); expect(summary).not.toHaveProperty('attachments'); expect(summary).not.toHaveProperty('text');
+    const file = path.join(home, 'threads', 'home', item.id + '.json');
+    const before = fs.statSync(file).mtimeMs;
+    threadSummaries(); threadView(readThread(item.id)!);
+    expect(fs.statSync(file).mtimeMs).toBe(before);
+  });
+  it('repeats unanswered reminders on cadence and stops after a helm response', () => {
+    const item = start();
+    remindThreads('home', 1000, at.getTime() + 999);
+    expect(listNotices()).toHaveLength(1);
+    remindThreads('home', 1000, at.getTime() + 1000);
+    expect(listNotices()).toHaveLength(2);
+    triageThread(item.id, 'bait', new Date(at.getTime() + 1001));
+    remindThreads('home', 1000, at.getTime() + 5000);
+    expect(listNotices()).toHaveLength(2);
+  });
+  it('expires idle discussions with no standing card, keeps bait and questions, and allows reopening', () => {
+    const idle = start(); triageThread(idle.id, 'thread', at);
+    const question = start(); triageThread(question.id, 'thread', at);
+    askDecision({ title: 'Still needed?', thread: question.id, askedBy: 'helm', maxBytes: 100 });
+    const bait = start(); triageThread(bait.id, 'bait', at);
+    expireIdleThreads('home', at.getTime() + THREAD_IDLE_MS);
+    expect(readThread(idle.id)?.outcome?.kind).toBe('dropped');
+    expect(readThread(question.id)?.state).toBe('open'); expect(readThread(bait.id)?.state).toBe('open');
+    expect(reopenThread(idle.id).state).toBe('open');
+  });
+  it('bounds each message and stops extending a conversation at 100 rounds', () => {
+    expect(() => startThread({ grounds: 'home', text: 'x'.repeat(20001) })).toThrow('20000');
+    const item = startThread({ grounds: 'home', text: 'One', via: 'chat' });
+    for (let n = 1; n < 100; n++) postThread(item.id, { text: 'Round ' + n, via: 'chat' });
+    expect(() => postThread(item.id, { text: 'Too many', via: 'chat' })).toThrow('report or plan');
+    expect(readThread(item.id)?.rounds).toHaveLength(100);
+  });
+});

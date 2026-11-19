@@ -260,6 +260,7 @@ export const MIRROR_SNAPSHOT_MAX_JSON_BYTES = 16 * 1024 * 1024;
  * settings, report pages and listed files, checklists). Nothing else.
  */
 export const MIRROR_READ_PATHS: readonly RegExp[] = [
+  /^\/threads\/[0-9a-f-]{36}(?:\/files\/[A-Za-z0-9%._-]{1,300})?$/,
   /^\/data\/(stats|settings)$/,
   /^\/data\/pr\/[A-Za-z0-9%._-]{1,300}$/,
   /^\/data\/dispatch\/[A-Za-z0-9-]{1,64}$/,
@@ -277,6 +278,7 @@ export const MIRROR_READ_PATHS: readonly RegExp[] = [
  * never relayed either: ↗ Open raises a window on the boat's own screen.
  */
 export const MIRROR_WRITE_KINDS = [
+  'thread-start', 'thread-post', 'thread-reopen',
   'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'helm-pass-request', 'pr-ack', 'pr-merge', 'stack-merge', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-decision-answer', 'review-new', 'review-dismiss', 'review-mute', 'review-unmute', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',

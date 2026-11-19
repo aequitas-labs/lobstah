@@ -301,6 +301,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   },
   'man:ask': {
     flags: {
+      '--thread': { value: '<thread-id>' },
       '--title': { value: '<question>' },
       '--detail': { value: '<file.md>' },
       '--option': { value: '<label>', repeatable: true },
@@ -321,6 +322,11 @@ export const COMMANDS: Record<string, CommandSpec> = {
     },
     positionals: '[<dispatch-id>]',
   },
+  'man:threads': { flags: { '--grounds': { value: '<name>' } }, positionals: '[<thread-id>]' },
+  'man:triage': { flags: { '--as': { value: 'bait|thread', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
+  'man:discuss': { flags: { '--said': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<title|thread-id>' },
+  'man:note': { flags: { '--decided': { value: '<line>', repeatable: true }, '--open': { value: '<line>', repeatable: true }, '--link': { value: '<kind:ref>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> [<note>]' },
+  'man:resolve': { flags: { '--outcome': { value: '<kind:ref>', required: true }, '--note': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
   'man:answer': {
     flags: { '--option': { value: '<label>' }, '--text': { value: '<text>' }, '--attach': { value: '<file>', repeatable: true } },
     positionals: '<key>',
@@ -526,6 +532,11 @@ The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
 --run <script>: a run card, which the glass runs once confirmed, --input values on stdin. Helm only.`,
   'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
 Stores the answer; the helm's man wait receives it as decision-answer.`,
+  'man:threads': `List conversations on these grounds, or read one with its notes, rounds and cards.`,
+  'man:triage': `Classify a new glass message as bait or a discussion thread. Helm only.`,
+  'man:discuss': `Record an open exchange from chat, or append a chat round to its existing thread. Helm only.`,
+  'man:note': `Replace decided/open notes or add a dispatch, report or plan link. Helm only.`,
+  'man:resolve': `Close a conversation with its outcome and a one-line note. The person can reopen it. Helm only.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   hook: `The plugin hook entry points. Each detects the session's role (helm, trap, or

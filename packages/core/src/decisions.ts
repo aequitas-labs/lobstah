@@ -1,6 +1,9 @@
 import { validDesktopStartLink, type DesktopAppStart } from './desktop-start-link.js';
 import type { GrantIntent } from './grants.js';
 import { validDecisionReferences, type DecisionReference } from './backend-model.js';
+import { linkThreadCard, readThread } from './threads.js';
+import { displayGrounds } from './grounds-name.js';
+import { loadConfig } from './config.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -85,6 +88,7 @@ export interface PermissionsProposal {
 }
 
 export interface DecisionMeta {
+  thread?: string;
   references?: DecisionReference[];
   /** A configured desktop session start action, separate from tool approval. */
   appStart?: DesktopAppStart;
@@ -409,6 +413,7 @@ export function runCardSettled(d: Pick<DecisionMeta, 'key' | 'run'>, now = Date.
 }
 
 export interface AskOptions {
+  thread?: string;
   references?: DecisionReference[];
   appStart?: DesktopAppStart;
   title: string;
@@ -461,6 +466,8 @@ function checkOptions(raw: string[]): string[] {
  * `replaced`.
  */
 export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: string[] } {
+  const conversation = opts.thread ? readThread(opts.thread) : undefined;
+  if (opts.thread && (conversation?.state !== 'open' || (opts.grounds && conversation.grounds !== displayGrounds(opts.grounds, loadConfig())))) throw new DecisionError('Choose an open conversation on these grounds');
   if (opts.replace !== undefined && !standingDecisions().some((d) => d.key === opts.replace)) {
     throw new DecisionError(`no standing decision ${opts.replace} to replace — \`lobstah man tend\` lists them`);
   }
@@ -518,6 +525,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   const meta: DecisionMeta = {
     key,
     title,
+    ...(opts.thread ? { thread: opts.thread } : {}),
     ...(opts.appStart ? { appStart: opts.appStart } : {}),
     options,
     ...(opts.references?.length ? { references: opts.references.map(({ kind, key }) => ({ kind, key })) } : {}),
@@ -529,7 +537,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     ...(question ? { questionAt: question.at } : {}),
     ...(opts.lane ? { lane: opts.lane } : {}),
     ...(opts.repo ? { repo: opts.repo } : {}),
-    ...(opts.grounds ? { grounds: opts.grounds } : {}),
+    ...(opts.grounds ?? conversation?.grounds ? { grounds: opts.grounds ?? conversation?.grounds } : {}),
     askedBy: opts.askedBy,
     askedAt,
     ...(opts.permission ? { permission: opts.permission } : {}),
@@ -545,6 +553,10 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     fs.writeFileSync(script, opts.run.script, { mode: 0o600, flag: 'wx' });
   }
   writeAtomic(path.join(dir, DECISION_JSON), `${JSON.stringify(meta, null, 2)}\n`);
+  if (opts.thread) {
+    try { linkThreadCard(opts.thread, meta.key); }
+    catch (error) { fs.rmSync(dir, { recursive: true, force: true }); throw error; }
+  }
   const replaced = opts.replace !== undefined && opts.replace !== key ? [opts.replace] : [];
   for (const old of replaced) {
     if (readDecision(old)?.run) withdrawDecision(old);
@@ -591,7 +603,7 @@ function uploadName(raw: string): string | undefined {
 }
 
 /** The type an answer file is stored as, or a DecisionError. */
-function answerFileType(name: string, head: Buffer): string {
+export function answerFileType(name: string, head: Buffer): string {
   const ext = path.extname(name).toLowerCase();
   const type = ANSWER_TYPES[ext];
   if (!type) throw new DecisionError(`file type not accepted: ${name} (accepted: ${ANSWER_EXTENSIONS.join(' ')})`, 415);
@@ -719,6 +731,7 @@ function storeDecisionAnswer(input: AnswerInput): DecisionAnswer {
     const payload: DecisionAnswerPayload = {
       key: input.key,
       title: meta.title,
+      ...(meta.thread ? { thread: meta.thread } : {}),
       ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
       ...(meta.lane ? { lane: meta.lane } : {}),
       ...(meta.repo ? { repo: meta.repo } : {}),
