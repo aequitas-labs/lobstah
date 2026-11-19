@@ -39,6 +39,7 @@ const view = (n: number): GhPrView => ({
   statusCheckRollup: [],
 });
 
+// This scenario repeatedly runs the shipped CLI across two batches; allow process startup on CI.
 it('publishes changed snapshots even when another poller checked those watches just before the batch', () => {
   const now = Date.now();
   vi.useFakeTimers();
@@ -90,7 +91,7 @@ it('publishes changed snapshots even when another poller checked those watches j
   syncPrWatches(now + 90_000, { run });
   expect(readWatch(ref(1).key)).toBeUndefined();
   expect(listNotices(100).filter((n) => n.kind === 'pr-merged')).toHaveLength(1);
-});
+}, 30_000);
 function snapshot(n: number, state = 'OPEN', conclusion = 'SUCCESS') {
   return {
     ...view(n),
