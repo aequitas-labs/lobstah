@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { registerInstalledWatch } from '@lobstah/core';
-import { runUmeCheck } from './ume-watch.js';
+import { runCliWatchCommand } from './watch-registration.js';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { runCliWatchSources, registerCliReportWatches } from './watch-sources.js';
 import { presentRegisteredWatch } from './watch-presenters/index.js';
@@ -297,11 +297,8 @@ import { appendRepoBlock, configuredRepoKeys, configuredRepoPaths, detectRepo, s
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
 import {
   autoRegisterPrWatch,
-  backfillPrWatches,
   runDueManWatches,
   pollSecs,
-  removePrWatch,
-  runPrCheck,
 } from './pr-watch.js';
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates } from './pr-repair.js';
 import { createRunCleanup } from './run-cleanup.js';
@@ -4129,7 +4126,10 @@ async function mainCli(): Promise<void> {
     }
     case 'watch': {
       const sub = pos[0];
-      if (['add', 'check-pr'].includes(sub ?? '')) loadConfig({ upgrade: true });
+      if (sub === 'add') loadConfig({ upgrade: true });
+      const sourceOutput = sub && !['add', 'inbox', 'hold', 'release'].includes(sub) ? runCliWatchCommand({ name: sub, args: pos.slice(1), flags: Object.fromEntries(flags) }) : undefined;
+      if (sourceOutput !== undefined) { console.log(sourceOutput); break; }
+      if (sub && !['add', 'inbox', 'hold', 'release', 'rm', 'ls'].includes(sub)) throw new Error(`No installed watch type handles ${sub}.`);
       if (sub === 'inbox') {
         const trapId = opt('--owner')?.replace(/^wt:/, '') ?? (callerSession(opt('--session'))?.id ? trapBySession(callerSession(opt('--session'))!.id)?.trapId : undefined);
         if (!trapId) throw new Error('watch inbox requires --owner wt:<id>');
@@ -4140,17 +4140,6 @@ async function mainCli(): Promise<void> {
           for (const instruction of watchInstructionLines(watch.presentation, 'worker')) console.log(`instruction: ${instruction}`);
         }
         if (!watches.length) console.log(toonKV({ trap: `wt:${trapId}`, inbox: 'empty' }));
-        break;
-      }
-      if (sub === 'check-ume') {
-        console.log(runUmeCheck(pos[1] ?? '', opt('--cursor')));
-        break;
-      }
-      if (sub === 'check-pr') {
-        // The shipped check behind pr: watches — contract JSON, not TOON.
-        const ref = pos[1];
-        if (!ref) throw new Error('watch check-pr requires pr:<owner>/<repo>#<n>');
-        console.log(runPrCheck(ref, opt('--cursor'), opt('--for')));
         break;
       }
       if (sub === 'add') {
@@ -4189,28 +4178,6 @@ async function mainCli(): Promise<void> {
         );
         break;
       }
-      if (sub === 'backfill') {
-        // Explicit migration for PRs in old dispatch history. Dry run unless --apply.
-        const apply = has('--apply');
-        const rows = backfillPrWatches({ apply });
-        console.log(
-          toonTable(
-            'backfill',
-            rows.map((r) => ({ ...r })),
-            rows.some((r) => r.error) ? ['key', 'action', 'owner', 'error'] : ['key', 'action', 'owner'],
-          ),
-        );
-        console.log(
-          toonKV({
-            applied: apply,
-            register: rows.filter((r) => r.action === 'register').length,
-            retire: rows.filter((r) => r.action === 'retire').length,
-            title: rows.filter((r) => r.action === 'title' && !r.error).length,
-          }),
-        );
-        if (!apply && rows.length > 0) console.log('dry run — pass --apply to write');
-        break;
-      }
       if (sub === 'hold') {
         const raw = pos[1];
         if (!raw) throw new Error('watch hold requires a key');
@@ -4239,13 +4206,6 @@ async function mainCli(): Promise<void> {
       if (sub === 'rm') {
         const key = pos[1];
         if (!key) throw new Error('watch rm requires a key');
-        const prRef = parsePrRef(key);
-        if (prRef) {
-          const { removed, stale } = removePrWatch(prRef);
-          console.log(toonKV({ key: prRef.key, removed }));
-          if (stale) console.log(`warning: could not refresh ${prRef.key} before removing its watch; its record may be stale (${stale})`);
-          break;
-        }
         console.log(toonKV({ key, removed: removeWatch(key) }));
         break;
       }

@@ -1,7 +1,7 @@
 import { WatchCommandError } from '@lobstah/watch-types';
 import { spawnSync } from 'node:child_process';
 import { UmeWatchType, UME_ARTIFACT_ID } from '@lobstah/watch-types';
-import type { UmeWatchContext, UmeWatchOptions, UmeWatchState, WatchRegistrationPolicy, WatchObservationBatch, WatchOwner } from '@lobstah/watch-types';
+import type { UmeWatchContext, UmeWatchOptions, UmeWatchState, WatchCommandPolicy, WatchRegistrationPolicy, WatchObservationBatch, WatchOwner } from '@lobstah/watch-types';
 import { laneOf } from './worktrees.js';
 import { readStatusLog } from './status.js';
 import { TERMINAL_VERBS } from './types.js';
@@ -9,6 +9,7 @@ import { TERMINAL_VERBS } from './types.js';
 /** Provider reads receive the recorded project explicitly, independently of the ambient environment. */
 export type UmeRead = (args: string[], cwd?: string, project?: string) => unknown;
 export interface UmeWatchSourceOptions {
+  commands?: WatchCommandPolicy;
   registration?: WatchRegistrationPolicy;
   read?: UmeRead;
 }
@@ -131,6 +132,7 @@ export function observeUmeFeedback(
 /** The native adapter bypasses the compatibility subprocess while custom check commands keep their behavior. */
 export function createUmeWatchType(options: UmeWatchSourceOptions = {}): UmeWatchType {
   return new UmeWatchType({
+    commands: options.commands,
     registration: options.registration,
     observe({ snapshot, now }: UmeWatchContext) {
       if (umeOwnerFinished(snapshot.owner)) return { cursor: snapshot.cursor, events: [], done: true };

@@ -45,6 +45,7 @@ import {
 import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch, PrBatchRun } from '@lobstah/core';
 import { githubRepoFromOrigin } from '@lobstah/pick';
 import { repoOf } from './digest.js';
+import { addCliWatch } from './watch-registration.js';
 import { discoverPrStack, ghStackLink } from './pr-stack-watch.js';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
 import type { FetchStackLink } from './pr-stack-watch.js';
@@ -71,12 +72,7 @@ export function prCheckCommand(ref: PrRef, forId?: string): string {
 
 /** Sugar over addWatch: install the shipped check (and the fix brief when a chain owns it). */
 export function addPrWatch(ref: PrRef, opts: { forId?: string; everySecs?: number } = {}): Watch {
-  return addWatch(ref.key, prCheckCommand(ref, opts.forId), {
-    typeId: 'pr',
-    owner: opts.forId ? `dispatch:${opts.forId}` : 'man',
-    everySecs: opts.everySecs,
-    brief: opts.forId ? prFixBrief(ref) : undefined,
-  });
+  return addCliWatch(ref.key, opts);
 }
 
 /**

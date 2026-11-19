@@ -1,3 +1,4 @@
+import { addCliWatch } from './watch-registration.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -71,8 +72,10 @@ export function prepareUmeWatch(
   } };
 }
 export function addUmeWatch(artifact: string, opts: Parameters<typeof prepareUmeWatch>[1] = {}): Watch {
-  const plan = prepareUmeWatch(artifact, opts);
-  return addWatch(plan.key, plan.check, plan.options);
+  return addCliWatch(`ume:${artifact}`, {
+    forId: opts.forId, everySecs: opts.everySecs, cursor: opts.cursor, cwd: opts.cwd,
+    options: { ...(opts.project ? { project: opts.project } : {}), ...(opts.org ? { org: opts.org } : {}) },
+  });
 }
 export function registerUmeReview(id: string, lane: Lane, entry: StatusEntry, env = process.env): Watch | undefined {
   try {

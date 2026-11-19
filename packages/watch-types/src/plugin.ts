@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { BaseWatchType } from './base.js';
 import type {
+  WatchCommandPolicy,
   WatchRegistrationPolicy,
   WatchActionProposal,
   WatchActionRequest,
@@ -110,6 +111,7 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
   readonly stateSchema: WatchSchema<WatchValue>;
   readonly cursorSchema: WatchSchema<WatchValue>;
   readonly optionsSchema: WatchSchema<WatchValue>;
+  declare readonly commands?: WatchCommandPolicy;
   declare readonly registration?: WatchRegistrationPolicy;
   declare readonly subscriber?: WatchSubscriber<WatchValue, WatchValue, WatchValue, WatchValue>;
   declare readonly batchObserver?: WatchBatchObserver<WatchValue, WatchValue, WatchValue, WatchValue>;
@@ -158,6 +160,10 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
         if (!value || typeof value !== 'object' || Array.isArray(value)) return options.parse(value);
         return options.parse(pluginDto({ ...defaults, ...value }));
       },
+    };
+    if (enabled('commands') && capabilities.commands) this.commands = {
+      bindings: capabilities.commands.bindings,
+      run: (request) => pluginSchema<string>(stringSchema, 'Plugin command output').parse(this.call('watch.command', { request })),
     };
     if (enabled('registration')) this.registration = {
       prepare: (request) => pluginSchema<ReturnType<WatchRegistrationPolicy['prepare']> | null>(

@@ -6,7 +6,7 @@ import { watchJson } from './registry.js';
 
 export const WATCH_PLUGIN_PROTOCOL = 1 as const;
 export const WATCH_PRESENTATION_PROTOCOL = 1 as const;
-export const WATCH_PLUGIN_CAPABILITIES = ['poll', 'batch', 'subscribe', 'actions', 'automation', 'dispatch', 'derived', 'notices', 'registration'] as const;
+export const WATCH_PLUGIN_CAPABILITIES = ['poll', 'batch', 'subscribe', 'actions', 'automation', 'dispatch', 'derived', 'notices', 'registration', 'commands'] as const;
 export type WatchPluginCapability = (typeof WATCH_PLUGIN_CAPABILITIES)[number];
 export type PluginJsonSchema = Record<string, WatchValue>;
 
@@ -33,6 +33,7 @@ export interface WatchPluginManifest {
   schemas: { reference: PluginJsonSchema; options: PluginJsonSchema; state: PluginJsonSchema; cursor: PluginJsonSchema };
   bindings: WatchRegistrationBinding[];
   capabilities: {
+    commands?: { bindings: Array<{ name: string; pattern?: string }> };
     registration?: boolean;
     batch?: boolean;
     subscribe?: boolean;
@@ -291,6 +292,10 @@ const manifestSchema: PluginJsonSchema = {
       type: 'object',
       additionalProperties: false,
       properties: {
+        commands: { type: 'object', required: ['bindings'], additionalProperties: false, properties: {
+          bindings: { type: 'array', items: { type: 'object', required: ['name'], additionalProperties: false,
+            properties: { name: { type: 'string', minLength: 1 }, pattern: { type: 'string' } } } },
+        } },
         registration: { type: 'boolean' },
         batch: { type: 'boolean' },
         subscribe: { type: 'boolean' },
@@ -326,7 +331,7 @@ export function validatePluginManifest(
     pluginSchema(manifest.capabilities.actions.arguments, 'Plugin action arguments');
     pluginSchema(manifest.capabilities.actions.result, 'Plugin action result');
   }
-  for (const binding of manifest.bindings)
+  for (const binding of [...manifest.bindings, ...(manifest.capabilities.commands?.bindings ?? [])])
     if (binding.pattern) {
       try {
         new RegExp(binding.pattern);

@@ -22,7 +22,7 @@ import {
 } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
-import { addPrWatch } from './pr-watch.js';
+import { addCliWatch } from './watch-registration.js';
 import { deliverMergeWatchActions } from './watch-sources/merge.js';
 
 /** A merge request the boat refuses, with the HTTP status the glass answers. */
@@ -112,7 +112,7 @@ export function requestPrMerge(
     writePr({ ...pr, mergeRequest: request });
     // Its watch checks it every poll; a PR watched by no one yet gets one.
     const ref = parsePrRef(pr.url);
-    if (ref && !readWatch(ref.key)) addPrWatch(ref);
+    if (ref && !readWatch(ref.key)) addCliWatch(ref.key);
     return request;
   });
 }
@@ -368,7 +368,7 @@ export function requestStackMerge(
     // Each PR's watch checks it every poll; a PR watched by no one yet gets one.
     for (const p of open) {
       const ref = parsePrRef(p.url);
-      if (ref && !readWatch(ref.key)) addPrWatch(ref);
+      if (ref && !readWatch(ref.key)) addCliWatch(ref.key);
     }
     return request;
   });

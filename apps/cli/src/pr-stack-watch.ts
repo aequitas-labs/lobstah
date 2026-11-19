@@ -1,9 +1,10 @@
+import { addCliWatch } from './watch-registration.js';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { uniqueTempPath, atomicRenameSync, lobstahHome, loadConfig, parsePrRef, PR_VIEW_FIELDS, prStackTrunk, readPrs, readWatch, cachedPrStackLink, githubBlockedUntil, derivePrStacks, laneOf } from '@lobstah/core';
 import type { GhPrView, PrRef } from '@lobstah/core';
-import { addPrWatch, observePr, pollSecs } from './pr-watch.js';
+import { observePr, pollSecs } from './pr-watch.js';
 import { recordDispatchPrs } from './pr-stack.js';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
 
@@ -59,7 +60,7 @@ export function discoverPrStack(
         (direction === 'head' ? r.headRefName : r.baseRefName) === branch);
       if (known.length) {
         known.filter(own).forEach((r) => {
-          if (!readWatch(r.key)) addPrWatch(parsePrRef(r.key)!, { everySecs, ...(forId ? { forId } : {}) });
+          if (!readWatch(r.key)) addCliWatch(r.key, { everySecs, ...(forId ? { forId } : {}) });
           todo.push(r.key);
         });
         continue;
@@ -79,7 +80,7 @@ export function discoverPrStack(
         // gh pr list cannot read unresolved review threads. The normal
         // watch check supplies them; discovery must not announce readiness first.
         observePr(found, view, { now: new Date(now), discovered: true });
-        if (!readWatch(found.key)) addPrWatch(found, { everySecs, ...(forId ? { forId } : {}) });
+        if (!readWatch(found.key)) addCliWatch(found.key, { everySecs, ...(forId ? { forId } : {}) });
         todo.push(found.key);
       } catch { /* Existing watch retries at its normal cadence; never invent readiness. */ }
     }

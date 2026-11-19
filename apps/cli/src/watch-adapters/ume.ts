@@ -1,7 +1,7 @@
 import { laneOf, readSessionClaim, readWatch } from '@lobstah/core';
 import type { TurnWaitRegistration, Watch } from '@lobstah/core';
-import type { WatchRegistrationPolicy } from '@lobstah/watch-types';
-import { clearFinishedUmeWatches, prepareUmeWatch, syncUmeWatches, umeArtifact, umeTurnArtifact } from '../ume-watch.js';
+import type { WatchCommandPolicy, WatchRegistrationPolicy } from '@lobstah/watch-types';
+import { runUmeCheck, clearFinishedUmeWatches, prepareUmeWatch, syncUmeWatches, umeArtifact, umeTurnArtifact } from '../ume-watch.js';
 import { legacyRegistration, registerLegacyWatch } from './legacy.js';
 
 /** Review parks, report links and explicit keys use the same source registration. */
@@ -9,9 +9,9 @@ export function umeRegistration(): WatchRegistrationPolicy {
   return {
     prepare(request) {
       const forId = request.owner.kind === 'dispatch' ? request.owner.chainId : undefined;
-      const options = request.options as { cursor?: string };
+      const options = request.options as { cursor?: string; project?: string; org?: string; cwd?: string };
       let artifact: string | undefined,
-        cwd = request.cwd;
+        cwd = request.cwd ?? options.cwd;
       if (request.event === 'explicit' && typeof request.fields.key === 'string') artifact = request.fields.key.replace(/^ume:/, '');
       if (request.event === 'turn-wait' && forId) artifact = umeTurnArtifact(request.fields as unknown as TurnWaitRegistration);
       if (request.event === 'report' && forId && request.fields.verb === 'paused') {
@@ -24,7 +24,13 @@ export function umeRegistration(): WatchRegistrationPolicy {
       if (!artifact) return undefined;
       const existing = readWatch(`ume:${artifact}`);
       if (existing && request.event !== 'explicit') return legacyRegistration(existing);
-      const plan = prepareUmeWatch(artifact, { forId, cwd, cursor: request.cursor ?? options.cursor });
+      const plan = prepareUmeWatch(artifact, {
+        forId,
+        cwd,
+        cursor: request.cursor ?? options.cursor,
+        project: options.project,
+        org: options.org,
+      });
       return legacyRegistration(
         {
           ...existing,
@@ -44,6 +50,15 @@ export function umeRegistration(): WatchRegistrationPolicy {
     sync(_now, phase) {
       if (phase === 'before-observe') syncUmeWatches();
       if (phase === 'report') clearFinishedUmeWatches();
+    },
+  };
+}
+
+export function umeWatchCommands(): WatchCommandPolicy {
+  return {
+    bindings: [{ name: 'check-ume' }],
+    run({ args, flags }) {
+      return runUmeCheck(args[0] ?? '', typeof flags['--cursor'] === 'string' ? flags['--cursor'] : undefined);
     },
   };
 }

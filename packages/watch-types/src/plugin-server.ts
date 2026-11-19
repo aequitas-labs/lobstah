@@ -1,6 +1,6 @@
 import * as readline from 'node:readline';
 import type { BaseWatchType } from './base.js';
-import type { WatchRegistrationRequest, WatchCloseReason, WatchContext, WatchSnapshot, WatchValue } from './model.js';
+import type { WatchCommandRequest, WatchRegistrationRequest, WatchCloseReason, WatchContext, WatchSnapshot, WatchValue } from './model.js';
 import {
   pluginDto,
   validateWatchFailure,
@@ -23,6 +23,7 @@ export function watchPluginManifest<Reference, State, Cursor, Options>(
   options: WatchPluginServerOptions = {},
 ): WatchPluginManifest {
   const capabilities: WatchPluginManifest['capabilities'] = {};
+  if (adapter.commands) capabilities.commands = { bindings: [...adapter.commands.bindings] };
   if (adapter.registration) capabilities.registration = true;
   if (adapter.batchObserver) capabilities.batch = true;
   if (adapter.subscriber) capabilities.subscribe = true;
@@ -87,6 +88,13 @@ export async function serveWatchPlugin<Reference, State, Cursor, Options>(
     switch (request.method) {
       case 'watch.handshake':
         return pluginDto(manifest);
+      case 'watch.command': {
+        if (!adapter.commands) throw new Error('Watch plugin command capability is unavailable');
+        const command = body.request as unknown as WatchCommandRequest;
+        if (!adapter.commands.bindings.some(binding => binding.name === command.name &&
+          (!binding.pattern || new RegExp(binding.pattern).test(command.args[0] ?? '')))) throw new Error('Unknown watch adapter command');
+        return pluginDto(adapter.commands.run(command));
+      }
       case 'watch.registration.prepare':
         if (!adapter.registration) throw new Error('Watch plugin registration capability is unavailable');
         return pluginDto(adapter.registration.prepare(body.request as unknown as WatchRegistrationRequest) ?? null);

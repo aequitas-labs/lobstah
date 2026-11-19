@@ -127,6 +127,12 @@ must grant each optional capability with `allowCapabilities`; the default is
   `before-observe`, `after-observe` and `report` boundaries. A failed source hook
   does not prevent another adapter's reconciliation. Grant `registration` in
   `allowCapabilities` to enable these hooks for a process plugin.
+- `commands`: source-owned compatibility command bindings declare a subcommand
+  name and optional input pattern. `commands.run({ name, args, flags })` returns
+  its output text. These bindings route existing CLI command forms through the
+  installed adapter; a replacement source supplies its own handlers. Configuration
+  must grant `commands` before the host calls `watch.command`. Ambiguous handlers
+  fail before either runs.
 - `batch`: the source groups compatible checks and returns a batch or failure for
   each requested key. Shared rate limits belong here.
 - `subscribe`: an async iterable yields the same batches as `poll`. The host

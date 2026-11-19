@@ -1,4 +1,4 @@
-import type { WatchRegistrationPolicy } from '../model.js';
+import type { WatchCommandPolicy, WatchRegistrationPolicy } from '../model.js';
 import type { WatchNoticePolicy } from '../model.js';
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
@@ -16,6 +16,8 @@ import type {
   WatchSnapshot,
   WatchValue,
 } from '../model.js';
+
+export const PR_WATCH_INPUT_PATTERN = '^(?:(?:pr:)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+|https?://github\\.com/[^/]+/[^/]+/pull/[0-9]+(?:[/?#].*)?)$';
 
 /** GitHub identity is canonical across report URLs, explicit keys and wharf reports. */
 export interface PrWatchReference {
@@ -63,6 +65,7 @@ export const prWatchReferenceSchema: WatchSchema<PrWatchReference> = {
 
 /** Host services supply GitHub IO and existing evidence projections, never runtime policy. */
 export interface PrWatchServices {
+  commands?: WatchCommandPolicy;
   registration?: WatchRegistrationPolicy;
   noticePolicy?: WatchNoticePolicy;
   effectHandler?: WatchEffectHandler<PrWatchReference>;
@@ -76,6 +79,7 @@ export interface PrWatchServices {
 
 /** The PR source owns identity, observation, checkpoints, errors and instructions. */
 export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, string, PrWatchOptions> {
+  readonly commands: WatchCommandPolicy | undefined;
   readonly registration: WatchRegistrationPolicy | undefined;
   readonly descriptor = {
     id: 'pr',
@@ -91,7 +95,7 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, s
     ],
   };
   readonly bindings = [
-    { event: 'explicit' as const, field: 'key', pattern: '^(?:(?:pr:)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+|https?://github\\.com/[^/]+/[^/]+/pull/[0-9]+(?:[/?#].*)?)$' },
+    { event: 'explicit' as const, field: 'key', pattern: PR_WATCH_INPUT_PATTERN },
     { event: 'report' as const, field: 'pr' },
     { event: 'legacy-command' as const, field: 'check', importsType: 'command', pattern: '[\\s\\S]+' },
   ];
@@ -132,6 +136,7 @@ export class PrWatchType extends BaseWatchType<PrWatchReference, PrWatchState, s
   readonly dispatchPolicy: PrWatchServices['dispatchPolicy'];
   constructor(private readonly services: PrWatchServices) {
     super();
+    this.commands = services.commands;
     this.registration = services.registration;
     this.batchObserver = services.batchObserver;
     this.effectHandler = services.effectHandler;

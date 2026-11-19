@@ -67,6 +67,17 @@ export interface WatchRegistrationPolicy {
   sync?(now: string, phase: 'before-observe' | 'after-observe' | 'report'): void;
 }
 
+/** Optional adapter commands retain compatibility entry points without host source branches. */
+export interface WatchCommandRequest {
+  name: string;
+  args: string[];
+  flags: Record<string, string | string[] | boolean>;
+}
+export interface WatchCommandPolicy {
+  bindings: ReadonlyArray<{ name: string; pattern?: string }>;
+  run(request: WatchCommandRequest): string;
+}
+
 /** Provider IDs are stable across polling, streaming and reconnects. */
 export interface WatchObservation {
   id: string;

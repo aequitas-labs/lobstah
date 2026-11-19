@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parse, stringify } from 'smol-toml';
 import { disposeWatchPlugins } from '@lobstah/watch-types';
 import {
+  parsePrRef,
   registerWatchEvent,
   appendStatus,
   claimBait,
@@ -18,6 +19,9 @@ import {
   unhandled,
   WatchJournal,
 } from '@lobstah/core';
+import { addCliWatch } from '../src/watch-registration.js';
+import { addPrWatch } from '../src/pr-watch.js';
+import { addUmeWatch } from '../src/ume-watch.js';
 import { createTurnWaits, readTurnWaitRecords } from '../src/turn-waits.js';
 import { createCliWatchRegistry } from '../src/watch-automation.js';
 import { buildGlassSnapshot } from '../src/glass.js';
@@ -54,6 +58,7 @@ class HarborWatch extends CommandWatchType {
     properties: { history: { type: 'string' }, cleanup: { type: 'string' }, cursor: { type: 'string' } } },
     parse(value) { if (!value || typeof value.history !== 'string' || typeof value.cleanup !== 'string') throw new Error('Missing history'); return value; } };
   identify(input) { return /^harbor:[a-z]+$/.test(input) ? { key: input } : undefined; }
+  commands = { bindings: [{ name: 'check-ume' }], run({ args }) { return JSON.stringify({ adapter: 'harbor', input: args[0] }); } };
   registration = {
     prepare(request) {
       if (request.event === 'explicit') return { input: request.fields.key, options: request.options };
@@ -197,4 +202,52 @@ it('leaves an ungranted process park on the ordinary turn-wait path', () => {
     ),
   ).toBeUndefined();
   expect(new WatchJournal().list()).toEqual([]);
+});
+
+it.each(['pr', 'ume'] as const)('honors an installed process replacement through the existing %s helper', (typeId) => {
+  const config = parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'));
+  const types = config.watchTypes as Record<string, Record<string, unknown>>;
+  const settings = types.harbor;
+  const program = (settings.command as string[])[1];
+  fs.writeFileSync(
+    program,
+    fs
+      .readFileSync(program, 'utf8')
+      .replace("id: 'harbor'", `id: '${typeId}'`)
+      .replace("pattern: '^harbor:'", `pattern: '^${typeId}:'`)
+      .replace('^harbor:[a-z]+$', `^${typeId}:.+$`),
+  );
+  config.watchTypes = { [typeId]: settings };
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  const watch = typeId === 'pr' ? addPrWatch(parsePrRef('pr:example/repo#7')!) : addUmeWatch('external');
+  expect(watch.check).toBe('');
+  expect(new WatchJournal().read(watch.key)).toMatchObject({ type: { id: typeId, installation: { kind: 'process' } } });
+});
+
+it('runs a replacement adapter command only when its command capability is granted', () => {
+  const config = parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'));
+  const settings = (config.watchTypes as Record<string, Record<string, unknown>>).harbor;
+  const program = (settings.command as string[])[1];
+  fs.writeFileSync(program, fs.readFileSync(program, 'utf8').replace("id: 'harbor'", "id: 'ume'"));
+  settings.allowCapabilities = ['poll', 'registration', 'commands'];
+  config.watchTypes = { ume: settings };
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  expect(JSON.parse(command('watch', 'check-ume', 'external'))).toEqual({ adapter: 'harbor', input: 'external' });
+  settings.allowCapabilities = ['poll', 'registration'];
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  const denied = spawnSync(process.execPath, [cli, 'watch', 'check-ume', 'external'], {
+    encoding: 'utf8',
+    timeout: 15000,
+    env: process.env,
+  });
+  expect(denied.status).toBe(1);
+  expect(denied.stdout).toContain('No installed watch type handles check-ume');
+});
+
+it('keeps the recorded owner when a compatibility helper re-registers without a new owner', () => {
+  const first = addCliWatch('harbor:repeat', { forId: owner });
+  const repeated = addCliWatch('harbor:repeat');
+  expect(first.owner).toBe(`dispatch:${owner}`);
+  expect(repeated.owner).toBe(first.owner);
+  expect(new WatchJournal().read(first.key)?.owner).toMatchObject({ kind: 'dispatch', chainId: owner });
 });

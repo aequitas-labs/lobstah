@@ -42,7 +42,7 @@ import {
   type TodoView,
   type HelmConfig,
 } from '@lobstah/core';
-import { addPrWatch } from './pr-watch.js';
+import { addCliWatch } from './watch-registration.js';
 
 export type { TodoView };
 
@@ -235,7 +235,7 @@ export function prepareTodoTriggers(values: readonly string[], mode: TodoTrigger
 
 /** Stand watch on an open PR a trigger named, as `report --pr` would; the helm owns it. Returns what to say. */
 export function watchTriggerPr(key: string): string {
-  addPrWatch(parsePrRef(key)!);
+  addCliWatch(key);
   return `watching ${key}: also wakes the helm on failing checks and requested changes`;
 }
 
