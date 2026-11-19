@@ -15,6 +15,7 @@ import type {
   WatchValue,
 } from '@lobstah/watch-types';
 import { WatchJournal } from './watch-journal.js';
+import { sourceWatchFailure } from './watch-source-errors.js';
 
 const emptyPresentation = (): WatchPresentation => ({
   title: '',
@@ -44,12 +45,36 @@ interface Execution {
   now: number;
   everySecs: number;
   previousCheckedAt?: string;
+  committed?: boolean;
+}
+
+/** Fields a source reads while producing its next checkpoint and presentation. */
+function sourceRevision(snapshot: WatchSnapshot): string {
+  return JSON.stringify([
+    snapshot.type,
+    snapshot.reference,
+    snapshot.options,
+    snapshot.state,
+    snapshot.cursor,
+    snapshot.events,
+    snapshot.failure,
+  ]);
+}
+
+/** Publish source changes without replacing concurrent delivery or action receipts. */
+function applySource(target: WatchSnapshot, source: WatchSnapshot): void {
+  target.type = source.type;
+  target.reference = source.reference;
+  target.options = source.options;
+  target.state = source.state;
+  target.cursor = source.cursor;
+  target.presentation = source.presentation;
 }
 
 /** Provider-free orchestration: identity, leases, atomic progress and durable delivery. */
 export class WatchRuntime {
   constructor(
-    readonly registry: WatchRegistry,
+    public registry: WatchRegistry,
     readonly journal = new WatchJournal(),
   ) {}
 
@@ -60,30 +85,39 @@ export class WatchRuntime {
       identified = adapter.identify(input, options);
     if (!identified) throw new Error(`Watch reference is not recognized by ${typeId}`);
     storeWatchTypeDescriptor(adapter.descriptor);
-    return this.journal.update(identified.key, (existing) => {
-      if (existing && existing.status !== 'retired') {
-        if (existing.type.id !== typeId) throw new Error(`Watch key belongs to another type: ${identified.key}`);
-        if (!ownerEqual(existing.owner, owner)) throw new Error('Watch ownership requires an explicit transfer');
-        const snapshot = adapter.restore(existing);
-        snapshot.options = identified.options;
-        snapshot.presentation = retainWatchConditionTimes(adapter.present(snapshot), snapshot.presentation, new Date().toISOString());
-        return { snapshot, result: snapshot };
-      }
-      const snapshot: WatchSnapshot = {
-        type: { ...adapter.descriptor },
-        ...identified,
-        owner,
-        generation: randomUUID(),
-        status: 'watching',
-        events: [],
-        deliveries: [],
-        presentation: emptyPresentation(),
-        createdAt: new Date().toISOString(),
-        failures: 0,
-      };
-      snapshot.presentation = retainWatchConditionTimes(adapter.present(snapshot), snapshot.presentation, new Date().toISOString());
-      return { snapshot, result: snapshot };
-    });
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const prior = this.journal.read(identified.key);
+      const active = prior && prior.status !== 'retired' ? prior : undefined;
+      if (active?.type.id && active.type.id !== typeId) throw new Error(`Watch key belongs to another type: ${identified.key}`);
+      if (active && !ownerEqual(active.owner, owner)) throw new Error('Watch ownership requires an explicit transfer');
+      const prepared: WatchSnapshot = active
+        ? adapter.restore(structuredClone(active))
+        : {
+            type: { ...adapter.descriptor },
+            ...identified,
+            owner,
+            generation: randomUUID(),
+            status: 'watching',
+            events: [],
+            deliveries: [],
+            presentation: emptyPresentation(),
+            createdAt: new Date().toISOString(),
+            failures: 0,
+          };
+      prepared.options = identified.options;
+      prepared.presentation = retainWatchConditionTimes(adapter.present(prepared), prepared.presentation, new Date().toISOString());
+      const result = this.journal.update<WatchSnapshot | undefined>(identified.key, (current) => {
+        if (current?.generation !== prior?.generation || (current && prior && sourceRevision(current) !== sourceRevision(prior)))
+          return { result: undefined };
+        if (active && current) {
+          applySource(current, prepared);
+          return { snapshot: current, result: current };
+        }
+        return { snapshot: prepared, result: prepared };
+      });
+      if (result) return result;
+    }
+    throw new Error('Watch registration changed concurrently; retry registration');
   }
 
   /** Transfer is explicit and keeps undelivered events with the watched source. */
@@ -94,6 +128,7 @@ export class WatchRuntime {
       snapshot.owner = owner;
       snapshot.generation = randomUUID();
       snapshot.lease = undefined;
+      snapshot.subscriptionLease = undefined;
       return { snapshot, result: snapshot };
     });
   }
@@ -107,6 +142,44 @@ export class WatchRuntime {
     } catch (error) {
       return this.failed(execution, error);
     }
+  }
+
+  /** A subscribed batch uses the same reducer, dedupe and outbox commit as a poll. */
+  accept(key: string, generation: string, batch: WatchObservationBatch<WatchValue>, now = Date.now()): boolean {
+    const current = this.journal.read(key);
+    if (current?.generation !== generation || current.status !== 'watching') return false;
+    const execution = this.begin(key, now, 0, true);
+    if (!execution) return false;
+    try {
+      this.complete(execution, batch);
+      return execution.committed === true;
+    } catch (error) {
+      this.failed(execution, error);
+      return false;
+    }
+  }
+
+  /** Stream failures retain the committed cursor and only hold their own source. */
+  subscriptionFailed(key: string, generation: string, error: unknown): void {
+    const observed = this.journal.read(key);
+    if (observed?.generation !== generation || observed.status !== 'watching') return;
+    let adapter: InstalledWatchType | undefined;
+    try {
+      adapter = this.registry.get(observed.type.id);
+    } catch {
+      /* Missing adapters are diagnosed by the same failure path. */
+    }
+    const failure = sourceWatchFailure(adapter, error);
+    this.journal.update(key, (current) => {
+      if (current?.generation !== generation || current.status !== 'watching') return { result: undefined };
+      current.failure = failure;
+      if (!failure.shared) current.failures++;
+      if (failure.hold) {
+        current.status = 'held';
+        current.lease = undefined;
+      }
+      return { snapshot: current, result: undefined };
+    });
   }
 
   /** The legacy synchronous command API uses the same persistence and lease rules. */
@@ -195,39 +268,54 @@ export class WatchRuntime {
       snapshot.generation = randomUUID();
       snapshot.status = 'retired';
       snapshot.lease = undefined;
+      snapshot.subscriptionLease = undefined;
       for (const delivery of snapshot.deliveries) delivery.status = 'delivered';
       return { snapshot, result: undefined };
     });
   }
 
   private begin(key: string, now: number, everySecs: number, force = false): Execution | undefined {
-    return this.journal.update<Execution | undefined>(key, (stored) => {
-      if (!stored || stored.status !== 'watching' || (stored.lease && stored.lease.until > now)) return { result: undefined };
-      const delay = Math.max(everySecs, stored.failure?.retryAfterSecs ?? 0) * 1000;
-      if (!force && stored.checkedAt && Date.parse(stored.checkedAt) + delay > now) return { result: undefined };
-      let snapshot: WatchSnapshot, adapter: InstalledWatchType | undefined;
-      try {
-        adapter = this.registry.get(stored.type.id);
-        snapshot = adapter.restore(stored);
-      } catch (error) {
-        let supplied: WatchFailure | undefined;
-        try { supplied = adapter?.failure(error); } catch { /* A broken failure formatter cannot hide the restore error. */ }
-        stored.status = 'held';
-        stored.failure = {
-          ...supplied,
-          kind: supplied?.kind ?? 'adapter',
-          message: supplied?.message ?? (error instanceof Error ? error.message : String(error)),
-          remedy: supplied?.remedy ?? 'Install a compatible watch adapter or restore its supported state version.',
-          hold: true,
-        };
-        return { snapshot: stored, result: undefined };
-      }
-      const token = randomUUID(),
-        previousCheckedAt = snapshot.checkedAt;
-      snapshot.checkedAt = new Date(now).toISOString();
-      snapshot.lease = { token, until: now + 120_000 };
-      return { snapshot, result: { snapshot, adapter, token, now, everySecs, previousCheckedAt } };
-    });
+    const claimed = this.journal.update<{ snapshot: WatchSnapshot; token: string; previousCheckedAt?: string } | undefined>(
+      key,
+      (stored) => {
+        if (!stored || stored.status !== 'watching' || (stored.lease && stored.lease.until > now)) return { result: undefined };
+        const delay = Math.max(everySecs, stored.failure?.retryAfterSecs ?? 0) * 1000;
+        if (!force && stored.checkedAt && Date.parse(stored.checkedAt) + delay > now) return { result: undefined };
+        const token = randomUUID(),
+          previousCheckedAt = stored.checkedAt;
+        stored.checkedAt = new Date(now).toISOString();
+        stored.lease = { token, until: now + 120_000 };
+        return { snapshot: stored, result: { snapshot: structuredClone(stored), token, previousCheckedAt } };
+      },
+    );
+    if (!claimed) return undefined;
+    let adapter: InstalledWatchType | undefined;
+    try {
+      adapter = this.registry.get(claimed.snapshot.type.id);
+      const restored = adapter.restore(structuredClone(claimed.snapshot));
+      const source = adapter;
+      return this.journal.update<Execution | undefined>(key, (current) => {
+        if (current?.generation !== claimed.snapshot.generation || current.lease?.token !== claimed.token || current.status !== 'watching')
+          return { result: undefined };
+        if (sourceRevision(current) !== sourceRevision(claimed.snapshot)) {
+          current.lease = undefined;
+          current.checkedAt = claimed.previousCheckedAt;
+          return { snapshot: current, result: undefined };
+        }
+        applySource(current, restored);
+        return { snapshot: current, result: { ...claimed, snapshot: structuredClone(current), adapter: source, now, everySecs } };
+      });
+    } catch (error) {
+      const failure = { ...sourceWatchFailure(adapter, error), hold: true };
+      this.journal.update(key, (current) => {
+        if (current?.generation !== claimed.snapshot.generation || current.lease?.token !== claimed.token) return { result: undefined };
+        current.status = 'held';
+        current.failure = failure;
+        current.lease = undefined;
+        return { snapshot: current, result: undefined };
+      });
+      return undefined;
+    }
   }
 
   private owns(snapshot: WatchSnapshot | undefined, execution: Execution): snapshot is WatchSnapshot {
@@ -249,53 +337,84 @@ export class WatchRuntime {
       )
         throw new Error('Invalid normalized watch event');
     }
-    return this.journal.update<WatchSnapshot | undefined>(execution.snapshot.key, (snapshot) => {
-      if (!this.owns(snapshot, execution)) return { result: snapshot };
-      if (batch.deferred) {
-        if (batch.events.length || batch.done || JSON.stringify(batch.cursor) !== JSON.stringify(snapshot.cursor))
-          throw new Error('A deferred watch batch cannot advance progress');
-        snapshot.checkedAt = execution.previousCheckedAt;
-        snapshot.lease = undefined;
-        return { snapshot, result: snapshot };
-      }
-      const plan = execution.adapter.reduce(structuredClone(snapshot), structuredClone(batch));
-      const known = new Set(snapshot.events.map((event) => event.id));
-      const fresh = batch.events.filter((event) => {
-        if (known.has(event.id)) return false;
-        known.add(event.id);
-        return true;
+    const observed = this.journal.read(execution.snapshot.key);
+    if (!this.owns(observed, execution)) return observed;
+    if (batch.deferred) {
+      if (batch.events.length || batch.done || JSON.stringify(batch.cursor) !== JSON.stringify(observed.cursor))
+        throw new Error('A deferred watch batch cannot advance progress');
+      return this.journal.update<WatchSnapshot | undefined>(observed.key, (current) => {
+        if (!this.owns(current, execution)) return { result: current };
+        current.checkedAt = execution.previousCheckedAt;
+        current.lease = undefined;
+        return { snapshot: current, result: current };
       });
-      snapshot.state = plan.state;
-      snapshot.cursor = plan.cursor;
-      snapshot.events.push(...fresh);
-      if (fresh.length) snapshot.deliveries.push({ id: randomUUID(), eventIds: fresh.map((event) => event.id), status: 'pending' });
-      snapshot.failure = batch.failure;
-      snapshot.failures = batch.failure?.shared ? snapshot.failures : batch.failure ? snapshot.failures + 1 : 0;
-      if (plan.done) snapshot.status = 'draining';
-      if (batch.failure?.hold) snapshot.status = 'held';
-      snapshot.lease = undefined;
-      snapshot.presentation = retainWatchConditionTimes(
-        execution.adapter.present(structuredClone(snapshot)),
-        snapshot.presentation,
-        new Date(execution.now).toISOString(),
-      );
-      return { snapshot, result: snapshot };
+    }
+    const prepared = structuredClone(observed);
+    const plan = execution.adapter.reduce(structuredClone(observed), structuredClone(batch));
+    const known = new Set(prepared.events.map((event) => event.id));
+    const fresh = batch.events.filter((event) => {
+      if (known.has(event.id)) return false;
+      known.add(event.id);
+      return true;
+    });
+    prepared.state = plan.state;
+    prepared.cursor = plan.cursor;
+    prepared.events.push(...fresh);
+    prepared.failure = batch.failure;
+    prepared.failures = batch.failure?.shared ? prepared.failures : batch.failure ? prepared.failures + 1 : 0;
+    if (plan.done) prepared.status = 'draining';
+    if (batch.failure?.hold) prepared.status = 'held';
+    prepared.lease = undefined;
+    prepared.presentation = retainWatchConditionTimes(
+      execution.adapter.present(structuredClone(prepared)),
+      observed.presentation,
+      new Date(execution.now).toISOString(),
+    );
+    return this.journal.update<WatchSnapshot | undefined>(observed.key, (current) => {
+      if (!this.owns(current, execution)) return { result: current };
+      if (sourceRevision(current) !== sourceRevision(observed)) {
+        current.lease = undefined;
+        current.checkedAt = execution.previousCheckedAt;
+        return { snapshot: current, result: current };
+      }
+      applySource(current, prepared);
+      execution.committed = true;
+      current.events.push(...fresh);
+      if (fresh.length) current.deliveries.push({ id: randomUUID(), eventIds: fresh.map((event) => event.id), status: 'pending' });
+      current.failure = prepared.failure;
+      current.failures = prepared.failures;
+      current.status = prepared.status;
+      current.lease = undefined;
+      return { snapshot: current, result: current };
     });
   }
 
   private failed(execution: Execution, error: unknown): WatchSnapshot | undefined {
-    return this.journal.update<WatchSnapshot | undefined>(execution.snapshot.key, (snapshot) => {
-      if (!this.owns(snapshot, execution)) return { result: snapshot };
-      snapshot.failure = execution.adapter.failure(error);
-      if (!snapshot.failure.shared) snapshot.failures++;
-      snapshot.lease = undefined;
-      if (snapshot.failure.hold) snapshot.status = 'held';
-      snapshot.presentation = retainWatchConditionTimes(
-        execution.adapter.present(structuredClone(snapshot)),
-        snapshot.presentation,
+    const failure = sourceWatchFailure(execution.adapter, error);
+    const observed = this.journal.read(execution.snapshot.key);
+    if (!this.owns(observed, execution)) return observed;
+    const prepared = structuredClone(observed);
+    prepared.failure = failure;
+    if (!failure.shared) prepared.failures++;
+    prepared.lease = undefined;
+    if (failure.hold) prepared.status = 'held';
+    try {
+      prepared.presentation = retainWatchConditionTimes(
+        execution.adapter.present(prepared),
+        observed.presentation,
         new Date(execution.now).toISOString(),
       );
-      return { snapshot, result: snapshot };
+    } catch {
+      /* Retain the last valid presentation when the source process is unavailable. */
+    }
+    return this.journal.update<WatchSnapshot | undefined>(observed.key, (current) => {
+      if (!this.owns(current, execution)) return { result: current };
+      current.failure = failure;
+      current.failures = prepared.failures;
+      current.status = prepared.status;
+      current.lease = undefined;
+      if (sourceRevision(current) === sourceRevision(prepared)) current.presentation = prepared.presentation;
+      return { snapshot: current, result: current };
     });
   }
 
@@ -325,19 +444,26 @@ export class WatchRuntime {
       if (!current || current.status === 'retired') return { result: undefined };
       if (reason === 'done' && current.status !== 'draining' && current.status !== 'closing') return { result: undefined };
       if (current.deliveries.some((delivery) => delivery.status === 'pending')) return { result: undefined };
-      if (current.actionReceipts?.some((receipt) => receipt.generation === current.generation && (receipt.status === 'pending' || receipt.status === 'running'))) return { result: undefined };
+      if (
+        current.actionReceipts?.some(
+          (receipt) => receipt.generation === current.generation && (receipt.status === 'pending' || receipt.status === 'running'),
+        )
+      )
+        return { result: undefined };
       current.status = 'closing';
       current.lease = undefined;
       return { snapshot: current, result: current };
     });
     if (!snapshot) return false;
-    const adapter = this.registry.get(snapshot.type.id);
+    let adapter: InstalledWatchType | undefined;
     try {
+      adapter = this.registry.get(snapshot.type.id);
       await adapter.close({ snapshot: structuredClone(snapshot), now: new Date().toISOString() }, reason);
     } catch (error) {
+      const failure = sourceWatchFailure(adapter, error);
       this.journal.update(key, (current) => {
         if (current?.generation !== snapshot.generation) return { result: undefined };
-        current.failure = adapter.failure(error);
+        current.failure = failure;
         return { snapshot: current, result: undefined };
       });
       return false;
@@ -352,13 +478,22 @@ export class WatchRuntime {
 
   /** Resume a held type only after its adapter can restore the stored state. */
   release(key: string): void {
+    const observed = this.journal.read(key);
+    if (!observed || observed.status !== 'held') return;
+    const restored = this.registry.get(observed.type.id).restore(structuredClone(observed));
     this.journal.update(key, (current) => {
-      if (!current || current.status !== 'held') return { result: undefined };
-      const snapshot = this.registry.get(current.type.id).restore(current);
-      snapshot.status = 'watching';
-      snapshot.failure = undefined;
-      snapshot.checkedAt = undefined;
-      return { snapshot, result: undefined };
+      if (
+        !current ||
+        current.generation !== observed.generation ||
+        current.status !== 'held' ||
+        sourceRevision(current) !== sourceRevision(observed)
+      )
+        return { result: undefined };
+      applySource(current, restored);
+      current.status = 'watching';
+      current.failure = undefined;
+      current.checkedAt = undefined;
+      return { snapshot: current, result: undefined };
     });
   }
 }

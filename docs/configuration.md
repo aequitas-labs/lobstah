@@ -660,3 +660,9 @@ answers cannot. `apply`, `remove` and grants remain person-only actions.
 | `LOBSTAH_MAN` | `=1` designates a session as the lobstah man for the `man haul` Stop hook. |
 | `LOBSTAH_TRAP_TICKET` | A ticket `man throw` reserved. `lobstah soak` redeems it and signs the session on as the reserved trap. `--ticket` takes precedence. |
 | `LOBSTAH_TERMINAL_TITLE` | `=0` stops soak from naming the terminal tab after the trap, and stow from clearing it. |
+
+## Process watch adapters
+
+Configure opt-in adapters in `[watchTypes.<id>]` with `module = "process"`, a pinned
+release and an executable argv list. See [the watch adapter guide](watch-plugins.md)
+for capability grants, environment access, registration and the versioned protocol.

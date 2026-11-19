@@ -8,6 +8,7 @@ import {
   WatchAutomationRunner,
   WatchJournal,
   WatchRuntime,
+  syncWatchSubscriptions,
   claimCommandWatchContinuation,
   reservedWatchDispatch,
   watchInstructionLines,
@@ -247,6 +248,7 @@ export async function watchLoop(
   notify: (n: ReportNotification) => void = () => {},
   registry: WatchRegistry = builtinWatchRegistry(),
 ): Promise<void> {
+  syncWatchSubscriptions(registry);
   for (const { watch, fresh } of runWatchCycle(defaultEverySecs, new Date(), { registry })) {
     if (watch.lastError) log(watchFailureLogLine(watch));
     notifyMan(watch, fresh, notify);

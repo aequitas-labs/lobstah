@@ -14,8 +14,20 @@ export function presentedWatchViews(
   const journal = journalWatchViews(exclude),
     prior = new Map(journal.map((view) => [view.snapshot.key, view]));
   const stored = journal.filter((view) => !types.has(view.snapshot.type.id));
-  for (const source of derived)
-    for (const view of source.derived!.views(new Date(now).toISOString())) {
+  for (const source of derived) {
+    let views;
+    try {
+      views = source.derived!.views(new Date(now).toISOString());
+    } catch {
+      // Keep the last supplied rows when an optional projection is unavailable.
+      for (const previous of prior.values())
+        if (previous.snapshot.type.id === source.descriptor.id) {
+          stored.push(previous);
+          prior.delete(previous.snapshot.key);
+        }
+      continue;
+    }
+    for (const view of views) {
       if (exclude.has(view.key)) continue;
       const previous = prior.get(view.key);
       if (previous) {
@@ -65,6 +77,7 @@ export function presentedWatchViews(
         pending: [],
       });
     }
+  }
   stored.push(...[...prior.values()].filter((view) => types.has(view.snapshot.type.id) && view.snapshot.status === 'held'));
   return stored;
 }

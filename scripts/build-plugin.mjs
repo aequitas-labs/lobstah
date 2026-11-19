@@ -12,9 +12,13 @@ fs.mkdirSync(path.join(out, 'dist'), { recursive: true });
 execFileSync(
   'npx',
   ['esbuild', 'apps/node/src/index.ts', '--bundle', '--platform=node', '--format=esm',
+   '--banner:js=import { createRequire as pluginCreateRequire } from "node:module"; const require = pluginCreateRequire(import.meta.url);',
    '--target=node20', '--external:openclaw', '--external:openclaw/*', `--outfile=${out}/dist/index.js`],
   { cwd: root, stdio: 'inherit' },
 );
+
+// The generic process transport loads its IO worker beside the bundle.
+execFileSync('npx', ['esbuild', 'packages/watch-types/src/plugin-worker.ts', '--bundle', '--platform=node', '--format=esm', '--target=node20', `--outfile=${out}/dist/plugin-worker.js`], { cwd: root, stdio: 'inherit' });
 
 // Default to the CLI's version: every published artifact carries one version.
 const version = process.argv[2] ?? JSON.parse(fs.readFileSync(path.join(root, 'apps/cli/package.json'), 'utf8')).version;

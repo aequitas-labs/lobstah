@@ -1,4 +1,4 @@
-import { syncLocalWatchSources } from '@lobstah/core';
+import { syncLocalWatchSources, syncWatchSubscriptions } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { syncRegisteredWatches } from './watch-observation.js';
@@ -9,6 +9,7 @@ import { clearFinishedUmeWatches, registerUmeReview, syncUmeWatches } from './um
 export function runCliWatchSources(now: number, log: (message: string) => void): void {
   const passes: Array<() => void> = [
     () => syncUmeWatches(),
+    () => syncWatchSubscriptions(createCliWatchRegistry(log), now),
     () => syncLocalWatchSources(createCliWatchRegistry(log), now),
     () => {
       syncRegisteredWatches(now);

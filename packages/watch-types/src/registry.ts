@@ -17,6 +17,7 @@ import type {
   WatchDispatchPolicy,
   WatchDerivation,
   WatchNoticePolicy,
+  WatchSubscriber,
 } from './model.js';
 
 /** Runtime type erasure happens only after each adapter validates its own schemas. */
@@ -25,6 +26,7 @@ export interface InstalledWatchType {
   bindings: readonly WatchRegistrationBinding[];
   batchObserver?: WatchBatchObserver<WatchValue, WatchValue, WatchValue, WatchValue>;
   noticePolicy?: WatchNoticePolicy;
+  subscriber?: WatchSubscriber<WatchValue, WatchValue, WatchValue, WatchValue>;
   derived?: WatchDerivation;
   effectHandler?: WatchEffectHandler<WatchValue>;
   automation?: WatchAutomation<WatchValue, WatchValue, WatchValue, WatchValue>;
@@ -88,6 +90,11 @@ export class WatchRegistry {
       descriptor: { ...adapter.descriptor },
       bindings: adapter.bindings,
       ...(adapter.noticePolicy ? { noticePolicy: adapter.noticePolicy } : {}),
+      ...(adapter.subscriber ? { subscriber: {
+        subscribe(context) {
+          return adapter.subscriber!.subscribe({ ...context, snapshot: restore(context.snapshot) }) as AsyncIterable<WatchObservationBatch<WatchValue>>;
+        },
+      } } : {}),
       ...(adapter.derived ? { derived: { views(now) { return adapter.derived!.views(now); } } } : {}),
       ...(adapter.effectHandler
         ? {

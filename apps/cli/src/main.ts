@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerInstalledWatch } from '@lobstah/core';
 import { addUmeWatch, runUmeCheck } from './ume-watch.js';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { runCliWatchSources, registerCliReportWatches } from './watch-sources.js';
@@ -402,7 +403,7 @@ work (humans and agents):
                                   entries, orphaned worktrees, stale state.
                                   Dry run by default (14 days).
   cancel <uuid>                   request cancellation
-  watch [add <key> --check <cmd> [--for <uuid>] [--cursor <c>] [--every <s>]
+  watch [add <key> [--type <id>] [--options <json>] [--check <cmd>] [--for <uuid>] [--cursor <c>] [--every <s>]
         [--brief <template>] [--stream <cmd>] | rm <key>]
                                   stand watch on something external: the check
                                   command answers "anything since {cursor}?"
@@ -4123,7 +4124,7 @@ async function mainCli(): Promise<void> {
       if (['add', 'check-pr'].includes(sub ?? '')) loadConfig({ upgrade: true });
       if (sub === 'inbox') {
         const trapId = opt('--owner')?.replace(/^wt:/, '') ?? (callerSession(opt('--session'))?.id ? trapBySession(callerSession(opt('--session'))!.id)?.trapId : undefined);
-        if (!trapId) throw new Error('watch inbox requires --trap wt:<id>');
+        if (!trapId) throw new Error('watch inbox requires --owner wt:<id>');
         const watches = pendingWatchEvents(!has('--peek'), `trap:${trapId}`);
         for (const { watch, events } of watches) {
           console.log(toonKV({ watch: watch.key, events: events.length }));
@@ -4150,7 +4151,7 @@ async function mainCli(): Promise<void> {
         const forId = opt('--for');
         const every = opt('--every');
         // Preset: a PR key or URL with no --check installs the shipped check.
-        const prRef = !check && key ? parsePrRef(key) : undefined;
+        const prRef = !check && !opt('--type') && key ? parsePrRef(key) : undefined;
         if (prRef) {
           const w = addPrWatch(prRef, { forId, everySecs: every ? Number(every) : undefined });
           console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
@@ -4164,10 +4165,24 @@ async function mainCli(): Promise<void> {
           );
           break;
         }
-        if (!check && key?.startsWith('ume:')) {
+        if (!check && !opt('--type') && key?.startsWith('ume:')) {
           const w = addUmeWatch(key.slice(4), { forId, everySecs: every ? Number(every) : undefined, cursor: opt('--cursor') });
           console.log(toonKV({ key: w.key, owner: w.owner, cursor: w.cursor, registered: true }));
           break;
+        }
+        if (!check && key) {
+          const trapOwner = opt('--owner');
+          if (trapOwner && !/^wt:[^\s]+$/.test(trapOwner)) throw new Error('Watch --owner must name a stable wt:<id> trap');
+          if (forId && trapOwner) throw new Error('Select either --for or --owner for a watch');
+          if (forId) findLane(forId);
+          const grounds = resolveGrounds(loadConfig(), opt('--grounds')).name;
+          const owner = forId ? { kind: 'dispatch' as const, chainId: forId, grounds }
+            : trapOwner ? { kind: 'trap' as const, trapId: trapOwner.slice(3), grounds } : { kind: 'helm' as const, grounds };
+          const installed = registerInstalledWatch(key, owner, opt('--options') ? JSON.parse(opt('--options')!) : {}, opt('--type'));
+          if (installed) {
+            console.log(toonKV({ key: installed.key, type: installed.type.id, owner: forId ? `dispatch:${forId}` : trapOwner ?? 'man', cursor: JSON.stringify(installed.cursor), registered: true }));
+            break;
+          }
         }
         if (!key || !check) throw new Error('watch add requires a key and --check <command>');
         const w = addWatch(key, check, {

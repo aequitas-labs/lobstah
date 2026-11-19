@@ -1,3 +1,4 @@
+import { parseWatchPluginConfiguration } from '@lobstah/watch-types';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse, stringify } from 'smol-toml';
@@ -147,6 +148,7 @@ export function validateWatchConfiguration(raw: Record<string, unknown>): void {
       throw new Error(`[watchTypes.${id}].enabled must be true or false`);
     if (options.module !== undefined && (typeof options.module !== 'string' || !options.module))
       throw new Error(`[watchTypes.${id}].module must name a built-in or process module`);
+    if (options.module === 'process') parseWatchPluginConfiguration(id, options);
     if (options.apiVersion !== undefined && options.apiVersion !== 1) throw new Error(`[watchTypes.${id}].apiVersion must be 1`);
   }
 }

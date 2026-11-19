@@ -40,17 +40,17 @@ export function restoreCommandWatch(watch: Watch, runtime = commandWatchRuntime(
     if (!binding) throw new Error(`Watch type transfer requires an explicit import: ${previous.type.id} to ${typeId}`);
     const identified = source.identify(watch.key, options);
     if (!identified) throw new Error('Watch source rejected its legacy reference');
+    // Migration can call an out-of-process adapter; prepare it before taking the publication lock.
+    const imported = source.restore({ ...structuredClone(previous), type: source.descriptor,
+      reference: identified.reference, state: identified.state, options: identified.options });
     runtime.journal.update(watch.key, (snapshot) => {
-      if (!snapshot || snapshot.generation !== previous.generation) throw new Error('Watch changed during source import');
-      // The source validates the previous checkpoint; deliveries and their reserved IDs stay intact.
-      const imported = source.restore({
-        ...snapshot,
-        type: source.descriptor,
-        reference: identified.reference,
-        state: identified.state,
-        options: identified.options,
-      });
-      return { snapshot: imported, result: undefined };
+      if (!snapshot || snapshot.generation !== previous.generation || JSON.stringify(snapshot.cursor) !== JSON.stringify(previous.cursor)) throw new Error('Watch changed during source import');
+      snapshot.type = imported.type;
+      snapshot.reference = imported.reference;
+      snapshot.state = imported.state;
+      snapshot.options = imported.options;
+      snapshot.cursor = imported.cursor;
+      return { snapshot, result: undefined };
     });
   }
   runtime.register(
@@ -62,7 +62,6 @@ export function restoreCommandWatch(watch: Watch, runtime = commandWatchRuntime(
   const legacyEvents = readWatchEvents(watch.key);
   runtime.journal.update(watch.key, (snapshot) => {
     if (!snapshot) throw new Error('Command watch registration disappeared');
-    snapshot = source.restore(snapshot);
     snapshot.originGeneration = origin;
     const known = new Set(snapshot.events.map((event) => event.id));
     const imported = legacyEvents.filter((event) => !known.has(String(event.seq)));

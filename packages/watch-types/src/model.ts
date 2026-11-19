@@ -14,8 +14,20 @@ export type WatchOwner =
   | { kind: 'dispatch'; chainId: string; grounds: string }
   | { kind: 'trap'; trapId: string; grounds: string };
 
+/** The durable record pins execution identity and capability grants, without environment values. */
+export interface WatchPluginInstallation {
+  kind: 'process';
+  protocolVersion: 1;
+  identity: string;
+  executable: string;
+  version: string;
+  envAllow: string[];
+  capabilities: string[];
+}
+
 /** Protocol compatibility, state layout and adapter release evolve separately. */
 export interface WatchTypeDescriptor {
+  installation?: WatchPluginInstallation;
   id: string;
   apiVersion: 1;
   stateVersion: number;
@@ -153,6 +165,8 @@ export interface WatchSnapshot<Reference = WatchValue, State = WatchValue, Curso
   failure?: WatchFailure;
   failures: number;
   lease?: { token: string; until: number };
+  /** Independent stream ownership; polling and streaming publish through the same observation lease. */
+  subscriptionLease?: { token: string; until: number };
 }
 
 export interface WatchContext<Reference, State, Cursor, Options> {
@@ -187,6 +201,8 @@ export interface WatchBatchObserver<Reference, State, Cursor, Options> {
 
 /** Recorded authority and expected source revision accompany every remote write. */
 export interface WatchActionRequest<Reference> {
+  /** The host attaches its claimed durable generation before invoking an effect. */
+  generation?: string;
   id: string;
   actionId: string;
   reference: Reference;
@@ -240,6 +256,8 @@ export interface WatchActionReceipt {
   generation: string;
   status: 'pending' | 'running' | 'done' | 'failed';
   lease?: { token: string; until: number };
+  /** Independent stream ownership; polling and streaming publish through the same observation lease. */
+  subscriptionLease?: { token: string; until: number };
   result?: WatchEffectResult;
   failure?: WatchFailure;
 }

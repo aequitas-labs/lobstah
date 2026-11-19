@@ -1,3 +1,4 @@
+import { sourceWatchFailure } from './watch-source-errors.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { watchJson } from '@lobstah/watch-types';
@@ -10,7 +11,7 @@ import type {
   WatchValue,
 } from '@lobstah/watch-types';
 import { WatchJournal } from './watch-journal.js';
-type ActionClaim = { kind: 'cached'; result: WatchEffectResult | undefined } | { kind: 'execute'; typeId: string } | undefined;
+type ActionClaim = { kind: 'cached'; result: WatchEffectResult | undefined } | { kind: 'execute'; typeId: string; generation: string } | undefined;
 
 /** Recorded authority binds an action, arguments, reference and source revision to one receipt. */
 export class WatchActionRunner {
@@ -80,7 +81,7 @@ export class WatchActionRunner {
       handler = adapter.effectHandler;
     if (!handler) throw new Error('Watch action handler is unavailable');
     try {
-      const result = await handler.execute(structuredClone(request));
+      const result = await handler.execute({ ...structuredClone(request), generation: claimed.generation });
       watchJson(result);
       if (!Array.isArray(result.workIds) || result.workIds.some((id) => typeof id !== 'string' || !id))
         throw new Error('Watch effect returned invalid work IDs');
@@ -91,9 +92,10 @@ export class WatchActionRunner {
       });
       return result;
     } catch (error) {
+      const failure = sourceWatchFailure(adapter, error);
       this.finish(key, request.id, token, (receipt) => {
         receipt.status = 'failed';
-        receipt.failure = adapter.failure(error);
+        receipt.failure = failure;
       });
       throw error;
     }
@@ -110,7 +112,7 @@ export class WatchActionRunner {
     if (!handler) throw new Error('Watch action handler is unavailable');
     try {
       if (handler.execution === 'async') throw new Error('An asynchronous watch effect requires the asynchronous runtime');
-      const result = handler.execute(structuredClone(request));
+      const result = handler.execute({ ...structuredClone(request), generation: claimed.generation });
       if (result && typeof (result as Promise<WatchEffectResult>).then === 'function') {
         void (result as Promise<WatchEffectResult>).catch(() => {});
         throw new Error('An asynchronous watch effect requires the asynchronous runtime');
@@ -126,9 +128,10 @@ export class WatchActionRunner {
       });
       return output;
     } catch (error) {
+      const failure = sourceWatchFailure(adapter, error);
       this.finish(key, request.id, token, (receipt) => {
         receipt.status = 'failed';
-        receipt.failure = adapter.failure(error);
+        receipt.failure = failure;
       });
       throw error;
     }
@@ -151,7 +154,7 @@ export class WatchActionRunner {
       if (snapshot.actionReceipts?.some((entry) => entry.lease && entry.lease.until > Date.now())) return { result: undefined };
       receipt.status = 'running';
       receipt.lease = { token, until: Date.now() + 120_000 };
-      return { snapshot, result: { kind: 'execute', typeId: snapshot.type.id } };
+      return { snapshot, result: { kind: 'execute', typeId: snapshot.type.id, generation: snapshot.generation } };
     });
   }
 

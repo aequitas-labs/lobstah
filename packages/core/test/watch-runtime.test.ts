@@ -326,3 +326,21 @@ it('the synchronous batch boundary reports an async source without an unhandled 
   });
   await Promise.resolve();
 });
+
+
+it('runs adapter transformations outside publication locks and preserves concurrent delivery progress', () => {
+  const adapter = new FixtureWatch();
+  const service = runtime(adapter);
+  const originalReduce = adapter.reduce.bind(adapter);
+  service.register('fixture', 'build:one', { check: 'unused' }, owner);
+  adapter.reduce = (snapshot, observations) => {
+    expect(fs.readdirSync(service.journal.directory).filter((name) => name.endsWith('.lock'))).toEqual([]);
+    service.journal.update(snapshot.key, (current) => {
+      current!.deliveryProgress = { seenAt: 42, lastFollowUpId: 'reserved-work' };
+      return { snapshot: current, result: undefined };
+    });
+    return originalReduce(snapshot, observations);
+  };
+  const result = service.checkSync('build:one', { now });
+  expect(result).toMatchObject({ cursor: '1', deliveryProgress: { seenAt: 42, lastFollowUpId: 'reserved-work' } });
+});

@@ -140,6 +140,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   watch: {
     subverbs: ['add', 'rm', 'ls', 'inbox', 'check-pr', 'check-ume', 'backfill', 'hold', 'release'],
     flags: {
+      '--type': { value: '<id>' },
+      '--options': { value: '<json>' },
       '--owner': { value: '<wt:id>' },
       '--peek': {},
       '--check': { value: '<cmd>' },
@@ -151,7 +153,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--apply': {},
       '--all': {},
     },
-    flagSubverbs: { '--owner': ['inbox'], '--peek': ['inbox'], '--apply': ['backfill'], '--all': ['release'] },
+    flagSubverbs: { '--type': ['add'], '--options': ['add'], '--owner': ['add', 'inbox'], '--peek': ['inbox'], '--apply': ['backfill'], '--all': ['release'] },
     positionals: '[<key>]',
   },
   soak: {
@@ -410,7 +412,7 @@ A draft is staged on the PR as your pending review: edit and send it in your rev
 post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
 pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
   watch: `Stand watch; bare \`watch\` lists source rows and held errors. \`watch add pr:<o>/<r>#<n>\` or \`watch add ume:<artifact>\` installs a builtin adapter.
---check keeps a custom command; --for records its dispatch owner. \`watch inbox --owner wt:<id>\` consumes direct trap feedback (--peek leaves it buffered).
+\`watch add <reference> --type <id> --options <json>\` registers any installed adapter. --for records its dispatch owner; --owner records a stable trap. --check keeps a custom command. \`watch inbox --owner wt:<id>\` consumes direct trap feedback (--peek leaves it buffered).
 \`watch hold <key> [--for <id>]\` holds repairs; \`watch release <key>|--all\` frees holds. Reads never register watches.`,
   soak: `Volunteer as worker. End your turn: Stop waits without waking on quiet deadlines. --wait does the same for hookless sessions; --timeout 0 probes once. Idle traps auto-stow after [soak].idleStowMins (60 by default), keeping the worktree. --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.
 Sessions reuse traps. --one stows after a catch; --name, --link set name, URL; --remote-link: the https://claude.ai/code/… URL Claude printed.

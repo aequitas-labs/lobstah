@@ -147,3 +147,6 @@ export { createPrMergeWatchType } from './pr-merge-watch-source.js';
 export * from './ume-watch-source.js';
 
 export * from './local-watch-source.js';
+
+export { registerInstalledWatch } from './watch-registration.js';
+export { WatchSubscriptionManager, syncWatchSubscriptions } from './watch-subscriptions.js';

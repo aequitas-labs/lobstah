@@ -13,11 +13,17 @@ fs.mkdirSync(path.join(out, 'dist'), { recursive: true });
 const external = ['@anthropic-ai/claude-agent-sdk', '@openai/codex-sdk', 'ws'];
 const common = [
   '--bundle', '--platform=node', '--format=esm', '--target=node20',
+  '--banner:js=import { createRequire as pluginCreateRequire } from "node:module"; const require = pluginCreateRequire(import.meta.url);',
   ...external.map((e) => `--external:${e}`),
 ];
 execFileSync('npx', ['esbuild', 'apps/cli/src/main.ts', ...common, `--outfile=${out}/dist/main.js`], { cwd: root, stdio: 'inherit' });
 execFileSync('npx', ['esbuild', 'packages/runner/src/index.ts', ...common, `--outfile=${out}/dist/runner.js`], { cwd: root, stdio: 'inherit' });
 execFileSync('npx', ['esbuild', 'apps/cli/src/wharf-trap-runner.ts', ...common, `--outfile=${out}/dist/wharf-trap-runner.js`], { cwd: root, stdio: 'inherit' });
+execFileSync('npx', ['esbuild', 'packages/watch-types/src/plugin-worker.ts', ...common, `--outfile=${out}/dist/plugin-worker.js`], { cwd: root, stdio: 'inherit' });
+execFileSync('npx', ['esbuild', 'packages/watch-types/src/index.ts', ...common, `--outfile=${out}/dist/watch-types.js`], { cwd: root, stdio: 'inherit' });
+// Keep declaration-relative imports intact for external TypeScript adapter authors.
+fs.cpSync(path.join(root, 'packages/watch-types/dist'), path.join(out, 'dist/watch-types'), { recursive: true, filter: (file) => fs.statSync(file).isDirectory() || file.endsWith('.d.ts') });
+
 
 // Default to the CLI's version: every published artifact carries one version.
 const version = process.argv[2] ?? JSON.parse(fs.readFileSync(path.join(root, 'apps/cli/package.json'), 'utf8')).version;
@@ -32,6 +38,7 @@ fs.writeFileSync(
       author: 'aequitas labs LLC',
       type: 'module',
       bin: { lobstah: 'dist/main.js' },
+      exports: { './watch-types': { types: './dist/watch-types/index.d.ts', import: './dist/watch-types.js' }, './dist/*': './dist/*', './package.json': './package.json' },
       files: ['dist', 'docs', 'pet', 'README.md', 'LICENSE'],
       engines: { node: '>=20' },
       keywords: ['agents', 'claude-code', 'codex', 'supervisor', 'coding-agents', 'worktree', 'orchestration'],
