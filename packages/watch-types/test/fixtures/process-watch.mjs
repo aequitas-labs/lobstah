@@ -41,13 +41,13 @@ export class FixtureProcessWatch extends CommandWatchType {
     const history = JSON.parse(fs.readFileSync(context.snapshot.options.history, 'utf8'));
     for (const batch of history.stream ?? []) { if (context.signal?.aborted) return; yield batch; }
   } };
-  effectHandler = { execution: 'sync', execute(request) { fs.writeFileSync(request.arguments.output, JSON.stringify(request)); return { workIds: [request.id] }; } };
+  effectHandler = { execution: 'sync', execute(request) { fs.writeFileSync(request.arguments.output, JSON.stringify(request)); return { workIds: [request.id], ...(request.arguments.includeData ? { data: { acknowledged: true } } : {}) }; } };
   dispatchPolicy = { plan: ({ events }) => ({ disposition: 'continue', eventIds: events.map((event) => event.id), notes: [] }), prepareBrief: (_context, filled) => filled + '\nRead the fixture feedback.', delivered() {} };
   automation = { propose: () => [] };
   derived = { views: () => [] };
   noticePolicy = { kinds: ['fixture:notice'], quietKinds: ['fixture:quiet'], current: (notice) => notice.stateHash === 'current', relatedDispatches: () => [] };
 }
-export const fixtureActionSchemas = { arguments: { type: 'object', required: ['output'], additionalProperties: false, properties: { output: { type: 'string' } } }, result: { type: 'object', required: ['workIds'], additionalProperties: false, properties: { workIds: { type: 'array', items: { type: 'string' } } } } };
+export const fixtureActionSchemas = { arguments: { type: 'object', required: ['output'], additionalProperties: false, properties: { output: { type: 'string' }, includeData: { type: 'boolean' } } }, result: { type: 'object', required: ['workIds'], additionalProperties: false, properties: { workIds: { type: 'array', items: { type: 'string' } }, data: {} } } };
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const adapter = new FixtureProcessWatch();
   if (process.argv.includes('--release-2')) adapter.descriptor.version = '2.0.0';

@@ -193,3 +193,11 @@ it('rejects a subscription notification from a stale generation', async () => {
     await transport.dispose();
   }
 });
+
+
+it('preserves adapter-specific JSON effect data after the common and action-specific result checks', () => {
+  history({ cursor: 0 });
+  const adapter = new ProcessWatchType(config());
+  const request = { id: 'effect-with-data', generation: 'generation-1', actionId: 'acknowledge', reference: { key: 'fixture:one' }, expectedRevision: 'revision-1', authorization: { id: 'human', by: 'chris', at: '2026-11-19T00:00:00.000Z' }, arguments: { output: path.join(home, 'effect.json'), includeData: true } };
+  expect(adapter.effectHandler!.execute(request)).toEqual({ workIds: [request.id], data: { acknowledged: true } });
+});

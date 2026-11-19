@@ -488,7 +488,7 @@ export const watchEffectResultSchema: PluginJsonSchema = {
   type: 'object',
   required: ['workIds'],
   additionalProperties: false,
-  properties: { workIds: { type: 'array', items: { type: 'string', minLength: 1 } } },
+  properties: { workIds: { type: 'array', items: { type: 'string', minLength: 1 } }, data: {} },
 };
 
 /** Separate transport settings from adapter-owned defaults before validating source options. */
