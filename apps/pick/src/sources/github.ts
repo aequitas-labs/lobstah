@@ -152,6 +152,7 @@ export class GithubSource implements Source, MergeSource {
         repoKey: this.cfg.key,
         title: pr.title,
         followUp: uuid,
+        pr: { url: pr.html_url, headRefName: pr.head.ref, headSha: pr.head.sha, ...(feedback.reviewThreadId ? { reviewThreadId: feedback.reviewThreadId } : {}) },
         ...(feedback.heldOnly ? { heldOnly: true } : {}),
         brief: withBriefHooks(
           `Address the review feedback on ${pr.html_url} (branch ${pr.head.ref}). Check out that branch in this worktree, read the full review discussion with \`gh pr view ${pr.number} --comments\`, implement what the feedback asks, and push. Reply to review threads where a reply is warranted. ${markRepliesRule(uuid)} When the feedback is addressed, report status done.`,
@@ -183,7 +184,7 @@ export class GithubSource implements Source, MergeSource {
    * counts once the run ends, unless that run was itself opened only by
    * held comments, in which case it is dropped.
    */
-  private async latestFeedback(n: number, runs: readonly PrRun[]): Promise<{ tag: string; heldOnly: boolean } | undefined> {
+  private async latestFeedback(n: number, runs: readonly PrRun[]): Promise<{ tag: string; heldOnly: boolean; reviewThreadId?: number } | undefined> {
     const pr = parsePrRef(`https://github.com/${this.cfg.repo}/pull/${n}`)!;
     const events: Array<{ at: string; tag: string; own: boolean }> = [];
     const own = (login: string): boolean => login === this.cfg.identity;
@@ -203,7 +204,9 @@ export class GithubSource implements Source, MergeSource {
       if (routePrQuestionReply(pr, c, this.cfg.identity)) continue;
       if (!lobstahWrote(c.body)) events.push({ at: c.created_at, tag: `ic${c.id}`, own: own(c.user.login) });
     }
-    return guardFeedback(events, runs);
+    const feedback = guardFeedback(events, runs);
+    const origin = feedback && comments.find((comment) => feedback.tag === `rc${comment.id}`);
+    return feedback ? { ...feedback, ...(origin ? { reviewThreadId: origin.in_reply_to_id ?? origin.id } : {}) } : undefined;
   }
 
   private async paged<T>(url: string): Promise<T[]> {

@@ -1,7 +1,9 @@
 import { HIDDEN_MARKER, hiddenMarker } from '@lobstah/core';
-import type { Evidence, Verb } from '@lobstah/core';
+import type { DescriptorPr, Evidence, Verb } from '@lobstah/core';
 
 export interface WorkItem {
+  /** The existing PR and precise originating thread for a feedback round. */
+  pr?: DescriptorPr;
   /** Stable tracker key, e.g. "linear:BAS-12" or "gh:owner/repo#pr34@rv567". */
   key: string;
   kind: 'issue' | 'review';

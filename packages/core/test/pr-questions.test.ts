@@ -163,3 +163,12 @@ it('does not publish an obsolete question first discovered after work already re
   await syncDispatchPrQuestions(id, 'work', transport);
   expect(transport.post).not.toHaveBeenCalled();
 });
+
+it('does not treat every thread listed in a feedback brief as the question origin', () => {
+  const other = '22222222-2222-4222-8222-222222222222';
+  enqueue({ id: other, repo: 'r', brief: `${pr.url}#discussion_r88\n${pr.url}#discussion_r89`, pr: { url: pr.url, reviewThreadId: 88 } }); claimNext('work');
+  appendStatus(other, 'work', 'needs-decision', 'A different question', askedAt);
+  const question = capturePrQuestions(other, 'work')[0]!;
+  expect(question.reviewThreadIds).toEqual([88]);
+  expect(routePrQuestionReply(pr, reply({ body: 'Unrelated review feedback', in_reply_to_id: 89 }), transport.identity, 'review')).toBe(false);
+});

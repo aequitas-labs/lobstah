@@ -163,7 +163,9 @@ describe('post-PR feedback pickup', () => {
         issueComments: [{ id: 52, login: 'chris', body: markedNote('reset'), at: '2026-09-21T13:00:00Z' }],
       },
     ]);
-    expect((await source().poll()).map((i) => i.key)).toEqual(['gh:o/r#pr12@rc42']);
+    const items = await source().poll();
+    expect(items.map((i) => i.key)).toEqual(['gh:o/r#pr12@rc42']);
+    expect(items[0]?.pr).toMatchObject({ url: 'https://github.com/o/r/pull/12', reviewThreadId: 42 });
   });
 
   it('the review-feedback brief tells the worker to mark its replies', async () => {

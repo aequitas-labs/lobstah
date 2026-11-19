@@ -37,7 +37,7 @@ function inboxDir(id: string, lane: Lane): string {
 export function sendMessage(id: string, lane: Lane, text: string, from?: string, attachments: Attachment[] = []): string {
   return withInboxWrite(id, lane, () => {
     const question = questionEntry(readStatusLog(id, lane));
-    const questionAt = question && !answeredAt(id, lane, question.at) ? question.at : undefined;
+    const questionAt = (from !== undefined || attachments.length > 0) && question && !answeredAt(id, lane, question.at) ? question.at : undefined;
     return appendMessage(id, lane, text, from, attachments, undefined, undefined, questionAt);
   });
 }

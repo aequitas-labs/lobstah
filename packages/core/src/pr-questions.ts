@@ -92,10 +92,12 @@ export function capturePrQuestions(id: string, lane: Lane, target?: PrRef): PrQu
   const pr = target ?? dispatchQuestionPr(id, lane);
   if (!pr) return records;
   const descriptor = storedDescriptor(id, lane);
-  const threadIds = [...new Set([...((descriptor?.brief ?? '').matchAll(/#discussion_r(\d+)/g))].map((match) => Number(match[1])))];
+  const briefThreadIds = [...new Set([...((descriptor?.brief ?? '').matchAll(/#discussion_r(\d+)/g))].map((match) => Number(match[1])))];
   entries.forEach((entry, index) => {
     if (entry !== standing) return;
     if (records.some((question) => question.number === index + 1)) return;
+    const explicitThreads = [...new Set([...(entry.note ?? '').matchAll(/#discussion_r(\d+)/g)].map((match) => Number(match[1])))];
+    const threadIds = explicitThreads.length ? explicitThreads : descriptor?.pr?.reviewThreadId ? [descriptor.pr.reviewThreadId] : briefThreadIds.length === 1 ? briefThreadIds : [];
     const question: PrQuestion = { dispatch: id, lane, number: index + 1, askedAt: entry.at, text: entry.note ?? 'A decision is needed.', pr, reviewThreadIds: threadIds, replies: [] };
     saveQuestion(question); records.push(question);
   });
