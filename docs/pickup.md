@@ -337,10 +337,12 @@ click, including when the repo otherwise enables automatic posting. While
 repair runs, Glass shows only a quiet Updating state without a new attention
 badge. Muting, dismissing, closing, or explicitly cancelling stops the repair.
 
-Reviews sharing an unambiguous branch stack appear together, bottom to top,
-with per-PR status and overall review progress. In a stack review, Previous and
-Next buttons, left/right arrow keys, and horizontal mobile swipes move between
-PRs. Each move updates the URL; browser Back returns through prior PRs.
+Reviews sharing an unambiguous branch stack appear in one stack card, bottom
+to top, with per-PR status and overall review progress. The stack container
+has only its title and progress; actions stay on each PR card inside it.
+Stacks keep their PR cards in both card and table views. In a stack review,
+Previous and Next buttons, left/right arrow keys, and horizontal mobile swipes
+move between PRs. Each move updates the URL; browser Back returns through prior PRs.
 Standalone PRs keep their existing layout. “Needs your review” stays open.
 “Waiting on response” holds submitted comments, change requests, and approvals
 on open PRs; “Done” holds merged and closed PRs, newest first. Both sections

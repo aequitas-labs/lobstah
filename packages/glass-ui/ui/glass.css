@@ -2966,6 +2966,14 @@ a.lob {
 .rv-group + .rv-group {
   margin-top: calc(2 * var(--space-4));
 }
+.rv-stack {
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  padding: var(--space-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .rv-stack-nav {
   display: flex;
   align-items: center;

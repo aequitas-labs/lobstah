@@ -685,6 +685,44 @@ describe('review requests on /requests', () => {
 });
 
 
+it.each(['cards', 'table'])('keeps stack actions on its PR cards in %s view', async (view) => {
+  const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8].map(number => `review:acme/web#${number}`) };
+  const reviews = [8, 7].map(number => review(number, { stack, state: 'drafted', staged: true, verdict: 'comment' }));
+  const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view } });
+  open.push(g);
+  const container = g.$('[data-review-stack="pr:acme/web#7"]')!;
+  expect(container.getAttribute('aria-label')).toBe('Files');
+  expect(g.$$('#reviews [data-review-stack]')).toHaveLength(1);
+  expect(container.querySelector('header')!.textContent).toContain('FilesBottom → top · #7 → #8 · 2 of 2 reviews ready');
+  expect(container.querySelector('header')!.querySelector('button, a, input, select, [role="button"]')).toBeNull();
+  expect(Array.from(container.querySelectorAll('[data-review]')).map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
+  expect(container.querySelector('table')).toBeNull();
+  for (const key of stack.keys) {
+    const pr = container.querySelector(`[data-review="${key}"]`)!;
+    expect(pr.tagName).toBe('DIV');
+    expect(pr.textContent).toContain('Ready to post');
+    expect(Array.from(pr.querySelectorAll('button')).some(button => button.textContent === 'Publish')).toBe(true);
+  }
+});
+
+it.each(['needs', 'waiting', 'done'] as const)('places a complete stack only in its topmost %s section', async (section) => {
+  const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8, 9].map(number => `review:acme/web#${number}`) };
+  const reviews = [
+    review(9, { stack, state: section === 'needs' ? 'drafted' : section === 'waiting' ? 'posted' : 'merged', prState: section === 'done' ? 'MERGED' : 'OPEN', verdict: 'comment' }),
+    review(7, { stack, state: 'merged', prState: 'MERGED' }),
+    review(8, { stack, state: section === 'done' ? 'closed' : 'posted', prState: section === 'done' ? 'CLOSED' : 'OPEN', verdict: 'request_changes' }),
+  ];
+  const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards', reviewSections: { waiting: true, done: true } } });
+  open.push(g);
+  expect(g.$$('#reviews [data-review-stack]')).toHaveLength(1);
+  const container = g.$(`[data-review-section="${section}"] [data-review-stack]`)!;
+  expect(container).toBeTruthy();
+  expect(Array.from(container.querySelectorAll('[data-review]')).map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
+  expect(container.querySelector('[data-review="review:acme/web#7"]')!.textContent).toContain('Merged');
+  for (const other of ['needs', 'waiting', 'done'].filter(id => id !== section))
+    expect(g.$(`[data-review-section="${other}"] [data-review]`)).toBeNull();
+});
+
 it('groups stacks in bottom-to-top order and navigates with buttons, arrows, swipes, and browser Back', async () => {
   const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8, 9].map(number => `review:acme/web#${number}`) };
   const reviews = [9, 7, 8].map(number => review(number, { stack, state: 'drafted' }));
