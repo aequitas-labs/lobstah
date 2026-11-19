@@ -389,6 +389,8 @@ export interface GlassReview {
   /** The reviewer's own earlier threads this draft resolves on publish; each can be unticked. */
   threadsToResolve?: import('./review-threads.js').ReviewThreadToResolve[];
   needsYou?: boolean;
+  /** No one asks the person to review this open PR any more; its rounds are history. */
+  requestRemoved?: boolean;
   seenAt?: string;
   acknowledgedAt?: string;
   notification?: import('./reviews.js').ReviewNotification;

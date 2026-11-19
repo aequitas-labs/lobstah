@@ -1,4 +1,4 @@
-import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot, derivePrStacks, reviewThreadsToResolve } from '@lobstah/core';
+import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot, derivePrStacks } from '@lobstah/core';
 import type { GlassReview, PrEvidence } from '@lobstah/core';
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -51,7 +51,9 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const name = person.name;
     const avatar = person.avatarUrl;
     const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
-    const threadsToResolve = draft && !('error' in draft) ? reviewThreadsToResolve(r, draft.threads, config.identity) : [];
+    // Submitting a review ends its request too; that round and a re-review are not removed requests.
+    const requestRemoved = !!item.unseenAt && item.pr.state === 'OPEN' && r.state !== 'posted' && !r.reReview;
+    const threadHistory = item.rounds.flatMap(round => round.threadResolutions ?? []).sort((a, b) => b.at.localeCompare(a.at));
     out.push({
       ...(stack ? { stack: { id: stack.id, title: stack.title, keys: stack.members.map(member => items.find(item => item.pr.url === member.url)!.key) } } : {}),
       updatedAt: item.updatedAt,
@@ -60,7 +62,7 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       roundId: r.id, decisions: r.decisions, decisionAnswers: r.decisionAnswers,
       verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
       ...(draft && !('error' in draft) ? { summary: draft.body, comments: draft.comments, decisions: draft.decisions } : {}),
-      ...(threadsToResolve.length ? { threadsToResolve } : {}),
+      ...(threadHistory.length ? { threadHistory } : {}),
       mode: reviewSettings(config, item.pr.repoKey).mode,
       publish: reviewSettings(config, item.pr.repoKey).publish,
       key: item.key,
@@ -81,7 +83,8 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       requestedBy: asker,
       requestedAt: r.requestedAt,
       state: r.state,
-      stands: reviewStands(r),
+      ...(requestRemoved ? { requestRemoved } : {}),
+      stands: !requestRemoved && reviewStands(r),
       ...(!r.refresh && r.reason ? { reason: r.reason } : {}),
       headSha: r.headSha,
       prHeadSha: item.pr.headSha,

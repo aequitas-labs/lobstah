@@ -37,6 +37,8 @@ interface Pr {
   state?: 'OPEN' | 'MERGED' | 'CLOSED';
   reviews?: Array<{ id: number; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; head: string; at: string }>;
   requests?: Array<{ id: string; at: string; to: string; team?: boolean; actor?: { login: string; __typename?: string; name?: string; avatarUrl?: string } }>;
+  /** The PR's current review requests: a person's login, or a team's member logins. */
+  reviewers?: Array<{ user: string } | { team: string[] }>;
 }
 
 function node(pr: Pr) {
@@ -71,7 +73,11 @@ function gh(prs: Pr[], calls: Array<{ query: string; q: string }>, issueCount?: 
       ? { rateLimit: { cost: 1 }, search: { issueCount: issueCount ?? prs.length, nodes: prs.map(node) } }
       : Object.fromEntries(Object.keys(body.variables).filter((key) => key.startsWith('number')).map((key) => {
           const pr = missing.find((candidate) => candidate.number === body.variables[key]);
-          return [`pr${key.slice('number'.length)}`, { pullRequest: { state: pr?.state ?? 'OPEN', reviews: node(pr ?? { number: Number(body.variables[key]) }).reviews } }];
+          const reviewers = pr?.reviewers ?? [];
+          if (body.query.includes('members(')) return [`pr${key.slice('number'.length)}`, { pullRequest: { reviewRequests: { nodes: reviewers.map((r) =>
+            ({ requestedReviewer: 'team' in r ? { members: { nodes: r.team.map((login) => ({ login })) } } : {} })) } } }];
+          return [`pr${key.slice('number'.length)}`, { pullRequest: { state: pr?.state ?? 'OPEN', reviews: node(pr ?? { number: Number(body.variables[key]) }).reviews,
+            reviewRequests: { nodes: reviewers.map((r) => ({ requestedReviewer: 'team' in r ? { __typename: 'Team' } : { __typename: 'User', login: r.user } })) } } }];
         }));
     return { status: 0, stdout: headers + JSON.stringify({ data }) };
   };
@@ -419,6 +425,58 @@ describe('the reviews loop', () => {
     await reviewsLoop(ME, tok, (m) => logs.push(m), { run: gh([{ number: 2 }], []) });
     expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe('withdrawn');
     expect(logs).toEqual(['review:acme/web#1: review request gone; round withdrawn']);
+  });
+
+  it.each([
+    { reviewers: [{ user: ME }], expected: 'requested' },
+    { reviewers: [{ team: ['dana', ME] }], expected: 'requested' },
+    { reviewers: [{ team: ['dana'] }], expected: 'withdrawn' },
+    { reviewers: [{ user: 'dana' }], expected: 'withdrawn' },
+  ] as const)('re-checks the PR\'s current requests before withdrawing: $reviewers', async ({ reviewers, expected }) => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    await reviewsLoop(ME, tok, () => {}, { run: gh([], [], undefined, [{ number: 1, reviewers: [...reviewers] }]) });
+    const item = readReview('review:acme/web#1')!;
+    expect(latestRound(item)!.state).toBe(expected);
+    expect(item.unseenAt !== undefined).toBe(expected === 'withdrawn');
+  });
+
+  it('keeps a team request as asked when its members cannot be read', async () => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    const fake = gh([], [], undefined, [{ number: 1, reviewers: [{ team: ['dana'] }] }]);
+    const run: GhGraphql = (body, token) => body.query.includes('members(') ? { status: 1, stdout: '', stderr: 'read:org scope required' } : fake(body, token);
+    await reviewsLoop(ME, tok, () => {}, { run });
+    expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe('requested');
+    expect(readReview('review:acme/web#1')!.unseenAt).toBeUndefined();
+  });
+
+  it.each([
+    { round: 'an automatic refresh', refresh: true, drafts: false },
+    { round: 'a New review the person asked for', refresh: false, drafts: true },
+  ])('after the request is removed, $round drafts: $drafts', async ({ refresh, drafts }) => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    const item = readReview('review:acme/web#1')!;
+    Object.assign(latestRound(item)!, { localRequest: true, ...(refresh ? { refresh: { attempts: 1, retryAt: '2026-10-15T09:00:00Z' } } : {}) });
+    writeReview(item);
+    fs.writeFileSync(path.join(home, 'config.toml'), ['[reviews]', 'enabled = true', 'work = "headless"', 'requestedAfter = "1970-01-01T00:00:00Z"', ...CONFIG.slice(3)].join('\n'));
+    await reviewsLoop(ME, tok, () => {}, { run: gh([], [], undefined, [{ number: 1 }]) });
+    expect(readReview('review:acme/web#1')!.unseenAt).toBeDefined();
+    expect(latestRound(readReview('review:acme/web#1')!)!.state).toBe(drafts ? 'drafting' : 'requested');
+    expect(pendingIds('chore')).toHaveLength(drafts ? 1 : 0);
+  });
+
+  it('a request that returns clears the removed mark', async () => {
+    config();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    const item = readReview('review:acme/web#1')!;
+    latestRound(item)!.localRequest = true;
+    writeReview(item);
+    await reviewsLoop(ME, tok, () => {}, { run: gh([], [], undefined, [{ number: 1 }]) });
+    expect(readReview('review:acme/web#1')!.unseenAt).toBeDefined();
+    await reviewsLoop(ME, tok, () => {}, { run: gh([{ number: 1 }], []) });
+    expect(readReview('review:acme/web#1')!.unseenAt).toBeUndefined();
   });
 
   it('a failed search changes nothing', async () => {
