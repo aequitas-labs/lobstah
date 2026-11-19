@@ -298,6 +298,10 @@ export interface ReviewRound {
 }
 
 export interface ReviewPr {
+  /** GitHub branches used by the shared PR stack detector. */
+  headRefName?: string;
+  baseRefName?: string;
+  isCrossRepository?: boolean;
   owner: string;
   repo: string;
   number: number;
@@ -564,7 +568,8 @@ export function withdrawUnseenReviews(seen: ReadonlySet<string>, inScope: (item:
       writeReview({ ...item, updatedAt: at });
       continue;
     }
-    if (latest.localRequest || !OPEN_STATES.includes(latest.state)) continue;
+    // A pending review remains actionable even after GitHub removes the request.
+    if (latest.staged || latest.localRequest || !OPEN_STATES.includes(latest.state)) continue;
     latest.state = 'withdrawn';
     latest.reason = 'the review request was removed';
     writeReview({ ...item, updatedAt: at });

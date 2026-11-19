@@ -534,3 +534,18 @@ it('an explicit Draft action can start an old request held by the default activa
   expect(await draftReviewOnDemand(KEY, NOW)).toBeUndefined();
   expect(round()).toMatchObject({ state: 'drafting', onDemand: true });
 });
+
+
+it('keeps a June request (#689) visible without drafting in notify mode, regardless of age or cap', () => {
+  config('mode = "notify"', 'maxPerDay = 0');
+  request({ number: 689 });
+  const key = 'review:acme/web#689';
+  const item = readReview(key)!;
+  item.pr.state = 'OPEN';
+  latestRound(item)!.requestedAt = '2026-06-17T19:53:33Z';
+  writeReview(item);
+  draftReviews('chris', () => {}, NOW);
+  expect(latestRound(readReview(key)!)).toMatchObject({ state: 'requested' });
+  expect(latestRound(readReview(key)!)!.reason).toBeUndefined();
+  expect(pendingIds('chore')).toEqual([]);
+});

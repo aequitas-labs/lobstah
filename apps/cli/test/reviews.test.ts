@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, executorPath, latestRound, observeReviewRequest, readReview, reviewBrief, reviewRoundDir, writeReview } from '@lobstah/core';
+import { ensureLayout, executorPath, latestRound, observeReviewRequest, readReview, reviewBrief, reviewRoundDir, writeReview, withdrawUnseenReviews } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
 import { reviewRows, glassReviews } from '../src/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -87,4 +87,29 @@ describe('lobstah reviews', () => {
     expect(reviewRows()).toHaveLength(2);
     expect(reviewRows(true)[0]).toMatchObject({ title: expect.stringMatching(/^pr /), author: 'dana', requestedBy: 'dana' });
   });
+});
+
+
+it('keeps a staged draft in the CLI and glass after the review request disappears', () => {
+  request(7);
+  const item = readReview('review:acme/web#7')!;
+  item.pr.state = 'OPEN';
+  Object.assign(latestRound(item)!, { state: 'drafted', staged: { reviewId: '77', at: new Date().toISOString() } });
+  writeReview(item);
+  expect(withdrawUnseenReviews(new Set(), () => true)).toEqual([]);
+  expect(reviewRows()).toMatchObject([{ state: 'drafted', stagedReviewUrl: expect.stringContaining('pullrequestreview-77') }]);
+  expect(glassReviews()).toMatchObject([{ state: 'drafted', staged: true }]);
+});
+
+it('uses branch stack order for review requests without requiring PR watches', () => {
+  for (const number of [9, 7, 8]) {
+    request(number);
+    const item = readReview(`review:acme/web#${number}`)!;
+    item.pr.headRefName = `branch-${number}`;
+    item.pr.baseRefName = number === 7 ? 'main' : `branch-${number - 1}`;
+    writeReview(item);
+  }
+  const keys = [7, 8, 9].map(number => `review:acme/web#${number}`);
+  expect(glassReviews()).toHaveLength(3);
+  for (const row of glassReviews()) expect(row.stack?.keys).toEqual(keys);
 });

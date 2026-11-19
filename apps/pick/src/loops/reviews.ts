@@ -66,7 +66,7 @@ export const REVIEW_SEARCH = `query($q: String!, $identity: String!) {
     issueCount
     nodes {
       ... on PullRequest {
-        number url title isDraft headRefOid baseRefOid
+        number url title isDraft headRefOid baseRefOid headRefName baseRefName isCrossRepository
         author { login avatarUrl ... on User { name } }
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
@@ -86,6 +86,9 @@ export function reviewSearchQuery(identity: string): string {
 }
 
 interface SearchPr {
+  headRefName?: string;
+  baseRefName?: string;
+  isCrossRepository?: boolean;
   number?: number;
   url?: string;
   title?: string;
@@ -240,8 +243,15 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
   }
   for (const item of listReviews()) {
     const r = latestRound(item);
-    if (!confirmed.has(item.key) || !r?.staged || (r.state !== 'drafted' && r.state !== 'stale') || item.pr.state !== 'OPEN') continue;
+    if (!confirmed.has(item.key) || !r?.staged || !['drafted', 'stale', 'withdrawn'].includes(r.state) || item.pr.state !== 'OPEN') continue;
     const out = await settleStagedReview(item.key, gh);
+    if (out === 'pending' && r.state === 'withdrawn') {
+      const fresh = readReview(item.key)!;
+      const round = latestRound(fresh)!;
+      round.state = round.headSha === fresh.pr.headSha ? 'drafted' : 'stale';
+      delete round.reason;
+      writeReview(fresh);
+    }
     if (out === 'posted') log(`${item.key}: review sent from the review tool`);
     if (out === 'deleted') log(`${item.key}: pending review deleted in the review tool; round dismissed`);
   }
@@ -435,6 +445,9 @@ async function searchReviews(identity: string, token: () => string, log: (m: str
           author,
           ...(pr.author?.name ? { authorName: pr.author.name } : {}),
           ...(pr.author?.avatarUrl ? { authorAvatarUrl: pr.author.avatarUrl } : {}),
+          headRefName: pr.headRefName,
+          baseRefName: pr.baseRefName,
+          isCrossRepository: pr.isCrossRepository,
           headSha: pr.headRefOid,
           ...(pr.baseRefOid ? { baseSha: pr.baseRefOid } : {}),
           ...(diffId ? { diffId } : {}),

@@ -159,7 +159,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   const lock = receipt(key, r.id, 'staged.json', 'stage', at);
   if (!lock) return { staged: false, why: `${key}: staging this round is already in flight or done` };
   try {
-    const existing = await github<Array<{ id: number; state: string; body?: string | null }>>(f, token(), 'GET', `${base}?per_page=100`);
+    const existing = await github<Array<{ id: number; state: string; body?: string | null; user?: { login: string } }>>(f, token(), 'GET', `${base}?per_page=100`);
     const prior = existing.find((x) => x.body?.includes(reviewMarker(r.id)));
     if (prior && prior.state !== 'PENDING') {
       markReviewPosted(key, r.id, { reviewId: String(prior.id), by: 'review tool', at });
@@ -167,9 +167,23 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
     }
     const refused = postRefusal(key, r, 'cli');
     if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
+    // GitHub allows one pending review per identity, across all request rounds.
+    // Keep its body and inline comments intact; put the new draft alongside them.
+    const identity = loadConfig().reviews.identity?.toLowerCase();
+    const pending = prior ?? (identity
+      ? existing.find(review => review.state === 'PENDING' && review.user?.login.toLowerCase() === identity)
+      : undefined);
+    if (pending) {
+      const findings = draftComments(draft).map(comment => `${comment.path}:${comment.line}\n\n${publishableBody(comment.body)}`).join('\n\n');
+      const additions = [reviewBody(draft.body, r, draft.decisions), findings].filter(part => part && !pending.body?.includes(part));
+      const body = [pending.body, ...additions].filter(Boolean).join('\n\n---\n\n');
+      const refused = postRefusal(key, r, 'cli');
+      if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
+      if (body !== pending.body) await github(f, token(), 'PUT', `${base}/${pending.id}`, { body });
+    }
     const id = prior
       ? prior.id
-      : (
+      : pending ? pending.id : (
           await github<{ id: number }>(f, token(), 'POST', base, {
             commit_id: readReview(key)!.pr.headSha,
             body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions),
@@ -182,7 +196,8 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
       r.id,
       (x) => {
         x.staged = { reviewId: String(id), at };
-        delete x.reason;
+        if (pending) x.reason = 'Your existing pending review and comments are kept alongside the new draft.';
+        else delete x.reason;
       },
       at,
     );
@@ -331,7 +346,7 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
       return { posted: false, why: refused };
     }
     const posted = r.staged
-      ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body: reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions) })
+      ? await github<{ id: number }>(f, token(), 'POST', `${base}/${r.staged.reviewId}/events`, { event, body: existing.find(review => String(review.id) === r.staged!.reviewId)?.body ?? reviewBody(draft.body, latestRound(readReview(key)!)!, draft.decisions) })
       : await github<{ id: number }>(f, token(), 'POST', base, {
           commit_id: targetHead,
           event,
@@ -363,6 +378,7 @@ export async function settleStagedReview(key: string, opts: Opts = {}): Promise<
   try {
     const review = await github<{ id: number; state: string }>(f, token(), 'GET', `${base}/${r.staged!.reviewId}`);
     if (review.state === 'PENDING') return 'pending';
+    if (review.state === 'DISMISSED') { dismissReview(key, 'review tool', opts.now); return 'deleted'; }
     markReviewPosted(key, r.id, { reviewId: String(review.id), by: 'review tool', at });
     return 'posted';
   } catch (err) {
@@ -406,13 +422,12 @@ export async function dismissReviewRound(key: string, by: string, opts: Opts = {
   return typeof out === 'string' ? out : undefined;
 }
 
-/** Re-draft a stale or failed round: its pending review is deleted first, so the new draft can be staged. */
+/** Re-draft locally, retaining the pending review and any edits for the next staging pass. */
 export async function redraftReviewRound(key: string, opts: Opts = {}): Promise<string | undefined> {
   const item = readReview(key);
   const r = item && latestRound(item);
   if (r && !['drafted', 'stale', 'failed'].includes(r.state)) return `${key}: the newest round is ${r.state}; only a drafted, stale or failed round re-drafts`;
-  const why = await discardStaged(key, opts);
-  if (why) return why;
+  if (r?.staged) fs.rmSync(path.join(reviewRoundDir(key, r.id)!, 'staged.json'), { force: true });
   const out = redraftReview(key, opts.now);
   return typeof out === 'string' ? out : undefined;
 }

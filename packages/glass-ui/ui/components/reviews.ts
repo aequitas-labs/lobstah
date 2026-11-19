@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
-import { dismissReview, hideLob, muteReviewPr, reviewRequest, showModal, unmuteReviewPr } from '../actions.js';
+import { dismissReview, hideLob, muteReviewPr, reviewRequest, setPrefs, showModal, unmuteReviewPr } from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html, type Children } from '../html.js';
 import { Age, Table, ageText } from './common.js';
@@ -312,7 +312,7 @@ const staged = (r: GlassReview) =>
   html`<a class="rv-staged" href=${r.stagedReviewUrl ?? r.reviewUrl} target="_blank" rel="noopener" onClick=${(e: Event) => {
     e.stopPropagation();
     void reviewRequest('review-seen', { key: r.key });
-  }}>Open pending review</a>`;
+  }}>Staged on GitHub</a>`;
 
 /** Read the same PR authorization that the PRs page renders. */
 const mergePr = (r: GlassReview) => getState().snapshot?.prs.find((p) => p.key === r.key.replace(/^review:/, 'pr:'));
@@ -353,7 +353,7 @@ export function reviewStatus(
   if (r.reReview) return { word: 're-review needed', tone: 'bad' };
   if (r.autoReapproved) return { word: 'automatically re-approved', tone: 'ok' };
   if (reviewState(r) === 'needs your call') return { word: 'needs your call', tone: 'bad' };
-  if (r.state === 'drafted') return { word: 'draft ready', tone: 'ok' };
+  if (r.state === 'drafted') return { word: r.staged ? 'staged on GitHub' : 'draft ready', tone: 'ok' };
   if (r.state === 'posted')
     return { word: (r.verdict && POSTED[r.verdict]) || 'posted', tone: r.verdict === 'request_changes' ? 'warn' : 'ok' };
   if (r.state === 'failed') return { word: 'failed', tone: 'bad' };
@@ -462,14 +462,85 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
     setup?.enabled
       ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
-    !inp.list.length
-      ? html`<div class="empty">no review requests</div>`
-      : inp.view === 'cards'
-        ? html`<div class="cards">${inp.list.map((r) => card(r, canDraft, publish))}</div>`
-        : Table(
-            ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
-            inp.list.map((r) => row(r, canDraft, publish)),
-            'no review requests match',
-          ),
+    ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
+      const contents = groups.map(
+        ({ stack, reviews }) => html`<section>
+        ${stack && html`<h3>${stack.title ?? 'Review stack'}</h3><p class="sub">Bottom → top · ${reviews.map((review) => `#${review.number}`).join(' → ')} · ${reviewStackState(reviews)}</p>`}
+        ${
+          inp.view === 'cards'
+            ? html`<div class="cards">${reviews.map((review) => card(review, canDraft, publish))}</div>`
+            : Table(
+                ['PR', 'title', 'author', 'asked by', 'asked', 'state', ''],
+                reviews.map((review) => row(review, canDraft, publish)),
+                'no review requests match',
+              )
+        }
+      </section>`,
+      );
+      return id === 'needs'
+        ? html`<section data-review-section=${id}><h2>${title} (${count})</h2>${count ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
+        : html`<details data-review-section=${id} open=${inp.expanded?.[id] === true} onToggle=${(event: Event) => {
+            const expanded = (event.currentTarget as HTMLDetailsElement).open;
+            if ((getState().prefs.reviewSections?.[id] === true) !== expanded)
+              setPrefs({ reviewSections: { ...getState().prefs.reviewSections, [id]: expanded } });
+          }}><summary>${title} (${count})</summary>${contents}</details>`;
+    }),
   ];
+}
+
+/** Group visible reviews using the watch detector's order; standalone PRs retain their layout. */
+export function reviewGroups(reviews: readonly GlassReview[]): Array<{ stack?: GlassReview['stack']; reviews: GlassReview[] }> {
+  const groups: Array<{ stack?: GlassReview['stack']; reviews: GlassReview[] }> = [];
+  const seen = new Set<string>();
+  for (const review of reviews) {
+    if (seen.has(review.key)) continue;
+    const members = review.stack ? review.stack.keys.flatMap((key) => reviews.filter((candidate) => candidate.key === key)) : [review];
+    members.forEach((member) => seen.add(member.key));
+    const previous = groups.at(-1);
+    if (!review.stack && previous && !previous.stack) previous.reviews.push(review);
+    else groups.push({ stack: review.stack, reviews: members });
+  }
+  return groups;
+}
+
+/** Summarize review progress independently of merge checks. */
+export function reviewStackState(reviews: readonly GlassReview[]): string {
+  if (reviews.some((review) => review.reReview || review.state === 'stale')) return 'Needs re-review';
+  if (reviews.some((review) => review.state === 'posted' && review.verdict === 'request_changes')) return 'Changes requested';
+  if (reviews.every((review) => review.state === 'posted' && review.verdict === 'approve')) return 'Approved';
+  const ready = reviews.filter((review) => review.state === 'drafted' || review.state === 'posted').length;
+  return `${ready} of ${reviews.length} reviews ready`;
+}
+
+/** A whole stack follows its most urgent PR, so its review order stays intact. */
+export function reviewSections(reviews: readonly GlassReview[]): Array<{
+  id: 'needs' | 'waiting' | 'done';
+  title: string;
+  groups: ReturnType<typeof reviewGroups>;
+  count: number;
+}> {
+  const sections = [
+    { id: 'needs' as const, title: 'Needs your review', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
+    { id: 'waiting' as const, title: 'Waiting on response', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
+    { id: 'done' as const, title: 'Done', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
+  ];
+  const urgency = (review: GlassReview): number => {
+    if (['MERGED', 'CLOSED'].includes(review.prState ?? '') || ['merged', 'closed'].includes(review.state)) return 2;
+    return review.state === 'posted' && !review.reReview ? 1 : 0;
+  };
+  const recent = (review: GlassReview): string => review.updatedAt ?? review.postedAt ?? review.requestedAt;
+  // Keep standalone reviews independent while assigning urgency, then coalesce their layouts.
+  const groups = reviewGroups(reviews).flatMap((group) => (group.stack ? [group] : group.reviews.map((review) => ({ reviews: [review] }))));
+  groups.sort((left, right) => {
+    const latest = (group: { reviews: GlassReview[] }): string => group.reviews.map(recent).sort().at(-1) ?? '';
+    return latest(right).localeCompare(latest(left));
+  });
+  for (const group of groups) {
+    const section = sections[Math.min(...group.reviews.map(urgency))]!;
+    const previous = section.groups.at(-1);
+    if (!('stack' in group && group.stack) && previous && !previous.stack) previous.reviews.push(...group.reviews);
+    else section.groups.push(group);
+    section.count += group.reviews.length;
+  }
+  return sections;
 }

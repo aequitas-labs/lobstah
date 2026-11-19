@@ -345,6 +345,10 @@ export interface GlassHelm extends HelmRegistration {
  */
 /** A review item as the glass shows it (reviews.ts): the PR and its newest round. */
 export interface GlassReview {
+  /** Shared detector output, ordered from the bottom PR to the top. */
+  stack?: { id: string; title?: string; keys: string[] };
+  /** Latest local review observation, used to order completed reviews. */
+  updatedAt?: string;
   key: string;
   url: string;
   /** The PR in the repo's review tool ([repos.<key>].reviewTool), where the staged draft is edited and sent. */
