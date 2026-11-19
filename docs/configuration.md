@@ -659,3 +659,32 @@ answers cannot. `apply`, `remove` and grants remain person-only actions.
 | `LOBSTAH_MAN` | `=1` designates a session as the lobstah man for the `man haul` Stop hook. |
 | `LOBSTAH_TRAP_TICKET` | A ticket `man throw` reserved. `lobstah soak` redeems it and signs the session on as the reserved trap. `--ticket` takes precedence. |
 | `LOBSTAH_TERMINAL_TITLE` | `=0` stops soak from naming the terminal tab after the trap, and stow from clearing it. |
+
+## Worktree server cleanup
+
+`lobstah cull` previews listening TCP servers, dedicated server tmux sessions,
+and running containers from agent worktrees. `--apply` stops them before the
+existing disk cleanup. Servers receive SIGTERM, then SIGKILL after a 5-second
+grace period. Containers use `docker stop`; cull never removes containers.
+
+The default worktree parents are `~/.lobstah/worktrees` (or
+`$LOBSTAH_HOME/worktrees`), `~/.codex/worktrees`, and `.claude/worktrees` in each
+configured repository. Add other parent directories with:
+
+```toml
+[cull]
+worktreeRoots = ["~/agent-worktrees"]
+```
+
+A busy trap keeps its worktree's services. For worktrees outside lobstah's
+parent directory, cull also keeps services when any file or directory was
+edited within the last 12 hours; `--idle-hours <hours>` changes that window.
+Unreadable worktrees are kept. Agent CLIs, glass, the daemon, Docker itself,
+and shared tmux sessions are preserved. A shared process group is never
+signalled as a group; an eligible listener can still be stopped individually.
+Containers qualify through a Compose project working-directory label or a
+host bind mount inside a worktree. Containers spanning several worktrees are
+kept if any of those worktrees is busy or recently edited.
+
+This pass runs only for the manual `cull` command. Windows supports container
+cleanup; process cleanup requires macOS or Linux with `ps` and `lsof`.

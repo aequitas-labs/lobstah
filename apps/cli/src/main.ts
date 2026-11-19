@@ -255,7 +255,7 @@ import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
 import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS, walkingAttention } from './tend.js';
-import { runCull } from './cull.js';
+import { runCullWithServers } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
@@ -393,7 +393,7 @@ work (humans and agents):
   reviews post <key>              send a fresh draft as a comment-only review
   reviews dismiss <key>           drop the review and its pending draft
   prs [sync]                      list known PRs, or refresh due PR watches
-  cull [--older-than <days>] [--apply]
+  cull [--older-than <days>] [--idle-hours <hours>] [--apply]
                                   sweep aged catch and lost gear — old done/
                                   entries, orphaned worktrees, stale state.
                                   Dry run by default (14 days).
@@ -1999,7 +1999,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'cull': {
-      console.log(runCull(Number(opt('--older-than') ?? '14'), has('--apply')));
+      console.log(await runCullWithServers(Number(opt('--older-than') ?? '14'), has('--apply'), { idleHours: Number(opt('--idle-hours') ?? '12') }));
       break;
     }
     case 'man:manual': {
