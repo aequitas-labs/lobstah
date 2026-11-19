@@ -498,10 +498,15 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
               ? html`<${StackCard}
               id=${`review-stack:${stack.id}`}
               prState=${reviews.some((review) => ['open', 'draft'].includes(reviewPrState(review))) ? 'open' : reviews.some((review) => reviewPrState(review) === 'merged') ? 'merged' : 'closed'}
+              repo=${reviews[0]!.repoKey ?? reviews[0]!.repo}
+              updatedAt=${reviews
+                .map((review) => review.updatedAt ?? review.postedAt ?? review.draftedAt ?? review.requestedAt)
+                .sort()
+                .at(-1)}
+              range=${reviews.length === 1 ? `#${reviews[0]!.number}` : `#${reviews[0]!.number} → #${reviews.at(-1)!.number}`}
               header=${{
                 title: stack.title ?? reviews.at(-1)!.title,
                 titleAttr: stack.title ?? reviews.at(-1)!.title,
-                context: reviews.length === 1 ? `#${reviews[0]!.number}` : `#${reviews[0]!.number} → #${reviews.at(-1)!.number}`,
                 attrs: { 'data-review-stack': stack.id, 'aria-label': stack.title ?? reviews.at(-1)!.title },
               }}
               members=${() => reviews.map((review) => card(review, canDraft, publish))}

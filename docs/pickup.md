@@ -339,7 +339,8 @@ badge. Muting, dismissing, closing, or explicitly cancelling stops the repair.
 
 Reviews sharing an unambiguous branch stack use the PRs page's expandable
 stack card, with the same stack icon and disclosure behavior. Its header shows
-only the title and the starting and ending PR numbers. Click it, or press Enter
+the title, starting and ending PR numbers, and the same repo and last-updated
+line as the PRs page. The update time is the newest member review update. Click it, or press Enter
 or Space, to show the PR cards in stack order. Actions stay on those PR cards.
 Stacks keep their PR cards in both card and table views. In a stack review,
 Previous and Next buttons, left/right arrow keys, and horizontal mobile swipes

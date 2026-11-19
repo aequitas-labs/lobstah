@@ -687,14 +687,16 @@ describe('review requests on /requests', () => {
 
 it.each(['cards', 'table'])('keeps stack actions on its PR cards in %s view', async (view) => {
   const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8].map(number => `review:acme/web#${number}`) };
-  const reviews = [8, 7].map(number => review(number, { stack, state: 'drafted', staged: true, verdict: 'comment' }));
+  const reviews = [8, 7].map(number => review(number, { stack, state: 'drafted', staged: true, verdict: 'comment', updatedAt: ago(number === 8 ? 5_000 : 30_000) }));
   const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view } });
   open.push(g);
   const container = g.$('[data-review-stack="pr:acme/web#7"]')!;
   expect(container.getAttribute('aria-label')).toBe('Files');
   expect(g.$$('#reviews [data-review-stack]')).toHaveLength(1);
   expect(container.getAttribute('aria-expanded')).toBe('false');
-  expect(container.textContent).toBe('Files#7 → #8');
+  expect(container.querySelector('.gcontext')!.textContent).toBe('#7 → #8');
+  expect(container.querySelector('.gnow')!.textContent).toBe('web · updated 5s ago');
+  expect(container.textContent).not.toContain('reviews ready');
   expect(container.querySelector('svg')).not.toBeNull();
   expect(container.querySelector('button, a, input, select')).toBeNull();
   expect(container.querySelector('[data-review]')).toBeNull();
@@ -812,4 +814,20 @@ it('counts only actionable stack members and preserves disclosure across polls a
   expect(container.getAttribute('aria-expanded')).toBe('false');
   expect(container.querySelector('[data-review]')).toBeNull();
   expect(g.posts().filter(post => JSON.parse(post.body).kind === 'review-seen')).toHaveLength(0);
+});
+
+
+it('updates stack recency from any member while preserving expansion and falls back for older review payloads', async () => {
+  const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8].map(number => `review:acme/web#${number}`) };
+  let reviews = [review(7, { stack, repoKey: undefined, updatedAt: ago(60_000) }), review(8, { stack, repoKey: undefined, requestedAt: ago(10_000) })];
+  const snapshot = () => ({ ...fleet(), reviews });
+  const g = await loadGlass(GLASS_PAGE, snapshot(), { now: NOW, hash: '#reviews', prefs: { view: 'cards' } }); open.push(g);
+  const container = g.$('[data-review-stack]')!;
+  expect(container.querySelector('.gnow')!.textContent).toBe('acme/web · updated 10s ago');
+  (container as unknown as HTMLElement).click(); await g.settle();
+  reviews = reviews.map(review => review.number === 7 ? { ...review, updatedAt: ago(1_000) } : review);
+  g.serve(snapshot()); await g.poll();
+  expect(container.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('.gnow')!.textContent).toBe('acme/web · updated 1s ago');
+  expect(container.querySelector('.gcontext')!.textContent).toBe('#7 → #8');
 });

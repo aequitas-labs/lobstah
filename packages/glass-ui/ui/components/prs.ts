@@ -383,7 +383,11 @@ const StackIcon = html`<svg class="pricon" viewBox="0 0 16 16" width="14" height
 export interface StackCardProps {
   id: string;
   prState: PrIconState;
-  header: Omit<CardProps, 'icon' | 'iconFirst' | 'extra' | 'cls' | 'onClick'>;
+  repo: string;
+  updatedAt?: string;
+  /** Reviews retain their endpoint range above the shared repo/update line. */
+  range?: string;
+  header: Omit<CardProps, 'icon' | 'iconFirst' | 'extra' | 'cls' | 'onClick' | 'context' | 'contextTitle' | 'now' | 'nowTitle'>;
   /** Render members only while expanded; each member owns its actions. */
   members: () => Children;
   /** PR stacks acknowledge attention when opened; review stacks leave reviews unread. */
@@ -391,7 +395,9 @@ export interface StackCardProps {
 }
 
 /** The shared stack card: one icon, surface and keyboard/click disclosure, with member cards below. */
-export function StackCard({ id, prState, header, members, onOpen }: StackCardProps): Children {
+export function StackCard({ id, prState, repo, updatedAt, range, header, members, onOpen }: StackCardProps): Children {
+  const context: Children = [RepoName(repo), updatedAt && [' · updated ', Age(updatedAt), ' ago']];
+  const contextTitle = [repo, updatedAt && `updated ${ageText(updatedAt)} ago`].filter(Boolean).join(' · ');
   const open = stackOpen(id);
   const toggle = (): void => {
     if (!open) onOpen?.();
@@ -399,6 +405,10 @@ export function StackCard({ id, prState, header, members, onOpen }: StackCardPro
   };
   return Card({
     ...header,
+    context: range ?? context,
+    contextTitle: range ?? contextTitle,
+    now: range ? context : undefined,
+    nowTitle: range ? contextTitle : undefined,
     icon: html`<span class=${'prstate pr-' + prState}>${StackIcon}</span>`,
     iconFirst: true,
     cls: ['prcard stackcard', open && 'open'].filter(Boolean).join(' '),
@@ -443,6 +453,8 @@ export function PrStackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr
   return StackCard({
     id: s.id,
     prState,
+    repo: s.repo,
+    updatedAt: at,
     onOpen: () => ackOnOpen(pending),
     members: () => members.map((p) => prCard(p, { attention })),
     header: {
@@ -455,8 +467,6 @@ export function PrStackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr
         html`<${PrTags} state=${!actionable ? prState : undefined} tags=${actionable ? [{ word: summary.text, tone: summary.tone }] : []} />`,
         StatusChip(`${members.length} PRs`, 'dim'),
       ],
-      context: [RepoName(s.repo), at && [' · updated ', Age(at), ' ago']],
-      contextTitle: [s.repo, at && `updated ${ageText(at)} ago`].filter(Boolean).join(' · '),
       // The Open icon (the top of the stack, as GitHub shows a stack) at the bar's right; opening the stack, or Open, acks it.
       actions: [
         html`<${MergeStackWhenGreen} s=${s} prs=${members} />`,
