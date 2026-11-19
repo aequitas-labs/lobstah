@@ -115,3 +115,5 @@ export * from './permission-cards.js';
 export * from './review-automation.js';
 export * from './turn-owner.js';
 export * from './codex-idle-recovery.js';
+
+export * from './review-wait-worktrees.js';

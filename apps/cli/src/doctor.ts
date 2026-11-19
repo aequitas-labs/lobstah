@@ -30,7 +30,7 @@ import type { Config, FreeBytesReader, RepoConfig } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig, pickupPlan } from '@lobstah/pick';
 import { codexTrapHooksRow } from './codex-startup.js';
 import { pickRunning } from './reviews-setup.js';
-import { planPressureCull } from './cull.js';
+import { keptWorktreeSummary, planPressureCull } from './cull.js';
 import { mirrorScope } from './wharf-mirror.js';
 import { parkedSummary } from './parked-view.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
@@ -262,6 +262,7 @@ export function diskRow(cfg: Config, freeBytes: FreeBytesReader = statfsFreeByte
     `retentionDays ${retentionDays > 0 ? retentionDays : 'off'}`,
     cullable.length > 0 ? `${cullable.length} cullable worktree(s), oldest ${oldest}d` : 'no cullable worktrees',
   ];
+  parts.push(...keptWorktreeSummary(new Set(cullable.map((item) => item.id))));
   parts.push(`releaseOnMerge ${cfg.limits.releaseOnMerge ? 'on' : 'off'}`);
   const kept = readKeptWorktrees();
   if (kept.length > 0) {
