@@ -409,7 +409,7 @@ describe('the Reviews tab', () => {
     await g.go('#reviews');
     // A drafted round's chip says its draft is ready; every other state says itself.
     const chips = g.$$('#reviews .gstate .gchip').map((b) => b.textContent?.replace(/^● /, ''));
-    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'draft ready' : state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : state);
+    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'staged on GitHub' : state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : state);
     // The drafted round's card links its pending review; the others open the review tool.
     const drafted = 20 + REVIEW_ROUND_STATES.indexOf('drafted');
     const draftLink = g.$(`#reviews [data-review="review:acme/web#${drafted}"] .gactions a`)!;
@@ -500,7 +500,7 @@ describe('the Reviews tab', () => {
     expect(g.$('#tabs a[data-tab="reviews"]')?.textContent).toContain('Reviews');
     const rows = g.$$('#reviews tr.rowhead');
     expect(rows.map((r) => r.querySelector('td')?.textContent?.trim())).toEqual(['acme/web#8', 'acme/web#7', 'acme/web#9', 'acme/web#10']);
-    expect(rows[1]!.textContent).toContain('draft ready');
+    expect(rows[1]!.textContent).toContain('staged on GitHub');
     expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Publish comment', 'Re-draft', 'More actions', 'Mute this PR', 'Dismiss']);
     expect([...rows[2]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Re-draft', 'More actions', 'Mute this PR', 'Dismiss']);
     expect([...rows[3]!.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['More actions', 'Mute this PR']);
@@ -670,4 +670,60 @@ describe('review requests on /requests', () => {
     expect(latestRound(readReview(key)!)?.needsYou).toBeUndefined();
     expect(refreshReviewNotifications()).toEqual([]);
   });
+});
+
+
+it('groups stacks in bottom-to-top order and navigates with buttons, arrows, swipes, and browser Back', async () => {
+  const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8, 9].map(number => `review:acme/web#${number}`) };
+  const reviews = [9, 7, 8].map(number => review(number, { stack, state: 'drafted' }));
+  const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
+  open.push(g);
+  expect(g.$('#reviews')!.textContent).toContain('Bottom → top · #7 → #8 → #9');
+  expect(g.$$('#reviews [data-review]').map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
+  (g.$('#reviews [data-review="review:acme/web#7"]') as unknown as HTMLElement).click();
+  await g.settle();
+  const clickNext = () => (g.$$('nav[aria-label="Review stack"] button').find(button => button.textContent?.includes('Next')) as unknown as HTMLElement).click();
+  clickNext(); await g.settle();
+  expect(decodeURIComponent(g.window.location.hash)).toContain('acme/web#8');
+  expect(g.$('.detail-frame')!.textContent).toContain('2 of 3');
+  g.$('.detail-frame')!.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  await g.settle();
+  expect(decodeURIComponent(g.window.location.hash)).toContain('acme/web#9');
+  g.window.history.back(); await g.settle();
+  expect(decodeURIComponent(g.window.location.hash)).toContain('acme/web#8');
+  const frame = g.$('.detail-frame')!;
+  const swipeEvent = (type: string, points: Record<string, unknown>) => {
+    const event = new g.window.Event(type, { bubbles: true });
+    for (const [key, value] of Object.entries(points)) Object.defineProperty(event, key, { value });
+    frame.dispatchEvent(event);
+  };
+  swipeEvent('touchstart', { touches: [{ clientX: 100, clientY: 200 }] });
+  swipeEvent('touchend', { changedTouches: [{ clientX: 230, clientY: 210 }] });
+  await g.settle();
+  expect(decodeURIComponent(g.window.location.hash)).toContain('acme/web#7');
+});
+
+
+it('keeps each stack in its most urgent section and remembers collapsed sections for this viewer', async () => {
+  const stack = { id: 'pr:acme/web#7', keys: [7, 8].map(number => `review:acme/web#${number}`) };
+  const reviews = [review(7, { stack, state: 'posted', verdict: 'approve' }), review(8, { stack, state: 'stale', reReview: { headSha: 'new', at: ago(0) } }), review(9, { state: 'posted', verdict: 'request_changes' }), review(10, { state: 'merged', prState: 'MERGED' })];
+  const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
+  open.push(g);
+  expect(g.$('[data-review-section="needs"]')!.textContent).toContain('Needs your review (2)');
+  expect(g.$('[data-review-section="needs"] [data-review="review:acme/web#7"]')).toBeTruthy();
+  const waiting = g.$('[data-review-section="waiting"]')!;
+  const done = g.$('[data-review-section="done"]')!;
+  expect(waiting.textContent).toContain('Waiting on response (1)');
+  expect(done.textContent).toContain('Done (1)');
+  expect(waiting.hasAttribute('open')).toBe(false);
+  expect(done.hasAttribute('open')).toBe(false);
+  waiting.setAttribute('open', '');
+  waiting.dispatchEvent(new g.window.Event('toggle'));
+  await g.settle();
+  const prefs = JSON.parse(g.window.localStorage.getItem('spyglass')!);
+  expect(prefs.reviewSections).toMatchObject({ waiting: true });
+  const reload = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs });
+  open.push(reload);
+  expect(reload.$('[data-review-section="waiting"]')!.hasAttribute('open')).toBe(true);
+  expect(reload.$('[data-review-section="done"]')!.hasAttribute('open')).toBe(false);
 });

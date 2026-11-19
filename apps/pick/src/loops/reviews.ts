@@ -66,7 +66,7 @@ export const REVIEW_SEARCH = `query($q: String!, $identity: String!) {
     issueCount
     nodes {
       ... on PullRequest {
-        number url title isDraft headRefOid baseRefOid
+        number url title isDraft headRefOid baseRefOid headRefName baseRefName isCrossRepository
         author { login avatarUrl ... on User { name } }
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
@@ -86,6 +86,9 @@ export function reviewSearchQuery(identity: string): string {
 }
 
 interface SearchPr {
+  headRefName?: string;
+  baseRefName?: string;
+  isCrossRepository?: boolean;
   number?: number;
   url?: string;
   title?: string;
@@ -113,6 +116,7 @@ interface SubmittedReview {
 interface ReviewPrSnapshot {
   state: NonNullable<ReviewItem['pr']['state']>;
   headRefOid?: string; baseRefOid?: string; isDraft?: boolean;
+  headRefName?: string; baseRefName?: string; isCrossRepository?: boolean;
   reviews?: SearchPr['reviews'];
 }
 
@@ -202,7 +206,7 @@ export async function reviewsLoop(
  * A failed or incomplete state check leaves unconfirmed rounds untouched.
  */
 async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem) => boolean }, identity: string, gh: { token: () => string; fetch?: FetchLike; now: number }, run: GhGraphql, log: (m: string) => void): Promise<void> {
-  const missing = listReviews().filter((item) => !found.seen.has(item.key) && found.inScope(item) &&
+  const missing = listReviews().filter((item) => (!found.seen.has(item.key) || latestRound(item)?.staged) && found.inScope(item) &&
     !['merged', 'closed'].includes(latestRound(item)?.state ?? ''));
   const confirmed = new Set<string>();
   for (let start = 0; start < missing.length; start += 50) {
@@ -215,7 +219,7 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
       declarations.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
       Object.assign(variables, { [`owner${index}`]: item.pr.owner, [`repo${index}`]: item.pr.repo, [`number${index}`]: item.pr.number });
       fields.push(`pr${index}: repository(owner: $owner${index}, name: $repo${index}) { pullRequest(number: $number${index}) {
-        state headRefOid baseRefOid isDraft reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
+        state headRefOid baseRefOid isDraft headRefName baseRefName isCrossRepository reviews(last: 100, author: $identity, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
           nodes { databaseId state submittedAt commit { oid } }
         }
       } }`);
@@ -227,7 +231,13 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
       const pr = data[`pr${index}`]?.pullRequest;
       if (!pr || !['OPEN', 'MERGED', 'CLOSED'].includes(pr.state)) continue;
       confirmed.add(item.key);
-      if (item.pr.state !== pr.state) writeReview({ ...item, pr: { ...item.pr, state: pr.state }, updatedAt: new Date(gh.now).toISOString() });
+      const observedPr = {
+        ...item.pr, state: pr.state,
+        ...(pr.headRefName !== undefined ? { headRefName: pr.headRefName } : {}),
+        ...(pr.baseRefName !== undefined ? { baseRefName: pr.baseRefName } : {}),
+        ...(pr.isCrossRepository !== undefined ? { isCrossRepository: pr.isCrossRepository } : {}),
+      };
+      if (JSON.stringify(item.pr) !== JSON.stringify(observedPr)) writeReview({ ...item, pr: observedPr, updatedAt: new Date(gh.now).toISOString() });
       settleSubmittedReview(item, pr.reviews);
       const submitted = [...(pr.reviews?.nodes ?? [])].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt)).at(-1);
       if (pr.state === 'OPEN' && pr.headRefOid && pr.baseRefOid && submitted?.state === 'APPROVED' && submitted.commit?.oid !== pr.headRefOid) {
@@ -240,8 +250,15 @@ async function settleGone(found: { seen: Set<string>; inScope: (item: ReviewItem
   }
   for (const item of listReviews()) {
     const r = latestRound(item);
-    if (!confirmed.has(item.key) || !r?.staged || (r.state !== 'drafted' && r.state !== 'stale') || item.pr.state !== 'OPEN') continue;
+    if (!confirmed.has(item.key) || !r?.staged || !['drafted', 'stale', 'withdrawn'].includes(r.state) || item.pr.state !== 'OPEN') continue;
     const out = await settleStagedReview(item.key, gh);
+    if (out === 'pending' && r.state === 'withdrawn') {
+      const fresh = readReview(item.key)!;
+      const round = latestRound(fresh)!;
+      round.state = round.headSha === fresh.pr.headSha ? 'drafted' : 'stale';
+      delete round.reason;
+      writeReview(fresh);
+    }
     if (out === 'posted') log(`${item.key}: review sent from the review tool`);
     if (out === 'deleted') log(`${item.key}: pending review deleted in the review tool; round dismissed`);
   }
@@ -435,6 +452,9 @@ async function searchReviews(identity: string, token: () => string, log: (m: str
           author,
           ...(pr.author?.name ? { authorName: pr.author.name } : {}),
           ...(pr.author?.avatarUrl ? { authorAvatarUrl: pr.author.avatarUrl } : {}),
+          headRefName: pr.headRefName,
+          baseRefName: pr.baseRefName,
+          isCrossRepository: pr.isCrossRepository,
           headSha: pr.headRefOid,
           ...(pr.baseRefOid ? { baseSha: pr.baseRefOid } : {}),
           ...(diffId ? { diffId } : {}),

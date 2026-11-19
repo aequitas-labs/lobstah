@@ -194,9 +194,10 @@ describe('review decision posting gate', () => {
     expect(await stageReview(KEY, { token: tok, fetch: github(calls) })).toMatchObject({ staged: true });
     const r = latestRound(readReview(KEY)!)!;
     expect(answerReviewDecision(KEY, { roundId: r.id, headSha: r.headSha, draftedAt: r.draftedAt! }, 'rollout-owner', { text: 'Chris will own the rollout.' })).toBeUndefined();
-    expect(await postReview(KEY, { by: 'glass', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+    expect(await postReview(KEY, { by: 'glass', token: tok, fetch: github(calls, [{ id: 99, state: 'PENDING', body: 'My edited summary' }]) })).toMatchObject({ posted: true });
     expect(posts(calls).at(-1)?.url).toContain('/99/events');
     expect(posts(calls).at(-1)?.body?.body).toContain('Chris will own the rollout.');
+    expect(posts(calls).at(-1)?.body?.body).toContain('My edited summary');
   });
 
   it.each(['approve', 'request_changes'] as const)('the loop never auto-posts %s with unanswered decisions', async verdict => {
@@ -465,7 +466,7 @@ describe('staged reviews', () => {
     expect(posts(calls)).toEqual([{ method: 'POST', url: 'https://api.github.com/repos/acme/web/pulls/7/reviews/77/events', body: { event: 'COMMENT', body: `Looks right.\n\n${MARKER}` } }]);
   });
 
-  it('when the request goes, a review sent from the tool reads posted; a still-pending one withdraws; a deleted one dismisses', async () => {
+  it('when the request goes, a review sent from the tool reads posted; a still-pending one stays drafted; a deleted one dismisses', async () => {
     config();
     staged();
     await reviewsLoop('chris', tok, () => {}, { run: gone, fetch: github([], [{ id: 77, body: MARKER, state: 'APPROVED' }]) });
@@ -474,7 +475,7 @@ describe('staged reviews', () => {
     fs.rmSync(path.join(home, 'reviews'), { recursive: true });
     staged();
     await reviewsLoop('chris', tok, () => {}, { run: gone, fetch: github([], [{ id: 77, body: MARKER, state: 'PENDING' }]) });
-    expect(latestRound(readReview(KEY)!)!.state).toBe('withdrawn');
+    expect(latestRound(readReview(KEY)!)!.state).toBe('drafted');
 
     fs.rmSync(path.join(home, 'reviews'), { recursive: true });
     staged();
@@ -498,11 +499,11 @@ describe('staged reviews', () => {
     expect(latestRound(readReview(KEY)!)!.state).toBe('posted');
   });
 
-  it.each(['stale', 'drafted'] as const)('re-drafting a %s round deletes its pending review first', async state => {
+  it.each(['stale', 'drafted'] as const)('re-drafting a %s round keeps its pending review and unsent edits', async state => {
     staged(state);
     const calls: Call[] = [];
     expect(await redraftReviewRound(KEY, { token: tok, fetch: github(calls, [{ id: 77, body: MARKER, state: 'PENDING' }]) })).toBeUndefined();
-    expect(calls.map((c) => c.method)).toEqual(['GET', 'DELETE']);
+    expect(calls).toEqual([]);
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'requested' });
     expect(latestRound(readReview(KEY)!)!.staged).toBeUndefined();
   });
@@ -615,4 +616,48 @@ it('cancellation while checking pending reviews prevents staging a new draft', a
   };
   expect(await stageReview(KEY, { token: tok, fetch: fetcher })).toMatchObject({ staged: false, why: expect.stringContaining('cancelled') });
   expect(posts(calls)).toEqual([]);
+});
+
+
+it('adds a new round alongside the identity pending review without deleting unsent comments', async () => {
+  drafted();
+  fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nidentity = "chris"\n');
+  const calls: Call[] = [];
+  const fetcher: FetchLike = async (url, init) => {
+    calls.push({ method: init.method, url, ...(init.body ? { body: JSON.parse(init.body) } : {}) });
+    if (init.method === 'GET') return new Response(JSON.stringify([
+      { id: 11, state: 'PENDING', body: 'Someone else', user: { login: 'other' } },
+      { id: 77, state: 'PENDING', body: 'My unsent summary', user: { login: 'Chris' } },
+    ]));
+    return new Response(JSON.stringify({ id: 77 }));
+  };
+  expect(await stageReview(KEY, { token: tok, fetch: fetcher })).toEqual({ staged: true, reviewId: '77' });
+  expect(calls.map(call => call.method)).toEqual(['GET', 'PUT']);
+  expect(calls[1]!.body!.body).toContain('My unsent summary');
+  expect(calls[1]!.body!.body).toContain('Looks right.');
+  expect(calls[1]!.body!.body).toContain('Why not b()?');
+  expect(latestRound(readReview(KEY)!)).toMatchObject({ staged: { reviewId: '77' }, reason: expect.stringContaining('comments are kept') });
+});
+
+
+it('preserves edits to a staged summary when submitting from glass', async () => {
+  drafted();
+  const item = readReview(KEY)!;
+  latestRound(item)!.staged = { reviewId: '77', at: 'now' };
+  writeReview(item);
+  const calls: Call[] = [];
+  expect(await postReview(KEY, { by: 'glass', event: 'COMMENT', token: tok, fetch: github(calls, [{ id: 77, state: 'PENDING', body: 'My edited summary' }]) })).toMatchObject({ posted: true });
+  expect(posts(calls)[0]!.body!.body).toBe('My edited summary');
+});
+
+it('repairs a previously withdrawn draft when GitHub confirms it is pending', async () => {
+  drafted();
+  fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nenabled = true\nmode = "notify"\n[repos.web]\npath = "/w"\norigin = "git@github.com:acme/web.git"\n');
+  const item = readReview(KEY)!;
+  Object.assign(latestRound(item)!, { state: 'withdrawn', staged: { reviewId: '77', at: 'now' } });
+  writeReview(item);
+  const run: GhGraphql = () => ({ status: 0, stdout: JSON.stringify({ data: { search: { issueCount: 0, nodes: [] }, pr0: { pullRequest: { state: 'OPEN', headRefName: 'files-upload', baseRefName: 'files-core', isCrossRepository: false } } } }) });
+  await reviewsLoop('chris', tok, () => {}, { run, fetch: github([], [{ id: 77, state: 'PENDING', body: MARKER }]) });
+  expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', staged: { reviewId: '77' } });
+  expect(readReview(KEY)!.pr).toMatchObject({ headRefName: 'files-upload', baseRefName: 'files-core' });
 });

@@ -1,5 +1,5 @@
-import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot } from '@lobstah/core';
-import type { GlassReview } from '@lobstah/core';
+import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot, derivePrStacks } from '@lobstah/core';
+import type { GlassReview, PrEvidence } from '@lobstah/core';
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
 
@@ -18,6 +18,7 @@ export function reviewRows(all: boolean = false): Array<Record<string, string>> 
       state: r.state,
       requestedAt: r.requestedAt,
       reason: r.reason ?? '',
+      ...(r.staged ? { stagedReviewUrl: `${item.pr.url}#pullrequestreview-${r.staged.reviewId}` } : {}),
     });
   }
   return rows;
@@ -27,9 +28,23 @@ export function reviewRows(all: boolean = false): Array<Record<string, string>> 
 export function glassReviews(tools: Readonly<Record<string, string>> = {}): GlassReview[] {
   const out: GlassReview[] = [];
   const config = loadConfig().reviews;
-  for (const item of listReviews()) {
+  const items = listReviews();
+  const evidence: PrEvidence[] = items.map(({ pr }) => ({
+    ...pr, state: pr.state ?? 'OPEN', draft: pr.draft ?? false,
+    reviewDecision: '', mergeStateStatus: '', observedAt: '',
+    checks: { total: 0, passed: 0, failed: 0, pending: 0 },
+  }));
+  const stacks = derivePrStacks(evidence);
+  // Retained branch observations keep a completed chain navigable after merge.
+  // Prefer live topology; only use the historical chain when it does not overlap it.
+  const historical = derivePrStacks(evidence.map(pr => ({ ...pr, state: 'OPEN' })));
+  for (const stack of historical) {
+    if (!stack.members.some(member => stacks.some(live => live.members.some(pr => pr.url === member.url)))) stacks.push(stack);
+  }
+  for (const item of items) {
     const r = latestRound(item);
     if (!r) continue;
+    const stack = stacks.find(stack => stack.members.some(member => member.url === item.pr.url));
     const automatic = r.requestedAutomatically || isReviewBot(r.requestedBy);
     const person = reviewAsker(item, r);
     const asker = person.login;
@@ -37,6 +52,8 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const avatar = person.avatarUrl;
     const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
     out.push({
+      ...(stack ? { stack: { id: stack.id, title: stack.title, keys: stack.members.map(member => items.find(item => item.pr.url === member.url)!.key) } } : {}),
+      updatedAt: item.updatedAt,
       reReview: r.reReview, autoReapproved: r.autoReapprovals?.at(-1)?.headSha === item.pr.headSha,
       roundId: r.id, decisions: r.decisions, decisionAnswers: r.decisionAnswers,
       verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
