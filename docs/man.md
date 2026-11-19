@@ -1866,8 +1866,9 @@ remain open. Reads never run this maintenance; the helm wait does.
 The glass's Threads page shows one list of conversations as compact decision cards.
 Unread responses use the decision highlight; a state icon distinguishes messages
 waiting for the helm from conversations waiting for you. Resolved conversations
-sit in a collapsed section below. The wheel button on Threads and On deck opens
-one message composer; the helm classifies
+sit in a collapsed section below. A conversation opens in a full-page sheet over
+the list, as a report does; Back returns to Threads. The orange wheel button on
+Threads and On deck opens one message composer; the helm classifies
 the message. Cards and conversation replies use the same text and attachment
 controls. A card from a thread shows that thread's notes above its question.
 Phone navigation is On deck, Reviews, Threads, Search and Menu; PRs remain in Menu

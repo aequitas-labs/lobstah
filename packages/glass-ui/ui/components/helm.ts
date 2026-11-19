@@ -4,7 +4,7 @@ import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
 import { getState, viewOf } from '../store.js';
 import { openDecision } from '../actions.js';
-import { markThreadResponseSeen, openThread, reopenConversation, threadId } from '../thread-actions.js';
+import { closeThreadSheet, markThreadResponseSeen, openThread, reopenConversation } from '../thread-actions.js';
 import { safeHref } from '../../src/glass-markdown.js';
 import { ThreadComposer } from './thread-composer.js';
 import { Button } from './button.js';
@@ -16,6 +16,7 @@ import { VerbIcon } from './run-status.js';
 import { dispatchCard } from './dispatches.js';
 import { ReportEmbed } from './decision-embeds.js';
 import { prCard } from './prs.js';
+import { Sheet } from './sheet.js';
 
 function useThread(id: string | undefined) {
   const [view, setView] = useState<ThreadView>(),
@@ -150,11 +151,17 @@ function Round({ round, view, number, current }: { round: ThreadRound; view: Thr
     },
   )}</details>`;
 }
-function Conversation({ id }: { id: string }) {
+/** A conversation in the sheet over the Threads tab, as a report opens; Back returns to the list. */
+export function ThreadSheet({ id }: { id: string }) {
   const { view, error } = useThread(id);
-  if (error) return html`<p role="status">${error}</p>`;
-  if (!view) return html`<p class="dim">Loading conversation</p>`;
-  return html`<div class="thread-view"><a href="#helm">All threads</a><${SectionHead} title=${view.title} page />
+  // The snapshot already names it, so the bar has its title before the conversation loads.
+  const title = view?.title ?? getState().snapshot?.threads?.find((t) => t.id === id)?.title ?? 'Conversation';
+  return html`<${Sheet} page=${id} title=${title} titleId="tsheet-title" cls="tsheet" onBack=${closeThreadSheet}>
+    <div class="thread-sheet-body">${error ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
+  <//>`;
+}
+function Conversation({ view }: { view: ThreadView }) {
+  return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
     ${html`<${ThreadResponse} view=${view} />`}${Notes(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
     ${view.rounds.map((round, i) => html`<${Round} key=${round.at} round=${round} view=${view} number=${i + 1} current=${i === view.rounds.length - 1} />`)}
@@ -183,9 +190,7 @@ function ThreadCard({ item }: { item: ThreadSummary }) {
     onOpen=${() => openThread(item.id)} />`;
 }
 export function Threads() {
-  const state = getState(),
-    id = threadId();
-  if (id) return html`<${Conversation} key=${id} id=${id} />`;
+  const state = getState();
   const query = state.prefs.q.toLowerCase();
   const items = (state.snapshot?.threads ?? []).filter(
     (t) => !query || `${t.title} ${t.openLine ?? ''} ${t.responseText ?? ''}`.toLowerCase().includes(query),

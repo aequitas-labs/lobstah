@@ -1,4 +1,4 @@
-import { Threads } from './helm.js';
+import { ThreadSheet, Threads } from './helm.js';
 import { MessageButton, MessageSheet } from './thread-composer.js';
 import { isActiveTrap, olderLeft, sectionInputs } from '../../src/glass-diff.js';
 import { visibleTabs } from '../backend.js';
@@ -122,7 +122,8 @@ export function App({ state }: { state: GlassState }) {
         html`<main key=${t} id=${'page-' + t} class=${d ? (t === tab ? 'tabpage on' : 'tabpage') : 'tabpage'}><div id=${t}>${page(t)}</div></main>`,
     ),
     d &&
-      (tab === 'deck' || (tab === 'helm' && !location.hash.startsWith('#thread/'))) &&
+      (tab === 'deck' || tab === 'helm') &&
+      !state.threadSheet &&
       !state.messageSheet &&
       !state.decisionModal &&
       !state.modal &&
@@ -130,6 +131,7 @@ export function App({ state }: { state: GlassState }) {
     state.messageSheet && html`<${MessageSheet} key=${state.messageSheet.about ?? 'new'} />`,
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
+    d && state.threadSheet && html`<${ThreadSheet} key=${state.threadSheet} id=${state.threadSheet} />`,
     d && html`<${ReportSheet} reportKey=${state.reportSheet ?? null} />`,
     html`<${LightboxView} box=${state.lightbox} />`,
     settingsOpen &&

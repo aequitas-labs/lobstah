@@ -35,17 +35,17 @@ it('keeps a failed send for retry and opens its stored conversation after succes
   await click(g, '.dsend');
   expect(g.window.location.hash).toBe(`#thread/${ID}`);
   expect(g.$('.dialog-scrim')).toBeNull();
-  expect(g.$('#helm')?.textContent).toContain('Keep Reviews');
+  expect(g.$('.tsheet')?.textContent).toContain('Keep Reviews');
   expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'thread-start', payload: { text: 'Where should Helm go?', grounds: 'home' } });
 });
 it('shows current notes, cards, collapsed past rounds, chat provenance, and the long-thread hint', async () => {
   const g = await page(fleet(), { hash: `#thread/${ID}` });
-  expect(g.$('#helm')?.textContent).toContain('Choose the middle tab');
-  expect(g.$('#helm')?.textContent).toContain('Card for you');
+  expect(g.$('.tsheet')?.textContent).toContain('Choose the middle tab');
+  expect(g.$('.tsheet')?.textContent).toContain('Card for you');
   expect(g.$('.thread-hint')?.textContent).toContain('long thread');
   expect(g.$$('.thread-round')).toHaveLength(6);
   expect(g.$$('.thread-round[open]')).toHaveLength(1);
-  expect(g.$('#helm')?.textContent).toContain('In chat');
+  expect(g.$('.tsheet')?.textContent).toContain('In chat');
   expect(g.$('.dcompose')).not.toBeNull();
   await g.go('#helm'); expect(g.$('#helm [aria-label="Waiting for you"]')).not.toBeNull();
   expect(g.$('.bbitem[href="#helm"]')).not.toBeNull();
@@ -57,7 +57,7 @@ it('shows an outcome and reopens without answering the standing card', async () 
   const g = await page(d, { hash: `#thread/${ID}`, get: url => url.startsWith('/threads/') ? { status: 200, body: resolved } : undefined, post: () => { d.threads![0] = summary(); return { status: 200, body: { ok: true } }; } });
   expect(g.$('.thread-outcome')?.textContent).toContain('Helm gets the middle tab');
   expect(g.$('.dcompose')).toBeNull();
-  const reopen = g.$$('#helm button').find(el => el.textContent === 'Reopen') as HTMLElement;
+  const reopen = g.$$('.tsheet button').find(el => el.textContent === 'Reopen') as HTMLElement;
   reopen.click(); await g.settle();
   expect(g.posts().map(p => JSON.parse(p.body).kind)).toEqual(['thread-reopen']);
 });
@@ -174,6 +174,30 @@ it('shows checklist notes and existing dispatch, report and PR cards in conversa
   expect((g.$('.thread-checklist input[aria-label="Decided"]') as HTMLInputElement).checked).toBe(true);
   expect(g.$$('.thread-links .card')).toHaveLength(3);
   expect(g.$('.thread-links')?.textContent).toContain(dispatch.title);
-  expect(g.$('#helm')?.textContent).toContain(report.title);
-  expect(g.$('#helm')?.textContent).toContain(pr.title);
+  expect(g.$('.tsheet')?.textContent).toContain(report.title);
+  expect(g.$('.tsheet')?.textContent).toContain(pr.title);
+});
+
+it('opens a conversation in a sheet over the Threads list and returns to the list on Back', async () => {
+  const g = await page(fleet(), { hash: '#helm' });
+  await click(g, `#helm [data-thread="${ID}"] .dopen`);
+  expect(g.window.location.hash).toBe(`#thread/${ID}`);
+  expect(g.$('.tsheet[role="dialog"] .rbartitle')?.textContent).toBe('Navigation');
+  expect(g.$('.tsheet')?.textContent).toContain('Choose the middle tab');
+  expect(g.$(`#helm [data-thread="${ID}"]`)).not.toBeNull();
+  expect(g.$('#helm .thread-view')).toBeNull();
+  expect(g.$('.message-fab')).toBeNull();
+  await click(g, '.tsheet .rback');
+  expect(g.window.location.hash).toBe('#helm');
+  expect(g.$('.tsheet')).toBeNull();
+  expect(g.$(`#helm [data-thread="${ID}"]`)).not.toBeNull();
+  expect(g.$('.message-fab')).not.toBeNull();
+});
+it('closes a linked conversation to the Threads list without leaving the glass', async () => {
+  const g = await page(fleet(), { hash: `#thread/${ID}` });
+  expect(g.$('.tsheet')).not.toBeNull();
+  await click(g, '.tsheet .rback');
+  expect(g.window.location.hash).toBe('#helm');
+  expect(g.$('.tsheet')).toBeNull();
+  expect(g.$('#helm .page-head h1')?.textContent).toBe('Threads');
 });

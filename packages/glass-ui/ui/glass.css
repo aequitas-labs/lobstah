@@ -90,6 +90,8 @@
   /* A report's sheet: over the tabs and their modal, under the decision modal and the image overlay. */
   --layer-sheet: 12;
   --layer-alert: calc(var(--layer-modal) - 1);
+  /* A conversation's sheet: over the tabs and the phone bar, under the modal its cards open and a report's sheet. */
+  --layer-thread-sheet: var(--layer-alert);
   /* the phone's bottom bar: its row's height, above the safe-area inset */
   --bottombar-height: 44px;
   /* an unread decision: a red-ish tint mixed from the palette, so it follows the theme */
@@ -2657,7 +2659,7 @@ a.lob {
  * never widens the page; long tokens (paths, hashes, URLs) wrap.
  */
 /*
- * A report's sheet over the glass (components/report-view.ts ReportSheet): a
+ * A report's sheet over the glass (components/sheet.ts Sheet): a
  * bar with Back and the title, then the report, scrolling on its own so the
  * tab underneath keeps its place.
  */
@@ -4213,9 +4215,26 @@ footer .glass-brand {
   height: 52px;
   box-shadow: 0 4px 18px #0008;
 }
+/* The accent orange, so the one way to message the helm stands out. */
+.message-fab,
+.message-fab:hover {
+  background: var(--lobstah);
+  border-color: var(--lobstah);
+  color: var(--on-fill);
+}
+.message-fab:hover {
+  background: color-mix(in srgb, var(--lobstah) 85%, var(--on-fill));
+}
 .message-fab svg {
   width: 28px;
   height: 28px;
+}
+/* A conversation opens in the report's sheet (components/sheet.ts), with the report's gutter. */
+.tsheet {
+  z-index: var(--layer-thread-sheet);
+}
+.thread-sheet-body {
+  padding: var(--space-3) var(--space-4) 48px;
 }
 .thread-view {
   max-width: 760px;

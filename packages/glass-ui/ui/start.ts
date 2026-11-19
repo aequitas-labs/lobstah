@@ -1,6 +1,15 @@
 import { h, render } from 'preact';
 import type { GlassSnapshot } from '@lobstah/core';
-import { NO_OLDER, detailHash, detailFromHash, trapFromHash, decisionFromHash, reportFromHash, reportFromPath } from '../src/glass-diff.js';
+import {
+  NO_OLDER,
+  detailHash,
+  detailFromHash,
+  trapFromHash,
+  decisionFromHash,
+  reportFromHash,
+  reportFromPath,
+  threadFromHash,
+} from '../src/glass-diff.js';
 import {
   closeDecision,
   closeLightbox,
@@ -26,6 +35,7 @@ import { poll, setLive, startPolling } from './poll.js';
 import { startPresence } from './presence.js';
 import { loadLobHidden, loadPrefs } from './prefs.js';
 import { currentRoute, onRoute } from './route.js';
+import { closeThreadSheet, routeThread } from './thread-actions.js';
 import { getState, initState, setState, subscribe } from './store.js';
 import type { GlassState } from './store.js';
 import { setBackend } from './backend.js';
@@ -45,6 +55,7 @@ const initialState = (): GlassState => ({
   snapshot: undefined,
   route: currentRoute(),
   reportSheet: reportFromHash(location.hash),
+  threadSheet: threadFromHash(location.hash),
   prefs: location.hash.startsWith('#review-') ? { ...loadPrefs(), repo: '', q: '' } : loadPrefs(),
   modal: detailFromHash(location.hash),
   detail: detailFromHash(location.hash)?.type === 'dispatch' ? { key: detailFromHash(location.hash)!.key } : null,
@@ -219,7 +230,9 @@ function startGlass(): Array<() => void> {
     }
     routeDecision(null);
     routeDetailView(modal);
+    // A conversation's sheet stays under the report, card or detail it opened.
     if (modal) return;
+    routeThread(threadFromHash(location.hash));
     if (focusDecision !== getState().focusDecision) scrolledTo = null;
     setState({
       route,
@@ -248,7 +261,7 @@ function startGlass(): Array<() => void> {
     const state = getState();
     const t = e.target as HTMLElement | null;
     if (e.key === 'Escape') {
-      // Topmost first: the image overlay, then the decision modal, then the report sheet, then the modal.
+      // Topmost first: the image overlay, the decision modal, the report sheet, the modal, then a conversation's sheet.
       if (state.lightbox) closeLightbox();
       else if (state.decisionModal) {
         if (typing(t) && t!.closest?.('.dmodal')) {
@@ -256,7 +269,11 @@ function startGlass(): Array<() => void> {
           document.querySelector<HTMLElement>('.dmodal')?.focus();
         } else closeDecision();
       } else if (state.reportSheet) closeReportSheet();
-      else closeModal();
+      else if (!state.modal && !state.messageSheet && state.threadSheet) {
+        // Escape leaves the reply field first, as in the decision modal.
+        if (typing(t)) t!.blur();
+        else closeThreadSheet();
+      } else closeModal();
       return;
     }
     if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.keyCode === 229 || typing(t) || state.lightbox) return;
