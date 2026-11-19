@@ -110,8 +110,8 @@ export function latestWorktreeEdit(directory: string): number {
 function protectedProcess(row: ServerProcess, protectedPids: Set<number>): boolean {
   if (row.pid <= 1 || protectedPids.has(row.pid)) return true;
   const words = row.command.split(/\s+/).map((word) => path.basename(word.replace(/^["']|["']$/g, '')));
-  return words.some((word) => /^(?:codex|claude)(?:[.\-].*)?$|^(?:lobstah|docker|dockerd|containerd|tmux|com\.docker\..*|Docker)(?:\.exe)?$/i.test(word)) ||
-    /(?:@anthropic-ai\/claude-code|@openai\/codex|(?:^|\s)(?:glass|daemon)(?:\s|$)|lobstah\/apps\/cli\/dist\/main\.js)/i.test(row.command);
+  return words.some((word) => /^(?:codex|claude)(?:[.\-].*)?$|^(?:lobstah|docker|dockerd|containerd|tmux:?|com\.docker\..*|Docker)(?:\.exe)?$/i.test(word)) ||
+    /(?:(?:^|\/)(?:codex|claude)(?:[.\-\/]|\s|$)|@anthropic-ai\/claude-code|@openai\/codex|(?:^|\s)(?:glass|daemon)(?:\s|$)|lobstah\/apps\/cli\/dist\/main\.js)/i.test(row.command);
 }
 
 function protectedProcessIds(processes: ServerProcess[], extra: number[]): Set<number> {

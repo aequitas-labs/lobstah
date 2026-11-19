@@ -147,7 +147,7 @@ describe('server cleanup safety', () => {
     expect(rows[0]?.processes.map((row) => row.pid)).toEqual([700001, 700002]);
   });
 
-  it.each(['codex --listen', 'claude --listen', 'node /tools/@openai/codex/bin/codex.js', 'lobstah glass', 'node dist/main.js daemon', 'dockerd', 'com.docker.backend', 'tmux'])('keeps protected command %s', (command) => {
+  it.each(['codex --listen', 'claude --listen', 'node /tools/@openai/codex/bin/codex.js', 'node /opt/claude/cli.js', 'lobstah glass', 'node dist/main.js daemon', 'dockerd', 'com.docker.backend', 'tmux', 'tmux: server'])('keeps protected command %s', (command) => {
     expect(planServerCull(inventory([server({ command })]), options)[0]).toMatchObject({ action: 'keep', reason: 'agent or infrastructure process' });
   });
 
