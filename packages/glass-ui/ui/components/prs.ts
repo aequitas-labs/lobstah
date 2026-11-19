@@ -306,7 +306,10 @@ export function prCardPending(p: GlassPr, attention: readonly DeckAttention[], s
  * Merge readiness, the watch and the gate are in the PR's modal. `quiet`
  * greys an acked one; `stack` is its stack when it is the only PR in it.
  */
-export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly DeckAttention[]; stack?: GlassStack } = {}) {
+export function prCard(
+  p: GlassPr,
+  opts: { quiet?: boolean; attention?: readonly DeckAttention[]; stack?: GlassStack; onOpen?: () => void } = {},
+) {
   const state = p.badge.state;
   const pending = prCardPending(p, opts.attention ?? [], opts.stack);
   return prShapedCard({
@@ -326,6 +329,7 @@ export function prCard(p: GlassPr, opts: { quiet?: boolean; attention?: readonly
     quiet: opts.quiet,
     cls: opts.quiet ? 'acked' : undefined,
     onClick: () => {
+      opts.onOpen?.();
       ackOnOpen(pending);
       opener('pr', p.key)();
     },

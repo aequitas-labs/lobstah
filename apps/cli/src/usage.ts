@@ -7,6 +7,19 @@
  */
 
 import { GOAL_WORDING_RULE } from '@lobstah/core';
+import type { DecisionReference } from '@lobstah/core';
+
+/** Keep mixed --report/--pr occurrences in argument order, skipping other flag values. */
+export function decisionReferences(args: readonly string[]): DecisionReference[] {
+  const references: DecisionReference[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i]!;
+    if (flag === '--') break;
+    if (flag === '--report' || flag === '--pr') references.push({ kind: flag === '--pr' ? 'pr' : 'report', key: args[i + 1]! });
+    if (COMMANDS['man:ask']!.flags[flag]?.value) i++;
+  }
+  return references;
+}
 
 interface FlagSpec {
   /** Value placeholder for the synopsis; absent means a boolean flag. */
@@ -293,6 +306,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--option': { value: '<label>', repeatable: true },
       '--attach': { value: '<file>', repeatable: true },
       '--withdraw': { value: '<key>' },
+      '--report': { value: '<report-key>', repeatable: true },
+      '--pr': { value: '<pr-key>', repeatable: true },
       '--show': { value: '<card-or-report-key>' },
       '--replace': { value: '<key>' },
       '--grounds': { value: '<name>' },

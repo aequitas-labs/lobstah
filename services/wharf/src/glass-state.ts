@@ -1,4 +1,4 @@
-import { WHARF_REVIEW_REQUEST_KINDS } from '../../../packages/core/src/backend-model.js';
+import { WHARF_REVIEW_REQUEST_KINDS, validDecisionReferences } from '../../../packages/core/src/backend-model.js';
 import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
 import { LEASE_MS, identifier, object, repoIdentity, requireThat, text, tmuxPane } from './protocol.js';
 import { cardSchema, cardTables } from './cards.js';
@@ -234,6 +234,10 @@ export class GlassState {
         requireThat(Array.isArray(options) && options.length <= 6 && options.every((o) => typeof o === 'string' && o.trim() === o && o.length > 0 && o.length <= 80) && new Set(options).size === options.length, 400, 'invalid decision options');
         requireThat(b.kind === 'decision' || options.length === 0, 400, 'reports have no options');
         const d: WharfDocument = { id, title, kind: b.kind as WharfDocumentInput['kind'], options, attachments: [], published: false, at: new Date(now).toISOString(), author: `${actor.kind}:${actor.id}` };
+        if (b.references !== undefined) {
+          requireThat(d.kind === 'decision' && validDecisionReferences(b.references), 400, 'Choose up to 16 report or PR keys for the decision');
+          d.references = b.references.map(({ kind, key }) => ({ kind, key }));
+        }
         if (b.grounds !== undefined) d.grounds = identifier(b.grounds);
         if (d.kind === 'review') d.review = this.reviewMeta(b.review);
         if (b.dispatch !== undefined) {

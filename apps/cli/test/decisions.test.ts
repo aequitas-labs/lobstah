@@ -79,6 +79,34 @@ function question(note = 'which schema?') {
 }
 
 describe('man ask', () => {
+  it('retains mixed report and PR references in order through storage and the glass snapshot', () => {
+    const references = [
+      { kind: 'report', key: 'report:helm:home:abcd1234' },
+      { kind: 'pr', key: 'pr:acme/web#42' },
+      { kind: 'report', key: `report:work:${A}` },
+    ];
+    const result = lobstah('man', 'ask', '--title', 'Ship this?', '--report', references[0]!.key, '--pr', references[1]!.key, '--report', references[2]!.key);
+    expect(result.status, result.stderr).toBe(0);
+    const key = keyOf(result.stdout)!;
+    expect(readDecision(key)?.references).toEqual(references);
+    expect(buildGlassSnapshot().decisions.find((decision) => decision.key === key)?.references).toEqual(references);
+    expect(readDecisionAnswer(key)).toBeUndefined();
+  });
+
+  it.each(['../../private', 'pr:acme/web#0', 'https://evil.test/pr'])('rejects malformed PR references before storing a card: %s', (key) => {
+    const before = listDecisions();
+    const result = lobstah('man', 'ask', '--title', 'Ship this?', '--pr', key);
+    expect(result.status).not.toBe(0);
+    expect(listDecisions()).toEqual(before);
+  });
+
+  it('refuses more than 16 references without storing a partial card', () => {
+    const references = Array.from({ length: 17 }, (_, i) => ['--pr', `pr:acme/web#${i + 1}`]).flat();
+    const result = lobstah('man', 'ask', '--title', 'Ship this?', ...references);
+    expect(result.status).not.toBe(0);
+    expect(listDecisions()).toHaveLength(0);
+  });
+
   it.each([
     { config: undefined, env: undefined, port: 4949 },
     { config: 5888, env: undefined, port: 5888 },

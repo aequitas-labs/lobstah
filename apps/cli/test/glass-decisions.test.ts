@@ -111,6 +111,49 @@ const type = async (g: GlassDom, box: Element, value: string) => {
 const ok = () => ({ status: 201, body: { ok: true, id: 'r1' } });
 
 describe('glass: the decisions list', () => {
+  it('embeds report and PR cards in reference order and keeps the decision draft across report visits', async () => {
+    const d = fleet();
+    const sample = everyAttentionFleet();
+    const report = sample.reports[1]!;
+    const pr = sample.prs[0]!;
+    d.reports = [report];
+    d.prs = [pr];
+    d.decisions[0]!.references = [{ kind: 'report', key: report.key }, { kind: 'pr', key: pr.key }];
+    const base = '/report/' + encodeURIComponent(report.key);
+    const g = await page(d, { post: ok, files: { [base + '/meta']: JSON.stringify(report), [base]: '# Findings\n\nRead this before deciding' } });
+    await g.go('#decision/' + encodeURIComponent(KEY));
+    const box = g.$('.dmodal textarea')!;
+    await type(g, box, 'Keep this draft');
+    expect(text(g.$('.decision-embeds'))).toContain(report.title);
+    expect(text(g.$('.decision-embeds'))).toContain(pr.title);
+    await click(g, g.$('.decision-embeds .report-card'));
+    expect(g.$('.dmodal')).toBeNull();
+    expect(g.$('.rsheet')).toBeTruthy();
+    await click(g, g.$('.rsheet .rback'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await g.settle();
+    expect((g.$('.dmodal textarea') as HTMLTextAreaElement).value).toBe('Keep this draft');
+    await click(g, g.$('.decision-embeds .prcard'));
+    expect(g.$('.dmodal')).toBeNull();
+    g.window.history.back();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await g.settle();
+    expect((g.$('.dmodal textarea') as HTMLTextAreaElement).value).toBe('Keep this draft');
+    expect(answers(g)).toHaveLength(0);
+  });
+
+  it('keeps the answer controls when a reference is unavailable', async () => {
+    const d = fleet();
+    d.decisions[0]!.references = [{ kind: 'report', key: 'missing-report' }, { kind: 'pr', key: 'pr:acme/web#9999' }];
+    const g = await page(d);
+    await g.go('#decision/' + encodeURIComponent(KEY));
+    expect(text(g.$('.decision-embeds'))).toContain('Report unavailable');
+    expect(text(g.$('.decision-embeds'))).toContain('PR unavailable');
+    expect(g.$('.dmodal textarea')).toBeTruthy();
+    expect(g.$('.dmodal .dsend')).toBeTruthy();
+    expect(answers(g)).toHaveLength(0);
+  });
+
   it('the decisions section comes first: one compact row per open decision, newest first, no answering in the list', async () => {
     const g = await page(fleet());
     const first = g.$('#deck .deckgrid > section')!;

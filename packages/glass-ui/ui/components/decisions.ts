@@ -33,6 +33,7 @@ import { can, fileUrl } from '../backend.js';
 import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
 import { Button, buttonClass } from './button.js';
 import { Toast } from './toast.js';
+import { DecisionEmbeds } from './decision-embeds.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -431,6 +432,7 @@ export function DecisionModal({
                   c.detail.trim() &&
                   html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => fileUrl({ kind: 'decision', key: c.key }, name)} />`,
                 c.kind === 'decision' && attachments(c.key, c.attachments),
+                c.kind === 'decision' && !!c.references?.length && html`<${DecisionEmbeds} references=${c.references} />`,
                 c.kind === 'decision' && c.run && html`<${RunCardBody} cardKey=${c.key} run=${c.run} readOnly=${c.readOnly} />`,
               ]
         }

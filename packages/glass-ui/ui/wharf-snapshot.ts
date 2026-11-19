@@ -153,6 +153,7 @@ export function decisionOf(doc: WharfDocument, detail: string | undefined): Glas
     title: doc.title,
     detail: detail ?? '',
     options: doc.options ?? [],
+    ...(doc.references?.length ? { references: doc.references } : {}),
     attachments: attachments('documents', doc.id, doc.attachments),
     ...(doc.dispatch ? { dispatch: doc.dispatch, lane: LANE } : {}),
     askedBy: doc.author,

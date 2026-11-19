@@ -485,6 +485,7 @@ export interface GlassTrap extends Partial<Omit<TrapRegistration, 'trapId'>> {
 
 /** A standing decision as the glass renders it: the record plus its detail page. */
 export interface GlassDecision {
+  references?: import('./backend-model.js').DecisionReference[];
   /** Closed cards are available through their deep link, without answer controls. */
   readOnly?: boolean;
   appStart?: import('./desktop-start-link.js').DesktopAppStart;
