@@ -59,6 +59,15 @@ describe('background culling', () => {
     expect(lastCullPassAt()).toBeUndefined(); // only the worker stamps an actual pass
   });
 
+  it('schedules cache-pressure work even when the dispatch free-space floor is off', () => {
+    const cfg = loadConfig();
+    cfg.limits = { ...DEFAULT_LIMITS, minFreeGB: 0, cacheMinFreeGB: 20 };
+    let scheduled = 0;
+    const culler = { start: () => { scheduled++; return true; }, retention: () => 0, pressure: () => 0 };
+    expect(spaceGuard(cfg, { culler, freeBytes: () => GB }, () => {})).toBe(true);
+    expect(scheduled).toBe(1);
+  });
+
   it('does not overlap a live worker, including after a daemon restart', async () => {
     const lock = tryDirLock(path.join(home, 'cull-worker.lock'), { staleMs: 1000 });
     expect(lock).toBeDefined();

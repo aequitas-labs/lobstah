@@ -6,18 +6,24 @@ import { cacheDirectories, withTrapCacheLock } from './cache-paths.js';
 import { GB, formatGB, statfsFreeBytes, type FreeBytesReader } from './disk.js';
 import { listTraps, readTrap, type TrapRegistration } from './soak.js';
 import { listRoster } from './roster.js';
-import { laneOf } from './worktrees.js';
+import { laneOf, acquireWorktreeLock, releaseWorktreeLock, worktreeGitDir } from './worktrees.js';
+import { reviewWaitWorktrees, type ReviewWaitWorktree } from './review-wait-worktrees.js';
 import { readStatusLog } from './status.js';
 import { postNotice } from './notices.js';
 import { lobstahHome } from './paths.js';
 
-export interface TrapCachePlan {
-  trapId: string;
+/** Verified disposable directories in one linked checkout. */
+export interface WorktreeCachePlan {
   repo: string;
   worktree: string;
   targets: string[];
   bytes: number;
 }
+
+/** Disposable directories in an idle trap. */
+export interface TrapCachePlan extends WorktreeCachePlan { trapId: string; }
+/** Disposable directories in a finished chain waiting only for review. */
+export interface ReviewWaitCachePlan extends WorktreeCachePlan { owner: string; }
 
 type CacheTrap = Pick<TrapRegistration, 'trapId' | 'repo' | 'worktree'>;
 const git = (dir: string, args: string[]): string => execFileSync('git', ['-C', dir, ...args], {
@@ -82,12 +88,12 @@ function cacheBytes(target: string): number {
 }
 
 /** Reject unconfigured, busy, unverifiable or tracked cache trees before offering them for removal. */
-function planTrapCache(trap: CacheTrap, cfg: Config): TrapCachePlan | undefined {
-  const repo = trap.repo ? cfg.repos[trap.repo] : undefined;
-  if (!repo?.cacheDirs?.length || !cacheTrapIdle(trap)) return undefined;
+function planWorktreeCache(checkout: Pick<CacheTrap, 'repo' | 'worktree'>, cfg: Config): WorktreeCachePlan | undefined {
+  const repo = checkout.repo ? cfg.repos[checkout.repo] : undefined;
+  if (!repo?.cacheDirs?.length) return undefined;
   try {
-    const root = fs.realpathSync.native(trap.worktree);
-    if (!cacheWorktree(trap.worktree, repo.path)) return undefined;
+    const root = fs.realpathSync.native(checkout.worktree);
+    if (!cacheWorktree(checkout.worktree, repo.path)) return undefined;
     const tracked = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
     const targets: string[] = [];
     let bytes = 0;
@@ -98,7 +104,7 @@ function planTrapCache(trap: CacheTrap, cfg: Config): TrapCachePlan | undefined 
         targets.push(target); bytes += size;
       } catch { /* Unreadable or nested-repository targets are preserved. */ }
     }
-    return targets.length ? { trapId: trap.trapId, repo: trap.repo!, worktree: root, targets, bytes } : undefined;
+    return targets.length ? { repo: checkout.repo!, worktree: root, targets, bytes } : undefined;
   } catch { return undefined; } // Unknown Git/path state is never permission to delete.
 }
 
@@ -106,16 +112,57 @@ function planTrapCache(trap: CacheTrap, cfg: Config): TrapCachePlan | undefined 
 export function planTrapCaches(cfg: Config = loadConfig()): TrapCachePlan[] {
   const traps = new Map<string, CacheTrap>([...listRoster(), ...listTraps()].map((trap) => [trap.trapId, trap]));
   return [...traps.values()].flatMap((trap) => {
-    const plan = planTrapCache(trap, cfg);
-    return plan ? [plan] : [];
+    if (!cacheTrapIdle(trap)) return [];
+    const plan = planWorktreeCache(trap, cfg);
+    return plan ? [{ trapId: trap.trapId, ...plan }] : [];
   }).sort((a, b) => b.bytes - a.bytes || a.trapId.localeCompare(b.trapId));
+}
+
+/** Preview disposable caches in finished checkouts whose PRs only await review. */
+export function planReviewWaitCaches(cfg: Config = loadConfig()): ReviewWaitCachePlan[] {
+  return reviewWaitWorktrees(cfg).flatMap((worktree) => {
+    const plan = planWorktreeCache(worktree, cfg);
+    return plan ? [{ owner: worktree.owner, ...plan }] : [];
+  }).sort((left, right) => right.bytes - left.bytes || left.owner.localeCompare(right.owner));
+}
+
+/** A cleared dependency cache invalidates the reuse setup stamp, even when lockfiles did not change. */
+function invalidateCacheSetup(worktree: string): void {
+  const gitDir = worktreeGitDir(worktree);
+  if (gitDir) fs.rmSync(path.join(gitDir, 'lobstah-setup.json'), { force: true });
+}
+
+/** The same worktree lock a follow-up takes protects revalidation and cache removal. */
+export function clearReviewWaitCaches(worktree: ReviewWaitWorktree, cfg: Config = loadConfig()): number {
+  const lockId = `review-cache-${process.pid}-${worktree.owner}`;
+  if (acquireWorktreeLock(worktree.worktree, lockId, 'work', 'warm')) return 0;
+  try {
+    const current = reviewWaitWorktrees(cfg).find((item) => item.owner === worktree.owner);
+    if (!current) return 0;
+    const plan = planWorktreeCache(current, cfg);
+    if (!plan) return 0;
+    let bytes = 0;
+    for (const target of plan.targets) {
+      try {
+        if (!reviewWaitWorktrees(cfg).some((item) => item.owner === current.owner)) break;
+        const tracked = git(plan.worktree, ['ls-files', '-z']).split('\0').filter(Boolean);
+        if (!safeCacheTarget(plan.worktree, target, tracked)) continue;
+        const size = cacheBytes(target);
+        invalidateCacheSetup(plan.worktree);
+        fs.rmSync(target, { recursive: true, force: true });
+        bytes += size;
+      } catch { /* Unknown paths or changed Git state are preserved. */ }
+    }
+    return bytes;
+  } finally { releaseWorktreeLock(worktree.worktree, lockId); }
 }
 
 /** Re-plan inside the claim/status lock: a trap that became working after the preview is preserved. */
 export function clearTrapCaches(trap: CacheTrap, cfg: Config = loadConfig()): number {
   if (!trap.repo || !cfg.repos[trap.repo]?.cacheDirs?.length) return 0;
   return withTrapCacheLock(trap.trapId, () => {
-    const plan = planTrapCache(trap, cfg);
+    if (!cacheTrapIdle(trap)) return 0;
+    const plan = planWorktreeCache(trap, cfg);
     if (!plan) return 0;
     let bytes = 0;
     for (const target of plan.targets) {
@@ -123,6 +170,7 @@ export function clearTrapCaches(trap: CacheTrap, cfg: Config = loadConfig()): nu
         const tracked = git(plan.worktree, ['ls-files', '-z']).split('\0').filter(Boolean);
         if (!cacheTrapIdle(trap) || !safeCacheTarget(plan.worktree, target, tracked)) continue;
         const size = cacheBytes(target);
+        invalidateCacheSetup(plan.worktree);
         fs.rmSync(target, { recursive: true, force: true });
         bytes += size;
       } catch { /* Cleanup is best effort; a report or sign-off must still succeed. */ }
@@ -151,7 +199,6 @@ export function clearFinishedTrapCaches(trap: CacheTrap, reason: string): void {
 /** Recover idle caches before worktree culling/refusal; no opted-in repos means no disk reads or behavior change. */
 export function recoverTrapCaches(cfg: Config, volume: string, readFree: FreeBytesReader = statfsFreeBytes, log: (message: string) => void = () => {}): number {
   if (!Object.values(cfg.repos).some((repo) => repo.cacheDirs?.length)) return 0;
-  if (cfg.limits.cacheMinFreeGB === 0) return 0;
   const threshold = Math.max(cfg.limits.cacheMinFreeGB ?? 50, cfg.limits.minFreeGB ?? 0) * GB;
   const floor = (cfg.limits.minFreeGB ?? 0) * GB;
   if (!(threshold > 0)) return 0;
@@ -160,7 +207,17 @@ export function recoverTrapCaches(cfg: Config, volume: string, readFree: FreeByt
     if (before >= threshold) return 0;
     let bytes = 0;
     let traps = 0;
+    let reviewWaits = 0;
     const device = fs.statSync(volume).dev;
+    // Review waits are disposable before other idle traps and before whole checkouts.
+    for (const plan of planReviewWaitCaches(cfg)) {
+      if (readFree(volume) >= threshold) break;
+      if (fs.statSync(plan.worktree).dev !== device) continue;
+      const current = reviewWaitWorktrees(cfg).find((item) => item.owner === plan.owner);
+      if (!current) continue;
+      const removed = clearReviewWaitCaches(current, cfg);
+      if (removed > 0) { bytes += removed; reviewWaits++; }
+    }
     for (const plan of planTrapCaches(cfg)) {
       const free = readFree(volume);
       if (free >= threshold) break;
@@ -185,7 +242,7 @@ export function recoverTrapCaches(cfg: Config, volume: string, readFree: FreeByt
     if (bytes > 0) {
       const after = readFree(volume);
       const recovered = Math.max(0, after - before);
-      const text = `cache pressure cleanup: ${bytes} cache bytes cleared in ${traps} idle trap(s); ${recovered} free bytes recovered (${formatGB(recovered)})`;
+      const text = `cache pressure cleanup: ${bytes} cache bytes cleared in ${traps} idle trap(s) and ${reviewWaits} review-wait worktree(s); ${recovered} free bytes recovered (${formatGB(recovered)})`;
       if (recovered >= GB || before < floor || after < floor) postNotice({ kind: 'caches-cleared', text });
       log(text);
     }

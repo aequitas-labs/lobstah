@@ -41,6 +41,8 @@ import {
   recordRosterRevision,
   planTrapCaches,
   recoverTrapCaches,
+  planReviewWaitCaches,
+  reviewWaitWorktrees,
 } from '@lobstah/core';
 import type { CatchRef, FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
@@ -55,6 +57,8 @@ export interface CullItem {
   bytes: number;
   /** Milliseconds since epoch the age is counted from (oldest first ordering). */
   ageFrom?: number;
+  /** Pressure may discard this clean, published checkout while its PR waits for review. */
+  reviewWait?: boolean;
 }
 
 export interface PlanOptions {
@@ -110,18 +114,21 @@ function idsIn(dir: string): Set<string> {
   }
 }
 
-/** Lost gear has no dispatch proof: keep it unless git proves it is published and clean. */
-function orphanWorktreeSafe(dir: string): boolean {
+/** Explain why Git cannot prove that a checkout is clean and published. */
+function worktreeSafetyReason(dir: string, heads: readonly string[] = []): string | undefined {
   const git = (...args: string[]) => execFileSync('git', args, {
     cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000,
   }).trim();
   try {
-    if (git('status', '--porcelain', '--untracked-files=all')) return false;
-    return git('rev-list', '--count', 'HEAD', '--not', '--remotes') === '0';
-  } catch {
-    return false;
-  }
+    if (git('status', '--porcelain', '--untracked-files=all')) return 'dirty';
+    const published = heads.filter((head) => /^[a-f0-9]{40,64}$/i.test(head));
+    const count = git('rev-list', '--count', 'HEAD', '--not', '--remotes', ...published);
+    return count === '0' ? undefined : 'unpushed';
+  } catch { return 'unknown Git state'; }
 }
+
+/** Lost gear has no dispatch proof: keep it unless Git proves it is published and clean. */
+function orphanWorktreeSafe(dir: string): boolean { return worktreeSafetyReason(dir) === undefined; }
 
 /** Review checkouts kept on finish must also survive later retention/pressure passes. */
 function reviewWorktreeUsers(): Map<string, Set<string>> {
@@ -388,7 +395,7 @@ export function orderCull(items: CullItem[]): CullItem[] {
  * Worktrees the free-space guard may remove, oldest first: the worktree of
  * every finished dispatch, and every worktree nothing owns. Never a queued
  * or active dispatch's, never one a soaking trap works in, and never one
- * whose PR is still open. No age cutoff
+ * whose PR needs work. Clean, published review-wait checkouts qualify after caches. No age cutoff
  * and no sizing: the guard reads free space after each removal instead.
  */
 export function planPressureCull(now = Date.now()): CullItem[] {
@@ -407,13 +414,17 @@ export function planPressureCull(now = Date.now()): CullItem[] {
   const wtRoot = path.join(lobstahHome(), 'worktrees');
   for (const id of trapWorktreeIds(wtRoot)) live.add(id);
   const usage = worktreeUsage(openPr);
+  const waiting = new Map(reviewWaitWorktrees().map((item) => [item.owner, item]));
   const reviews = reviewWorktreeUsers();
   for (const id of usage.live) live.add(id);
+  for (const owner of waiting.keys()) live.delete(owner);
   const items: CullItem[] = [];
   for (const id of idsIn(wtRoot)) {
     if (live.has(id)) continue;
     const p = path.join(wtRoot, id);
     if (configuredFolderOverlaps(p)) continue;
+    const reviewWait = waiting.get(id);
+    if (reviewWait && worktreeSafetyReason(p, reviewWait.heads)) continue;
     if (reviews.has(id) && !orphanWorktreeSafe(p)) continue;
     const proof = proofs.get(id);
     if (proof && mergedWorktreeUnsafe(p, proof.heads, proof.trunk, fetched)) continue;
@@ -422,7 +433,7 @@ export function planPressureCull(now = Date.now()): CullItem[] {
       if (inspectTrapWorktree(p).reason) continue;
     } else if (doneAt === undefined && !orphanWorktreeSafe(p)) continue;
     const from = doneAt ?? fs.statSync(p).mtimeMs;
-    items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: 0, ageFrom: from });
+    items.push({ kind: 'worktree', id, target: p, ageDays: Math.floor((now - from) / DAY), bytes: 0, ageFrom: from, ...(reviewWait ? { reviewWait: true } : {}) });
   }
   return items.sort((a, b) => a.ageFrom! - b.ageFrom! || a.id.localeCompare(b.id));
 }
@@ -431,7 +442,7 @@ export function planPressureCull(now = Date.now()): CullItem[] {
  * Worktrees are removed through git when the owning repo is still known.
  * `git worktree remove` keeps the branch: a culled dispatch's commits stay.
  */
-export function removeWorktree(id: string, dir: string): void {
+export function removeWorktree(id: string, dir: string, reviewWait = false): void {
   if (configuredFolderOverlaps(dir)) throw new Error(`configured working folder is never culled: ${dir}`);
   const anchor = readTrapAnchor(dir);
   if (anchor?.createdBy === 'soak') {
@@ -439,11 +450,13 @@ export function removeWorktree(id: string, dir: string): void {
     recordRosterRevision(anchor.trapId, removeGhostWorktree(dir).revision);
     return; // Never fall through to force removal of a trap checkout.
   }
-  if (reviewWorktreeUsers().has(id) || !worktreeUsage().newest.has(id)) {
+  if (reviewWait || reviewWorktreeUsers().has(id) || !worktreeUsage().newest.has(id)) {
     // Recheck reviews and orphans at removal. Git must refuse newly dirty
     // work; never force or fall through to recursive removal when it does.
     try {
-      if (!orphanWorktreeSafe(dir)) return;
+      const waiting = reviewWait ? reviewWaitWorktrees().find((item) => item.owner === id) : undefined;
+      if (reviewWait && !waiting) return;
+      if (worktreeSafetyReason(dir, waiting?.heads)) return;
       const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       execFileSync('git', ['--git-dir', common, 'worktree', 'remove', dir], { stdio: 'ignore' });
     } catch { /* leave it for the next cleanup attempt */ }
@@ -499,11 +512,13 @@ export function applyCull(items: CullItem[]): CullItem[] {
     const locked = worktreeGitDir(item.target) !== undefined;
     if (locked && acquireWorktreeLock(item.target, lockId, 'work', 'warm')) { blocked.add(item.id); continue; }
     try {
-      if (trapWorktreeIds(worktreesDir()).has(item.id) || worktreeUsage(openPrDispatches()).live.has(item.id)) {
+      const reviewWait = item.reviewWait && reviewWaitWorktrees().some((worktree) => worktree.owner === item.id);
+      if (trapWorktreeIds(worktreesDir()).has(item.id) ||
+          worktreeUsage(reviewWait ? undefined : openPrDispatches()).live.has(item.id) || (item.reviewWait && !reviewWait)) {
         blocked.add(item.id);
         continue;
       }
-      removeWorktree(item.id, item.target);
+      removeWorktree(item.id, item.target, reviewWait);
       if (fs.existsSync(item.target)) blocked.add(item.id);
     } finally {
       if (locked) releaseWorktreeLock(item.target, lockId);
@@ -527,6 +542,25 @@ export function applyCull(items: CullItem[]): CullItem[] {
   return items;
 }
 
+/** Explain retained disk space only in previews; deletion passes never size kept trees. */
+export function keptWorktreeSummary(removing: ReadonlySet<string> = new Set()): string[] {
+  const inUse = worktreeUsage().live;
+  const open = worktreeUsage(openPrDispatches()).live;
+  const trapped = trapWorktreeIds(worktreesDir());
+  const groups = new Map<string, { count: number; bytes: number }>();
+  for (const id of idsIn(worktreesDir())) {
+    if (removing.has(id)) continue;
+    const directory = path.join(worktreesDir(), id);
+    const reason = trapped.has(id) ? 'kept for live traps' : inUse.has(id) ? 'kept for queued or active dispatches'
+      : worktreeSafetyReason(directory) ?? (open.has(id) ? 'kept for open PRs' : 'kept by retention or checkout protection');
+    const group = groups.get(reason) ?? { count: 0, bytes: 0 };
+    group.count++;
+    group.bytes += sizing.worktree(directory);
+    groups.set(reason, group);
+  }
+  return [...groups].map(([reason, group]) => `${group.count} ${reason}, ${formatGB(group.bytes)}`);
+}
+
 /**
  * `lobstah cull [--older-than <days>] [--apply]`. A dry run measures each
  * target and prints the sizes. An apply measures nothing: it deletes, then
@@ -536,11 +570,14 @@ export function runCull(days: number, apply: boolean, freeBytes: FreeBytesReader
   const lines: string[] = [];
   // Under pressure, disposable caches come before removing whole worktrees, including a manual --apply.
   if (apply) recoverTrapCaches(loadConfig(), worktreesDir(), freeBytes, (message) => lines.push(message));
-  const plan = planCull(days, now, { measure: !apply });
+  const plan = planCull(days, now, { measure: !apply, keepOpenPrs: true });
   if (!apply) {
     const caches = planTrapCaches();
     if (caches.length > 0) lines.push(`caches: ${formatGB(caches.reduce((bytes, cache) => bytes + cache.bytes, 0))} clearable in ${caches.length} idle trap(s)`);
+    const reviewCaches = planReviewWaitCaches();
+    if (reviewCaches.length > 0) lines.push(`review caches: ${formatGB(reviewCaches.reduce((bytes, cache) => bytes + cache.bytes, 0))} clearable in ${reviewCaches.length} checkout(s) waiting for review`);
     lines.push(toonTable('cull', plan.map((i) => ({ kind: i.kind, id: i.id, ageDays: i.ageDays, bytes: i.bytes })), ['kind', 'id', 'ageDays', 'bytes']));
+    lines.push(...keptWorktreeSummary(new Set(plan.filter((item) => item.kind === 'worktree').map((item) => item.id))));
     const total = plan.reduce((sum, item) => sum + item.bytes, 0);
     lines.push(toonKV({ totalBytes: total, total: formatGB(total) }));
     if (plan.length > 0) lines.push('dry run — pass --apply to remove');

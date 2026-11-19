@@ -2,7 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { COMPILED_BINARY, GB, laneDirs, loadConfig, lobstahHome, statfsFreeBytes, storedDescriptor, tryDirLock, worktreesDir } from '@lobstah/core';
+import { COMPILED_BINARY, GB, laneDirs, loadConfig, lobstahHome, statfsFreeBytes, storedDescriptor, tryDirLock, worktreesDir, recoverTrapCaches } from '@lobstah/core';
+import type { FreeBytesReader } from '@lobstah/core';
 import { releaseReviewWorktree } from '@lobstah/worktree';
 import { retentionPass } from '@lobstah/supervisor';
 import { cliCuller } from './auto-cull.js';
@@ -40,15 +41,16 @@ export function startBackgroundCull(log: (m: string) => void, reviewFinished = f
 }
 
 /** The process lock also covers daemon restarts while its old worker is still running. */
-export async function runCullWorker(now = Date.now(), log: (m: string) => void = console.log): Promise<boolean> {
+export async function runCullWorker(now = Date.now(), log: (m: string) => void = console.log, freeBytes: FreeBytesReader = statfsFreeBytes): Promise<boolean> {
   const lock = tryDirLock(path.join(lobstahHome(), 'cull-worker.lock'), { staleMs: 1000 });
   if (!lock) return false;
   try {
     for (const id of fs.readdirSync(laneDirs('chore').done)) await releaseReviewWorktree(id, 'chore', log);
     const cfg = loadConfig();
-    const need = cfg.limits.minFreeGB * GB;
-    if (need > 0 && statfsFreeBytes(worktreesDir()) < need) {
-      cliCuller.pressure(() => statfsFreeBytes(worktreesDir()) >= need, now, log);
+    recoverTrapCaches(cfg, worktreesDir(), freeBytes, log);
+    const need = Math.max(cfg.limits.minFreeGB, cfg.limits.cacheMinFreeGB) * GB;
+    if (need > 0 && freeBytes(worktreesDir()) < need) {
+      cliCuller.pressure(() => freeBytes(worktreesDir()) >= need, now, log);
     }
     retentionPass(cfg, { culler: cliCuller, now: () => now }, log);
     return true;
