@@ -1,3 +1,5 @@
+import { pendingJournalWatchEvents } from './watch-presentation.js';
+import type { WatchPresentation } from '@lobstah/watch-types';
 import { restoreCommandWatch, commandWatchEvents, acknowledgeCommandWatch, commandWatchRuntime } from './watch-command-runtime.js';
 import fs from 'node:fs';
 import * as path from 'node:path';
@@ -41,6 +43,8 @@ export interface Watch {
   owner: 'man' | `dispatch:${string}` | `trap:${string}`;
   /** Grounds scope for durable non-session owners. */
   grounds?: string;
+  /** Persisted adapter instructions and view data for every consumer. */
+  presentation?: WatchPresentation;
   check: string;
   /**
    * Optional held-stream command: a long-running process (spawned with
@@ -188,6 +192,7 @@ export function addWatch(
     generation: existing?.generation ?? randomUUID(),
     owner: opts.owner ?? existing?.owner ?? 'man',
     grounds: opts.grounds ?? existing?.grounds,
+    presentation: existing?.presentation,
     check,
     stream: opts.stream ?? existing?.stream,
     cursor: existing?.cursor ?? opts.cursor ?? '0',
@@ -386,6 +391,7 @@ function runCommandWatchCheck(w: Watch, now: Date): { watch: Watch; fresh: Watch
     if (!currentWatch(w)) { runtime.retire(w.key); return { watch: w, fresh: [] }; }
     const latest = readWatch(w.key)!;
     latest.lastCheckedAt = snapshot.checkedAt;
+    latest.presentation = snapshot.presentation;
     const fresh = appendWatchEvents(w.key, commandWatchEvents(snapshot));
     latest.cursor = String(snapshot.cursor);
     if (snapshot.status === 'draining') latest.done = true;
@@ -495,7 +501,8 @@ export function pendingWatchEvents(
   sinceMs = 0,
 ): WatchAttention[] {
   const out: WatchAttention[] = [];
-  for (const w of listWatches()) {
+  const registered = listWatches();
+  for (const w of registered) {
     const isMan = w.owner === 'man';
     if (owner === 'man' ? !isMan : owner === 'dispatch' ? !w.owner.startsWith('dispatch:') : w.owner !== owner) continue;
     const events = readWatchEvents(w.key);
@@ -514,6 +521,7 @@ export function pendingWatchEvents(
       else writeWatch(w);
     }
   }
+  out.push(...pendingJournalWatchEvents(new Set(registered.map((watch) => watch.key)), consume, owner, sinceMs));
   return out;
 }
 

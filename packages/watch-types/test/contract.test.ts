@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { CommandWatchType, WatchRegistry, parseCommandWatchBatch, watchJson } from '../src/index.js';
+import { CommandWatchType, WatchRegistry, parseCommandWatchBatch, watchJson, watchConditionKey } from '../src/index.js';
 
 it('rejects duplicate types, missing required methods and unsupported API majors before registration', () => {
   const registry = new WatchRegistry();
@@ -36,4 +36,9 @@ it('refuses non-JSON values rather than losing them during persistence or plugin
   for (const value of [NaN, Infinity, undefined, () => {}, { nested: undefined }, new Date()])
     expect(() => watchJson(value)).toThrow('JSON');
   expect(watchJson({ state: [0, 'cursor', true, null] })).toEqual({ state: [0, 'cursor', true, null] });
+});
+
+it('condition identities cannot collide when sources and conditions contain separators', () => {
+  expect(watchConditionKey('fixture:a', 'b:c')).not.toBe(watchConditionKey('fixture:a:b', 'c'));
+  expect(watchConditionKey('fixture:a', 'approval')).toBe(watchConditionKey('fixture:a', 'approval'));
 });

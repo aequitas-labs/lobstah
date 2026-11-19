@@ -53,6 +53,11 @@ export class WatchRegistry {
     for (const method of ['identify', 'key', 'initialize', 'restore', 'poll', 'reduce', 'present', 'failure', 'close'] as const) {
       if (typeof adapter[method] !== 'function') throw new Error(`Watch adapter must implement ${method}`);
     }
+    const kindNames = new Set(this.attentionKinds().map((kind) => kind.kind));
+    for (const kind of adapter.descriptor.attentionKinds ?? []) {
+      if (!kind.kind || !kind.label || typeof kind.defaultEnabled !== 'boolean' || kindNames.has(kind.kind)) throw new Error(`Invalid or duplicate watch attention kind: ${kind.kind}`);
+      kindNames.add(kind.kind);
+    }
     if (this.types.has(id)) throw new Error(`Watch type already installed: ${id}`);
     const restore = (snapshot: WatchSnapshot) => {
       if (snapshot.type.id !== id || snapshot.type.apiVersion !== apiVersion || snapshot.type.stateVersion > stateVersion)
@@ -102,6 +107,11 @@ export class WatchRegistry {
         return adapter.close({ ...context, snapshot: restore(context.snapshot) }, reason);
       },
     });
+  }
+
+  /** Sources register their attention names; callers never extend a global union. */
+  attentionKinds(): Array<{ typeId: string; kind: string; label: string; defaultEnabled: boolean }> {
+    return [...this.types.values()].flatMap((adapter) => (adapter.descriptor.attentionKinds ?? []).map((kind) => ({ typeId: adapter.descriptor.id, ...kind })));
   }
 
   /** Missing adapters are held by the runtime; their durable records remain intact. */

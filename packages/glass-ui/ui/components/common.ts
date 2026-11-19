@@ -1,3 +1,4 @@
+import { presentLegacyAttention, legacyAttentionLabels, legacyAttentionTones } from '@lobstah/watch-types/presentation';
 import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
 import { RepoIcon } from './card.js';
 import type { CardState } from './card.js';
@@ -655,35 +656,16 @@ export function prCell(x: GlassDispatchSummary) {
   ];
 }
 
-// Attention kinds (tend's contract): the short label shown in lobs, the pet, and the table.
-export const KIND_LABEL: Record<string, string> = {
-  'pr:draft': 'draft',
-  'pr:review': 'review',
-  'pr:checks': 'checks',
-  'pr:conflict': 'conflicts',
-  'pr:ready': 'ready',
-  'stack-ready': 'stack ready',
-  review: 'review request',
-  landed: 'landed',
-  watch: 'watch',
-};
-export const KIND_TONE: Record<string, string> = {
-  'pr:review': 'bad',
-  'pr:checks': 'bad',
-  'pr:conflict': 'pr-conflicts',
-  'pr:ready': 'ok',
-  'stack-ready': 'ok',
-  'pr:draft': 'dim',
-  watch: 'warn',
-};
-export const kindLabel = (k: string): string => KIND_LABEL[k] || '';
+// Compatibility exports read the source catalog; new rows carry their own display.
+export const KIND_LABEL = legacyAttentionLabels;
+export const KIND_TONE = legacyAttentionTones;
+export const kindLabel = (kind: string): string => legacyAttentionLabels[kind] || '';
 
-export function kindCell(x: Pick<TendAttention, 'kind' | 'verb'>) {
-  if (x.kind === 'question') return html`<span class=${'v-' + x.verb}>${x.verb}</span>`;
-  const tone = x.kind === 'landed' ? (x.verb === 'failed' ? 'bad' : 'ok') : KIND_TONE[x.kind] || 'dim';
+export function kindCell(record: Pick<TendAttention, 'kind' | 'verb' | 'presentation'>) {
+  const display = record.presentation ?? presentLegacyAttention(record);
   return [
-    html`<span class=${'badge ' + tone}>${kindLabel(x.kind) || x.kind}</span>`,
-    x.kind === 'landed' && [' ', html`<span class="dim">${x.verb}</span>`],
+    html`<span class=${display.badgeClass}>${display.badgeText}</span>`,
+    display.afterBadge !== undefined && [' ', html`<span class="dim">${display.afterBadge}</span>`],
   ];
 }
 

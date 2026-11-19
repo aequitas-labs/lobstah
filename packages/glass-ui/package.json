@@ -9,7 +9,8 @@
     "build": "tsc && tsc -p ui"
   },
   "dependencies": {
-    "@lobstah/core": "workspace:*"
+    "@lobstah/core": "workspace:*",
+    "@lobstah/watch-types": "workspace:*"
   },
   "devDependencies": {
     "htm": "^3.1.1",

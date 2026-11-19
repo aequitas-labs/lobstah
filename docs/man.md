@@ -346,6 +346,12 @@ validates and prints the replacement without writing; `lobstah config upgrade`
 applies it. A repeated upgrade leaves the file unchanged. Mixed or unmappable
 settings leave the original file intact and report what needs correcting.
 
+Watch types supply their own labels, links, rows, and instructions for the
+worker and helm. `man tend` prints the supplied rows and helm steps; a watch
+wake delivers the same instructions and recorded read context. New types
+register attention kinds through their descriptors, so the helm and glass
+can render them without source-specific instructions or label tables.
+
 One watch cycle forks at most `[watches].maxForksPerCycle` continuations
 (default 3). Generic watches over the cap are held and listed as `held` in
 `man tend` and `lobstah watch`. PR repairs wait for the next cycle.

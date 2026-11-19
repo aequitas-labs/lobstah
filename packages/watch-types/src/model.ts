@@ -1,3 +1,4 @@
+import type { WatchAttentionDisplay } from './presentation.js';
 /** JSON is the durable and cross-process boundary for every watch type. */
 export type WatchValue = null | boolean | number | string | WatchValue[] | { [key: string]: WatchValue };
 
@@ -19,6 +20,8 @@ export interface WatchTypeDescriptor {
   apiVersion: 1;
   stateVersion: number;
   version: string;
+  /** Source kind registration, including defaults, travels with stored observations. */
+  attentionKinds?: Array<{ kind: string; label: string; defaultEnabled: boolean }>;
 }
 
 /** Registration is data interpreted by the registry, never a consumer prefix branch. */
@@ -89,9 +92,12 @@ export interface WatchPresentation {
     id: string;
     kind: string;
     stateHash: string;
+    /** The condition began at this time; equal hashes retain it across polls. */
+    since?: string;
     summary: string;
     quiet: boolean;
     blocking: boolean;
+    presentation?: WatchAttentionDisplay;
   }>;
 }
 

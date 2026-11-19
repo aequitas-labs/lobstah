@@ -1,3 +1,7 @@
+import { presentRegisteredWatch } from './watch-presenters/index.js';
+import { evidencePrs, observedPrs, prAttention, type ChainMember } from './watch-presenters/pr.js';
+export { onTheHook, prKinds, humanPrAttention } from './watch-presenters/pr.js';
+export type { ChainMember } from './watch-presenters/pr.js';
 import { prMergeStatus } from '@lobstah/core';
 import { configuredTrapViews, orderedDispatchPrUrls, reviewAttention } from '@lobstah/core';
 import * as fs from 'node:fs';
@@ -6,6 +10,11 @@ import { reviewTools } from './review-tools.js';
 import { visibleGoals } from './goals.js';
 import { trapRows, repoTrapRows } from './trap-list.js';
 import {
+  presentLegacyAttention,
+  presentWatchCondition,
+  watchConditionKey,
+  journalWatchViews,
+  watchInstructionLines,
   workerLabel,
   questionViewedAt,
   activeIds,
@@ -83,6 +92,7 @@ import {
   heavyView,
 } from '@lobstah/core';
 import type {
+  WatchPresentation,
   AttentionKind,
   ActivityView,
   WaitingView,
@@ -182,6 +192,8 @@ export interface TendStory {
 }
 
 export interface TendWatch {
+  /** Source-supplied instructions and arbitrary rows, persisted with observation. */
+  presentation?: WatchPresentation;
   key: string;
   owner: string;
   cursor: string;
@@ -252,49 +264,6 @@ export interface TendNotice {
  */
 export type { TendAttention, TendAttentionKind } from '@lobstah/core';
 
-export interface ChainMember {
-  id: string;
-  bucket: TendDispatch['bucket'];
-}
-
-/**
- * The on-the-hook rule, pure: a pr:review or pr:checks item is suppressed
- * while a worker owns the problem — a queued or active dispatch in the PR's
- * chain that is a pickup feedback round (pickup's own map records it as
- * kind `review`) or the pr: watch's fix continuation (the watch records it
- * as lastFollowUpId). Returns the owning dispatch id, or undefined. When
- * that dispatch finishes without clearing the condition, the item stands
- * again. Every other kind is never suppressed.
- */
-export function onTheHook(
-  kind: TendAttentionKind,
-  chain: ChainMember[],
-  owners: { reviewRounds: ReadonlySet<string>; watchFollowUp?: string },
-): string | undefined {
-  if (kind !== 'pr:review' && kind !== 'pr:checks') return undefined;
-  return chain.find((m) => m.bucket !== 'done' && (owners.reviewRounds.has(m.id) || m.id === owners.watchFollowUp))?.id;
-}
-
-/** Which pr:* kinds a PR's evidence stands on right now. Pure. */
-export const prKinds = prStandingKinds;
-
-const PR_KIND_NOTE: Record<string, (pr: PrEvidence) => string> = {
-  'pr:draft': (pr) => prNote(pr, 'draft'),
-  'pr:review': (pr) =>
-    prNote(pr, `review: ${[
-      pr.review?.unresolvedThreads ? `${pr.review.unresolvedThreads} unresolved` : '',
-      pr.review?.changesRequested ? 'changes requested' : '',
-    ]
-      .filter(Boolean)
-      .join(', ')}`),
-  'pr:checks': (pr) => prNote(pr, `checks ${pr.checks.failed}/${pr.checks.total} failed`),
-  'pr:conflict': (pr) => prNote(pr, `conflicts with ${pr.baseRefName ?? 'its base'}`),
-  'pr:ready': (pr) => prNote(pr, 'ready to merge'),
-};
-
-/** How long a stack's title runs in its headline: the count and state must still fit a pet's bubble. */
-const STACK_HEADLINE_TITLE_MAX = 40;
-
 /** The merge view with each PR's title from its record: pickup's own state keeps none. */
 function mergeViewWithTitles(view: MergeView, records: readonly PrEvidence[]): MergeView {
   const titles = new Map(records.map((pr) => [pr.url, pr.title]));
@@ -303,47 +272,6 @@ function mergeViewWithTitles(view: MergeView, records: readonly PrEvidence[]): M
     return title ? { ...p, title } : p;
   };
   return { ...view, open: view.open.map(titled), recent: view.recent.map(titled) };
-}
-
-/** Hide a repairable problem only after a live repairer has claimed safe work. */
-export function humanPrAttention(
-  pr: PrEvidence,
-  kind: TendAttentionKind,
-  cfg: Config,
-  watchAvailable = true,
-  now = Date.now(),
-): { show: boolean; reason?: string } {
-  if (kind !== 'pr:conflict' && kind !== 'pr:checks' && kind !== 'pr:review') return { show: true };
-  const repairableReview = kind === 'pr:review' && pr.review?.changesRequested === true;
-  if (kind === 'pr:review' && !repairableReview) return { show: true }; // unresolved question for a person
-  const enabled = cfg.watch.autoRepair && (kind !== 'pr:conflict' || cfg.watch.conflicts) && (kind !== 'pr:checks' || cfg.watch.checks);
-  if (!enabled) return { show: true, reason: 'auto-repair is off' };
-  const owned = 'dispatches' in pr && Array.isArray(pr.dispatches) && pr.dispatches.length > 0;
-  if (!owned) return { show: true, reason: 'not owned by lobstah' };
-  const matchingRepair =
-    pr.repair?.headSha === pr.headSha &&
-    pr.repair.kind === (kind === 'pr:review' ? 'review' : kind === 'pr:conflict' ? 'conflict' : 'checks');
-  if (matchingRepair && (pr.repair!.status === 'blocked' || pr.repair!.status === 'gave-up'))
-    return { show: true, reason: pr.repair!.reason };
-  if (!watchAvailable) return { show: true, reason: 'no active PR watch' };
-  if (!liveRepairer(now)) return { show: true, reason: 'no repairer is running' };
-  // A check that had its round at this head and still fails needs a person.
-  if (matchingRepair && pr.repair!.status === 'waiting' && pr.repair!.heldBy === 'repaired') return { show: true, reason: pr.repair!.reason };
-  // A waiting repair needs no person: it is shown in the repairs-waiting table instead.
-  if (matchingRepair && pr.repair!.status === 'waiting') return { show: false, reason: `repair waits: ${pr.repair!.reason ?? ''}` };
-  if (!matchingRepair || pr.repair?.status !== 'repairing' || !pr.repair.dispatchId)
-    return { show: true, reason: 'repair not yet claimed' };
-  const queued = queuedDescriptor(pr.repair.dispatchId, 'work');
-  const active = fs.existsSync(path.join(laneDirs('work').active, pr.repair.dispatchId));
-  const last = readStatusLog(pr.repair.dispatchId, 'work').at(-1)?.verb;
-  if ((!queued && !active) || last === 'done' || last === 'failed') return { show: true, reason: 'repair awaiting next observation' };
-  if (queued?.for?.startsWith('wt:')) {
-    const trap = readTrap(queued.for.slice(3));
-    if (!trap || !!trap.claimed || !trap.firstParkedAt || now - Date.parse(trap.heartbeatAt) > cfg.soak.deferSecs * 1000) {
-      return { show: true, reason: `trap ${trap ? trapRepoLabel(trap) : queued.for} not listening` };
-    }
-  }
-  return { show: false };
 }
 
 /** A dispatch and every follow-up descending from it (work lane), with buckets. */
@@ -366,144 +294,12 @@ function groundsCursorFor(cfg: Config, repo: string | undefined): string {
   return Object.entries(cfg.grounds).find(([, g]) => g.repos.includes(repo))?.[0] ?? 'fleet';
 }
 
-/** Dispatch evidence `pr` objects, newest per PR url — the legacy source. */
-function evidencePrs(): Array<{ id: string; lane: Lane; pr: PrEvidence }> {
-  const newest = new Map<string, { id: string; lane: Lane; pr: PrEvidence }>();
-  for (const lane of ['work', 'chore'] as Lane[]) {
-    let files: string[];
-    try {
-      files = fs.readdirSync(laneDirs(lane).state).filter((f) => f.endsWith('.evidence'));
-    } catch {
-      continue;
-    }
-    for (const f of files) {
-      const id = f.slice(0, -'.evidence'.length);
-      const evidence = readEvidence(id, lane);
-      const pr = evidence.pr;
-      if (!pr) continue;
-      if ((evidence.prUrls?.length ?? 0) > 1 && !readPr(parsePrRef(pr.url)?.key ?? pr.url)?.state) continue;
-      const prev = newest.get(pr.url);
-      if (!prev || prev.pr.observedAt < pr.observedAt) newest.set(pr.url, { id, lane, pr });
-    }
-  }
-  return [...newest.values()];
-}
-
-const dispatchLane = (id: string): Lane | undefined =>
-  (['work', 'chore'] as Lane[]).find((l) => fs.existsSync(path.join(laneDirs(l).state, `${id}.status`)));
-
-/**
- * Observed PRs — the pr: watch's observations, never a forge call. Read
- * order: PR records first (core prs.ts: every observation, man-owned or
- * dispatch-owned), then dispatch evidence for a PR with no record yet. A
- * record attaches to its newest dispatch still on disk; one with none (a
- * human's PR, or a culled chain) is keyed by the PR itself: no chain, so
- * nothing puts it on the hook.
- */
-function observedPrs(records = readPrs(), legacy = evidencePrs()): Array<{ id: string; lane: Lane; pr: PrEvidence; dispatch: boolean }> {
-  const out: Array<{ id: string; lane: Lane; pr: PrEvidence; dispatch: boolean }> = [];
-  const seen = new Set<string>();
-  for (const r of records) {
-    seen.add(r.url);
-    const owner = [...r.dispatches].reverse().find((id) => dispatchLane(id) !== undefined);
-    out.push(
-      owner ? { id: owner, lane: dispatchLane(owner)!, pr: r, dispatch: true } : { id: r.key, lane: 'work', pr: r, dispatch: false },
-    );
-  }
-  for (const e of legacy) if (!seen.has(e.pr.url)) out.push({ ...e, dispatch: true });
-  return out;
-}
-
-function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()): TendAttention[] {
-  const reviewRounds = new Set(
-    Object.values(readPickupMap())
-      .filter((e) => e.kind === 'review')
-      .map((e) => e.uuid),
-  );
-  const out: TendAttention[] = [];
-  const stacks = identifyPrStacks(derivePrStacks(observed.map((x) => x.pr), {
-    readySettleSecs: cfg.readySettleSecs, now,
-  }));
-  const epochs = readStackEpochs();
-  for (const { id, lane, pr, dispatch } of observed) {
-    const kinds = prKinds(pr, { readySettleSecs: cfg.readySettleSecs, now });
-    if (kinds.length === 0) continue;
-    const ref = parsePrRef(pr.url);
-    const prWatch = ref ? readWatch(ref.key) : undefined;
-    const watchFollowUp = prWatch?.lastFollowUpId;
-    const chain = dispatch ? chainOf(id) : [];
-    for (const kind of kinds) {
-      if (kind === 'pr:checks' && stacks.some((s) => s.members.some((p) => p.url === pr.url))) {
-        const gates = ['Approval Gate', ...humanGatesFor(readPr(pr.url), ref ? forgeRepoKey(cfg, `${ref.owner}/${ref.repo}`) : undefined)];
-        if (pr.failingChecks?.length === pr.checks.failed && pr.failingChecks.every((c) => matchesGate(c.name, gates))) continue;
-      }
-      const human = humanPrAttention(pr, kind, cfg, !!prWatch && !prWatch.done, now);
-      if (!human.show) continue;
-      const repairCannotAct =
-        human.reason !== undefined && !['auto-repair is off', 'not owned by lobstah', 'no active PR watch'].includes(human.reason);
-      if (!repairCannotAct && onTheHook(kind, chain, { reviewRounds, watchFollowUp })) continue;
-      // Older dispatch evidence has no record; its observation is the best
-      // available approximation until a PR record is written.
-      const conditionSince = pr.standingSince?.[kind] ?? pr.observedAt;
-      const standingSince = kind === 'pr:ready'
-        ? new Date(Date.parse(conditionSince) + cfg.readySettleSecs * 1000).toISOString()
-        : conditionSince;
-      out.push({
-        kind,
-        key: ref?.key ?? pr.url,
-        stateHash: prStateHash(pr),
-        id,
-        lane,
-        verb: kind,
-        ageSecs: Math.max(0, Math.round((now - Date.parse(standingSince)) / 1000)),
-        at: standingSince,
-        standingSince,
-        note: `${PR_KIND_NOTE[kind]!(pr)}${human.reason ? ` — ${human.reason}` : ''}`,
-        repo: dispatch ? repoOf(id, lane) : ref ? `${ref.owner}/${ref.repo}` : undefined,
-        prUrl: pr.url,
-        number: pr.number,
-        state: pr.state,
-        draft: pr.draft,
-        reviewDecision: pr.reviewDecision,
-        mergeStateStatus: pr.mergeStateStatus,
-        headSha: pr.headSha,
-        checks: pr.checks,
-        ...(pr.review ? { review: pr.review } : {}),
-      });
-    }
-  }
-  for (const s of stacks) {
-    const members = s.members.map((pr) => {
-      const items = out.filter((a) => a.prUrl === pr.url);
-      return { key: parsePrRef(pr.url)!.key, url: pr.url, number: pr.number, ...(pr.title ? { title: pr.title } : {}),
-        note: items.map((a) => a.note).join('; ') || prNote(pr, prBadge(pr).text),
-        kinds: items.map((a) => a.kind) };
-    });
-    // Member readiness lives only in the stack item. A member's own problem
-    // (conflicts, checks, review, draft) keeps standing as its own pr:* item.
-    for (let i = out.length - 1; i >= 0; i--) if (out[i]!.kind === 'pr:ready' && s.members.some((p) => p.url === out[i]!.prUrl)) out.splice(i, 1);
-    const top = s.members.at(-1)!, source = observed.find((x) => x.pr.url === top.url)!;
-    const at = epochs[s.id]?.at ?? s.members[0]!.observedAt;
-    out.push({ kind: 'stack-ready', key: `stack:${s.id}`,
-      stateHash: stackStateHash(s, epochs[s.id]?.epoch),
-      id: source.id, lane: source.lane, verb: 'stack-ready', at, standingSince: at,
-      ageSecs: Math.max(0, Math.round((now - Date.parse(at)) / 1000)), note: s.text,
-      ...(s.title ? { headline: `${cutPrTitle(s.title, STACK_HEADLINE_TITLE_MAX)} (${s.allReady ? `${members.length} PRs, all green` : `${s.ready} of ${members.length} ready`})` } : {}),
-      // Only an all-ready stack (every member past its settle window) walks;
-      // a partly ready one is a quiet standing row in tend and the glass.
-      quiet: !s.allReady || !!epochs[s.id]?.silent || !!s.legacy,
-      stack: { ...(s.title ? { title: s.title } : {}), ready: s.ready, total: members.length, allReady: s.allReady, members },
-      repo: forgeRepoKey(cfg, s.repo), prUrl: top.url });
-  }
-  return out;
-}
-
 /**
  * The kind as a person reads it. The stack item keeps its `stack-ready` kind
  * (config and acks use it), but it is only "ready" when every member is.
  */
 export function attentionKindLabel(a: Pick<TendAttention, 'kind' | 'stack'>): string {
-  return a.kind === 'stack-ready' && a.stack && !a.stack.allReady ? 'stack-waiting' : a.kind;
+  return presentLegacyAttention({ ...a, verb: a.kind }).cliKind;
 }
 
 /** Terminal catches the helm hasn't been reported yet: past its grounds' cursor. */
@@ -948,6 +744,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const watches: TendWatch[] = [];
   const watchByDispatch = new Map<string, string>();
   for (const w of listWatches()) {
+    const presentation = presentRegisteredWatch(w);
     const events = readWatchEvents(w.key);
     const pending = events.slice(w.seen);
     const last = events.at(-1);
@@ -955,6 +752,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
       key: w.key,
       owner: w.owner,
       cursor: w.cursor,
+      ...(presentation ? { presentation } : {}),
       pendingEvents: pending.length,
       ...(w.heldAt ? { heldAt: w.heldAt } : {}),
       ...(w.heldAt && w.heldReason ? { heldReason: w.heldReason } : {}),
@@ -980,6 +778,35 @@ export function buildTendReport(now: number = Date.now()): TendReport {
         at: oldest?.at,
         standingSince: oldest?.at,
         note: pending.at(-1)?.summary,
+      });
+    }
+  }
+
+  const legacyWatchKeys = new Set(watches.map((watch) => watch.key));
+  for (const view of journalWatchViews(legacyWatchKeys)) {
+    const { snapshot, watch, pending, events } = view;
+    watches.push({ key: watch.key, owner: watch.owner, cursor: watch.cursor, pendingEvents: pending.length,
+      presentation: snapshot.presentation, lastSummary: events.at(-1)?.summary, lastAt: events.at(-1)?.at,
+      ...(watch.heldAt ? { heldAt: watch.heldAt, heldReason: watch.heldReason } : {}),
+      ...(watch.lastError ? { error: watchErrorCell(watch) } : {}),
+    });
+    for (const condition of snapshot.presentation.attention) {
+      const key = watchConditionKey(snapshot.key, condition.id);
+      const display = condition.presentation ?? presentWatchCondition(key, condition.kind, condition.summary, snapshot.presentation);
+      attention.push({
+        kind: condition.kind as TendAttentionKind, key, stateHash: condition.stateHash,
+        id: snapshot.key, lane: 'work', verb: condition.kind, ageSecs: Math.max(0, Math.round((now - Date.parse(condition.since ?? snapshot.createdAt)) / 1000)),
+        at: condition.since ?? snapshot.createdAt, standingSince: condition.since ?? snapshot.createdAt,
+        note: condition.summary, quiet: condition.quiet,
+        presentation: { ...display, blocking: condition.blocking },
+      });
+    }
+    if (snapshot.owner.kind === 'helm' && pending.length && !snapshot.presentation.attention.length) {
+      const key = `watch:${snapshot.key}`;
+      attention.push({ kind: 'watch', key, id: snapshot.key, lane: 'work', verb: 'watch', ageSecs: 0,
+        stateHash: String(pending.at(-1)?.seq ?? ''), at: pending[0]?.at,
+        note: snapshot.presentation.summary,
+        presentation: { ...presentWatchCondition(key, 'watch', snapshot.presentation.summary, snapshot.presentation), always: true, blocking: true },
       });
     }
   }
@@ -1093,7 +920,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     records,
     { readySettleSecs: cfg.readySettleSecs, now },
   ).stacks.filter((s) => s.open);
-  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg), ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
+  attention.push(...landedAttention(cfg, now), ...prAttention(now, observed, cfg, { chainOf, repoOf }), ...reportAttention(now), ...decisionAttention(now), ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
   attention.push(...dispatchProgress(now, cfg).map((p): TendAttention => ({
     kind: 'dispatch-progress', key: `progress:${p.lane}:${p.id}`, stateHash: p.stateHash,
     id: p.id, lane: p.lane, verb: p.state, ageSecs: p.ageSecs, at: p.since,
@@ -1101,16 +928,16 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     // The helm always gets it (man tend, its verdict); it walks on the pet and the glass only when attentionKinds names it.
     ...(cfg.attentionKinds.includes('dispatch-progress') ? {} : { quiet: true }),
   })));
-  // Man-owned member events are represented by the same current stack item,
-  // not an independent watch lobster (including obsolete Approval Gate events).
-  const stackKeys = new Set(attention.flatMap((a) => a.stack?.members.map((m) => `watch:${m.key}`) ?? []));
-  for (let i = attention.length - 1; i >= 0; i--) if (attention[i]!.kind === 'watch' && stackKeys.has(attention[i]!.key)) attention.splice(i, 1);
-  // attentionKinds (config.toml) picks what walks; watch events are
-  // machinery wakes and always stand. Dispatch progress stands for the helm
-  // too, and is quiet (never walks) unless attentionKinds names it.
+  const displayOf = (item: TendAttention) => item.presentation ?? presentLegacyAttention(item);
+  const suppressed = new Set(attention.flatMap((item) => displayOf(item).suppressesKeys ?? []));
   const enabled = new Set<string>(cfg.attentionKinds);
-  const walking = attention.filter((a) => a.kind === 'watch' || a.kind === 'dispatch-progress' ||
-    (a.kind === 'stack-ready' ? stackReadyEnabled(cfg) : enabled.has(a.kind)));
+  if (cfg.watches?.attention?.enabledKinds === undefined) {
+    for (const view of journalWatchViews()) for (const kind of view.snapshot.type.attentionKinds ?? []) if (kind.defaultEnabled) enabled.add(kind.kind);
+  }
+  const walking = attention.filter((item) => {
+    const display = displayOf(item);
+    return !suppressed.has(item.key) && (display.always || enabled.has(item.kind) || display.enabledBy?.some((kind) => enabled.has(kind)));
+  });
   // A question the helm framed as a decision shows as that decision.
   const shown = enabled.has('decision') ? hideFramedQuestions(walking, [...listDecisions(), ...hostedDecisionFrames(cfg)]) : walking;
   attention.length = 0;
@@ -1133,7 +960,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     ? 'daemon-down'
     : stalled
       ? 'stalled'
-      : attention.some((a) => a.kind === 'question' || a.kind === 'decision' || a.kind === 'watch' || a.kind === 'dispatch-progress')
+      : attention.some((item) => displayOf(item).blocking)
         ? 'needs-attention'
         : inFlight.length + queued.length > 0
           ? 'working'
@@ -1279,7 +1106,7 @@ export function renderTend(r: TendReport): string {
         'attention',
         r.attention.map((a) => ({
           id: a.id,
-          verb: a.kind === 'question' || a.kind === 'watch' ? a.verb : a.kind === 'landed' ? `landed (${a.verb})` : attentionKindLabel(a),
+          verb: (a.presentation ?? presentLegacyAttention(a)).cliVerb,
           waitingMins: Math.round(a.ageSecs / 60),
           held: a.held ? 'yes' : '',
           // Whether the human has opened it in the glass's decision modal,
@@ -1390,6 +1217,11 @@ export function renderTend(r: TendReport): string {
         ['key', 'owner', 'pending', 'held', 'last', 'error'],
       ),
     );
+  }
+  for (const watch of r.watches) {
+    if (watch.presentation?.rows.length) lines.push('', toonTable(`watch ${watch.key}`, watch.presentation.rows.map((row) => ({ ...row })), ['label', 'value']));
+    const instructions = watchInstructionLines(watch.presentation, 'helm');
+    if (instructions.length) lines.push('', ...instructions.map((instruction) => `instruction: ${instruction}`));
   }
   if (r.traps.length > 0) {
     lines.push('');

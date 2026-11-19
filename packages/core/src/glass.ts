@@ -1,3 +1,4 @@
+import type { WatchAttentionDisplay } from '@lobstah/watch-types';
 import type { PrMergeRequest } from './pr-merge.js';
 import type { ReviewPr, ReviewRoundState } from './reviews.js';
 import type { RecentRun } from './run-history.js';
@@ -30,6 +31,8 @@ export type TendAttentionKind = AttentionKind | 'watch' | 'dispatch-progress';
 /** One attention item exactly as `man tend` derives it. */
 export interface TendAttention {
   kind: TendAttentionKind;
+  /** Source-owned row, navigation and wake semantics; no source matching in renderers. */
+  presentation?: WatchAttentionDisplay;
   /** Stable item key: `<lane>:<id>` for question/landed, the PR key for pr:*, `watch:<key>` for watch. */
   key: string;
   /** Hash of the fields the kind stands on — an ack holds only while it matches (acks.ts). */

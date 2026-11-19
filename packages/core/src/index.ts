@@ -120,3 +120,8 @@ export * from './watch-runtime.js';
 export * from './watch-journal.js';
 export * from './config-upgrade.js';
 export { claimCommandWatchContinuation } from './watch-command-runtime.js';
+export { presentLegacyAttention, presentWatchCondition, watchConditionKey, watchInstructionLines, legacyAttentionLabels, legacyAttentionTones } from '@lobstah/watch-types';
+export type { WatchAttentionDisplay, WatchPresentation } from '@lobstah/watch-types';
+export * from './watch-presentation.js';
+export * from './watch-presentation.js';
+export * from './watch-type-descriptors.js';

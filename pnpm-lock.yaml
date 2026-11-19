@@ -44,6 +44,9 @@ importers:
       '@lobstah/supervisor':
         specifier: workspace:*
         version: link:../../packages/supervisor
+      '@lobstah/watch-types':
+        specifier: workspace:*
+        version: link:../../packages/watch-types
       '@lobstah/worktree':
         specifier: workspace:*
         version: link:../../packages/worktree
@@ -109,6 +112,9 @@ importers:
       '@lobstah/core':
         specifier: workspace:*
         version: link:../core
+      '@lobstah/watch-types':
+        specifier: workspace:*
+        version: link:../watch-types
     devDependencies:
       htm:
         specifier: ^3.1.1

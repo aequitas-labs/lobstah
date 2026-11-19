@@ -3,12 +3,13 @@
  * page's Lobs component. The page's bundle imports it, so the browser and
  * the tests run the same code — keep it free of Node imports.
  */
-import { decisionHash, prHash, reportPageUrl } from './glass-diff.js';
+import { presentLegacyAttention, type WatchAttentionDisplay } from '@lobstah/watch-types/presentation';
 import type { ModalRef } from './glass-diff.js';
 
 export interface LobAttention {
   id: string;
   lane: string;
+  presentation?: WatchAttentionDisplay;
   verb: string;
   note?: string;
   /** A stack's short line; a lob shows it before the note. */
@@ -57,51 +58,14 @@ export interface LobOptions {
 
 export function lobItems(att: LobAttention[], opts: LobOptions): LobItem[] {
   if (!opts.lobs) return [];
-  // The same labels the attention table and the desktop pet use.
-  const labels: Record<string, string> = {
-    'pr:draft': 'draft',
-    'pr:review': 'review',
-    'pr:checks': 'checks',
-    'pr:conflict': 'conflicts',
-    'pr:ready': 'ready',
-    'stack-ready': 'stack ready',
-    landed: 'landed',
-    watch: 'watch',
-    report: 'report',
-    review: 'review request',
-  };
   const hidden = opts.hidden ?? {};
   let items: LobItem[] = att
     .filter((x) => !x.quiet && !x.acked && !(x.key !== undefined && hidden[x.key] === x.stateHash))
     .map((x) => {
-      const label = labels[x.kind ?? ''] ?? '';
-      const hide = x.key !== undefined ? { hideKey: x.key, hideHash: x.stateHash ?? '' } : {};
-      // A wharf's decision or report has no card or page here: it opens in the hosted glass.
-      if ((x.kind === 'decision' || x.kind === 'report') && x.key && x.glass)
-        return { key: x.kind + ':' + x.key, text: x.note || x.verb, label, href: x.glass, ...hide };
-      // A decision or a worker's raw question goes to its card on the deck,
-      // where it is answered in place.
-      if (x.kind === 'decision' && x.key) return { key: 'decision:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
-      if ((x.kind ?? 'question') === 'question' && x.key)
-        return { key: 'question:' + x.key, text: x.note || x.verb, label, hash: decisionHash(x.key), ...hide };
-      // A review request opens the PR in its review tool, where the staged draft is sent.
-      if ((x.kind === 'review' || x.kind === 'pr:draft') && x.key && x.prUrl) {
-        const key = x.key.replace(/^review:/, 'pr:');
-        return { key: x.kind + ':' + x.key, text: x.note || x.verb, label, hash: prHash(key), ...(x.kind === 'review' ? hide : {}) };
-      }
-      // A report opens its own page in a new tab.
-      if (x.kind === 'report' && x.key) return { key: 'report:' + x.key, text: x.note || x.verb, label, href: reportPageUrl(x.key), ...hide };
-      return typeof x.kind === 'string' && (x.kind.startsWith('pr:') || x.kind === 'stack-ready') && x.prUrl
-        ? { key: x.kind + ':' + (x.key ?? x.prUrl), text: x.headline || x.note || x.kind, href: x.prUrl, label, ...hide }
-        : {
-            key: (x.kind ?? 'question') + ':' + (x.key ?? x.lane + ':' + x.id),
-            text: x.note || x.verb,
-            label,
-            ...(x.kind === 'watch'
-              ? {}
-              : { open: { type: 'dispatch' as const, key: x.lane + ':' + x.id } }),
-            ...hide,
-          };
+      const display = x.presentation ?? presentLegacyAttention(x);
+      const hide = display.acknowledge && x.key !== undefined ? { hideKey: x.key, hideHash: x.stateHash ?? '' } : {};
+      return { key: display.itemKey, text: display.text, label: display.label, ...display.target, ...hide };
+
     });
   if (!items.length && opts.preview) {
     items = [{ key: 'preview', text: 'attention questions crawl in here', ...(opts.previewHelm ? { open: { type: 'helm' as const, key: opts.previewHelm } } : {}) }];

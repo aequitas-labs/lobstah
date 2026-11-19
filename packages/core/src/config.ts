@@ -1,3 +1,4 @@
+import { storedWatchTypeDescriptors } from './watch-type-descriptors.js';
 import * as fs from 'node:fs';
 import { parseConfiguredTraps, type ConfiguredTrapProfile } from './configured-traps.js';
 import * as os from 'node:os';
@@ -585,17 +586,22 @@ function parsePermissions(raw: unknown): PermissionsConfig {
  * which fire once per transition.
  */
 export const ATTENTION_KINDS = ['question', 'decision', 'landed', 'pr:draft', 'pr:review', 'pr:checks', 'pr:conflict', 'pr:ready', 'report', 'stack-ready', 'review', 'dispatch-progress'] as const;
-export type AttentionKind = (typeof ATTENTION_KINDS)[number];
+export type AttentionKind = (typeof ATTENTION_KINDS)[number] | `${string}:${string}`;
 /** Human-actionable conditions; drafts, landed catches and review requests are opt-in. */
 export const DEFAULT_ATTENTION_KINDS: AttentionKind[] = ['question', 'decision', 'pr:ready', 'pr:review', 'pr:conflict', 'pr:checks'];
 
-function parseAttentionKinds(raw: unknown): AttentionKind[] {
+function parseAttentionKinds(raw: unknown, types: Record<string, WatchTypeConfiguration> = {}): AttentionKind[] {
   if (raw === undefined) return [...DEFAULT_ATTENTION_KINDS];
   if (!Array.isArray(raw)) {
     throw new Error(`attentionKinds must be an array of kinds (${ATTENTION_KINDS.join(', ')}) in ${configPath()}`);
   }
+  const descriptors = storedWatchTypeDescriptors();
+  const describedTypes = new Set(descriptors.map((descriptor) => descriptor.id));
+  const registeredKinds = new Set(descriptors.flatMap((descriptor) => descriptor.attentionKinds?.map((kind) => kind.kind) ?? []));
+  const legacyNamespaces = new Set(ATTENTION_KINDS.filter((kind) => kind.includes(':')).map((kind) => kind.split(':')[0]));
   for (const k of raw) {
-    if (!(ATTENTION_KINDS as readonly unknown[]).includes(k)) {
+    const registered = registeredKinds.has(String(k)) || (typeof k === 'string' && Object.keys(types).some((id) => !describedTypes.has(id) && !legacyNamespaces.has(id) && k.startsWith(`${id}:`) && /^[a-z][a-z0-9.-]*:[a-z][a-z0-9.-]*$/.test(k)));
+    if (!(ATTENTION_KINDS as readonly unknown[]).includes(k) && !registered) {
       throw new Error(`attentionKinds: unknown kind "${String(k)}" in ${configPath()} — valid kinds: ${ATTENTION_KINDS.join(', ')}`);
     }
   }
@@ -844,7 +850,7 @@ export function loadConfig(options: { upgrade?: boolean } = {}): Config {
     hooks: parseHooks(raw.hooks),
     remindSecs: raw.remindSecs !== undefined ? Number(raw.remindSecs) : undefined,
     readySettleSecs,
-    attentionKinds: parseAttentionKinds(watches.attention?.enabledKinds ?? ((raw.reviews as { enabled?: boolean } | undefined)?.enabled ? [...DEFAULT_ATTENTION_KINDS, 'review'] : undefined)),
+    attentionKinds: parseAttentionKinds(watches.attention?.enabledKinds ?? ((raw.reviews as { enabled?: boolean } | undefined)?.enabled ? [...DEFAULT_ATTENTION_KINDS, 'review'] : undefined), watchTypes),
     reviews: withConfigPath(() => parseReviews(raw.reviews, reposRaw)),
     permissions: withConfigPath(() => parsePermissions(raw.permissions)),
   };

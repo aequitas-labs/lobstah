@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import type { AttentionKind } from './config.js';
 import { firstMeaningfulLine } from './gh-errors.js';
 import { markRepliesRule } from './marker.js';
 import { cachedPrView } from './pr-poll.js';
@@ -203,7 +202,7 @@ function normalizeChecks(rollup: GhRollupItem[] | null | undefined): Check[] {
 }
 
 /** The evidence `pr` object: the PR's state as last observed. */
-export type PrStandingKind = Extract<AttentionKind, `pr:${string}`>;
+export type PrStandingKind = 'pr:draft' | 'pr:review' | 'pr:checks' | 'pr:conflict' | 'pr:ready';
 
 export interface PrRepair {
   headSha: string;

@@ -1,5 +1,6 @@
+import { storeWatchTypeDescriptor } from './watch-type-descriptors.js';
 import { randomUUID } from 'node:crypto';
-import { WatchRegistry, watchJson } from '@lobstah/watch-types';
+import { WatchRegistry, watchJson, retainWatchConditionTimes } from '@lobstah/watch-types';
 import type {
   InstalledWatchType,
   WatchCloseReason,
@@ -55,13 +56,14 @@ export class WatchRuntime {
     const adapter = this.registry.get(typeId),
       identified = adapter.identify(input, options);
     if (!identified) throw new Error(`Watch reference is not recognized by ${typeId}`);
+    storeWatchTypeDescriptor(adapter.descriptor);
     return this.journal.update(identified.key, (existing) => {
       if (existing && existing.status !== 'retired') {
         if (existing.type.id !== typeId) throw new Error(`Watch key belongs to another type: ${identified.key}`);
         if (!ownerEqual(existing.owner, owner)) throw new Error('Watch ownership requires an explicit transfer');
         const snapshot = adapter.restore(existing);
         snapshot.options = identified.options;
-        snapshot.presentation = adapter.present(snapshot);
+        snapshot.presentation = retainWatchConditionTimes(adapter.present(snapshot), snapshot.presentation, new Date().toISOString());
         return { snapshot, result: snapshot };
       }
       const snapshot: WatchSnapshot = {
@@ -76,7 +78,7 @@ export class WatchRuntime {
         createdAt: new Date().toISOString(),
         failures: 0,
       };
-      snapshot.presentation = adapter.present(snapshot);
+      snapshot.presentation = retainWatchConditionTimes(adapter.present(snapshot), snapshot.presentation, new Date().toISOString());
       return { snapshot, result: snapshot };
     });
   }
@@ -199,7 +201,7 @@ export class WatchRuntime {
       if (plan.done) snapshot.status = 'draining';
       if (batch.failure?.hold) snapshot.status = 'held';
       snapshot.lease = undefined;
-      snapshot.presentation = execution.adapter.present(structuredClone(snapshot));
+      snapshot.presentation = retainWatchConditionTimes(execution.adapter.present(structuredClone(snapshot)), snapshot.presentation, new Date(execution.now).toISOString());
       return { snapshot, result: snapshot };
     });
   }
@@ -211,7 +213,7 @@ export class WatchRuntime {
       snapshot.failures++;
       snapshot.lease = undefined;
       if (snapshot.failure.hold) snapshot.status = 'held';
-      snapshot.presentation = execution.adapter.present(structuredClone(snapshot));
+      snapshot.presentation = retainWatchConditionTimes(execution.adapter.present(structuredClone(snapshot)), snapshot.presentation, new Date(execution.now).toISOString());
       return { snapshot, result: snapshot };
     });
   }

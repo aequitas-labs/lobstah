@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { presentRegisteredWatch } from './watch-presenters/index.js';
 import { createCodexTrapWatch } from './codex-trap-watch.js';
 import { soakPark } from './trap-park.js';
 import { checklistSummary } from './checklists.js';
@@ -165,6 +166,7 @@ import {
   wakeFloorMs,
   listWatches,
   watchErrorCell,
+  watchInstructionLines,
   pendingWatchEvents,
   readWatchEvents,
   holdWatch,
@@ -734,9 +736,10 @@ function emitWatchAttention(attns: WatchAttention[], sessionId?: string): void {
     for (const e of a.events) {
       console.log(toonKV({ watch: a.watch.key, seq: e.seq, summary: e.summary }));
     }
+    for (const instruction of watchInstructionLines(presentRegisteredWatch(a.watch), 'helm')) console.log(`instruction: ${instruction}`);
   }
   console.log(
-    'next: handle the watched update now (a review round, a finished run — `lobstah watch ls` for context), ' +
+    'next: follow the supplied watch instructions, ' +
       `then re-arm a background \`lobstah man wait${sessionId ? ` --session ${sessionId}` : ''}\`.`,
   );
 }
