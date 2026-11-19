@@ -207,7 +207,7 @@ describe('a review card', () => {
     // The PR card's four parts.
     expect(card(7).querySelector('.gtop')!.firstElementChild?.querySelector('.pricon')).toBeTruthy();
     expect(card(7).querySelector('.gtop .gword, .gtop .gchip')).toBeNull();
-    expect(chips(7)).toEqual(['Open', '● draft ready']);
+    expect(chips(7)).toEqual(['Open', '● staged on GitHub']);
     expect(text(card(7).querySelector('.gcontext .gtext'))).toBe('acme/web · 60m ago · #7 · 🪤 wt:t1');
     expect(card(7).querySelector('.gcontext .reponame svg.repoicon')).toBeTruthy();
     expect(card(7).querySelectorAll(':scope > .gline')).toHaveLength(4);
