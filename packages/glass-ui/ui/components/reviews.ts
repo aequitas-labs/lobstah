@@ -26,7 +26,10 @@ function showReviewError(reason: string): void {
     const snapshot = getState().snapshot;
     if (snapshot && key)
       setState({
-        snapshot: { ...snapshot, reviews: snapshot.reviews.map((review) => (review.key === key ? { ...review, updating: true } : review)) },
+        snapshot: {
+          ...snapshot,
+          reviews: (snapshot.reviews ?? []).map((review) => (review.key === key ? { ...review, updating: true } : review)),
+        },
       });
     return;
   }

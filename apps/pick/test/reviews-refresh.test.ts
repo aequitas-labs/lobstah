@@ -66,7 +66,10 @@ it.each(['approve', 'request_changes'] as const)('stages repaired %s drafts and 
   await reviewsLoop('chris', () => 'fixture', () => {}, { run: truncated, fetch: fetcher, now: NOW + 1000 });
   expect(round()).toMatchObject({ state: 'drafted', staged: { reviewId: '99' }, manualPublishOnly: true });
   expect(round().refresh).toBeUndefined();
+  const upgraded = readReview(KEY)!;
+  Object.assign(latestRound(upgraded)!, { autoPostApprove: 'auto-post', autoPostRequestChanges: 'auto-post', onDemand: true }); writeReview(upgraded);
   expect(reviewCanPublish(loadConfig().reviews, 'web', round(), verdict)).toBe(false);
+  await reviewsLoop('chris', () => 'fixture', () => {}, { run: truncated, fetch: fetcher, now: NOW + 2000 });
   expect(writes).toHaveLength(1);
   expect(writes[0]!.url).toMatch(/\/reviews$/);
   expect(writes[0]!.body).not.toHaveProperty('event');
