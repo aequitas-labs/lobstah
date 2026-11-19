@@ -94,6 +94,13 @@ export function liveWorkers(): LiveWorker[] {
     } catch {
       continue;
     }
+    // Queued PR-bound work reserves the branch before a runner or trap claims it.
+    for (const name of fs.readdirSync(laneDirs(lane).queue)) {
+      if (!name.endsWith('.json')) continue;
+      const id = name.slice(0, -5);
+      const descriptor = storedDescriptor(id, lane);
+      if (descriptor?.pr && !terminal(id, lane)) out.push({ label: `dispatch:${id.slice(0, 8)}`, dispatchId: id, lane, repo: descriptor.repo });
+    }
     for (const id of ids) {
       // A trap's catch counts only while its trap is live (above).
       if (readSessionClaim(id, lane) || terminal(id, lane)) continue;
@@ -159,7 +166,10 @@ export function workerHold(worker: LiveWorker): WorkerHold {
   for (const push of evidence.pushes ?? []) {
     if (!branches.has(push.branch)) branches.set(push.branch, `pushed ${push.branch} at ${push.at}`);
   }
-  const named = evidence.prUrl ? parsePrRef(evidence.prUrl) : undefined;
+  const descriptor = worker.dispatchId ? storedDescriptor(worker.dispatchId, worker.lane) : undefined;
+  const bound = descriptor?.pr;
+  if (bound?.headRefName) branches.set(bound.headRefName, `works on ${bound.headRefName}`);
+  const named = parsePrRef(bound?.url ?? evidence.prUrl ?? '');
   if (named) prs.set(named.key, 'works on this PR');
   const owned = worker.dispatchId ? chainPr(worker.dispatchId, worker.lane) : undefined;
   const ownedRef = owned ? parsePrRef(owned.url) : undefined;
@@ -175,7 +185,8 @@ export function workerHold(worker: LiveWorker): WorkerHold {
     ...(forgeRepo ? { forgeRepo } : {}),
     branches,
     prs,
-    said,
+    // A system repair names the whole stack in its brief; only its bound PR is a direct hold.
+    said: descriptor?.systemRepair ? '' : said,
   };
 }
 

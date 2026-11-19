@@ -430,10 +430,10 @@ for `[watch].repairSettleSecs`, while a failing check's latest run is in
 progress or passed, and while the PR's watch is held. A wait is not an
 attempt. A repair whose worker reported `failed "push rejected: ..."` is `blocked` at the
 moved head and at the head it started from. After
-`[watch].maxRepairsWithoutProgress` repairs in a row that left the PR at
+`[watchTypes.pr].maxRepairsWithoutProgress` repairs in a row that left the PR at
 their own push and unmerged, repairs of that PR stop (`gave-up`, a
 `repair-stopped` notice) until it merges or closes, a push that is not the
-repair's moves the head, or `lobstah watch release <key>`. The rest is evidence.
+repair's moves the head, new reviewer input arrives (a submitted request for changes or inline reviewer comment), or `lobstah watch release <key>`. A PR comment alerts the requested reviewer or owner when repairs stop. Release and automatic repair both respect a dispatch already holding the PR or branch. The rest is evidence.
 Merged and closed reach the helm as a `pr-merged` / `pr-closed` notice,
 posted once by whichever process first records the open → terminal
 transition on the **PR record** — not by event routing. A PR whose first

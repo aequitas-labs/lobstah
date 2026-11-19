@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -31,7 +31,7 @@ import {
 } from '@lobstah/core';
 import type { Descriptor, PrEvidence, PrRecord } from '@lobstah/core';
 import { pumpClaudeMessage } from '../../../packages/adapters/src/claude.js';
-import { deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from '../src/pr-repair.js';
+import { alertRepairStopped, deliverPrRepairs, holdCancelledRepair, stampRepairerBeat } from '../src/pr-repair.js';
 import type { LatestChecks } from '../src/pr-repair.js';
 import { buildTendReport, humanPrAttention, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -138,7 +138,7 @@ function queued(): Descriptor[] {
 }
 
 const later = T0 + 3_600_000;
-const repair = (cap = 3, opts: Parameters<typeof deliverPrRepairs>[2] = {}) => deliverPrRepairs(() => {}, cap, { now: later, ...opts });
+const repair = (cap = 3, opts: Parameters<typeof deliverPrRepairs>[2] = {}) => deliverPrRepairs(() => {}, cap, { now: later, alertStopped: () => true, ...opts });
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-pr-holds-'));
@@ -301,12 +301,114 @@ describe('the repair circuit breaker', () => {
     expect(queued()).toHaveLength(2);
     const rec = readPr(key(1))!;
     expect(rec.repair).toMatchObject({ status: 'gave-up', kind: 'conflict' });
-    expect(rec.repair?.reason).toContain('no merge progress after 2 repair(s) in a row ([watch].maxRepairsWithoutProgress = 2)');
+    expect(rec.repair?.reason).toContain('no merge progress after 2 repair(s) in a row ([watchTypes.pr].maxRepairsWithoutProgress = 2)');
     expect(listNotices(50).filter((n) => n.kind === 'repair-stopped')).toHaveLength(1);
     const tend = buildTendReport();
     expect(tend.attention.find((a) => a.kind === 'pr:conflict' && a.key === key(1))?.note ?? JSON.stringify(tend.attention)).toContain('no merge progress');
     // It stays stopped on the next pass.
     expect(repair(3, { now: later + 2 * step + 60_000 })).toBe(0);
+  });
+
+  it.each(['lastChangesRequestedAt', 'lastInlineCommentAt'] as const)('new %s resets a stopped budget only once, including at the same head', (field) => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nmaxRepairsWithoutProgress = 1\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    repairedAt(sha('4'), T0 + 100_000);
+    expect(repair(3, { now: later + step })).toBe(0);
+    const review = { changesRequested: true, [field]: iso(later + step) };
+    upsertPr(observed(P, { headSha: sha('4'), review, observedAt: iso(later + step + 1000) }), P.owner);
+    expect(readPr(key(1))?.repairStreak).toBeUndefined();
+    expect(repair(3, { now: later + step + 2000 })).toBe(1);
+    repairedAt(sha('5'), later + step + 3000);
+    // Reading the same review again does not buy another repair.
+    upsertPr(observed(P, { headSha: sha('5'), review, observedAt: iso(later + step + 4000) }), P.owner);
+    expect(repair(3, { now: later + 2 * step })).toBe(0);
+    expect(readPr(key(1))?.repair?.status).toBe('gave-up');
+  });
+
+  it('allows successive reviewer rounds while unchanged reviews and approvals keep the streak', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nmaxRepairsWithoutProgress = 1\n');
+    stand(P);
+    expect(repair()).toBe(1);
+    for (const [i, head] of ['4', '5', '6'].entries()) {
+      repairedAt(sha(head), later + i * step);
+      upsertPr(observed(P, { headSha: sha(head), review: { changesRequested: true,
+        lastChangesRequestedAt: iso(later + i * step + 1000) }, observedAt: iso(later + i * step + 2000) }), P.owner);
+      expect(repair(3, { now: later + (i + 1) * step })).toBe(1);
+      expect(readPr(key(1))?.repairStreak?.count).toBe(0);
+    }
+    repairedAt(sha('7'), later + 4 * step);
+    upsertPr(observed(P, { headSha: sha('7'), review: { changesRequested: false,
+      lastReviewAt: iso(later + 4 * step), lastApprovalAt: iso(later + 4 * step) }, observedAt: iso(later + 4 * step) }), P.owner);
+    expect(repair(3, { now: later + 5 * step })).toBe(0);
+    expect(readPr(key(1))?.repair?.status).toBe('gave-up');
+  });
+
+  it('keeps a queued repair claim when a new observation changes its head', () => {
+    stand(P);
+    expect(repair()).toBe(1);
+    const id = readPr(key(1))!.repair!.dispatchId!;
+    upsertPr(observed(P, { headSha: sha('9'), observedAt: iso(later) }), P.owner);
+    expect(repair(3, { now: later + step })).toBe(0);
+    expect(queued()).toHaveLength(1);
+    expect(readPr(key(1))?.repair?.reason).toContain(id.slice(0, 8));
+  });
+
+  it('keeps stopping a CI loop without new reviewer input', () => {
+    const failure = { mergeStateStatus: 'CLEAN', checks: { total: 1, passed: 0, failed: 1, pending: 0 }, failingChecks: [{ name: 'test' }] };
+    stand(P, failure);
+    const run = (now: number) => repair(3, { now, readChecks: (pr) => ({ headSha: pr.headSha, checks: [{ name: 'test', outcome: 'failed' }] }) });
+    expect(run(later)).toBe(1);
+    repairedAt(sha('4'), T0 + 100_000);
+    upsertPr(observed(P, { ...failure, headSha: sha('4'), observedAt: iso(T0 + 101_000) }), P.owner);
+    expect(run(later + step)).toBe(1);
+    repairedAt(sha('5'), later + step + 1000);
+    upsertPr(observed(P, { ...failure, headSha: sha('5'), observedAt: iso(later + step + 2000) }), P.owner);
+    expect(run(later + 2 * step)).toBe(0);
+    expect(readPr(key(1))?.repair).toMatchObject({ status: 'gave-up', kind: 'checks' });
+  });
+
+  it('retries a failed stop alert, then sends no more alerts for that stop', () => {
+    fs.writeFileSync(path.join(dir, 'config.toml'), '[watch]\nmaxRepairsWithoutProgress = 1\n');
+    stand(P);
+    repair();
+    repairedAt(sha('4'), T0 + 100_000);
+    const alertStopped = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    for (let i = 0; i < 3; i++) repair(3, { now: later + step + i * 1000, alertStopped });
+    expect(alertStopped).toHaveBeenCalledTimes(2);
+    expect(alertStopped.mock.calls[0]![0].repair.reason).toContain('lobstah watch release');
+    expect(readPr(key(1))?.repair?.alerted).toBe(true);
+    expect(listNotices(50).filter((n) => n.kind === 'repair-stopped')).toHaveLength(1);
+  });
+
+  it.each(['reviewer', 'owner'])('posts a PR alert naming the %s with the recovery command', (who) => {
+    stand(P);
+    const run = vi.fn().mockReturnValueOnce({ status: 0, stdout: JSON.stringify({ author: { login: 'owner' }, reviewRequests: who === 'reviewer' ? [{ login: 'reviewer' }] : [] }) })
+      .mockReturnValueOnce({ status: 0 });
+    expect(alertRepairStopped({ ...readPr(key(1))!, repairStreak: { count: 2, stoppedHead: P.sha } }, run as unknown as typeof spawnSync)).toBe(true);
+    const body = JSON.parse(run.mock.calls[1]![2].input).body;
+    expect(body).toContain(`@${who}`);
+    expect(body).toContain(`lobstah watch release ${key(1)}`);
+    expect(body).toContain('by hand');
+    expect(body).toMatch(/<!-- lobstah -->$/);
+  });
+
+  it.each(['active', 'queued', 'same-branch'])('release cannot duplicate %s PR-bound work in another chain', (state) => {
+    stand(P);
+    writePr({ ...readPr(key(1))!, repairStreak: { count: 2, stoppedHead: P.sha },
+      repair: { headSha: P.sha, kind: 'conflict', attempts: 0, status: 'gave-up' } });
+    const id = uuid('e');
+    enqueue({ id, repo: 'web', brief: 'manual repair', pr: { url: state === 'same-branch' ? observed(STACK[1]!).url : observed(P).url, headRefName: P.head } }, 'work');
+    if (state === 'active') expect(claimNext('work')).toBe(id);
+    const out = spawnSync(process.execPath, [cli, 'watch', 'release', key(1)], { env: { ...process.env, LOBSTAH_HOME: dir }, encoding: 'utf8' });
+    expect(out.status, out.stderr).toBe(0);
+    expect(out.stdout).toContain('repairsHeld:');
+    expect(out.stdout).toContain(`dispatch ${id.slice(0, 8)}`);
+    expect(repair()).toBe(0);
+    expect(queued()).toHaveLength(0);
+    expect(readPr(key(1))?.repair?.reason).toContain(id.slice(0, 8));
+    appendStatus(id, 'work', 'done', 'manual repair finished');
+    expect(repair()).toBe(1);
   });
 
   it('[watch].maxRepairsWithoutProgress sets the cap', () => {

@@ -178,6 +178,7 @@ import {
   holdWatch,
   releaseHeldWatches,
   resetRepairStreaks,
+  readPrs,
   readEvidence,
   dispatchPrUrls,
   removeWatch,
@@ -4094,7 +4095,14 @@ async function mainCli(): Promise<void> {
         const released = releaseHeldWatches(has('--all') ? undefined : key);
         // A release resets stopped repairs and skips the remaining cooldown once.
         const resumed = resetRepairStreaks(has('--all') ? undefined : key);
-        console.log(toonKV({ released: released.length, ...(resumed.length ? { repairsResumed: resumed.join(', ') } : {}) }));
+        const { readWorkerHolds, repairHold } = await import('./repair-holds.js');
+        const workers = readWorkerHolds(), records = readPrs();
+        const held = records.filter((pr) => has('--all') || pr.key === key).flatMap((pr) => {
+          const hold = repairHold(pr, records, workers);
+          return hold ? [`${pr.key}: ${hold.reason}`] : [];
+        });
+        console.log(toonKV({ released: released.length, ...(resumed.length ? { repairsResumed: resumed.join(', ') } : {}),
+          ...(held.length ? { repairsHeld: held.join('; ') } : {}) }));
         break;
       }
       if (sub === 'rm') {

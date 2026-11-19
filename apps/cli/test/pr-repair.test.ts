@@ -311,7 +311,7 @@ describe('PR watch repairs', () => {
     appendStatus(readPr(KEY)!.repair!.dispatchId!, 'chore', 'done', 'tried again');
     upsertPr(pr(), OWNER);
     expect(deliverPrRepairs(() => {}, 3)).toBe(0);
-    expect(readPr(KEY)?.repair).toMatchObject({ status: 'gave-up', attempts: 2, reason: 'repair limit reached (2 of 2)' });
+    expect(readPr(KEY)?.repair).toMatchObject({ status: 'gave-up', attempts: 2, reason: 'repair limit reached (2 of 2); address the PR by hand' });
   });
 
   it('autoRepair off leaves the old watch behavior', () => {
