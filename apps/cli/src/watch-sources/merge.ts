@@ -8,7 +8,8 @@ import {
   WatchAutomationRunner,
   WatchRuntime,
 } from '@lobstah/core';
-import type { PrMergeWatchServices, StackWatchServices } from '@lobstah/watch-types';
+import type { PrMergeWatchServices } from '@lobstah/watch-types/pr-merge';
+import type { StackWatchServices } from '@lobstah/watch-types/stack';
 import { reconcileRequestedPrs, reconcileRequestedStacks } from '../pr-merge.js';
 import type { PrMergeDeps, StackMergeDeps } from '../pr-merge.js';
 

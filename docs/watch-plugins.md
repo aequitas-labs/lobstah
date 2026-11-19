@@ -66,7 +66,7 @@ them with an error and remedy. Correct the installation and run
 
 In this repository import `@lobstah/watch-types`. Installed adapters can import
 `lobstah/watch-types`, which exports the same base class, types, schemas and
-stdio runner. Keep the adapter separate from its executable entry point so the
+stdio runner. Builtin adapters are optional subpaths such as `lobstah/watch-types/pr` and `lobstah/watch-types/ume`; importing the generic SDK loads no builtin adapter. Keep the adapter separate from its executable entry point so the
 same history can run in both hosts.
 
 Every typed adapter declares its canonical `keyPrefix`; aliases in its bindings may accept other input spellings. The command transport declares an empty prefix to preserve arbitrary user keys. The host checks canonical identity at registration and restore.
@@ -131,7 +131,8 @@ must grant each optional capability with `allowCapabilities`; the default is
   `allowCapabilities` to enable these hooks for a process plugin.
 - `commands`: source-owned compatibility command bindings declare a subcommand
   name and optional input pattern. `commands.run({ name, args, flags })` returns
-  its output text. These bindings route existing CLI command forms through the
+  its output text, directly or through a promise. Synchronous projection queries
+  return text directly; report hooks and explicit commands may await IO. These bindings route existing CLI command forms through the
   installed adapter; a replacement source supplies its own handlers. Configuration
   must grant `commands` before the host calls `watch.command`. Ambiguous handlers
   fail before either runs.

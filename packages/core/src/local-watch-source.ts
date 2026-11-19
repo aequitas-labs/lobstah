@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import { LocalSignalWatchType, presentLegacyAttention, QUIET_LOCAL_NOTICE_KINDS } from '@lobstah/watch-types';
-import type { LocalSignalSpecification, LocalSignalState, WatchNotice } from '@lobstah/watch-types';
+import { LocalSignalWatchType } from '@lobstah/watch-types/local';
+import { presentLegacyAttention } from '@lobstah/watch-types/legacy-presentation';
+import { QUIET_LOCAL_NOTICE_KINDS } from '@lobstah/watch-types/local-notices';
+import type { LocalSignalSpecification, LocalSignalState } from '@lobstah/watch-types/local';
+import type { WatchNotice } from '@lobstah/watch-types';
 import type { TendAttention } from './glass.js';
 import { activeIds, pendingIds, storedDescriptor } from './queue.js';
 import { answeredAt } from './inbox.js';

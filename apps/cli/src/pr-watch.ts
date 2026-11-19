@@ -294,21 +294,7 @@ export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}):
 }
 
 /** A failed poll (a lock race, a GitHub outage) is logged; the wait goes on and polls again. */
-export function runDueManWatches(log: (message: string) => void = (m) => console.error(m)): void {
-  try {
-    const every = pollSecs();
-    // The source registry supplies batches for every due source. Ownership
-    // affects delivery, not whether this observation-only pass can read it.
-    for (const { watch } of runWatchCycle(every)) {
-      if (watch.lastError) log(`lobstah: watch poll failed: ${watchErrorText(watch)}; still waiting`);
-      if (watch.done && readWatchEvents(watch.key).length <= watch.seen) removeWatch(watch.key);
-    }
-    syncStackReadiness(loadConfig());
-  } catch (err) {
-    log(`lobstah: watch poll failed: ${err instanceof Error ? err.message : String(err)}; still waiting`);
-  }
-  // The daemon observes dispatch-owned PR watches even with no helm signed on.
-}
+export { runDueWatches as runDueManWatches } from './watch-observation.js';
 
 function laneOf(id: string): Lane | undefined {
   return (['work', 'chore'] as Lane[]).find((l) => fs.existsSync(evidencePath(id, l)) || readStatusLog(id, l).length > 0);

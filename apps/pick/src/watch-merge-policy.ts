@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { WatchAutomationRunner, WatchRuntime } from '@lobstah/core';
-import { MergePolicyWatchType, WatchRegistry } from '@lobstah/watch-types';
+import { MergePolicyWatchType } from '@lobstah/watch-types/merge-policy';
+import { WatchRegistry } from '@lobstah/watch-types';
 import type { WatchSourcePass } from '@lobstah/watch-types';
 import { reconcileMergePolicy } from './loops/merge.js';
 import type { MergePolicy, MergeSource } from './types.js';

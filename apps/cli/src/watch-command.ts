@@ -9,3 +9,6 @@ export function watchSelfCommand(): string {
   const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : 'lobstah';
   return `${shq(process.execPath)} ${shq(entry)}`;
 }
+
+/** A bounded provider probe can use the host's subprocess runner. */
+export type WatchProbeRun = (command: string, args: string[], cwd: string) => { status: number | null; stdout: string };

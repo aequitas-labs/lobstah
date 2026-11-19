@@ -1,3 +1,4 @@
+export * from './watch-adapters/exports.js';
 export * from './types.js';
 export * from './backend.js';
 export * from './repo-identity.js';
@@ -35,7 +36,6 @@ export * from './version.js';
 export * from './harness.js';
 export * from './gh-errors.js';
 export * from './github-budget.js';
-export * from './pr-poll.js';
 export * from './dir-lock.js';
 export * from './heavy.js';
 export * from './heavy-waits.js';
@@ -51,19 +51,14 @@ export * from './trap-names.js';
 export * from './trap-start.js';
 export * from './requests.js';
 export * from './notices.js';
-export * from './pr-stacks.js';
 export * from './window.js';
 export * from './tmux-panes.js';
 export * from './helm.js';
 export * from './grounds-name.js';
 export * from './sent.js';
 export * from './compiled.js';
-export * from './pr.js';
-export * from './prs.js';
-export * from './pr-merge.js';
 export * from './chain-pr.js';
 export * from './pushes.js';
-export * from './pr-repair.js';
 export * from './marker.js';
 export * from './reviews.js';
 export * from './resume.js';
@@ -84,14 +79,12 @@ export * from './session-watcher.js';
 export * from './trap-turn.js';
 export * from './slots.js';
 export * from './question-waits.js';
-export * from './pr-questions.js';
 export * from './worker-metadata.js';
 export * from './session-workers.js';
 export * from './telemetry.js';
 export * from './worker-profile.js';
 export * from './session-workers.js';
 export * from './pools.js';
-export * from './pr-review.js';
 export * from './wharf-credentials.js';
 export * from './mirror-status.js';
 export * from './wharf-broker.js';
@@ -122,7 +115,8 @@ export * from './watch-runtime.js';
 export * from './watch-journal.js';
 export * from './config-upgrade.js';
 export { claimCommandWatchContinuation } from './watch-command-runtime.js';
-export { presentLegacyAttention, presentWatchCondition, watchConditionKey, watchInstructionLines, legacyAttentionLabels, legacyAttentionTones } from '@lobstah/watch-types';
+export { presentLegacyAttention, legacyAttentionLabels, legacyAttentionTones } from '@lobstah/watch-types/legacy-presentation';
+export { presentWatchCondition, watchConditionKey, watchInstructionLines } from '@lobstah/watch-types';
 export type { WatchAttentionDisplay, WatchPresentation } from '@lobstah/watch-types';
 export * from './watch-presentation.js';
 export * from './watch-presentation.js';
@@ -133,7 +127,6 @@ export { builtinWatchRegistry, watchSourceType } from './watch-source-registry.j
 export * from './watch-actions.js';
 export * from './watch-automation.js';
 export * from './watch-dispatch.js';
-export { ciFixWork } from './pr-watch-delivery.js';
 
 export { restoreCommandWatch as restoreLegacyWatch } from './watch-command-runtime.js';
 
@@ -142,16 +135,11 @@ export { createReviewWatchType, reviewWatchRevision } from './review-watch-sourc
 export { reservedWatchDispatch } from './watch-command-runtime.js';
 
 export * from './watch-derived.js';
-export { createStackWatchType, presentStackWatch, stackWatchViews } from './stack-watch-source.js';
 
-export { createPrMergeWatchType } from './pr-merge-watch-source.js';
 
-export * from './ume-watch-source.js';
 
 export * from './local-watch-source.js';
 
 export { registerInstalledWatch, registerWatchEvent, syncWatchRegistrations } from './watch-registration.js';
 export { WatchSubscriptionManager, syncWatchSubscriptions } from './watch-subscriptions.js';
 export * from './review-wait-worktrees.js';
-
-export { prTodoTriggers } from './pr-todo.js';

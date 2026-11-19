@@ -3,15 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { DeploymentWatchType, ProcessWatchType, disposeWatchPlugins, parseWatchPluginConfiguration } from '../dist/index.js';
-import type {
-  DeploymentState,
-  DeploymentTransition,
-  WatchSnapshot,
-  DeploymentOptions,
-  DeploymentReference,
-  WatchValue,
-} from '../src/index.js';
+import { DeploymentWatchType } from '../dist/deployment/index.js';
+import { ProcessWatchType, disposeWatchPlugins, parseWatchPluginConfiguration } from '../dist/index.js';
+import type { DeploymentState, DeploymentTransition, DeploymentOptions, DeploymentReference } from '../src/deployment/index.js';
+import type { WatchSnapshot, WatchValue } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
 const program = fileURLToPath(new URL('../dist/deployment/plugin.js', import.meta.url));

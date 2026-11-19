@@ -117,7 +117,7 @@ export async function serveWatchPlugin<Reference, State, Cursor, Options>(
         const command = body.request as unknown as WatchCommandRequest;
         if (!adapter.commands.bindings.some(binding => binding.name === command.name &&
           (!binding.pattern || new RegExp(binding.pattern).test(command.args[0] ?? '')))) throw new Error('Unknown watch adapter command');
-        return pluginDto(adapter.commands.run(command));
+        return pluginDto(await adapter.commands.run(command));
       }
       case 'watch.registration.prepare':
         if (!adapter.registration) throw new Error('Watch plugin registration capability is unavailable');

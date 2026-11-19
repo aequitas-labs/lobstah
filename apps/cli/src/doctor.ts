@@ -36,7 +36,7 @@ import { parkedSummary } from './parked-view.js';
 import { installedClaudePlugin, installedCodexPlugin, pluginDrift, UPDATE_COMMAND, versionGap } from './plugin-version.js';
 import { glassPort, glassUrl, probeGlass } from './glass-lifecycle.js';
 import { serviceFile } from './service.js';
-import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
+import { watchDiagnostics } from './watch-registration.js';
 import { petRow } from './pet.js';
 import { listCodexHooks } from './codex-hook-list.js';
 import { claudeHooks, codexHooks, hookRow, listenerRow } from './hook-readiness.js';
@@ -418,7 +418,7 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
     }
   }
 
-  const repairer = liveRepairer(now);
+  const repairer = watchDiagnostics(now).live;
   push(
     'PR repairer',
     cfg.watch.autoRepair ? (repairer ? 'ok' : 'warn') : 'skip',
@@ -430,7 +430,7 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
   );
 
   // A waiting repair is information, not a failure: nothing here needs a person.
-  const waiting = cfg.watch.autoRepair ? waitingRepairs() : [];
+  const waiting = cfg.watch.autoRepair ? watchDiagnostics(now).waiting : [];
   if (waiting.length > 0) {
     push(
       'PR repairs waiting',
@@ -438,7 +438,7 @@ export async function runDoctor(now = Date.now()): Promise<DoctorRow[]> {
       waiting.map((pr) => `${pr.key} ${pr.repair!.kind}: ${pr.repair!.heldBy ?? 'held'} — ${pr.repair!.reason ?? ''}`).join('; '),
     );
   }
-  const chores = cfg.watch.autoRepair ? repairChores() : [];
+  const chores = cfg.watch.autoRepair ? watchDiagnostics().chores : [];
   if (chores.length > 0) {
     push('PR repair chores', 'ok', chores.map((r) =>
       `${r.pr} ${r.lane} ${r.state} ${r.worker}${r.waitingForTrap ? ` waiting for trap until ${r.until}` : ''}`).join('; '));

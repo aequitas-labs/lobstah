@@ -1,11 +1,13 @@
+import type { WatchProbeRun } from '../watch-command.js';
+import { prHostCommands } from './pr-host.js';
 import { loadConfig, parsePrRef, toonKV, toonTable } from '@lobstah/core';
-import { PR_WATCH_INPUT_PATTERN } from '@lobstah/watch-types';
+import { PR_WATCH_INPUT_PATTERN } from '@lobstah/watch-types/pr';
 import type { WatchCommandPolicy } from '@lobstah/watch-types';
 import { backfillPrWatches, removePrWatch, runPrCheck } from '../pr-watch.js';
 
 /** Compatibility commands and their output belong to the source that implements them. */
-export function prWatchCommands(): WatchCommandPolicy {
-  return {
+export function prWatchCommands(run?: WatchProbeRun): WatchCommandPolicy {
+  return prHostCommands({
     bindings: [{ name: 'check-pr' }, { name: 'backfill' }, { name: 'rm', pattern: PR_WATCH_INPUT_PATTERN }],
     run({ name, args, flags }) {
       const opt = (key: string) => (typeof flags[key] === 'string' ? (flags[key] as string) : undefined);
@@ -39,5 +41,5 @@ export function prWatchCommands(): WatchCommandPolicy {
         ...(!apply && rows.length ? ['dry run — pass --apply to write'] : []),
       ].join('\n');
     },
-  };
+  }, run);
 }

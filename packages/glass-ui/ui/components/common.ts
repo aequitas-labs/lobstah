@@ -1,4 +1,4 @@
-import { presentLegacyAttention, legacyAttentionLabels, legacyAttentionTones } from '@lobstah/watch-types/presentation';
+import { presentLegacyAttention, legacyAttentionLabels, legacyAttentionTones } from '@lobstah/watch-types/legacy-presentation';
 import type { Attachment, GlassDispatch, GlassDispatchSummary, GlassOlderKind, GlassPr, GlassStack, TendAttention } from '@lobstah/core';
 import { RepoIcon } from './card.js';
 import type { CardState } from './card.js';

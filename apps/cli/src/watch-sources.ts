@@ -1,6 +1,6 @@
-import { syncLocalWatchSources, syncWatchSubscriptions, syncWatchRegistrations, registerWatchEvent } from '@lobstah/core';
+import { loadConfig, syncLocalWatchSources, syncWatchSubscriptions, syncWatchRegistrations, registerWatchEvent } from '@lobstah/core';
 import type { Lane, StatusEntry } from '@lobstah/core';
-import { createCliWatchRegistry } from './watch-automation.js';
+import { createCliWatchRegistry, deliverRegisteredWatchActions } from './watch-automation.js';
 import { syncRegisteredWatches } from './watch-observation.js';
 
 /** Builtin source composition is separate from daemon scheduling and helm presentation. */
@@ -13,6 +13,7 @@ export function runCliWatchSources(now: number, log: (message: string) => void):
       syncRegisteredWatches(now);
     },
     () => syncWatchRegistrations(createCliWatchRegistry(log), now, log, 'after-observe'),
+    () => { deliverRegisteredWatchActions(now, loadConfig().watch.maxForksPerCycle, log); },
   ];
   for (const pass of passes) {
     try {

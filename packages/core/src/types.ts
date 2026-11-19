@@ -1,5 +1,5 @@
 import type { ConfiguredTrapTarget, RepoDispatchTarget } from './configured-trap-model.js';
-import type { PrEvidence } from './pr.js';
+import type { PrEvidence } from './watch-adapters/exports.js';
 import type { WorkerMetadata } from './worker-metadata.js';
 import type { PushRecord } from './pushes.js';
 export const VERBS = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed'] as const;

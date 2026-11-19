@@ -1,3 +1,4 @@
+import { runCliWatchSources } from '../src/watch-sources.js';
 import { ackItemExists, pruneStaleAcks, readAck, writeAck } from '../src/acks.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -58,9 +59,23 @@ class HarborWatch extends CommandWatchType {
   bindings = [ { event: 'explicit', field: 'key', pattern: '^harbor:' },
     { event: 'turn-wait', field: 'read', pattern: '^harbor inspect ' } ];
   optionsSchema = { json: { type: 'object', required: ['history', 'cleanup'], additionalProperties: false,
-    properties: { history: { type: 'string' }, cleanup: { type: 'string' }, cursor: { type: 'string' } } },
+    properties: { history: { type: 'string' }, cleanup: { type: 'string' }, cursor: { type: 'string' }, automate: { type: 'boolean' } } },
     parse(value) { if (!value || typeof value.history !== 'string' || typeof value.cleanup !== 'string') throw new Error('Missing history'); return value; } };
   identify(input) { return /^harbor:[a-z]+$/.test(input) ? { key: input } : undefined; }
+  automation = { propose({ snapshot }) { return snapshot.options.automate && snapshot.cursor !== '0' ? [{
+    actionId: 'record', expectedRevision: snapshot.cursor, idempotencyKey: snapshot.key + ':' + snapshot.cursor,
+    authority: 'harbor:configured', arguments: {},
+  }] : []; } };
+  effectHandler = { execution: 'sync', execute(request) {
+    const output = new URL('./action.json', import.meta.url);
+    if (fs.existsSync(output)) {
+      const prior = JSON.parse(fs.readFileSync(output, 'utf8'));
+      if (prior.id !== request.id) throw new Error('A different action already ran');
+      return { workIds: [] };
+    }
+    fs.writeFileSync(output, JSON.stringify({ id: request.id, key: request.reference.key }));
+    return { workIds: [] };
+  } };
   acknowledgements = {
     patterns: ['^harbor-legacy:'],
     exists(key) { return key.startsWith('harbor-legacy:') ? true : undefined; },
@@ -71,7 +86,7 @@ class HarborWatch extends CommandWatchType {
     read() { return JSON.parse(fs.readFileSync(new URL('./history.json', import.meta.url), 'utf8')).cursor !== '0' ? { state: 'met', as: 'ready' } : { state: 'waiting' }; },
     needsWatch() { return true; }, watchNote() { return 'wakes when harbor is ready'; },
   };
-  commands = { bindings: [{ name: 'check-ume' }], run({ args }) { return JSON.stringify({ adapter: 'harbor', input: args[0] }); } };
+  commands = { bindings: [{ name: 'check-ume' }], async run({ args }) { return JSON.stringify({ adapter: 'harbor', input: args[0] }); } };
   registration = {
     prepare(request) {
       if (request.event === 'explicit') return { input: request.fields.key, options: request.options };
@@ -88,12 +103,12 @@ class HarborWatch extends CommandWatchType {
   }
   present(snapshot) { return { title: 'Harbor watch', summary: snapshot.events.at(-1)?.summary ?? 'Waiting', label: 'Harbor', tone: 'warning',
     worker: { steps: ['Read harbor feedback and report the outcome.'] }, helm: { steps: ['Keep harbor feedback with its owner.'] },
-    rows: [], links: [{ label: 'Open harbor', url: 'https://example.test/harbor' }], actions: [],
+    rows: [], links: [{ label: 'Open harbor', url: 'https://example.test/harbor' }], actions: snapshot.options.automate ? [{ id: 'record', label: 'Record harbor action', requiresAuthority: true, automatic: true }] : [],
     attention: snapshot.events.length ? [{ id: 'attention', kind: 'harbor:attention', stateHash: snapshot.cursor,
       summary: 'Harbor needs attention', quiet: false, blocking: false }] : [] }; }
   close({ snapshot }, reason) { fs.appendFileSync(snapshot.options.cleanup, snapshot.key + ' ' + reason + '\\n'); }
 }
-await serveWatchPlugin(new HarborWatch());
+await serveWatchPlugin(new HarborWatch(), { actionSchemas: { arguments: { type: 'object', additionalProperties: false }, result: { type: 'object', required: ['workIds'], additionalProperties: false, properties: { workIds: { type: 'array', items: { type: 'string' } } } } } });
 `,
   );
   fs.writeFileSync(
@@ -310,4 +325,23 @@ it('applies a process adapter acknowledgement policy only with its capability gr
   fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
   expect(ackItemExists(acknowledgement.key)).toBe(false);
   expect(pruneStaleAcks([{ key: acknowledgement.key, stateHash: 'new' }])).toEqual([acknowledgement.key]);
+});
+
+it('runs configured plugin automation without the builtin PR observation adapter', () => {
+  const config = parse(fs.readFileSync(path.join(home, 'config.toml'), 'utf8'));
+  const types = config.watchTypes as Record<string, Record<string, unknown>>;
+  types.pr = { enabled: false };
+  types.harbor.automate = true;
+  types.harbor.allowCapabilities = ['poll', 'registration', 'automation', 'actions'];
+  fs.writeFileSync(path.join(home, 'config.toml'), stringify(config));
+  command('watch', 'add', 'harbor:automation');
+  feedback();
+  const errors: string[] = [], now = Date.now();
+  runCliWatchSources(now, error => errors.push(error));
+  const first = fs.readFileSync(path.join(directory, 'action.json'), 'utf8');
+  runCliWatchSources(now + 46000, error => errors.push(error));
+  expect(errors).toEqual([]);
+  expect(fs.readFileSync(path.join(directory, 'action.json'), 'utf8')).toBe(first);
+  expect(new WatchJournal().read('harbor:automation')?.actionReceipts).toMatchObject([{ status: 'done' }]);
+  expect(new WatchJournal().read('harbor:automation')?.actionReceipts).toHaveLength(1);
 });

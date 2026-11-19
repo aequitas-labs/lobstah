@@ -1,10 +1,12 @@
 import { prAcknowledgements } from './pr-acknowledgements.js';
 import { prTodoTriggers } from './pr-todo.js';
 import { spawnSync } from 'node:child_process';
-import { PrWatchType, CommandWatchType, parseCommandWatchBatch, WatchCommandError } from '@lobstah/watch-types';
-import type { PrWatchServices } from '@lobstah/watch-types';
+import { PrWatchType } from '@lobstah/watch-types/pr';
+import { CommandWatchType, parseCommandWatchBatch, WatchCommandError } from '@lobstah/watch-types';
+import type { PrWatchServices } from '@lobstah/watch-types/pr';
 import { prDispatchPolicy } from './pr-watch-delivery.js';
-import type { PrWatchContext, PrWatchSnapshot, WatchFailure, WatchObservationBatch, WatchPresentation } from '@lobstah/watch-types';
+import type { PrWatchContext, PrWatchSnapshot } from '@lobstah/watch-types/pr';
+import type { WatchFailure, WatchObservationBatch, WatchPresentation } from '@lobstah/watch-types';
 import { classifyGhError, firstMeaningfulLine } from './gh-errors.js';
 import { githubBlockedUntil, recordGitHubRateLimit } from './github-budget.js';
 import type { PrBatchRun } from './pr-poll.js';

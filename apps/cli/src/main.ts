@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { runDueWatches } from './watch-observation.js';
 import { registerInstalledWatch } from '@lobstah/core';
-import { runCliWatchCommand } from './watch-registration.js';
+import { runCliWatchCommand, queryCliWatch, requireCliWatch, recordCliWatchReport } from './watch-registration.js';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { runCliWatchSources, registerCliReportWatches } from './watch-sources.js';
 import { presentRegisteredWatch } from './watch-presenters/index.js';
@@ -210,12 +211,6 @@ import {
   toonKV,
   toonTable,
   VERBS,
-  cutPrTitle,
-  parsePrRef,
-  prBadge,
-  readPr,
-  prNewestFirst,
-  readPrs,
   handoffNote,
   resolveSessionHarness,
   codexDesktopThread,
@@ -258,7 +253,6 @@ import { swapTrapCatch } from './trap-swap.js';
 import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
 import { createTurnWaits } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
-import { createPrQuestionWatch, publishDispatchQuestions } from './pr-questions.js';
 import { questionPark } from '@lobstah/core';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
@@ -295,28 +289,18 @@ import { installService, restartService, serviceInstalled, uninstallService } fr
 import { activeDispatchCounts, awaitHeartbeat, daemonStatus, readHeartbeat, restartRefusal, RESTART_WAIT_MS } from './restart.js';
 import { appendRepoBlock, configuredRepoKeys, configuredRepoPaths, detectRepo, scanForRepos } from './repos.js';
 import { pruneStaleAcks, removeAck, writeAck } from './acks.js';
-import {
-  autoRegisterPrWatch,
-  runDueManWatches,
-  pollSecs,
-} from './pr-watch.js';
-import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates } from './pr-repair.js';
 import { createRunCleanup } from './run-cleanup.js';
-import { registerWaitWatches, waitWarning } from './pr-waits.js';
-import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
 import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, onCodexServer, startMode, throwBatch, throwTrap } from './throw.js';
 import { repoTrapRows, trapSummary } from './trap-list.js';
-import { trapPrWaitAsDone } from './trap-pr-wait.js';
 import { createSoakWorktree, discardSoakWorktree } from './soak-worktree.js';
 import { ForgetRefusedError, forgetTrap } from './forget.js';
 import { setTerminalTitle, trapTabTitle } from './terminal-title.js';
 import { runBeat } from './beat.js';
 import { fileDispatchReport, fileHelmReport, reportRows, unattachedDecisionWarning, unattachedWarning } from './report-file.js';
 import { reviewRows } from './reviews.js';
-import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerSource } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
@@ -411,16 +395,11 @@ work (humans and agents):
                                   child under pick for ms-latency delivery
                                   (the check stays the guarantee). Bare
                                   \`watch\` lists.
-  watch add pr:<owner>/<repo>#<n>|<pr-url> [--for <uuid>] [--every <s>]
-                                  the PR preset: installs the shipped check
-                                  (\`watch check-pr\`, one gh pr view per
-                                  cycle). --for stamps a pr state object into
-                                  that dispatch's evidence; failing checks
-                                  fork a CI-fix continuation (pick only);
-                                  merged/closed post a helm notice. The
-                                  first check is a baseline: it forks
-                                  nothing, and a PR already merged or
-                                  closed is recorded and retired.
+  watch add <type>:<id>|<pr-url> [--for <uuid>] [--every <s>]
+                                  install a source by its declared reference.
+                                  --for sends events to the dispatch chain.
+                                  The source supplies its rows, instructions,
+                                  events and cleanup policy.
   watch backfill [--apply]        list PRs in dispatch history with no watch or no title
                                   (dry run); --apply registers them. Read
                                   commands never register a watch.
@@ -539,7 +518,7 @@ workers (dispatched agents; injected into every brief):
                                   the validated status write path
                                   (${VERBS.join(' | ')}). --pr on any
                                   verb but failed records the PR and
-                                  registers its pr: watch for this chain;
+                                  registers its watch for this chain;
                                   repeat it for several PRs. A PR in a gh
                                   stack, or in a base chain of this
                                   dispatch's branches, adds the stack's
@@ -1284,7 +1263,7 @@ async function mainCli(): Promise<void> {
       };
       // --pr: the dispatch works on this existing PR. The runner opens no PR of its own.
       const prTarget = opt('--pr');
-      if (prTarget !== undefined) d.pr = resolvePrTarget(repo, prTarget);
+      if (prTarget !== undefined) d.pr = requireCliWatch<NonNullable<Descriptor['pr']>>('dispatch.target', { repo, reference: prTarget });
       const lane: Lane = has('--chore') ? 'chore' : 'work';
       const caller = callerSession(opt('--session'));
       if (has('--trap-any')) {
@@ -1298,8 +1277,7 @@ async function mainCli(): Promise<void> {
       }
       const warnings = startDispatch(d, lane, values('--attach'), caller);
       if (!d.pr && !d.followUp) {
-        for (const url of briefPrMentions(d.brief, repo))
-          warnings.push(`the brief names ${url}, but this dispatch will open its own draft PR; to push to that PR instead, dispatch with --pr ${url}`);
+        warnings.push(...queryCliWatch<string[]>('dispatch.advice', { repo, brief: d.brief }, []));
       }
       console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
@@ -1570,7 +1548,7 @@ async function mainCli(): Promise<void> {
         followUp: origin.descriptor.target ? undefined : origin.id,
         for: origin.descriptor.target ? `trap:${origin.descriptor.target.profile}` : address,
         ...(!address && origin.descriptor.pool ? { pool: origin.descriptor.pool } : {}),
-        ...(opt('--pr') !== undefined ? { pr: resolvePrTarget(origin.descriptor.repo!, opt('--pr')!) } : {}),
+        ...(opt('--pr') !== undefined ? { pr: requireCliWatch<NonNullable<Descriptor['pr']>>('dispatch.target', { repo: origin.descriptor.repo!, reference: opt('--pr')! }) } : {}),
       };
       const warnings = startDispatch(followUp, origin.lane, values('--attach'), sender);
       if (!has('--no-reply')) expectReply({ dispatchId: followUp.id, lane: origin.lane, from, text });
@@ -1593,7 +1571,7 @@ async function mainCli(): Promise<void> {
       const note = rest.join(' ') || undefined;
       const askedWaiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
       // A trap doesn't park on its own PR's CI or review: that pause is recorded as done --pr, which frees the trap.
-      const prDone = trapPrWaitAsDone(id, lane, asked, askedWaiting, values('--pr'));
+      const prDone = queryCliWatch<{ prs: string[] } | null>('report.prepare', { id, lane, verb: asked, waiting: askedWaiting, references: values('--pr') }, null);
       const verb = prDone ? 'done' : asked;
       const reportedPrs = prDone ? prDone.prs : values('--pr');
       const prUrl = reportedPrs[0];
@@ -1690,7 +1668,6 @@ async function mainCli(): Promise<void> {
       const entry = appendStatus(id, lane, verb, runNote ? `${note ?? ''}${runNote}`.trim() : note, undefined, saysWaiting ? waiting : undefined, true, asksPermission);
       if (prDone) console.log(`note: a trap doesn't park on its own PR; recorded done --pr ${prDone.prs.join(' --pr ')}. The PR's watch starts the next round on review feedback, a failing check or a merge.`);
       // A PR-bound worker that could not push: mark its PR record and tell the helm.
-      if (verb === 'failed') recordPushFailure(id, lane, note);
       // A trap reports from its own checkout, or names its session from
       // anywhere else (a primary checkout): keep its last commit as the
       // ownership anchor for safe PR-watch repairs after the session moves on.
@@ -1712,40 +1689,11 @@ async function mainCli(): Promise<void> {
             mergeEvidence(id, lane, { commits: [head.stdout.trim()], branch: branch.stdout.trim() });
         }
       }
-      // Each --pr, and the other PRs of a stack that holds one, belongs to
-      // this dispatch. The first reported PR stays its `prUrl`.
-      let reportPrs: string[] = [];
-      let discovery: ReturnType<typeof dispatchPrDiscovery> | undefined;
-      if (prUrl) {
-        const ev = readEvidence(id, lane);
-        const worktree = readSessionClaim(id, lane)?.worktree ?? ev.worktree;
-        const branches = [...new Set([ev.branch, ...(ev.pushes ?? []).map((p) => p.branch)])].filter(
-          (b): b is string => !!b && b !== 'HEAD',
-        );
-        discovery = dispatchPrDiscovery(reportedPrs, { cwd: worktree && fs.existsSync(worktree) ? worktree : process.cwd(), branches });
-        reportPrs = discovery.urls;
-        if (discovery.urls.length) recordDispatchPrs(id, lane, discovery, false);
-        else mergeEvidence(id, lane, { prUrl });
-      }
-      const gatesNamed = recordReportedGates(id, lane, values('--human-gate'), prUrl);
-      if (verb === 'needs-decision' && !asksPermission) {
-        try { await publishDispatchQuestions(id, lane); }
-        catch (error) { console.log(`warning: PR question delivery will retry: ${error instanceof Error ? error.message : String(error)}`); }
-      }
-      // A PR stays observed from the first report that names it: CI, review,
-      // and merge flow back through its pr: watch instead of lobstah going
-      // blind at "PR open". The watch is registered once per PR. A pause on
-      // the dispatch's own PR registers that PR's watch.
-      // A daemon repair is already bound to that PR's watch. Reporting the
-      // same URL must not register a replacement watch.
-      const prWatches =
-        verb !== 'failed' && prUrl && !noWatch && !storedDescriptor(id, lane)?.systemRepair
-          ? reportPrs.map((u) => autoRegisterPrWatch(id, u)).filter((w): w is Watch => !!w)
-          : verb === 'paused' && !noWatch
-            ? registerWaitWatches(id, lane, entry)
-            : [];
+      const sourceReport = await recordCliWatchReport({
+        id, lane, entry, references: reportedPrs, gates: values('--human-gate'), enabled: !noWatch, permission: asksPermission,
+      });
       registerCliReportWatches(id, lane, entry, !noWatch);
-      const warnings = [waitWarning(id, lane, entry), filed && unattachedWarning(filed)].filter((w): w is string => !!w);
+      const warnings = [...sourceReport.warnings, filed && unattachedWarning(filed)].filter((warning): warning is string => !!warning);
       let permissionCard: string | undefined;
       if (permCommand !== undefined || permPath !== undefined) {
         const { askPermission } = await import('./grants-cli.js');
@@ -1775,11 +1723,8 @@ async function mainCli(): Promise<void> {
           ...(entry.waitingOn ? { waitingOn: entry.waitingOn } : {}),
           ...(entry.link ? { link: entry.link } : {}),
           ...(entry.until ? { until: entry.until } : {}),
-          ...(prUrl ? { prUrl } : {}),
-          ...(reportPrs.length > 1 ? { prs: reportPrs.join(', ') } : {}),
-          ...(prWatches.length ? { watch: prWatches.map((w) => w.key).join(', ') } : {}),
+          ...sourceReport.fields,
           ...(warnings.length ? { warning: warnings.join('; ') } : {}),
-          ...(gatesNamed.length ? { humanGates: gatesNamed.join(', ') } : {}),
           ...(filed ? { report: reportMarkdownPath(filed.key), reportKey: filed.key, reportTitle: filed.title } : {}),
         }),
       );
@@ -1930,16 +1875,7 @@ async function mainCli(): Promise<void> {
           }),
           branch: ev.branch,
           prUrl: ev.prUrl,
-          ...(dispatchPrUrls(ev).length > 1
-            ? {
-                prs: dispatchPrUrls(ev)
-                  .map((u) => {
-                    const record = readPr(parsePrRef(u)!.key);
-                    return record ? `${prBadge(record).text} ${u}` : u;
-                  })
-                  .join('; '),
-              }
-            : {}),
+          ...queryCliWatch<Record<string, string>>('catch.fields', { evidence: ev }, {}),
           sessionId: ev.sessionId,
           ...worktreeView(id, lane),
           ...dispatchTrap(id, lane, names),
@@ -1947,28 +1883,8 @@ async function mainCli(): Promise<void> {
           ...(reportMarkdownPath(dispatchReportKey(id, lane)) ? { report: reportMarkdownPath(dispatchReportKey(id, lane)) } : {}),
         }),
       );
-      if (ev.pr) {
-        const c = ev.pr.checks;
-        console.log(
-          toonKV({
-            pr: prBadge(ev.pr).text,
-            prState: ev.pr.state,
-            prDraft: ev.pr.draft,
-            prReview: ev.pr.reviewDecision || 'none',
-            ...(ev.pr.review
-              ? {
-                  prChangesRequested: ev.pr.review.changesRequested,
-                  ...(ev.pr.review.unresolvedThreads !== undefined ? { prUnresolvedThreads: ev.pr.review.unresolvedThreads } : {}),
-                  ...(ev.pr.review.lastReviewAt ? { prLastReviewAt: ev.pr.review.lastReviewAt } : {}),
-                }
-              : {}),
-            prMergeState: ev.pr.mergeStateStatus,
-            prHead: ev.pr.headSha,
-            prChecks: `${c.passed}/${c.total} passed, ${c.failed} failed, ${c.pending} pending`,
-            prObservedAt: ev.pr.observedAt,
-          }),
-        );
-      }
+      const sourceDetail = queryCliWatch<string | null>('catch.details', { evidence: ev }, null);
+      if (sourceDetail) console.log(sourceDetail);
       if (ev.commits?.length) {
         console.log(`commits[${ev.commits.length}]:`);
         for (const c of ev.commits) console.log(`  ${c}`);
@@ -1988,36 +1904,15 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'pr': {
-      const { mergeWhenGreenCommand } = await import('./pr-merge-command.js');
-      console.log(mergeWhenGreenCommand(pos, { opt, has }));
+      const output = await runCliWatchCommand({ name: cmd, args: pos, flags: Object.fromEntries(flags) });
+      if (output === undefined) throw new Error('No installed watch type handles this command.');
+      console.log(output);
       break;
     }
     case 'prs': {
-      const now = Date.now();
-      const watches = new Map(listWatches().map((w) => [w.key, w]));
-      const records = readPrs();
-      const rows = records.sort(prNewestFirst(records));
-      console.log(
-        toonTable(
-          'prs',
-          rows.map((r) => {
-            const watch = watches.get(r.key);
-            const ageMins = Math.max(0, Math.floor((now - Date.parse(r.observedAt)) / 60_000));
-            return {
-              number: `#${r.number}`,
-              title: cutPrTitle(r.title),
-              repo: r.repo,
-              state: r.state,
-              badge: prBadge(r).text,
-              draft: r.draft,
-              checks: `${r.checks.passed}/${r.checks.total} passed, ${r.checks.failed} failed, ${r.checks.pending} pending`,
-              observed: Number.isFinite(ageMins) ? `${ageMins}m ago` : 'unknown',
-              watch: watch ? (watch.lastError ? 'error' : watch.done ? 'done' : 'watching') : 'no watch',
-            };
-          }),
-          ['number', 'title', 'repo', 'state', 'badge', 'draft', 'checks', 'observed', 'watch'],
-        ),
-      );
+      const output = await runCliWatchCommand({ name: cmd, args: pos, flags: Object.fromEntries(flags) });
+      if (output === undefined) throw new Error('No installed watch type handles this command.');
+      console.log(output);
       break;
     }
     case 'cull': {
@@ -2762,7 +2657,7 @@ async function mainCli(): Promise<void> {
       const lane = findLane(id);
       // A cancelled PR repair holds its PR: no new repair until `watch release`.
       const repairHeld = () => {
-        const keys = holdCancelledRepair(id);
+        const keys = queryCliWatch<string[]>('dispatch.cancelled', { id }, []);
         return keys.length > 0 ? { repairHeld: `${keys.join(', ')} (lobstah watch release <key> frees it)` } : {};
       };
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
@@ -2878,7 +2773,7 @@ async function mainCli(): Promise<void> {
         // standing conditions still wake (attentionNow, noticeWakes).
         const wakes = noticeWakes(callerHelm);
         const floorMs = wakeFloorMs(callerHelm);
-        runDueManWatches();
+        runDueWatches();
         // The grounds `todo add` would use. With several and none named, the todos stand for their helms.
         const todoGroundsName = groundsScope?.name ?? (groundsList(cfgWait).length === 1 ? resolveGrounds(cfgWait).name : undefined);
         const dueTodos = () => (todoGroundsName !== undefined ? takeTodoDue(todoGroundsName, consume) : []);
@@ -2944,7 +2839,7 @@ async function mainCli(): Promise<void> {
             delivered(helmWakeKeys({ events: fresh, replies }), ...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
             return;
           }
-          runDueManWatches(); // no pick running? this loop is the poller
+          runDueWatches(); // no pick running? this loop is the poller
           const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
           if (watched.length > 0) {
             emitWatchAttention(watched, sid);
@@ -3234,7 +3129,7 @@ async function mainCli(): Promise<void> {
           break;
         }
         const idle = new IdleWait(helm?.sessionId, cfgHaul.wait, opt('--timeout'));
-        runDueManWatches();
+        runDueWatches();
         let evs = attentionNow(true, remindMs, Date.now(), matchHelm);
         let watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
         const notEcho = (n: Notice) => n.by === undefined || n.by !== hook?.session_id;
@@ -3258,7 +3153,7 @@ async function mainCli(): Promise<void> {
             if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too
-            runDueManWatches();
+            runDueWatches();
             watched = pendingWatchEvents(true, 'man', Date.now(), helmFloorMs);
             fleetNotices = unseenNotices(true, helmNoticeFilter, helmWakes, STOP_TRAP_CHANGES).filter(notEcho);
             replies = takeReplies(true, matchHelm);
@@ -3943,7 +3838,6 @@ async function mainCli(): Promise<void> {
             await (await import('./wharf-cards.js')).publishBoatCards(Date.now(), console.log);
           },
           idleTraps: createIdleTrapWatch(),
-          prQuestions: createPrQuestionWatch(),
           trapPanes: createTrapPaneWatch(),
           trapStarts: createTrapDispatchScheduler(),
           culler: backgroundCuller,
@@ -4127,7 +4021,7 @@ async function mainCli(): Promise<void> {
     case 'watch': {
       const sub = pos[0];
       if (sub === 'add') loadConfig({ upgrade: true });
-      const sourceOutput = sub && !['add', 'inbox', 'hold', 'release'].includes(sub) ? runCliWatchCommand({ name: sub, args: pos.slice(1), flags: Object.fromEntries(flags) }) : undefined;
+      const sourceOutput = sub && !['add', 'inbox', 'hold', 'release'].includes(sub) ? await runCliWatchCommand({ name: sub, args: pos.slice(1), flags: Object.fromEntries(flags) }) : undefined;
       if (sourceOutput !== undefined) { console.log(sourceOutput); break; }
       if (sub && !['add', 'inbox', 'hold', 'release', 'rm', 'ls'].includes(sub)) throw new Error(`No installed watch type handles ${sub}.`);
       if (sub === 'inbox') {
@@ -4181,7 +4075,7 @@ async function mainCli(): Promise<void> {
       if (sub === 'hold') {
         const raw = pos[1];
         if (!raw) throw new Error('watch hold requires a key');
-        const key = parsePrRef(raw)?.key ?? raw;
+        const key = queryCliWatch<string>('watch.resolve', { reference: raw }, raw);
         const forId = opt('--for');
         if (forId) findLane(forId); // an unknown dispatch throws
         const w = holdWatch(key, new Date(), {

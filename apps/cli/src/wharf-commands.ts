@@ -7,7 +7,7 @@ import type { BackendEvent, BackendScope, Config, ReportInput } from '@lobstah/c
 import { resolveSessionId } from './session-id.js';
 import { hostedItem, isHostedKey } from './hosted-view.js';
 import { wharfRepoIdentity } from './wharf-repo.js';
-import { registerWharfPrWatch } from './pr-watch.js';
+import { queryCliWatch } from './watch-registration.js';
 import { wharfLogin } from './wharf-login.js';
 import { brokerBody, endBrokerAgent, waitBrokerAgent, wharfSoak } from './wharf-soak.js';
 import { readHookStdin } from './soak-site.js';
@@ -194,7 +194,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
         evidence: { prUrls: opts.values('--pr'), files } };
       await backend.report(pos[0] ?? '', r, base);
       // Once the wharf has the report, this boat watches its PRs.
-      for (const url of r.evidence?.prUrls ?? []) registerWharfPrWatch(url);
+      for (const url of r.evidence?.prUrls ?? []) queryCliWatch('watch.import', { reference: url }, null);
       if (verb === 'done') {
         // Only this boat's accepted report counts. Never send telemetry or create its ID here.
         try {

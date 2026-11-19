@@ -2,15 +2,8 @@ import { loadConfig } from '../config.js';
 import { storedWatchTypeDescriptors, storeWatchTypeDescriptor } from '../watch-type-descriptors.js';
 import { localWatchTypes, type LocalWatchSources } from '../local-watch-source.js';
 import { createUmeWatchType, type UmeWatchSourceOptions } from '../ume-watch-source.js';
-import {
-  CommandWatchType,
-  MergePolicyWatchType,
-  WatchRegistry,
-  UnavailableWatchType,
-  createProcessWatchType,
-  parseWatchPluginConfiguration,
-  watchPluginDefaults,
-} from '@lobstah/watch-types';
+import { CommandWatchType, WatchRegistry, UnavailableWatchType, createProcessWatchType, parseWatchPluginConfiguration, watchPluginDefaults } from '@lobstah/watch-types';
+import { MergePolicyWatchType } from '@lobstah/watch-types/merge-policy';
 import type { BaseWatchType } from '@lobstah/watch-types';
 import { createStackWatchType, type StackWatchSourceOptions } from '../stack-watch-source.js';
 import { createPrMergeWatchType, type PrMergeWatchSourceOptions } from '../pr-merge-watch-source.js';

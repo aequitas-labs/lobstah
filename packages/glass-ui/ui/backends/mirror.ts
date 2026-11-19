@@ -1,3 +1,4 @@
+import { legacyPrKey, legacyReviewKey } from '@lobstah/watch-types/legacy-presentation';
 import type {
   GlassDecision,
   GlassPrDetails,
@@ -341,10 +342,10 @@ export function createMirrorBackend(options: MirrorBackendOptions): MirrorBacken
     snapshot: load,
     prDetails: async (key) => {
       if (!merged) await load();
-      const sourceKey = route(key).boat ? key : key.replace('pr:', 'review:');
+      const sourceKey = route(key).boat ? key : legacyReviewKey(key);
       return readFor<GlassPrDetails>(
         sourceKey,
-        (local) => `/data/pr/${encodeURIComponent(local.replace('review:', 'pr:'))}`,
+        (local) => `/data/pr/${encodeURIComponent(legacyPrKey(local))}`,
         async () => ({ ok: false, status: 404 }),
       );
     },

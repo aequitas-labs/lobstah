@@ -1,10 +1,10 @@
+import { legacyStackKey } from '@lobstah/watch-types/legacy-presentation';
 import { presentRegisteredWatch, presentationSources } from './watch-presenters/index.js';
-import { evidencePrs, observedPrs, type ChainMember } from './watch-presenters/pr.js';
-export { onTheHook, prKinds, humanPrAttention } from './watch-presenters/pr.js';
-export type { ChainMember } from './watch-presenters/pr.js';
-import { prMergeStatus } from '@lobstah/core';
+import type { SourceTendCache, ChainMember } from './watch-presenters/index.js';
+export { onTheHook, prKinds, humanPrAttention } from './watch-presenters/index.js';
+export type { ChainMember } from './watch-presenters/index.js';
 import { questionParkNote } from '@lobstah/core';
-import { configuredTrapViews, orderedDispatchPrUrls, reviewAttention } from '@lobstah/core';
+import { configuredTrapViews, reviewAttention } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { reviewTools } from './review-tools.js';
@@ -48,24 +48,13 @@ import {
   listWatches,
   watchErrorCell,
   loadConfig,
-  prReviewUrl,
-  parsePrRef,
   pendingIds,
-  cutPrTitle,
-  prBadge,
-  prKeyLabel,
-  prLabel,
-  prNote,
-  prNewestFirst,
-  prStandingKinds,
   queuedDescriptor,
   storedDescriptor,
   storageGrounds,
   groundsList,
   standingDecisions,
   readEvidence,
-  readPr,
-  readPrs,
   readSessionClaim,
   readTrap,
   questionEntry,
@@ -80,14 +69,6 @@ import {
   slotUsage,
   parkedDispatches,
   isFinished,
-  derivePrStacks,
-  readStackEpochs,
-  stackReadyEnabled,
-  stackStateHash,
-  identifyPrStacks,
-  humanGatesFor,
-  matchesGate,
-  repoKey as forgeRepoKey,
   poolViews,
   poolWaits,
   formatHeavyView,
@@ -121,11 +102,9 @@ import { backendViews, hostedAttention } from './hosted-view.js';
 import { otherBoatsAttention } from './wharf-attention.js';
 import { livenessView } from './liveness-view.js';
 import { dispatchUsageLimit } from '@lobstah/core';
-import { deriveGlassPrs } from './glass-prs.js';
-import { refreshMissingDispatchPrs } from './pr-watch.js';
-import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
-import type { RepairChore } from './pr-repair.js';
-import type { GlassStack } from './glass-prs.js';
+import { queryCliWatch, watchDiagnostics } from './watch-registration.js';
+import type { SourceRepairChore as RepairChore } from './watch-registration.js';
+import type { GlassStack } from './watch-presenters/index.js';
 import { decisionHash } from '@lobstah/glass-ui';
 import { glassPort, glassUrl } from './glass-lifecycle.js';
 import { todoOverdueLine, todoStaleLine, todoTable, todoViews, type TodoView } from './todo.js';
@@ -605,38 +584,8 @@ function awaitingView(id: string): Pick<TendDispatch, 'awaitingReply'> {
 }
 
 /** Each PR of a chain with more than one, `<state> <url>` when its record exists. */
-function prsOf(chain: TendDispatch[]): string[] | undefined {
-  const urls = [...new Set(chain.flatMap((d) => d.prUrls ?? []))]
-    .filter((url) => readPr(parsePrRef(url)?.key ?? url)?.state !== 'CLOSED');
-  if (urls.length < 2) return undefined;
-  const positions = Object.assign({}, ...chain.map((dispatch) => dispatch.prPositions ?? {})) as NonNullable<import('@lobstah/core').Evidence['prPositions']>;
-  const ordered = orderedDispatchPrUrls({ prUrls: urls, prPositions: positions });
-  return ordered.map((u) => {
-    const ref = parsePrRef(u);
-    const record = ref ? readPr(ref.key) : undefined;
-    const prefix = positions[u] ? `${positions[u]!.position}/${positions[u]!.size} ` : '';
-    return prefix + (record ? `${prBadge(record).text} ${u}` : u);
-  });
-}
-
-/**
- * The chain's PR state as a badge — the one derivation tend, catch, and glass
- * share. A chain with several PRs shows the one first seen last.
- */
-function prStateOf(chain: TendDispatch[]): string | undefined {
-  const records = chain
-    .map((d) => parsePrRef(d.prUrl ?? d.pr?.url ?? ''))
-    .filter((ref) => ref !== undefined)
-    .map((ref) => readPr(ref.key))
-    .filter((pr): pr is NonNullable<typeof pr> => pr !== undefined && ['OPEN', 'MERGED', 'CLOSED'].includes(pr.state));
-  const record = records.sort(prNewestFirst(records))[0];
-  if (record) return prBadge(record).text;
-  const observed = chain
-    .filter((dispatch) => (dispatch.prUrls?.length ?? 0) < 2)
-    .map((d) => d.pr)
-    .filter((p): p is PrEvidence => p !== undefined)
-    .sort((a, b) => b.number - a.number || b.observedAt.localeCompare(a.observedAt))[0];
-  return observed ? prBadge(observed).text : undefined;
+function storyFields(chain: TendDispatch[]): { prs?: string[]; prState?: string } {
+  return queryCliWatch('story.fields', { chain }, {});
 }
 
 /** followUp chains: every dispatch whose descriptor points back at `uuid`. */
@@ -682,7 +631,7 @@ export function walkingAttention(report: TendReport, now: number = Date.now(), o
 /** Fleet state with a one-time refresh for unrecorded multi-PR observations. */
 export function buildTendReport(now: number = Date.now()): TendReport {
   const cfg = loadConfig();
-  refreshMissingDispatchPrs();
+  queryCliWatch('watch.refresh', {}, null);
 
   const heartbeat = readJson<{ heartbeat?: string }>(executorPath())?.heartbeat;
   const daemonUp = heartbeat !== undefined && now - Date.parse(heartbeat) < HEARTBEAT_STALE_MS;
@@ -817,15 +766,13 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     if (!fresh) continue;
     const prUrl = chain.map((d) => d.prUrl).find((u) => u !== undefined);
     const watch = chain.map((d) => watchByDispatch.get(d.id)).find((w) => w !== undefined);
-    const prs = prsOf(chain);
-    stories.push({ key, dispatches: chain, prUrl, ...(prs ? { prs } : {}), prState: prStateOf(chain), gate: gateFor(entry.uuid, prUrl), watch });
+    stories.push({ key, dispatches: chain, prUrl, ...storyFields(chain), gate: gateFor(entry.uuid, prUrl), watch });
   }
   const direct = (d: TendDispatch): TendStory => ({
     key: '(direct)',
     dispatches: [d],
     prUrl: d.prUrl,
-    ...(prsOf([d]) ? { prs: prsOf([d]) } : {}),
-    prState: prStateOf([d]),
+    ...storyFields([d]),
     gate: gateFor(d.id, d.prUrl),
     watch: watchByDispatch.get(d.id),
   });
@@ -841,9 +788,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     if (d.prUrl && d.at !== undefined && now - Date.parse(d.at) < DAY_MS) stories.push(direct(d));
   }
 
-  const records = readPrs();
-  const legacy = evidencePrs();
-  const observed = observedPrs(records, legacy);
+  const { records, legacy, observed, stacks } = queryCliWatch<SourceTendCache>('tend.cached', { now }, { records: [], legacy: [], observed: [], stacks: [] });
   const sourcePresentation = presentationSources(now, observed, cfg, { chainOf, repoOf }, { landed: (at) => landedAttention(cfg, at), decisions: (at) => decisionAttention(at), reports: (at) => reportAttention(at) });
   const legacyWatchKeys = new Set(watches.map((watch) => watch.key));
   const sourceViews = presentedWatchViews(now, legacyWatchKeys, sourcePresentation.registry);
@@ -877,24 +822,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   }
 
 
-  // Stories with a PR take the shared PR order (first seen, newest first) in
-  // the slots PR stories hold; a story whose PR has no observation goes last.
-  const byPrUrl = new Map(observed.map(({ pr }) => [pr.url, pr]));
-  const newestFirst = prNewestFirst(observed.map(({ pr }) => pr));
-  const prStories = stories.filter((s) => s.prUrl).sort((a, b) => {
-    const pa = byPrUrl.get(a.prUrl!), pb = byPrUrl.get(b.prUrl!);
-    return pa && pb ? newestFirst(pa, pb) : Number(!pa) - Number(!pb);
-  });
-  let prIndex = 0;
-  stories.forEach((s, i) => {
-    if (s.prUrl) stories[i] = prStories[prIndex++]!;
-  });
-  const stacks = deriveGlassPrs(
-    legacy.map(({ id, pr }) => ({ id, pr })),
-    [],
-    records,
-    { readySettleSecs: cfg.readySettleSecs, now },
-  ).stacks.filter((s) => s.open);
+  stories.splice(0, stories.length, ...queryCliWatch<TendStory[]>('stories.order', { stories, observed }, stories));
   attention.push(...sourcePresentation.attention, ...hostedAttention(cfg, now).filter(a => a.kind !== 'review'));
   const displayOf = (item: TendAttention) => item.presentation ?? presentLegacyAttention(item);
   const suppressedConditions = new Set([...sourceViews.flatMap((view) => view.snapshot.presentation.suppresses ?? []).map((rule) => `${rule.kind}\0${rule.key}`), ...attention.flatMap((item) => (displayOf(item).suppresses ?? []).map((rule) => `${rule.kind}\0${rule.key}`))]);
@@ -945,7 +873,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const pools = poolViews(cfg);
   const tools = reviewTools(cfg);
   for (const item of attention) {
-    if (item.prUrl) item.reviewUrl = prReviewUrl(item.prUrl, tools);
+    if (item.prUrl) item.reviewUrl = queryCliWatch<string | undefined>('view.review-link', { url: item.prUrl, tools }, undefined);
   }
   let todos: TodoView[] = [];
   try {
@@ -1005,10 +933,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     helms,
     ...(merge ? { merge: mergeViewWithTitles(merge, records) } : {}),
     stacks,
-    mergeWhenGreen: records.filter((pr) => pr.mergeRequest).map((pr) => ({
-      pr: pr.key, by: pr.mergeRequest!.by, at: pr.mergeRequest!.at, method: pr.mergeRequest!.method,
-      status: prMergeStatus(pr), hold: pr.mergeRequest!.hold, note: pr.mergeRequest!.note, sha: pr.mergeRequest!.mergeSha,
-    })),
+    mergeWhenGreen: queryCliWatch<NonNullable<TendReport['mergeWhenGreen']>>('view.merge-requests', {}, []),
     parked: parked.map((p) => ({
       id: p.id,
       lane: p.lane,
@@ -1018,7 +943,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
       ...(p.note ? { note: p.note } : {}),
       ...(p.waiting ? { waiting: p.waiting } : {}),
     })),
-    repairsWaiting: waitingRepairs(records).map((pr) => ({
+    repairsWaiting: watchDiagnostics(now).waiting.map((pr) => ({
       key: pr.key,
       url: pr.url,
       ...(pr.title ? { title: pr.title } : {}),
@@ -1027,7 +952,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
       reason: pr.repair!.reason ?? '',
       ...(pr.repair!.until ? { until: pr.repair!.until } : {}),
     })),
-    repairChores: repairChores(records),
+    repairChores: watchDiagnostics(now).chores,
     ...(hold ? { hold: { ...hold, reason: holdReason(hold) } } : {}),
     ...(pools.length > 0 ? { pools } : {}),
     ...(todos.length > 0 ? { todos } : {}),
@@ -1062,7 +987,7 @@ export function renderTend(r: TendReport): string {
   for (const stack of r.stacks) {
     lines.push(`stack ${stack.title ? `${stack.title} · ` : ''}${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);
     if (stack.readiness) lines.push(`${stack.readiness.text} ${stack.readiness.url}`);
-    const item = r.attention.find((a) => a.key === `stack:${stack.readiness?.id}`);
+    const item = r.attention.find((a) => a.key === legacyStackKey(stack.readiness?.id ?? ''));
     if (item?.stack) for (const member of item.stack.members) lines.push(`  ${member.note} ${member.url}`);
   }
   if (r.attention.length > 0) {
@@ -1147,7 +1072,7 @@ export function renderTend(r: TendReport): string {
     lines.push(
       toonTable(
         'repairs waiting',
-        r.repairsWaiting.map((w) => ({ pr: prKeyLabel(w.key, w.title), kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
+        r.repairsWaiting.map((w) => ({ pr: queryCliWatch('view.key-label', { key: w.key, title: w.title }, w.key), kind: w.kind, heldBy: named(w.heldBy), reason: named(w.reason), until: w.until ?? '' })),
         ['pr', 'kind', 'heldBy', 'reason', 'until'],
       ),
     );
@@ -1155,7 +1080,7 @@ export function renderTend(r: TendReport): string {
   if (r.repairChores?.length) {
     lines.push('');
     lines.push(toonTable('repair chores', r.repairChores.map((c) => ({
-      id: c.id.slice(0, 8), pr: prKeyLabel(c.pr, c.title), lane: c.lane, state: c.state,
+      id: c.id.slice(0, 8), pr: queryCliWatch('view.key-label', { key: c.pr, title: c.title }, c.pr), lane: c.lane, state: c.state,
       worker: named(c.worker), waitingForTrap: c.waitingForTrap ? `until ${c.until ?? '?'}` : '',
     })), ['id', 'pr', 'lane', 'state', 'worker', 'waitingForTrap']));
   }
@@ -1251,8 +1176,8 @@ export function renderTend(r: TendReport): string {
       toonTable(
         `prs (${r.merge.repo}, observed ${r.merge.updatedAt})`,
         [
-          ...r.merge.open.map((p) => ({ pr: prLabel(p), state: p.mergeableState, gate: p.gate, url: p.url })),
-          ...r.merge.recent.map((p) => ({ pr: prLabel(p), state: p.disposition, gate: '', url: p.url })),
+          ...r.merge.open.map((p) => ({ pr: queryCliWatch('view.label', { record: p }, `#${p.number}`), state: p.mergeableState, gate: p.gate, url: p.url })),
+          ...r.merge.recent.map((p) => ({ pr: queryCliWatch('view.label', { record: p }, `#${p.number}`), state: p.disposition, gate: '', url: p.url })),
         ],
         ['pr', 'state', 'gate', 'url'],
       ),

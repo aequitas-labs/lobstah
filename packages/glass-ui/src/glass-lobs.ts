@@ -3,7 +3,8 @@
  * page's Lobs component. The page's bundle imports it, so the browser and
  * the tests run the same code — keep it free of Node imports.
  */
-import { presentLegacyAttention, type WatchAttentionDisplay } from '@lobstah/watch-types/presentation';
+import { presentLegacyAttention } from '@lobstah/watch-types/legacy-presentation';
+import { type WatchAttentionDisplay } from '@lobstah/watch-types/presentation';
 import type { ModalRef } from './glass-diff.js';
 
 export interface LobAttention {

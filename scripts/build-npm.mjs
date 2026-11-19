@@ -20,7 +20,22 @@ execFileSync('npx', ['esbuild', 'apps/cli/src/main.ts', ...common, `--outfile=${
 execFileSync('npx', ['esbuild', 'packages/runner/src/index.ts', ...common, `--outfile=${out}/dist/runner.js`], { cwd: root, stdio: 'inherit' });
 execFileSync('npx', ['esbuild', 'apps/cli/src/wharf-trap-runner.ts', ...common, `--outfile=${out}/dist/wharf-trap-runner.js`], { cwd: root, stdio: 'inherit' });
 execFileSync('npx', ['esbuild', 'packages/watch-types/src/plugin-worker.ts', ...common, `--outfile=${out}/dist/plugin-worker.js`], { cwd: root, stdio: 'inherit' });
-execFileSync('npx', ['esbuild', 'packages/watch-types/src/index.ts', ...common, `--outfile=${out}/dist/watch-types.js`], { cwd: root, stdio: 'inherit' });
+// Publish the generic kernel and optional adapter entry points independently.
+const watchTypePackage = JSON.parse(fs.readFileSync(path.join(root, 'packages/watch-types/package.json'), 'utf8'));
+const watchTypeExports = {};
+for (const [subpath, entry] of Object.entries(watchTypePackage.exports)) {
+  const suffix = subpath === '.' ? '' : `/${subpath.slice(2)}`;
+  const source = `packages/watch-types/src/${entry.import.slice('./dist/'.length).replace(/\.js$/, '.ts')}`;
+  const bundle = `dist/watch-types${suffix}.js`;
+  fs.mkdirSync(path.dirname(path.join(out, bundle)), { recursive: true });
+  const flags = entry.browser ? ['--bundle', '--platform=neutral', '--format=esm', '--target=es2020'] : common;
+  execFileSync('npx', ['esbuild', source, ...flags, `--outfile=${out}/${bundle}`], { cwd: root, stdio: 'inherit' });
+  watchTypeExports[`./watch-types${suffix}`] = {
+    types: entry.types.replace('./dist/', './dist/watch-types/'),
+    ...(entry.browser ? { browser: `./${bundle}` } : {}),
+    import: `./${bundle}`,
+  };
+}
 // Keep declaration-relative imports intact for external TypeScript adapter authors.
 fs.cpSync(path.join(root, 'packages/watch-types/dist'), path.join(out, 'dist/watch-types'), { recursive: true, filter: (file) => fs.statSync(file).isDirectory() || file.endsWith('.d.ts') });
 
@@ -38,7 +53,7 @@ fs.writeFileSync(
       author: 'aequitas labs LLC',
       type: 'module',
       bin: { lobstah: 'dist/main.js' },
-      exports: { './watch-types': { types: './dist/watch-types/index.d.ts', import: './dist/watch-types.js' }, './dist/*': './dist/*', './package.json': './package.json' },
+      exports: { ...watchTypeExports, './dist/*': './dist/*', './package.json': './package.json' },
       files: ['dist', 'docs', 'pet', 'README.md', 'LICENSE'],
       engines: { node: '>=20' },
       keywords: ['agents', 'claude-code', 'codex', 'supervisor', 'coding-agents', 'worktree', 'orchestration'],

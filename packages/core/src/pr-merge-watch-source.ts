@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { PrMergeWatchType } from '@lobstah/watch-types';
-import type { PrMergeWatchServices } from '@lobstah/watch-types';
+import { PrMergeWatchType } from '@lobstah/watch-types/pr-merge';
+import type { PrMergeWatchServices } from '@lobstah/watch-types/pr-merge';
 import { readPr } from './prs.js';
 import { prMergeStatus } from './pr-merge.js';
 
-export type PrMergeWatchSourceOptions = Pick<PrMergeWatchServices, 'automation' | 'effectHandler'>;
+export type PrMergeWatchSourceOptions = Pick<PrMergeWatchServices, 'automation' | 'effectHandler' | 'registration' | 'commands'>;
 
 /** The request remains in the PR record; the watch owns scheduling and effect receipts. */
 export function createPrMergeWatchType(options: PrMergeWatchSourceOptions = {}): PrMergeWatchType {

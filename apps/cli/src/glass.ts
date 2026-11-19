@@ -1,3 +1,5 @@
+import { invokeCliWatch, queryCliWatch } from './watch-registration.js';
+import { legacyPrAttention, legacyPrItemKey, legacyPrKey } from '@lobstah/watch-types/legacy-presentation';
 import { trapAvailability } from '@lobstah/core';
 import { questionParkNote } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
@@ -7,7 +9,6 @@ import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
-import { readPrDetails } from './pr-details.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
@@ -68,8 +69,6 @@ import {
   loadConfig,
   lobstahVersion,
   pendingIds,
-  dispatchPrUrls,
-  prBadge,
   readEvidence,
   dispatchWorktree,
   readSessionClaim,
@@ -78,7 +77,6 @@ import {
   holdReason,
   readHold,
   slotUsage,
-  readPrs,
   listReports,
   readReportMarkdown,
   resolveReportFile,
@@ -105,7 +103,7 @@ import { helmPassViews } from './helm-pass.js';
 import { answerKey, viewKey } from './decision-answer.js';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
-import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, readMergeView, redraftReviewRound } from '@lobstah/pick';
+import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, redraftReviewRound } from '@lobstah/pick';
 import { muteReview, unmuteReview } from '@lobstah/core';
 import { glassReviews } from './reviews.js';
 import { reviewSetupView } from './reviews-setup.js';
@@ -113,10 +111,6 @@ import { buildTendReport, landedCatches, walkingAttention } from './tend.js';
 import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
 import type { LandedCatch } from './tend.js';
 import { GLASS_PAGE, GLASS_APP_ICONS } from './glass-page.generated.js';
-import { deriveGlassPrs, dispatchPrHead, dispatchPrList } from './glass-prs.js';
-import { githubViewer } from './pr-ownership.js';
-import { PrMergeRefused, cancelPrMerge, cancelStackMerge, prMergeMethod, requestPrMerge, requestStackMerge } from './pr-merge.js';
-import { refreshMissingDispatchPrs } from './pr-watch.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { startSnapshotThread } from './glass-snapshot-thread.js';
@@ -649,9 +643,7 @@ function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
 export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
   reconcilePermissionCards();
   const cfg = loadConfig();
-  refreshMissingDispatchPrs();
-  const prRecords = readPrs();
-  const recordsByUrl = new Map(prRecords.map((record) => [record.url, record]));
+  queryCliWatch('watch.refresh', {}, null);
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
@@ -663,43 +655,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     transcript: transcriptPath(h.harness, h.cwd, h.sessionId),
     desktopThread: (h.harness === 'codex' && !!codexDesktopThread(h.sessionId)) || undefined,
   }));
-  const mergeView = readMergeView();
-  // PR state per dispatch: the evidence badge (the shared derivation tend and
-  // catch use) plus the merge view's gate verdict where pick has one.
-  const dispatches: GlassDispatch[] = [...dispatchRows().map((x) => {
-    const observation = recordsByUrl.get(x.evidence?.prUrl ?? x.evidence?.pr?.url ?? '') ??
-      ((x.evidence?.prUrls?.length ?? 0) > 1 ? undefined : x.evidence?.pr);
-    const pr = observation && ['OPEN', 'MERGED', 'CLOSED'].includes(observation.state) ? observation : undefined;
-    const url = x.evidence?.prUrl ?? pr?.url;
-    const open = mergeView?.open.find((p) => p.uuid === x.id || (url !== undefined && p.url === url));
-    return {
-      ...x,
-      ...(x.evidence ? { evidence: { ...x.evidence, pr } } : {}),
-      prBadge: pr ? { ...prBadge(pr), observedAt: pr.observedAt } : undefined,
-      prGate: open?.gate,
-    };
-  }), ...hostedDispatches(cfg)];
-  // The glass shows a failing watch's whole error cell (reason, exit code,
-  // remedy, streak start) wherever it shows lastError — the same text as tend.
-  const watches = listWatches().map((w) => (w.lastError ? { ...w, lastError: watchErrorCell(w) } : w));
-  // PR records first (every observation, man-owned or not); evidence for PRs with none yet.
-  const { prs, stacks } = deriveGlassPrs(
-    dispatches.map((d) => ({ id: d.id, followUp: d.followUp, repoKey: d.repo, pr: d.evidence?.pr, prGate: d.prGate })),
-    watches,
-    prRecords,
-    { readySettleSecs: cfg.readySettleSecs, now: Date.now() },
-    () => githubViewer(),
-  );
-  // Your open PRs say how Merge when green would merge them, so its second tap can.
-  for (const p of prs) if (p.mine && p.state === 'OPEN') p.mergeMethod = prMergeMethod(cfg, p.forgeRepo);
-  // A dispatch with several PRs lists each, in stack order, with its state.
-  for (const d of dispatches as GlassDispatch[]) {
-    const urls = d.evidence?.prUrls;
-    if (urls && urls.length > 1) d.prList = dispatchPrList(urls.filter((url) => recordsByUrl.get(url)?.state !== 'CLOSED'), prs, d.evidence?.prPositions);
-    const ev = d.evidence;
-    const head = ev && dispatchPrHead(dispatchPrUrls(ev), (url) => recordsByUrl.get(url) ?? (ev.pr?.url === url ? ev.pr : undefined), prs, d, ev.prPositions);
-    if (head) d.prHead = head;
-  }
+  const watches = listWatches().map(watch => watch.lastError ? { ...watch, lastError: watchErrorCell(watch) } : watch);
+  const rows: GlassDispatch[] = dispatchRows(), shared = hostedDispatches(cfg);
+  const { dispatches, prs, stacks, mergeView } = queryCliWatch<Pick<GlassFullSnapshot, 'dispatches' | 'prs' | 'stacks' | 'mergeView'>>('glass.snapshot', { rows, shared, watches }, { dispatches: [...rows, ...shared], prs: [], stacks: [] });
   const allNotices = listNotices(Number.MAX_SAFE_INTEGER);
   const live = listTraps();
   // Historical traps: a stowed or ghosted registration is gone, but its mail
@@ -960,7 +918,7 @@ export function serveGlass(
     snapshot?: (options?: { local?: boolean }) => GlassFullSnapshot;
     presence?: GlassPresence;
     /** Read a fresh PR description with this server's forge sign-in. */
-    prDetails?: typeof readPrDetails;
+    prDetails?: (key: string) => Promise<import('@lobstah/core').GlassPrDetails | undefined>;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
     runWindows?: RunWindows;
@@ -1257,36 +1215,15 @@ export function serveGlass(
             );
             return;
           }
-          case 'pr-merge': {
-            const payload = body.payload as { key?: unknown; cancel?: unknown } | undefined;
-            const key = payload?.key;
-            if (typeof key !== 'string' || !/^pr:[^\s]{1,300}$/.test(key)) return reply(400, { ok: false, reason: 'A PR key is required.' });
-            if (payload?.cancel === true) return reply(200, { ok: true, key, cancelled: cancelPrMerge(key) });
-            try {
-              const request = requestPrMerge(key, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass');
-              return reply(200, { ok: true, key, method: request.method });
-            } catch (error) {
-              if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
-              return reply(500, { ok: false, reason: 'The merge request could not be stored.' });
-            }
-          }
+          case 'pr-merge':
           case 'stack-merge': {
-            const payload = body.payload as { stack?: unknown; cancel?: unknown } | undefined;
-            const stack = payload?.stack;
-            if (typeof stack !== 'string' || !/^pr:[^\s]{1,300}$/.test(stack)) return reply(400, { ok: false, reason: 'A stack is required.' });
-            if (payload?.cancel === true) {
-              const cancelled = cancelStackMerge(stack);
-              return cancelled === 'merging'
-                ? reply(409, { ok: false, reason: "GitHub is already merging it, so it can't be cancelled." })
-                : reply(200, { ok: true, stack, cancelled: cancelled === 'cancelled' });
-            }
-            try {
-              const request = requestStackMerge(stack, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass');
-              return reply(200, { ok: true, stack, method: request.method });
-            } catch (error) {
-              if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
-              return reply(500, { ok: false, reason: 'The stack merge request could not be stored.' });
-            }
+            void invokeCliWatch<{ status: number; body: unknown }>(`glass.${body.kind}`, {
+              payload: body.payload, by: req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass',
+            }, { status: 409, body: { ok: false, reason: 'This watch action is unavailable.' } }).then(
+              result => reply(result.status, result.body),
+              () => reply(500, { ok: false, reason: 'The watch request could not be stored.' }),
+            );
+            return;
           }
           case 'pr-ack':
           case 'attention-ack': {
@@ -1296,14 +1233,14 @@ export function serveGlass(
             const prOnly = body.kind === 'pr-ack';
             const items = (body.payload as { items?: unknown } | undefined)?.items;
             if (!Array.isArray(items) || items.length > (prOnly ? 1000 : 1) || items.some((i) =>
-              !i || typeof i.key !== 'string' || (prOnly && !/^(pr:|stack:)/.test(i.key)) || i.key.length > 300 ||
+              !i || typeof i.key !== 'string' || (prOnly && !legacyPrItemKey(i.key)) || i.key.length > 300 ||
               typeof i.stateHash !== 'string' || i.stateHash.length > 200))
               return reply(400, { ok: false, reason: prOnly ? 'PR or stack attention states are required.' : 'One attention item and its state are required.' });
             void (async () => {
               const standing = walkingAttention(buildTendReport());
               const acked: WalkingAck[] = [];
               for (const item of items as Array<{ key: string; stateHash: string }>) {
-                const a = standing.find((a) => a.key === item.key && a.stateHash === item.stateHash && (!prOnly || a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
+                const a = standing.find((a) => a.key === item.key && a.stateHash === item.stateHash && (!prOnly || legacyPrAttention(a.kind)));
                 if (a) acked.push(await ackWalkingItem(a, 'glass'));
               }
               return acked;
@@ -1592,10 +1529,10 @@ export function serveGlass(
       try { key = decodeURIComponent(req.url.slice('/data/pr/'.length)); }
       catch { res.writeHead(400); res.end(); return; }
       const fleet = snapshot({ local: false });
-      if (!fleet.prs.some(pr => pr.key === key) && !fleet.reviews?.some(review => review.key.replace(/^review:/, 'pr:') === key)) {
+      if (!fleet.prs.some(pr => pr.key === key) && !fleet.reviews?.some(review => legacyPrKey(review.key) === key)) {
         res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ error: 'PR not found' })); return;
       }
-      void (options.prDetails ?? readPrDetails)(key).then(details => {
+      void (options.prDetails ? options.prDetails(key) : invokeCliWatch<import('@lobstah/core').GlassPrDetails | undefined>('glass.details', { key }, undefined)).then(details => {
         res.writeHead(details ? 200 : 404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify(details ?? { error: 'PR description could not be read' }));
       }).catch(error => fail(req, res, error));

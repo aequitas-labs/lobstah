@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import { StackWatchType, presentLegacyAttention, watchJson } from '@lobstah/watch-types';
-import type { StackWatchServices, StackWatchView, WatchPresentation, WatchValue } from '@lobstah/watch-types';
+import { StackWatchType } from '@lobstah/watch-types/stack';
+import { presentLegacyAttention } from '@lobstah/watch-types/legacy-presentation';
+import { watchJson } from '@lobstah/watch-types';
+import type { StackWatchServices, StackWatchView } from '@lobstah/watch-types/stack';
+import type { WatchPresentation, WatchValue } from '@lobstah/watch-types';
 import { loadConfig } from './config.js';
 import type { Config } from './config.js';
 import { cutPrTitle, parsePrRef, prBadge, prNote, prStandingKinds } from './pr.js';
@@ -13,6 +16,8 @@ import { WatchRuntime } from './watch-runtime.js';
 
 /** Host-specific ownership and member detail are source ports during legacy UI migration. */
 export interface StackWatchSourceOptions {
+  commands?: StackWatchServices['commands'];
+  registration?: StackWatchServices['registration'];
   config?: () => Config;
   records?: () => readonly PrEvidence[];
   member?: (pr: PrEvidence) => { kinds: string[]; note: string };
@@ -172,6 +177,8 @@ const revision = (view: StackWatchView): string => createHash('sha256').update(J
 /** PR snapshot changes feed this adapter; no stack observer queries GitHub. */
 export function createStackWatchType(options: StackWatchSourceOptions = {}): StackWatchType {
   return new StackWatchType({
+    commands: options.commands,
+    registration: options.registration,
     noticePolicy: { kinds: ['stack-ready'], current(notice) {
       const epoch = notice.refId ? readStackEpochs()[notice.refId] : undefined;
       return !!epoch?.ready && notice.stateHash === stackStateHash({ id: notice.refId! }, epoch.epoch) && stackReadyEnabled(options.config?.() ?? loadConfig());

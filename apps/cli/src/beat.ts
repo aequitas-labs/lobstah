@@ -3,8 +3,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { beatTrap, loadConfig, lobstahHome, readTrap, trapBySession, trapIdAbove } from '@lobstah/core';
 import type { BeatResult } from '@lobstah/core';
-import { probeTrapPr } from './beat-pr.js';
-import type { ProbeRun } from './beat-pr.js';
+import { queryCliWatch } from './watch-registration.js';
+import { createCliWatchRegistry } from './watch-automation.js';
+import type { WatchProbeRun as ProbeRun } from './watch-command.js';
 import { readHookStdin } from './soak-site.js';
 
 /** The post-tool hook's stdin: Claude Code and Codex share these fields. */
@@ -34,7 +35,7 @@ function probePr(input: PostToolHookInput | undefined, opts: { now?: number; run
     const trapId = trapIdAbove(cwd) ?? (input?.session_id ? trapBySession(input.session_id)?.trapId : undefined);
     const reg = trapId !== undefined ? readTrap(trapId) : undefined;
     if (!reg || (input?.session_id && input.session_id !== reg.sessionId)) return;
-    probeTrapPr(reg, opts);
+    queryCliWatch('trap.beat', { registration: reg, now: opts.now }, null, createCliWatchRegistry(logError, { commandRun: opts.run }));
   } catch (err) {
     logError(err);
   }

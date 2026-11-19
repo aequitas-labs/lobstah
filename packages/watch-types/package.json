@@ -15,7 +15,54 @@
     },
     "./presentation": {
       "types": "./dist/presentation.d.ts",
+      "browser": "./dist/presentation.js",
       "import": "./dist/presentation.js"
+    },
+    "./pr": {
+      "types": "./dist/pr/index.d.ts",
+      "import": "./dist/pr/index.js"
+    },
+    "./pr-merge": {
+      "types": "./dist/pr/merge.d.ts",
+      "import": "./dist/pr/merge.js"
+    },
+    "./merge-policy": {
+      "types": "./dist/pr/merge-policy.d.ts",
+      "import": "./dist/pr/merge-policy.js"
+    },
+    "./review": {
+      "types": "./dist/review/index.d.ts",
+      "import": "./dist/review/index.js"
+    },
+    "./stack": {
+      "types": "./dist/stack/index.d.ts",
+      "import": "./dist/stack/index.js"
+    },
+    "./ume": {
+      "types": "./dist/ume/index.d.ts",
+      "import": "./dist/ume/index.js"
+    },
+    "./local": {
+      "types": "./dist/local/index.d.ts",
+      "import": "./dist/local/index.js"
+    },
+    "./local-notices": {
+      "types": "./dist/local/notice-policy.d.ts",
+      "import": "./dist/local/notice-policy.js"
+    },
+    "./deployment": {
+      "types": "./dist/deployment/index.d.ts",
+      "import": "./dist/deployment/index.js"
+    },
+    "./builtin-metadata": {
+      "types": "./dist/adapters/metadata.d.ts",
+      "browser": "./dist/adapters/metadata.js",
+      "import": "./dist/adapters/metadata.js"
+    },
+    "./legacy-presentation": {
+      "types": "./dist/adapters/presentation.d.ts",
+      "browser": "./dist/adapters/presentation.js",
+      "import": "./dist/adapters/presentation.js"
     }
   },
   "dependencies": {

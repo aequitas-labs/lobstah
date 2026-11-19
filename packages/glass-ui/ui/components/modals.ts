@@ -1,3 +1,4 @@
+import { legacyPrKey } from '@lobstah/watch-types/legacy-presentation';
 import type { GlassDispatchSummary, GlassHelm, GlassSnapshot } from '@lobstah/core';
 import { modalItem } from '../../src/glass-diff.js';
 import type { DispatchDetail, GlassPrefs, ModalRef, GlassTrapView as GlassTrap } from '../../src/glass-diff.js';
@@ -62,7 +63,7 @@ export function Modal({
   // Settings open in a Dialog of their own (app.ts).
   if (modal.type === 'settings') return null;
   if (modal.type === 'pr') return html`<${PrView} snapshot=${snapshot} prKey=${modal.key} />`;
-  if (modal.type === 'review') return html`<${PrView} snapshot=${snapshot} prKey=${modal.key.replace('review:', 'pr:')} />`;
+  if (modal.type === 'review') return html`<${PrView} snapshot=${snapshot} prKey=${legacyPrKey(modal.key)} />`;
   if (modal.type === 'helm') return null;
   if (modal.type === 'dispatch') {
     return html`<${DispatchView} snapshot=${snapshot} dispatch=${item as GlassDispatchSummary} detail=${detail} />`;

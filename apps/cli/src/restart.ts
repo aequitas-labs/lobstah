@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import { executorPath, loadConfig, parkedDispatches, slotUsage } from '@lobstah/core';
 import type { ServiceKind } from './service.js';
 import { parkedText } from './parked-view.js';
-import { repairChores } from './pr-repair.js';
+import { watchDiagnostics } from './watch-registration.js';
 
 /** How long a restart waits for the new process to show itself. */
 export const RESTART_WAIT_MS = 10_000;
@@ -97,7 +97,7 @@ export function daemonStatus(installed: boolean, now = Date.now()): Record<strin
   const cfg = loadConfig();
   const work = slotUsage('work');
   const chore = slotUsage('chore');
-  const repairs = repairChores();
+  const repairs = watchDiagnostics().chores;
   return {
     daemon: running ? 'running' : 'stopped',
     installed,

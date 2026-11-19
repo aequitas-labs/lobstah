@@ -1,8 +1,10 @@
+import type { WatchCommandPolicy } from '../model.js';
 import type { WatchNoticePolicy } from '../model.js';
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
 import { watchJson } from '../registry.js';
 import type {
+  WatchRegistrationPolicy,
   WatchAutomation,
   WatchContext,
   WatchDerivation,
@@ -41,6 +43,8 @@ export interface StackWatchState {
 export type StackWatchOptions = Record<string, never>;
 export type StackWatchSnapshot = WatchSnapshot<StackWatchReference, StackWatchState, string, StackWatchOptions>;
 export interface StackWatchServices {
+  commands?: WatchCommandPolicy;
+  registration?: WatchRegistrationPolicy;
   noticePolicy?: WatchNoticePolicy;
   observe(context: WatchContext<StackWatchReference, StackWatchState, string, StackWatchOptions>): WatchObservationBatch<string>;
   present(snapshot: StackWatchSnapshot): WatchPresentation;
@@ -52,6 +56,8 @@ export interface StackWatchServices {
 
 /** Normalize the local PR graph into one durable stack view. */
 export class StackWatchType extends BaseWatchType<StackWatchReference, StackWatchState, string, StackWatchOptions> {
+  readonly commands: WatchCommandPolicy | undefined;
+  readonly registration: WatchRegistrationPolicy | undefined;
   readonly descriptor = {
     id: 'stack', keyPrefix: 'stack:',
     apiVersion: 1 as const,
@@ -122,6 +128,8 @@ export class StackWatchType extends BaseWatchType<StackWatchReference, StackWatc
   readonly effectHandler: StackWatchServices['effectHandler'];
   constructor(private readonly services: StackWatchServices) {
     super();
+    this.commands = services.commands;
+    this.registration = services.registration;
     this.derived = services.derived;
     this.noticePolicy = services.noticePolicy;
     this.automation = services.automation;

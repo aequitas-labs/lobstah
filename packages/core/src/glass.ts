@@ -1,11 +1,11 @@
 import type { WatchAttentionDisplay } from '@lobstah/watch-types';
-import type { PrMergeRequest } from './pr-merge.js';
+import type { PrMergeRequest } from './watch-adapters/exports.js';
 import type { ReviewPr, ReviewRoundState } from './reviews.js';
 import type { RecentRun } from './run-history.js';
 import type { AttentionKind } from './config.js';
 import type { HelmRegistration } from './helm.js';
 import type { Notice } from './notices.js';
-import type { PrBadge, PrEvidence } from './pr.js';
+import type { PrBadge, PrEvidence } from './watch-adapters/exports.js';
 import type { TrapRegistration } from './soak.js';
 import type { Attachment, Evidence, Lane, StatusEntry, Verb } from './types.js';
 import type { WorkerMetadata } from './worker-metadata.js';

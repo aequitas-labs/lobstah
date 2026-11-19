@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { ReviewWatchType } from '@lobstah/watch-types';
-import type { ReviewWatchServices } from '@lobstah/watch-types';
+import { ReviewWatchType } from '@lobstah/watch-types/review';
+import type { ReviewWatchServices } from '@lobstah/watch-types/review';
 import { listReviews } from './reviews.js';
 import { classifyGhError } from './gh-errors.js';
 

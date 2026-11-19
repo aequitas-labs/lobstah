@@ -29,8 +29,6 @@ export interface WatchAttentionDisplay {
   suppresses?: Array<{ key: string; kind: string }>;
 }
 
-export { legacyAttentionLabels, legacyAttentionTones, presentLegacyAttention } from './adapters/presentation.js';
-export type { LegacyAttentionRecord } from './adapters/presentation.js';
 
 /** New types render from their supplied contract without joining a label or route map. */
 export function presentWatchCondition(key: string, kind: string, summary: string, presentation: WatchPresentation): WatchAttentionDisplay {

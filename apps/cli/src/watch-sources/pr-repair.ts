@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig, readPr, readWatch, storedDescriptor } from '@lobstah/core';
-import type { PrWatchServices } from '@lobstah/watch-types';
+import type { PrWatchServices } from '@lobstah/watch-types/pr';
 import { reconcilePrRepairs } from '../pr-repair.js';
 import type { RepairOptions } from '../pr-repair.js';
 

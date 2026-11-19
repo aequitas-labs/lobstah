@@ -1,4 +1,4 @@
-import { QUIET_LOCAL_NOTICE_KINDS } from '@lobstah/watch-types';
+import { QUIET_LOCAL_NOTICE_KINDS } from './watch-adapters/metadata.js';
 import { builtinWatchRegistry } from './watch-source-registry.js';
 import { watchNoticeCurrent, watchNoticeQuiet, watchNoticeDispatches } from './watch-notices.js';
 import fs from 'node:fs';

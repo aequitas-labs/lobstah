@@ -1,8 +1,10 @@
+import type { WatchCommandPolicy } from '../model.js';
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
 import { parsePrWatchReference, prWatchReferenceSchema } from './index.js';
 import type { PrWatchReference } from './index.js';
 import type {
+  WatchRegistrationPolicy,
   WatchAutomation,
   WatchContext,
   WatchEffectHandler,
@@ -16,6 +18,8 @@ export type PrMergeWatchState = Record<string, never>;
 export type PrMergeWatchOptions = Record<string, never>;
 export type PrMergeWatchSnapshot = WatchSnapshot<PrWatchReference, PrMergeWatchState, string, PrMergeWatchOptions>;
 export interface PrMergeWatchServices {
+  commands?: WatchCommandPolicy;
+  registration?: WatchRegistrationPolicy;
   observe(context: WatchContext<PrWatchReference, PrMergeWatchState, string, PrMergeWatchOptions>): WatchObservationBatch<string>;
   present(snapshot: PrMergeWatchSnapshot): WatchPresentation;
   failure(error: unknown): WatchFailure;
@@ -25,6 +29,8 @@ export interface PrMergeWatchServices {
 
 /** A standing merge authorization outlives the PR’s observation watch and retargets its successors. */
 export class PrMergeWatchType extends BaseWatchType<PrWatchReference, PrMergeWatchState, string, PrMergeWatchOptions> {
+  readonly commands: WatchCommandPolicy | undefined;
+  readonly registration: WatchRegistrationPolicy | undefined;
   readonly descriptor = { id: 'pr-merge', keyPrefix: 'pr-merge:', apiVersion: 1 as const, stateVersion: 1, version: '1.0.0' };
   readonly bindings = [{ event: 'local' as const, field: 'pr.mergeRequest' }];
   private readonly command = new CommandWatchType();
@@ -36,6 +42,8 @@ export class PrMergeWatchType extends BaseWatchType<PrWatchReference, PrMergeWat
   readonly effectHandler: PrMergeWatchServices['effectHandler'];
   constructor(private readonly services: PrMergeWatchServices) {
     super();
+    this.commands = services.commands;
+    this.registration = services.registration;
     this.automation = services.automation;
     this.effectHandler = services.effectHandler;
   }

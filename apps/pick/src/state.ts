@@ -153,7 +153,7 @@ export class PickupState {
   }
   /** Pending native requests must remain visible even when their PRs leave the open list. */
   stackMergeEntries(source: string): Array<[string, PendingStackMerge]> {
-    return Object.entries(this.data.stackMerges ?? {}).filter(([key]) => key.startsWith(source + ':stack:'));
+    return Object.entries(this.data.stackMerges ?? {}).filter(([key]) => key.startsWith([source, 'stack', ''].join(':')));
   }
 
   /** Read a persisted bottom-up transition. */

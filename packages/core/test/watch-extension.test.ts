@@ -4,14 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { stringify } from 'smol-toml';
-import {
-  DeploymentWatchType,
-  FixtureDeploymentProvider,
-  WatchRegistry,
-  deploymentFixtureFiles,
-  disposeWatchPlugins,
-} from '@lobstah/watch-types';
-import type { DeploymentReference, DeploymentState, DeploymentTransition, DeploymentOptions, WatchSnapshot } from '@lobstah/watch-types';
+import { DeploymentWatchType, FixtureDeploymentProvider, deploymentFixtureFiles } from '@lobstah/watch-types/deployment';
+import { WatchRegistry, disposeWatchPlugins } from '@lobstah/watch-types';
+import type { DeploymentReference, DeploymentState, DeploymentTransition, DeploymentOptions } from '@lobstah/watch-types/deployment';
+import type { WatchSnapshot } from '@lobstah/watch-types';
 import {
   WatchRuntime,
   WatchJournal,

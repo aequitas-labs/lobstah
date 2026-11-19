@@ -1,3 +1,4 @@
+import { legacyPrAttention, legacyPrKey, legacyPrKeyMatches, legacyStackKey } from '@lobstah/watch-types/legacy-presentation';
 import { reviewUnreadReason } from './review-attention.js';
 export { goalLine } from '@lobstah/core/dist/goal-line.js';
 import type {
@@ -568,7 +569,7 @@ export function modalItem(d: GlassSnapshot, modal: ModalRef | null, detail?: Dis
     // The detail has the brief, log, and whole note; the summary keeps its PR badges.
     return summary && full ? { ...summary, ...full } : (summary ?? full ?? null);
   }
-  if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || (d.reviews || []).find(v => v.key.replace('review:', 'pr:') === modal.key) || null;
+  if (modal.type === 'pr') return (d.prs || []).find((v) => v.key === modal.key) || (d.reviews || []).find(v => legacyPrKey(v.key) === modal.key) || null;
   if (modal.type === 'review') return (d.reviews || []).find((v) => v.key === modal.key) || null;
   if (modal.type === 'settings') return { attentionKinds: d.attentionKinds || [], attentionError: d.attentionError, helms: d.helms };
   const t = d.traps.find((v) => v.trapId === modal.key);
@@ -619,8 +620,8 @@ export function shownPrAttention(
 ): DeckAttention[] {
   const keys = new Set(prs.map((p) => p.key));
   const stackIds = new Set(prs.map((p) => p.stackId));
-  for (const s of stacks) if (stackIds.has(s.id)) keys.add('stack:' + s.id);
-  return attention.filter((a) => keys.has(a.key) && (a.kind.startsWith('pr:') || a.kind === 'stack-ready'));
+  for (const s of stacks) if (stackIds.has(s.id)) keys.add(legacyStackKey(s.id));
+  return attention.filter((a) => keys.has(a.key) && (legacyPrAttention(a.kind)));
 }
 
 export interface SectionInputs {
@@ -726,7 +727,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
         prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)),
         stacks,
       ),
-      watches: (d.watches || []).filter((w) => !String(w.key).startsWith('pr:')),
+      watches: (d.watches || []).filter((w) => !legacyPrKeyMatches(String(w.key))),
     },
     reports: {
       view: st.view,

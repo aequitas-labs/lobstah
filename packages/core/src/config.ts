@@ -1,4 +1,4 @@
-import { builtinAttentionKinds, builtinDefaultAttentionKinds } from '@lobstah/watch-types';
+import { builtinAttentionKinds, builtinDefaultAttentionKinds } from './watch-adapters/metadata.js';
 import { storedWatchTypeDescriptors } from './watch-type-descriptors.js';
 import * as fs from 'node:fs';
 import { parseConfiguredTraps, type ConfiguredTrapProfile } from './configured-traps.js';

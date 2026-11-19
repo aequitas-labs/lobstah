@@ -6,7 +6,7 @@ import type { Lane, StatusEntry, Verb, WaitingOn } from './types.js';
 import { statusPath } from './paths.js';
 import { ageLabel } from './activity.js';
 import { recordCatch } from './stats.js';
-import { parsePrRef } from './pr.js';
+import { quietSourceWait } from './watch-adapters/waits.js';
 import { observeLocalCatch } from './catch-context.js';
 import { readSessionClaim, readTrap } from './soak.js';
 import { withTrapCacheLock } from './cache-paths.js';
@@ -85,7 +85,7 @@ export function waitingFields(verb: Verb, w: WaitingFields, now = Date.now()): P
  */
 export function quietWait(entry: Pick<StatusEntry, 'waitingOn' | 'link'>): boolean {
   if (entry.waitingOn === 'heavy') return true;
-  return entry.waitingOn === 'review' && entry.link !== undefined && !parsePrRef(entry.link);
+  return quietSourceWait(entry);
 }
 
 /** The write path IS the validation: anything outside the verb set is rejected. */

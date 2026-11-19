@@ -1,7 +1,8 @@
 import { WatchCommandError } from '@lobstah/watch-types';
 import { spawnSync } from 'node:child_process';
-import { UmeWatchType, UME_ARTIFACT_ID } from '@lobstah/watch-types';
-import type { UmeWatchContext, UmeWatchOptions, UmeWatchState, WatchCommandPolicy, WatchRegistrationPolicy, WatchObservationBatch, WatchOwner } from '@lobstah/watch-types';
+import { UmeWatchType, UME_ARTIFACT_ID } from '@lobstah/watch-types/ume';
+import type { UmeWatchContext, UmeWatchOptions, UmeWatchState } from '@lobstah/watch-types/ume';
+import type { WatchCommandPolicy, WatchRegistrationPolicy, WatchObservationBatch, WatchOwner } from '@lobstah/watch-types';
 import { laneOf } from './worktrees.js';
 import { readStatusLog } from './status.js';
 import { TERMINAL_VERBS } from './types.js';

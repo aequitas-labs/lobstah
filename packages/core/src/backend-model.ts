@@ -1,3 +1,4 @@
+import { watchMirrorRead } from './watch-adapters/mirror-read.js';
 /** Portable coordination records. No filesystem, service or runtime imports. */
 export type BackendVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed';
 export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external' | 'heavy';
@@ -278,11 +279,8 @@ export const MIRROR_WRITE_KINDS = [
 export type MirrorWriteKind = (typeof MIRROR_WRITE_KINDS)[number];
 /** Whether a relayed read names a path the hosted glass may read. */
 export function mirrorReadAllowed(path: string): boolean {
-  // A PR identity contains one encoded slash; validate the decoded identity before the generic path guard.
-  if (path.startsWith('/data/pr/') && path.length <= 700 && !path.includes('..')) {
-    try { return /^pr:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*$/.test(decodeURIComponent(path.slice('/data/pr/'.length))); }
-    catch { return false; }
-  }
+  const source = watchMirrorRead(path);
+  if (source !== undefined) return source;
   // No climbing out of a segment, written plainly or percent-encoded.
   return path.length <= 700 && !path.includes('..') && !/%2e%2e|%2f|%5c/i.test(path) && MIRROR_READ_PATHS.some((pattern) => pattern.test(path));
 }

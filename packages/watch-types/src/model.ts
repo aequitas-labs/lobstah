@@ -77,7 +77,7 @@ export interface WatchCommandRequest {
 }
 export interface WatchCommandPolicy {
   bindings: ReadonlyArray<{ name: string; pattern?: string }>;
-  run(request: WatchCommandRequest): string;
+  run(request: WatchCommandRequest): WatchResult<string>;
 }
 
 /** Todo conditions are parsed and read by the source that owns their records. */

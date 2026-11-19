@@ -1,3 +1,4 @@
+import { legacyPrKey } from '@lobstah/watch-types/legacy-presentation';
 import type { GlassSettings } from '@lobstah/core';
 import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot, StatsPage } from '@lobstah/core';
 import {
@@ -582,7 +583,7 @@ export function routeDetailView(modal: ModalRef | null): void {
 
 export function showModal(type: ModalType, key: string): void {
   if (type === 'review') {
-    showModal('pr', key.replace('review:', 'pr:'));
+    showModal('pr', legacyPrKey(key));
     return;
   }
   const state = getState();

@@ -13,9 +13,9 @@ import { cachedPrView } from './pr-poll.js';
  * client, as in pick, and the check never writes to GitHub.
  */
 
-export type { PrWatchReference as PrRef } from '@lobstah/watch-types';
-import { parsePrWatchReference } from '@lobstah/watch-types';
-import type { PrWatchReference as PrRef } from '@lobstah/watch-types';
+export type { PrWatchReference as PrRef } from '@lobstah/watch-types/pr';
+import { parsePrWatchReference } from '@lobstah/watch-types/pr';
+import type { PrWatchReference as PrRef } from '@lobstah/watch-types/pr';
 
 /**
  * Every PR a dispatch owns, one per PR: its `prUrl`, then its `prUrls`,

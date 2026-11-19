@@ -1,3 +1,4 @@
+import { legacyPrKey } from '@lobstah/watch-types/legacy-presentation';
 import { linkParts } from '../../src/glass-links.js';
 import { showModal } from '../actions.js';
 import { getState } from '../store.js';
@@ -19,7 +20,7 @@ export const UrlLink = (url: string, label: string = url): Children => {
   const snapshot = getState().snapshot;
   const pr = snapshot?.prs?.find((pr) => pr.url === url);
   const review = snapshot?.reviews?.find((review) => review.url === url);
-  const key = pr?.key ?? review?.key.replace(/^review:/, 'pr:');
+  const key = pr?.key ?? (review ? legacyPrKey(review.key) : undefined);
   return key
     ? html`<a class="autolink" href=${prHash(key)} onClick=${(event: MouseEvent) => {
         stop(event);

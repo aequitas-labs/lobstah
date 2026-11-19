@@ -11,7 +11,8 @@ it('loads the SDK without compiling unused deployment schemas, then validates wh
     let compilations = 0;
     const original = Ajv.prototype.compile;
     Ajv.prototype.compile = function (...args) { compilations++; return original.apply(this, args); };
-    const { DeploymentWatchType } = await import(${JSON.stringify(new URL('../dist/index.js', import.meta.url).href)});
+    await import(${JSON.stringify(new URL('../dist/index.js', import.meta.url).href)});
+    const { DeploymentWatchType } = await import(${JSON.stringify(new URL('../dist/deployment/index.js', import.meta.url).href)});
     const beforeUse = compilations;
     const adapter = new DeploymentWatchType();
     const valid = adapter.optionsSchema.parse({ fixturePath: '/fixture/history.json' });

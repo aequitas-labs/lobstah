@@ -361,7 +361,7 @@ macOS it prints the command to run.`,
 as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
 choose the follow-up's worker, harness, or model, use dispatch --follow-up with
 --for, --harness, or --model. --attach copies files. A claimed helm requires
---session <helm-id>. --compact queues /compact in Claude or the Codex TUI; shared Codex threads use thread/compact/start. Codex traps without an input route swap to a fresh session with git progress. Requires a live local trap. Other sends keep the session. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR.`,
+--session <helm-id>. --compact queues /compact in Claude or the Codex TUI; shared Codex threads use thread/compact/start. Codex traps without an input route swap to a fresh session with git progress. Requires a live local trap. Other sends keep the session. Trap-name messages arrive at its next park. --pr makes the follow-up pushes to that PR.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -376,7 +376,7 @@ Use watch check-pr <key> to force a refresh of one PR watch.`,
   attention: `Standing attention items with their ack state; \`ack <item-key>\` marks the
 current state seen (--by names who), \`unack\` clears it. Display-only: an ack
 hides the item from the desktop pet and glass lobs until its state changes — never from man tend --json, man wait, the park, or reminders.
-Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
+Item keys: <lane>:<uuid> (question, landed), <type>:<id> (source attention),
 watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
 the same items and fields as man tend --json (the desktop pet reads it), less questions held on the helm's turn (the held column).`,
   cull: `Stop idle worktree servers and containers, then sweep aged catch and state.
@@ -402,7 +402,7 @@ which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
   todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction. add "<text>" records one; done and drop close it; ls (or bare) lists open ones (--all adds closed). recheck requests a todo and goals pass now. Open todos show in man tend, man report, the glass and every session start; a done one stays checked until 04:00. A trap gets none.
-add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed, pr:<o>/<r>#<n> merged|closed|green (registers a watch if none; merged also fires on closure without merging), trap:<name> free.
+add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed, <type>:<id> <condition> (registers a watch if none; merged also fires on closure without merging), trap:<name> free.
 24-hour, in [helm].timezone: "fri 09:00", "tomorrow 09:00", "09:00", "thu", "2026-11-06 09:00", "2026-11-06T14:00Z". A day runs 04:00 to 04:00.
 Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
@@ -412,7 +412,7 @@ acked. \`lobstah attention ack <key>\` acks one.`,
 A draft is staged on the PR as your pending review: edit and send it in your review tool.
 post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
 pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
-  watch: `Stand watch; bare \`watch\` lists source rows and held errors. \`watch add pr:<o>/<r>#<n>\` or \`watch add ume:<artifact>\` installs a builtin adapter.
+  watch: `Stand watch; bare \`watch\` lists source rows and held errors. \`watch add <type>:<id>\` or \`watch add <type>:<id>\` installs a builtin adapter.
 \`watch add <reference> --type <id> --options <json>\` registers any installed adapter. --for records its dispatch owner; --owner records a stable trap. --check keeps a custom command. \`watch inbox --owner wt:<id>\` consumes direct trap feedback (--peek leaves it buffered).
 \`watch hold <key> [--for <id>]\` holds repairs; \`watch release <key>|--all\` frees holds. Reads never register watches.`,
   soak: `Volunteer as worker. End your turn: Stop waits without waking on quiet deadlines. --wait does the same for hookless sessions; --timeout 0 probes once. Idle traps auto-stow after [soak].idleStowMins (60 by default), keeping the worktree. --trap <profile> uses a configured plain folder. Primary checkout or --repo creates worktrees/soak-<trap> from trunk: cd there.

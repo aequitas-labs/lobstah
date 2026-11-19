@@ -81,3 +81,10 @@ export function presentationSources(
   });
   return { attention, registry };
 }
+
+export { evidencePrs, observedPrs, onTheHook, prKinds, humanPrAttention } from './pr.js';
+export type { ChainMember } from './pr.js';
+export { deriveGlassPrs } from '../glass-prs.js';
+export type { GlassStack } from '../glass-prs.js';
+
+export type SourceTendCache = ReturnType<typeof import('../watch-adapters/pr-tend.js').cachedPrPresentation>;

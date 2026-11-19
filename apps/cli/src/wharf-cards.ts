@@ -1,4 +1,4 @@
-import { presentLegacyAttention } from '@lobstah/watch-types/presentation';
+import { presentLegacyAttention } from '@lobstah/watch-types/legacy-presentation';
 import { createHash, randomUUID } from 'node:crypto';
 import { backendScopes, listNotices, loadConfig, repoKey, standingDecisions } from '@lobstah/core';
 import type { BackendScope, Config, DecisionMeta, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardLink, Notice, TendAttention } from '@lobstah/core';

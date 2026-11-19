@@ -9,7 +9,9 @@ export function registerWatchEvent(
   typeId?: string,
 ): WatchSnapshot | undefined {
   const candidates = (typeId ? [registry.get(typeId)] : registry.list()).filter((source) =>
-    (typeId !== undefined && request.event === 'explicit') || source.bindings.some(
+    (typeId !== undefined && request.event === 'explicit') ||
+      (request.event === 'explicit' && typeof request.fields.key === 'string' && !!source.descriptor.keyPrefix && request.fields.key.startsWith(source.descriptor.keyPrefix)) ||
+      source.bindings.some(
       (binding) =>
         binding.event === request.event &&
         typeof request.fields[binding.field] === 'string' &&

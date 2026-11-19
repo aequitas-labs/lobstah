@@ -1,4 +1,4 @@
-import { presentLegacyAttention } from '@lobstah/watch-types/presentation';
+import { presentLegacyAttention } from '@lobstah/watch-types/legacy-presentation';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { atomicRenameSync, lobstahHome, readMirrorStatus, uniqueTempPath } from '@lobstah/core';

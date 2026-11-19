@@ -71,11 +71,8 @@ hash includes its sequence so a changed failure becomes a new condition.
 For an installed npm SDK, an executable entry point can be just:
 
 ```ts
-import {
-  DeploymentWatchType,
-  deploymentActionSchemas,
-  serveWatchPlugin,
-} from 'lobstah/watch-types';
+import { serveWatchPlugin } from 'lobstah/watch-types';
+import { DeploymentWatchType, deploymentActionSchemas } from 'lobstah/watch-types/deployment';
 
 /** Run the shared deployment contract over the process protocol. */
 await serveWatchPlugin(new DeploymentWatchType(), {
@@ -91,7 +88,8 @@ the daemon. This fixture adapter needs no environment grants.
 A host can install the same adapter directly at its composition boundary:
 
 ```ts
-import { DeploymentWatchType, WatchRegistry } from '@lobstah/watch-types';
+import { WatchRegistry } from '@lobstah/watch-types';
+import { DeploymentWatchType } from '@lobstah/watch-types/deployment';
 import { WatchRuntime } from '@lobstah/core';
 
 /** This host supplies ownership and installation; the source supplies behavior. */

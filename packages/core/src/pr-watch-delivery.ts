@@ -9,8 +9,10 @@ import { journalWatchViews } from './watch-presentation.js';
 import { WatchJournal } from './watch-journal.js';
 import { readWatch, recordCheckRounds, checkRoundKey } from './watch.js';
 import type { Watch, WatchEvent } from './watch.js';
-import type { PrWatchReference, WatchDispatchPolicy } from '@lobstah/watch-types';
-import type { PrWatchState, CommandWatchOptions } from '@lobstah/watch-types';
+import type { PrWatchReference } from '@lobstah/watch-types/pr';
+import type { WatchDispatchPolicy } from '@lobstah/watch-types';
+import type { PrWatchState } from '@lobstah/watch-types/pr';
+import type { CommandWatchOptions } from '@lobstah/watch-types';
 
 /** Existing check-round and human-gate policy belongs to the PR source. */
 export function ciFixWork(w: Watch, events: WatchEvent[]): { work: WatchEvent[]; rounds: string[]; skipped: string[] } {

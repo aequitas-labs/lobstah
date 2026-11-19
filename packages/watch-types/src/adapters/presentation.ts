@@ -96,3 +96,11 @@ export function presentLegacyAttention(record: LegacyAttentionRecord): WatchAtte
   } else if (kind !== 'watch') display.target = { open: { type: 'dispatch', key: `${record.lane}:${record.id}` } };
   return display;
 }
+
+/** Legacy browser identity mapping is owned by the presentation adapter. */
+export function legacyPrKey(key: string): string { return key.replace(/^review:/, 'pr:'); }
+export function legacyReviewKey(key: string): string { return key.replace(/^pr:/, 'review:'); }
+export function legacyStackKey(id: string): string { return `stack:${id}`; }
+export function legacyPrKeyMatches(key: string): boolean { return key.startsWith('pr:'); }
+export function legacyPrAttention(kind: string): boolean { return kind.startsWith('pr:') || kind === 'stack-ready'; }
+export function legacyPrItemKey(key: string): boolean { return /^(pr:|stack:)/.test(key); }
