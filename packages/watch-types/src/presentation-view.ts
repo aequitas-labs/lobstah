@@ -6,7 +6,7 @@ import {
   validWatchLink,
   validWatchTarget,
 } from './items.js';
-import type { WatchItem, WatchItemAction, WatchItemStatus, WatchPresentationVersion, WatchSourceBrand } from './items.js';
+import type { WatchItem, WatchItemAction, WatchItemNotification, WatchItemStatus, WatchPresentationVersion, WatchSourceBrand } from './items.js';
 
 /**
  * One normalized view of a cached presentation, whatever version the source
@@ -35,11 +35,18 @@ function normalizeAction(action: WatchItemAction, declared: ReadonlySet<string>)
   return { ...action, enabled: false, reason: action.reason ?? 'This action is no longer available.' };
 }
 
+/** A notification keeps its acknowledging effect only while the source still declares it. */
+function acknowledgedBy(notification: WatchItemNotification, declared: ReadonlySet<string>): WatchItemNotification {
+  const { action, ...rest } = notification;
+  return { ...rest, ...(action && declared.has(action) ? { action } : {}) };
+}
+
 /** Cached items keep their identity; unsafe assets and targets fall back instead of reaching the page. */
 function normalizeItem(item: WatchItem, declared: ReadonlySet<string>): WatchItem {
-  const { person, target, ...rest } = item;
+  const { person, target, notification, ...rest } = item;
   return {
     ...rest,
+    ...(notification ? { notification: acknowledgedBy(notification, declared) } : {}),
     statuses: (item.statuses ?? []).map(({ target: link, ...status }) => ({
       ...status,
       ...(link && validWatchTarget(link) ? { target: link } : {}),

@@ -95,6 +95,9 @@ describe('presentation v2 contract', () => {
       validateWatchPresentation(v2([item({ actions: [{ id: 'go', label: 'Go', placement: 'open', enabled: true, binding: { link: { href: 'javascript:alert(1)' } } }] })])),
     ).toThrow('invalid target');
     expect(() => validateWatchPresentation(v2([item(), item()]))).toThrow('repeats item');
+    expect(() => validateWatchPresentation(v2([item({ notification: { revision: 'n1', unread: true, action: 'missing' } })]))).toThrow(
+      'acknowledges through an undeclared human action',
+    );
   });
 
   it('declares and refuses presentation versions in the plugin handshake', () => {
@@ -148,6 +151,8 @@ describe('normalized presentation view', () => {
     const view = presentationView({ ...presentation, actions: [] }, 'review-requests');
     expect(view.items[0]!.actions[0]).toMatchObject({ id: 'publish', enabled: false, reason: 'This action is no longer available.' });
     expect(view.items[0]!.actions[1]).toMatchObject({ id: 'open', enabled: true });
+    const acknowledged = presentationView({ ...v2([item({ notification: { revision: 'n1', unread: true, action: 'publish' } })]), actions: [] }, 'review-requests');
+    expect(acknowledged.items[0]!.notification).toEqual({ revision: 'n1', unread: true });
   });
 });
 

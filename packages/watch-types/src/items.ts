@@ -87,8 +87,12 @@ export interface WatchItemStatus {
   meaning: WatchStatusMeaning;
   /** Hover text that says more than the label. */
   detail?: string;
-  /** Where the status links (a posted review), using the same validated targets as actions. */
+  /** Where the status links (a posted review), using the same validated targets as actions. A linked status reads as a link, not a chip. */
   target?: WatchAttentionTarget;
+  /** When the status began; the host shows its age after the label. */
+  at?: string;
+  /** Short text after the chip: "Waiting on CI". */
+  note?: string;
 }
 
 /**
@@ -108,6 +112,8 @@ export interface WatchItemNotification {
   revision: string;
   unread: boolean;
   seen?: boolean;
+  /** The declared effect that acknowledges this revision when the person opens the item. */
+  action?: string;
 }
 
 /** The person an item is about (its requester or author), shown as the card's avatar chip. */
@@ -125,14 +131,26 @@ export interface WatchItemPerson {
  * ages, resolves owners to names, and joins values with its separator; a
  * source never invents a value to fill a slot.
  */
-export const WATCH_METADATA_KINDS = ['project', 'reference', 'revision', 'owner', 'time', 'text'] as const;
+export const WATCH_METADATA_KINDS = ['project', 'reference', 'revision', 'owner', 'time', 'text', 'person'] as const;
 export type WatchMetadataKind = (typeof WATCH_METADATA_KINDS)[number];
 export interface WatchItemMetadata {
   kind: WatchMetadataKind;
-  /** ISO time for `time`; a worker address (`wt:<id>`) for `owner`; otherwise the text shown. */
+  /**
+   * ISO time for `time`; a worker address (`wt:<id>`) for `owner`; a login
+   * or name for `person` (an author, shown in tables and details, not on the
+   * card's context line); otherwise the text shown.
+   */
   value: string;
-  /** Hover text, or the label a detail view shows beside the value. */
+  /** Hover text, or the label a table or detail view shows beside the value ("author"). */
   label?: string;
+}
+
+/** A short source note a table row or detail view can show: a summary, a blocking finding. */
+export interface WatchItemNote {
+  text: string;
+  /** A labelled note collapses under its label; an unlabelled note is one line. */
+  label?: string;
+  meaning?: WatchStatusMeaning;
 }
 
 /** Host-drawn action glyphs, shown beside an action's words and never alone. */
@@ -216,10 +234,15 @@ export interface WatchItem {
   statuses: WatchItemStatus[];
   attention: WatchItemAttention;
   notification?: WatchItemNotification;
-  /** The item no longer waits on anyone (posted, dismissed, withdrawn): the host shows it quiet. */
+  /** The item waits on the viewer: it counts toward the surface's badge and sorts first. */
+  standing?: boolean;
+  /** The viewer has answered the current request (posted a review); it now waits on others. */
+  answered?: boolean;
+  /** The request is no longer open (answered, dismissed, withdrawn): the host shows the item quiet. */
   resolved?: boolean;
   person?: WatchItemPerson;
   metadata: WatchItemMetadata[];
+  notes?: WatchItemNote[];
   requestedAt?: string;
   updatedAt?: string;
   /** Where the card opens: a validated external URL or a shell-owned detail view. */

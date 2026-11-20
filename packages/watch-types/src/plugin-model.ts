@@ -355,6 +355,8 @@ const item: PluginJsonSchema = {
           meaning: { enum: [...WATCH_STATUS_MEANINGS] },
           detail: string,
           target,
+          at: time,
+          note: string,
         },
       },
     },
@@ -363,8 +365,10 @@ const item: PluginJsonSchema = {
       type: 'object',
       required: ['revision', 'unread'],
       additionalProperties: false,
-      properties: { revision: nonEmpty, unread: { type: 'boolean' }, seen: { type: 'boolean' } },
+      properties: { revision: nonEmpty, unread: { type: 'boolean' }, seen: { type: 'boolean' }, action: nonEmpty },
     },
+    standing: { type: 'boolean' },
+    answered: { type: 'boolean' },
     resolved: { type: 'boolean' },
     person: {
       type: 'object',
@@ -380,6 +384,16 @@ const item: PluginJsonSchema = {
         required: ['kind', 'value'],
         additionalProperties: false,
         properties: { kind: { enum: [...WATCH_METADATA_KINDS] }, value: nonEmpty, label: string },
+      },
+    },
+    notes: {
+      type: 'array',
+      maxItems: 32,
+      items: {
+        type: 'object',
+        required: ['text'],
+        additionalProperties: false,
+        properties: { text: nonEmpty, label: string, meaning: { enum: [...WATCH_STATUS_MEANINGS] } },
       },
     },
     requestedAt: time,
@@ -439,6 +453,12 @@ function validateWatchItems(presentation: WatchPresentation): void {
     ids.add(entry.id);
     for (const destination of targets(entry))
       if (destination && !validWatchTarget(destination)) throw new WatchPluginError(`Watch item ${entry.id} has an invalid target`);
+    const acknowledgement = entry.notification?.action;
+    if (acknowledgement) {
+      const declaration = declared.get(acknowledgement);
+      if (!declaration || declaration.automatic || !declaration.requiresAuthority)
+        throw new WatchPluginError(`Watch item ${entry.id} acknowledges through an undeclared human action`);
+    }
     const controls = new Set<string>();
     for (const control of entry.actions) {
       if (controls.has(control.id)) throw new WatchPluginError(`Watch item ${entry.id} repeats action ${control.id}`);
