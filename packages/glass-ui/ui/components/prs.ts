@@ -142,7 +142,10 @@ const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', r
  * first: not answered here or on the boat, and not withdrawn (a withdrawn
  * card leaves the snapshot). Permission and run cards never count.
  */
-export function openLinkedCard(p: Pick<GlassPr, 'key'>, cards: readonly GlassDecision[] = viewOf(getState())?.decisions ?? []): GlassDecision | undefined {
+export function openLinkedCard(
+  p: Pick<GlassPr, 'key'>,
+  cards: readonly GlassDecision[] = viewOf(getState())?.decisions ?? [],
+): GlassDecision | undefined {
   const { drafts } = getState();
   return cards.find((card) => !card.readOnly && !card.handoff && !drafts[card.key]?.sent && cardLinksPr(card, p.key));
 }
@@ -394,7 +397,10 @@ export function prCard(
     at: p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt,
     trap: dispatchTrap(p.dispatchIds),
     person: prAuthor(p),
-    actions: [html`<${MergeWhenGreen} p=${p} inCard=${opts.inCard} />`, html`<${CardLink} href=${reviewLink(p.url)} onOpen=${() => ackOnOpen(pending)} />`],
+    actions: [
+      html`<${MergeWhenGreen} p=${p} inCard=${opts.inCard} />`,
+      html`<${CardLink} href=${reviewLink(p.url)} onOpen=${() => ackOnOpen(pending)} />`,
+    ],
     quiet: opts.quiet,
     cls: opts.quiet ? 'acked' : undefined,
     onClick: () => {
