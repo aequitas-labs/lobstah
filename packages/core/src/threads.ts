@@ -7,8 +7,11 @@ import { answerFileType, ANSWER_FILES_MAX, readDecision, readDecisionAnswer, rea
 import type { DecisionUpload } from './decisions.js';
 import type { Attachment } from './types.js';
 import { postNotice } from './notices.js';
-import { responseState, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
-import type { HelmThread, ThreadEntry, ThreadSummary, ThreadView } from './thread-model.js';
+import { responseState, recordThreadResponse, sayInThread, appendThreadEntry, personWords, THREAD_LINK_KINDS, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
+import type { HelmThread, ThreadEntry, ThreadLinkKind, ThreadSummary, ThreadView } from './thread-model.js';
+import { parsePrRef } from './pr.js';
+import { settledState, trackingTransition } from './thread-model.js';
+import { threadTrackedItems } from './thread-tracking.js';
 
 export const threadsRoot = () => path.join(lobstahHome(), 'threads');
 const groundDir = (grounds: string) => {
@@ -61,7 +64,7 @@ function update(id: string, change: (item: HelmThread) => HelmThread): HelmThrea
   }, { staleMs: 30_000, waitMs: 2000, busy: () => new ThreadError('This conversation is busy, try again', 409) });
 }
 function open(item: HelmThread): void {
-  if (item.state !== 'open') throw new ThreadError('Reopen this conversation before adding to it', 409);
+  if (item.state === 'resolved') throw new ThreadError('Reopen this conversation before adding to it', 409);
 }
 const nextAt = (item: HelmThread, now: Date) => new Date(Math.max(now.getTime(), Date.parse(item.updatedAt) + 1)).toISOString();
 function message(text: unknown, files: readonly DecisionUpload[]): string {
@@ -108,7 +111,7 @@ export function postThread(id: string, input: { text: unknown; uploads?: Decisio
     const at = nextAt(item, input.now ?? new Date());
     if (item.rounds.length >= THREAD_MESSAGES_MAX) throw new ThreadError('This conversation needs a report or plan before more messages', 409);
     const attachments = uploads(id, item.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024);
-    return { ...item, rounds: [...item.rounds, { at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
+    return { ...item, state: 'open', rounds: [...item.rounds, { at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
   });
   if (input.via !== 'chat') remindThreads(item.grounds, 900_000, Date.parse(item.lastPersonAt));
   return item;
@@ -135,8 +138,8 @@ export function noteThread(id: string, notes: { decided?: string[]; open?: strin
     let entry: ThreadEntry | undefined;
     if (notes.link) {
       const split = notes.link.indexOf(':'), kind = notes.link.slice(0, split), ref = notes.link.slice(split + 1);
-      if (!['dispatched', 'report', 'planned'].includes(kind) || !ref || ref.length > 1000 || (kind === 'planned' && !ref.startsWith('https://'))) throw new ThreadError('Choose a dispatch, report or HTTPS plan link');
-      entry = { link: kind as 'dispatched' | 'report' | 'planned', ref, text: threadWords(notes.text ?? ref, 'a link note', 1000), at };
+      if (!THREAD_LINK_KINDS.includes(kind as ThreadLinkKind) || !ref || ref.length > 1000 || (kind === 'planned' && !ref.startsWith('https://')) || (kind === 'pr' && !parsePrRef(ref))) throw new ThreadError('Choose a dispatch, report, PR or HTTPS plan link');
+      entry = { link: kind as ThreadLinkKind, ref, text: threadWords(notes.text ?? ref, 'a link note', 1000), at };
     }
     const noted = notes.decided !== undefined || notes.open !== undefined;
     const { rounds } = entry ? appendThreadEntry(item, entry) : item;
@@ -152,11 +155,23 @@ export function linkThreadCard(id: string, key: string, now = new Date()): HelmT
     return recordThreadResponse({ ...item, rounds, updatedAt: at, lastHelmAt: at }, at, 'A card is ready for you');
   });
 }
+/** Resolving keeps the thread tracking while any work it links to is unfinished. */
 export function resolveThread(id: string, outcome: unknown, note: unknown, now = new Date()): HelmThread {
   return update(id, (item) => {
     const at = nextAt(item, now), result = threadOutcome(outcome, note, at);
-    return recordThreadResponse({ ...item, state: 'resolved', outcome: result, updatedAt: at, lastHelmAt: at }, at, result.note);
+    const settled = { ...item, outcome: result, updatedAt: at, lastHelmAt: at };
+    return recordThreadResponse({ ...settled, state: settledState(threadTrackedItems(settled, { now: now.getTime() })) }, at, result.note);
   });
+}
+/** Tracking threads close when their work finishes and return to the person when it stalls. Only the helm wait runs this. */
+export function trackThreads(grounds?: string, now = Date.now()): HelmThread[] {
+  const changed: HelmThread[] = [];
+  for (const item of listThreads(grounds)) {
+    if (item.state !== 'tracking') continue;
+    const next = update(item.id, (latest) => trackingTransition(latest, threadTrackedItems(latest, { now }), nextAt(latest, new Date(now))) ?? latest);
+    if (next.state !== 'tracking') changed.push(next);
+  }
+  return changed;
 }
 export function reopenThread(id: string, now = new Date()): HelmThread {
   const item = update(id, (item) => {
@@ -167,22 +182,25 @@ export function reopenThread(id: string, now = new Date()): HelmThread {
   return item;
 }
 export function threadView(item: HelmThread, person = THREAD_PERSON): ThreadView {
+  return { ...item, ...responseState(item, person), tracked: threadTrackedItems(item), cards: threadCards(item) };
+}
+function threadCards(item: HelmThread): ThreadView['cards'] {
   const keys = [...new Set(item.rounds.flatMap((round) => round.entries.flatMap((entry) => 'card' in entry ? [entry.card] : [])))];
-  return { ...item, ...responseState(item, person), cards: keys.flatMap((key) => {
+  return keys.flatMap((key) => {
     const card = readDecision(key) ?? readArchivedDecision(key);
     if (!card) return [];
     const answer = readDecisionAnswer(key);
     return [{ key, title: card.title, options: card.options, ...(answer ? { answer: { option: answer.option, text: answer.text, attachments: answer.attachments, answeredAt: answer.answeredAt } } : {}), standing: !!readDecision(key) && !answer }];
-  }) };
+  });
 }
 function newestPersonAt(item: HelmThread): string {
-  return threadView(item).cards.reduce((at, card) => card.answer && card.answer.answeredAt > at ? card.answer.answeredAt : at, item.lastPersonAt);
+  return threadCards(item).reduce((at, card) => card.answer && card.answer.answeredAt > at ? card.answer.answeredAt : at, item.lastPersonAt);
 }
 export function threadSummaries(grounds?: string, now = Date.now()): ThreadSummary[] {
-  return listThreads(grounds).filter((item) => item.state === 'open' || responseState(item).unreadResponse || now - Date.parse(item.updatedAt) < 86400_000).map((item) => ({
+  return listThreads(grounds).filter((item) => item.state !== 'resolved' || responseState(item).unreadResponse || now - Date.parse(item.updatedAt) < 86400_000).map((item) => ({
     ...responseState(item), id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, state: item.state, updatedAt: item.updatedAt,
     roundCount: item.rounds.length, ...(item.notes.open[0] ? { openLine: item.notes.open[0] } : {}),
-    cards: threadView(item).cards.filter((card) => card.standing).map((card) => card.key),
+    cards: threadCards(item).filter((card) => card.standing).map((card) => card.key),
     waitingForHelm: item.state === 'open' && (!item.lastHelmAt || newestPersonAt(item) > item.lastHelmAt), ...(item.outcome ? { outcome: item.outcome } : {}) }));
 }
 export function remindThreads(grounds?: string, remindMs = 900_000, now = Date.now()): void {
@@ -199,7 +217,7 @@ export function remindThreads(grounds?: string, remindMs = 900_000, now = Date.n
 }
 export function expireIdleThreads(grounds?: string, now = Date.now()): void {
   for (const item of listThreads(grounds)) {
-    if (item.state === 'open' && item.kind === 'thread' && now - Date.parse(newestPersonAt(item)) >= THREAD_IDLE_MS && !threadView(item).cards.some((card) => card.standing)) resolveThread(item.id, 'dropped', 'No new message for seven days', new Date(now));
+    if (item.state === 'open' && item.kind === 'thread' && now - Date.parse(newestPersonAt(item)) >= THREAD_IDLE_MS && !threadCards(item).some((card) => card.standing)) resolveThread(item.id, 'dropped', 'No new message for seven days', new Date(now));
   }
 }
 export function resolveThreadFile(id: string, name: string): string | undefined {

@@ -234,3 +234,43 @@ it('reads as a chat: the person on the right, the helm beside its wheel, system 
   expect(notes.compareDocumentPosition(timeline) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(timeline.compareDocumentPosition(composer) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
+
+it('keeps tracking threads out of the open list, in a collapsed Tracking section', async () => {
+  const d = fleet();
+  d.threads = [
+    { ...summary(), id: 'open-thread', title: 'Still talking', cards: [] },
+    { ...summary(), id: 'tracking-thread', state: 'tracking', title: 'Fix is running', cards: [], outcome: { kind: 'dispatched', ref: 'd1', note: 'Dispatched', at: AT } },
+    { ...summary(), id: 'resolved-thread', state: 'resolved', title: 'Done', cards: [] },
+  ];
+  const g = await page(d, { hash: '#helm' });
+  expect(g.$$('#helm > section > .dlist .drow').map((row) => row.getAttribute('data-thread'))).toEqual(['open-thread']);
+  const tracking = g.$('#helm .thread-tracking')!;
+  expect(tracking.hasAttribute('open')).toBe(false);
+  expect(tracking.querySelector('summary')?.textContent).toBe('Tracking (1)');
+  expect(tracking.querySelector('[data-thread="tracking-thread"] [aria-label="Tracking"]')).not.toBeNull();
+  expect(g.$('#helm .thread-resolved:not(.thread-tracking) [data-thread="resolved-thread"]')).not.toBeNull();
+});
+
+it('shows linked work with its live state, read-only, and keeps the composer on a tracking thread', async () => {
+  const detail = { ...view(), state: 'tracking' as const, outcome: { kind: 'dispatched' as const, ref: 'd1', note: 'Dispatched the fix', at: AT } };
+  detail.tracked = [
+    { kind: 'dispatch', ref: 'd1', title: 'Fix the flaky deck test', state: 'open', status: 'working', href: '#dispatch/d1' },
+    { kind: 'pr', ref: 'pr:o/r#7', title: 'Deflake the deck test', state: 'stalled', status: 'checks failing', href: 'https://github.com/o/r/pull/7' },
+    { kind: 'todo', ref: '3', title: 'Check it tomorrow', state: 'done', status: 'done' },
+  ];
+  detail.rounds = [{ at: AT, entries: [{ by: 'person', via: 'glass', text: 'Fix it', attachments: [], at: AT }, { event: 'tracked', text: 'All linked work finished', at: AT }] }];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const panel = g.$('.thread-tracked')!;
+  expect(panel.querySelector('.thread-notes-head')?.textContent).toBe('Tracking · closes when this work finishes');
+  expect(g.$$('.thread-tracked li').map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+    'Dispatch Fix the flaky deck test working',
+    'PR Deflake the deck test checks failing',
+    'Todo Check it tomorrow done',
+  ]);
+  expect(g.$$('.thread-tracked .badge').map((b) => b.className)).toEqual(['badge ', 'badge warn', 'badge ok']);
+  expect(panel.querySelector('a[href="#dispatch/d1"]')).not.toBeNull();
+  expect(panel.querySelector('button, input, textarea')).toBeNull();
+  expect(g.$('.thread-system')?.textContent).toContain('All linked work finished');
+  expect(g.$('textarea[aria-label="Add to this thread"]')).not.toBeNull();
+});
+

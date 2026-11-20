@@ -126,8 +126,9 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--when': { value: '<trigger>', repeatable: true },
       '--when-all': { value: '<trigger>', repeatable: true },
       '--until': { value: '<time|duration>' },
+      '--thread': { value: '<thread-id>' },
     },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--at': ['add'], '--in': ['add'], '--every': ['add'], '--when': ['add'], '--when-all': ['add'], '--until': ['snooze'] },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--at': ['add'], '--in': ['add'], '--every': ['add'], '--when': ['add'], '--when-all': ['add'], '--until': ['snooze'], '--thread': ['add'] },
     positionals: '["<text>"|<id>]',
   },
   attention: { subverbs: ['ack', 'unack', 'ls'], flags: { '--by': { value: '<label>' }, '--json': {} }, positionals: '[<item-key>]' },
@@ -421,7 +422,7 @@ which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
   todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction. add "<text>" records one; done and drop close it; ls (or bare) lists open ones (--all adds closed). recheck requests a todo and goals pass now. Open todos show in man tend, man report, the glass and every session start; a done one stays checked until 04:00. A trap gets none.
-add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed, pr:<o>/<r>#<n> merged|closed|green (registers a watch if none; merged also fires on closure without merging), trap:<name> free.
+add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed, pr:<o>/<r>#<n> merged|closed|green (registers a watch if none; merged also fires on closure without merging), trap:<name> free. add --thread <id> ties it to a helm thread: the thread keeps tracking until the todo closes, and an overdue or stale todo hands the thread back to the person.
 24-hour, in [helm].timezone: "fri 09:00", "tomorrow 09:00", "09:00", "thu", "2026-11-06 09:00", "2026-11-06T14:00Z". A day runs 04:00 to 04:00.
 Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
@@ -540,9 +541,9 @@ Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:threads': `List conversations on these grounds, or read one with its notes, rounds and cards.`,
   'man:triage': `Classify a new glass message as bait or a discussion thread. Helm only.`,
   'man:discuss': `Record an open exchange from chat, or append a chat round to its existing thread. Helm only.`,
-  'man:note': `Replace decided/open notes or add a dispatch, report or plan link. Helm only.`,
+  'man:note': `Replace decided/open notes or add a link: dispatched:<id>, report:<key>, planned:<https-url> or pr:<url>. Helm only.`,
   'man:say': `Write to the person in a conversation, with optional --attach files. It shows as unread in the glass. Helm only.`,
-  'man:resolve': `Close a conversation with its outcome and a one-line note. The person can reopen it. Helm only.`,
+  'man:resolve': `Close a conversation with its outcome and a one-line note. While a linked dispatch, card, PR or todo is unfinished it tracks instead: man wait closes it when the work finishes and hands it back to the person if the work stalls. The person can reopen it. Helm only.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   hook: `The plugin hook entry points. Each detects the session's role (helm, trap, or

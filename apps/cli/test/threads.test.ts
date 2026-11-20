@@ -60,6 +60,24 @@ it('lets the helm write in the conversation with man say, with attachments, and 
   const wake = run('man', 'wait', '--timeout', '0', '--session', 'test-helm');
   expect(wake.stdout).toContain('event: thread'); expect(wake.stdout).toContain('Show me the other one'); expect(wake.stdout).not.toContain('see the sketch');
 });
+it('tracks a resolved thread through its todo and lets man wait close it when the todo is done', () => {
+  const item = startThread({ grounds: 'home', text: 'Check the deck test tomorrow' });
+  takeHelm({ sessionId: 'test-helm', grounds: { name: 'home', repos: ['web'] }, ttlMs: 60_000 });
+  const invoke = (...args: string[]) => { const r = run(...args, '--session', 'test-helm'); expect(r.status, r.stderr + r.stdout + JSON.stringify(args)).toBe(0); return r; };
+  expect(run('todo', 'add', 'Nothing to tie', '--thread', 'abcdef01-1234-4000-8000-abcdef012345', '--session', 'test-helm').status).toBe(2);
+  const added = invoke('todo', 'add', 'Check the deck test', '--thread', item.id);
+  expect(added.stdout).toContain(`thread: ${item.id}`);
+  const todoId = /^todo: (\d+)$/m.exec(added.stdout)![1]!;
+  const resolved = JSON.parse(invoke('man', 'resolve', item.id, '--outcome', 'answered', '--note', 'Checking tomorrow').stdout);
+  expect(resolved).toMatchObject({ state: 'tracking', tracked: [{ kind: 'todo', ref: todoId, state: 'open' }] });
+  expect(buildGlassSnapshot().threads?.[0]).toMatchObject({ state: 'tracking', waitingForHelm: false });
+  run('man', 'wait', '--timeout', '1', '--session', 'test-helm');
+  expect(readThread(item.id)?.state).toBe('tracking');
+  invoke('todo', 'done', todoId);
+  run('man', 'wait', '--timeout', '1', '--session', 'test-helm');
+  expect(readThread(item.id)?.state).toBe('resolved');
+  expect(readThread(item.id)?.rounds.at(-1)?.entries.at(-1)).toMatchObject({ event: 'tracked', text: 'Todo Check the deck test finished' });
+});
 it('authorizes writes, validates uploads, serves rounds on demand, and keeps snapshots small', async () => {
   server = serveGlass(0); await new Promise<void>(resolve => server!.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

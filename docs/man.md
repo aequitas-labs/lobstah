@@ -1864,7 +1864,19 @@ recorded. Quick answers in chat need no thread; quick glass answers go on a card
 to read. Consider a report or plan at six rounds; further messages stop at 100.
 
 `man resolve <id> --outcome dispatched:<id>|planned:<https-url>|answered|dropped
---note "<outcome>"` closes it. The person can reopen it. Unanswered messages recur
+--note "<outcome>"` closes it. The person can reopen it.
+
+A resolved thread whose linked work is unfinished moves to tracking instead. Its
+links are the dispatches it names (`--link dispatched:<id>` or a dispatched
+outcome), its cards, its PRs (`man note <id> --link pr:<url>`) and any todo added
+with `lobstah todo add "<text>" --thread <id>`, which stays in the todo list.
+Tracking threads leave the person's open list for a collapsed Tracking section,
+and the thread shows each link's live state, read-only. `man wait` resolves a
+tracking thread with a one-line system message once every link is done (a
+dispatch done, a card answered or withdrawn, a PR merged, a todo closed). It
+returns the thread to the open list, unread, when a link stalls: a dispatch
+failed, blocked or waiting on a decision, a PR closed without merging, or an
+overdue or stale todo. A message from the person also reopens it. Unanswered messages recur
 on the configured reminder cadence. Discussion threads with no new message for
 seven days and no standing card close as dropped; bait and standing questions
 remain open. Reads never run this maintenance; the helm wait does.

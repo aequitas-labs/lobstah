@@ -319,7 +319,7 @@ import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, decisionReferences, type FlagValue } from './usage.js';
-import { listThreads, readThread, startThread, postThread, sayThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, ThreadError } from '@lobstah/core';
+import { listThreads, readThread, startThread, postThread, sayThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, trackThreads, ThreadError } from '@lobstah/core';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
@@ -2093,7 +2093,13 @@ async function mainCli(): Promise<void> {
                 ? parseTodoDuration(inDuration, now)
                 : undefined;
           const prepared = whenValues.length > 0 ? prepareTodoTriggers(whenValues, whenAll.length > 0 ? 'all' : 'any', new Date(now).toISOString()) : undefined;
-          const t = addTodo(grounds, text, now, { dueAt, every, triggers: prepared?.triggers });
+          const threadId = opt('--thread');
+          if (threadId !== undefined) {
+            const linked = readThread(threadId);
+            if (!linked) throw new UsageError(`No thread ${threadId}. \`lobstah man threads\` lists them`);
+            if (linked.grounds !== shown) throw new UsageError('This thread belongs to another grounds');
+          }
+          const t = addTodo(grounds, text, now, { dueAt, every, triggers: prepared?.triggers, ...(threadId ? { thread: threadId } : {}) });
           const watching = (prepared?.unwatched ?? []).map(watchTriggerPr);
           console.log(toonKV({
             todo: t.id,
@@ -2102,6 +2108,7 @@ async function mainCli(): Promise<void> {
             ...(t.dueAt ? { due: formatTodoTime(t.dueAt, tz) } : {}),
             ...(t.every ? { every: formatTodoRecurrence(t.every) } : {}),
             ...(t.triggers ? { waiting: todoWaitingOn(t.triggers) } : {}),
+            ...(t.thread ? { thread: t.thread } : {}),
             ...(prepared?.already.length ? { already: prepared.already.join(', ') } : {}),
           }));
           for (const line of watching) console.log(line);
@@ -2917,6 +2924,7 @@ async function mainCli(): Promise<void> {
         const threadMaintenance = () => {
           const threadGrounds = groundsScope ? displayGrounds(groundsScope.name, cfgWait) : undefined;
           expireIdleThreads(threadGrounds);
+          trackThreads(threadGrounds);
           remindThreads(threadGrounds, remindMs);
         };
         threadMaintenance();

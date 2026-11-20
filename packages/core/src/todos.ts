@@ -28,6 +28,8 @@ export interface Todo {
   every?: TodoRecurrence;
   /** The events that wake this todo. */
   triggers?: TodoTriggerSet;
+  /** The helm thread this todo moves along: the thread keeps tracking until it closes. */
+  thread?: string;
   /** Set once when the todo fires; cleared by done, skip or snooze. */
   firing?: TodoFiring;
   /** The last done on a series, for the glass and the recap. */
@@ -213,6 +215,7 @@ export interface NewTodoFields {
   dueAt?: string;
   every?: TodoRecurrence;
   triggers?: TodoTriggerSet;
+  thread?: string;
 }
 
 export function addTodo(grounds: string, text: string, now = Date.now(), fields: NewTodoFields = {}): Todo {
@@ -229,6 +232,7 @@ export function addTodo(grounds: string, text: string, now = Date.now(), fields:
       ...(fields.dueAt ? { dueAt: fields.dueAt } : {}),
       ...(fields.every ? { every: fields.every } : {}),
       ...(fields.triggers ? { triggers: fields.triggers } : {}),
+      ...(fields.thread ? { thread: fields.thread } : {}),
     };
     data.items.push(todo);
     data.nextId += 1;

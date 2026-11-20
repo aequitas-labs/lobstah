@@ -457,7 +457,7 @@ function checkOptions(raw: string[]): string[] {
  */
 export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: string[] } {
   const conversation = opts.thread ? readThread(opts.thread) : undefined;
-  if (opts.thread && (conversation?.state !== 'open' || (opts.grounds && conversation.grounds !== displayGrounds(opts.grounds, loadConfig())))) throw new DecisionError('Choose an open conversation on these grounds');
+  if (opts.thread && (!conversation || conversation.state === 'resolved' || (opts.grounds && conversation.grounds !== displayGrounds(opts.grounds, loadConfig())))) throw new DecisionError('Choose an open conversation on these grounds');
   if (opts.replace !== undefined && !standingDecisions().some((d) => d.key === opts.replace)) {
     throw new DecisionError(`no standing decision ${opts.replace} to replace — \`lobstah man tend\` lists them`);
   }
