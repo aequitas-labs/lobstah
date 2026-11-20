@@ -138,11 +138,16 @@ export interface ThreadSubscriberNotice {
   href: string;
 }
 export const THREAD_PERSON = 'owner';
+/** Only an open thread asks for the person: one the helm has resolved never counts as unread. */
 export function responseState(item: HelmThread, person = THREAD_PERSON) {
   const responseSeq = item.responseSeq ?? 0, seenThrough = item.readers?.[person]?.seenThrough ?? 0;
-  return { responseSeq, seenThrough, unreadResponse: responseSeq > seenThrough, responseAt: item.responseAt, responseText: item.responseText };
+  return { responseSeq, seenThrough, unreadResponse: item.state === 'open' && responseSeq > seenThrough, responseAt: item.responseAt, responseText: item.responseText };
 }
-/** A response and its coalesced subscriber notice commit with the thread. */
+/**
+ * A response and its coalesced subscriber notice commit with the thread. Only
+ * what the person reads as a reply records one: the helm's message (sayInThread)
+ * and a card. Triage, notes, links and resolving update the thread quietly.
+ */
 export function recordThreadResponse(item: HelmThread, at: string, text: string): HelmThread {
   const responseSeq = (item.responseSeq ?? 0) + 1;
   return { ...item, responseSeq, responseAt: at, responseText: text, notice: { seq: responseSeq, at, text, href: `#thread/${item.id}` } };

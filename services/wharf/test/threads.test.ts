@@ -117,6 +117,8 @@ it('keeps a later response unread, coalesces subscriber notices and leaves cards
   await call('documents/read-card/publish',{});
   const shown = (await (await call(`threads/${ID}`)).json<ThreadView>()).responseSeq!;
   await call(`threads/${ID}/note`,{decided:['Keep Reviews']});
+  expect((await (await call(`threads/${ID}`)).json<ThreadView>()).responseSeq).toBe(shown);
+  await call(`threads/${ID}/say`,{text:'Reviews stays'});
   expect((await call(`threads/${ID}/seen`,{through:shown})).status).toBe(200);
   expect(await (await call(`threads/${ID}`)).json()).toMatchObject({responseSeq:shown+1,seenThrough:shown,unreadResponse:true});
   expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,person:'a',seq:shown+1,href:`#thread/${ID}`}]);
@@ -124,20 +126,22 @@ it('keeps a later response unread, coalesces subscriber notices and leaves cards
   expect(await (await call('threads/notices')).json()).toEqual([]);
   expect(await (await call(`threads/${ID}`)).json()).toMatchObject({unreadResponse:true,cards:[{key:'read-card',standing:true}]});
   expect(await (await call('documents/read-card')).json()).not.toHaveProperty('answer');
-  await call(`threads/${ID}/note`,{open:['Choose the middle tab']});
+  await call(`threads/${ID}/say`,{text:'Choose the middle tab'});
   expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,seq:shown+2}]);
   expect((await call(`threads/${ID}/seen`,{through:shown+3})).status).toBe(400);
   await call(`threads/${ID}/seen`,{through:shown+2});
   expect(await (await call('threads/notices')).json()).toEqual([]);
   expect(await rowsWritten(stub(),async()=>{await call('threads/notices');await call('threads');})).toBe(0);
 });
-it('retains an old resolved item while unread and drops it from the summary after reading', async () => {
+it('resolves quietly: never unread, no notice, and an old resolved item leaves the summary', async () => {
   await create(); await call('helm/take',{session:'helm'});
-  await call(`threads/${ID}/resolve`,{outcome:'answered',note:'Keep Reviews'});
-  await sql("UPDATE helm_threads SET data=json_set(data,'$.updatedAt','2000-01-01T00:00:00.000Z') WHERE id=?",ID);
+  await call(`threads/${ID}/say`,{text:'Keep Reviews as its own view'});
   expect(await (await call('threads')).json()).toMatchObject([{id:ID,unreadResponse:true}]);
-  expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,seq:1}]);
+  await call(`threads/${ID}/resolve`,{outcome:'answered',note:'Keep Reviews'});
+  expect(await (await call('threads')).json()).toMatchObject([{id:ID,state:'resolved',unreadResponse:false,responseSeq:1}]);
   await call(`threads/${ID}/seen`,{through:1});
+  expect(await (await call('threads/notices')).json()).toEqual([]);
+  await sql("UPDATE helm_threads SET data=json_set(data,'$.updatedAt','2000-01-01T00:00:00.000Z') WHERE id=?",ID);
   expect(await (await call('threads')).json()).toEqual([]);
   expect((await call(`threads/${ID}`)).status).toBe(200);
 });

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, readThread, takeHelm, startThread, postThread, triageThread, noteThread, askDecision, readDecisionAnswer, listThreads, mirrorReadAllowed, mirrorWriteAllowed } from '@lobstah/core';
+import { ensureLayout, readThread, takeHelm, startThread, postThread, triageThread, noteThread, sayThread, askDecision, readDecisionAnswer, listThreads, mirrorReadAllowed, mirrorWriteAllowed } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -93,6 +93,8 @@ it('shares response read cursors and subscriber notices across the local and mir
   const {meta} = askDecision({title:'Use Helm?',thread:item.id,askedBy:'helm',maxBytes:100});
   const shown = readThread(item.id)!.responseSeq!;
   noteThread(item.id,{decided:['Keep Reviews']});
+  expect(readThread(item.id)!.responseSeq).toBe(shown);
+  sayThread(item.id,{text:'Reviews stays'});
   server = serveGlass(0); await new Promise<void>(r => server!.once('listening',r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const token = ((await (await fetch(`${base}/data`)).json()) as {focusToken:string}).focusToken;

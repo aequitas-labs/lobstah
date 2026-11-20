@@ -131,7 +131,7 @@ export function sayThread(id: string, input: { text: unknown; uploads?: Decision
     return sayInThread(item, text, uploads(id, item.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024), at);
   });
 }
-export const triageThread = (id: string, kind: unknown, now = new Date()) => update(id, (item) => { const at = nextAt(item, now); return recordThreadResponse(classifyThread(item, kind, at), at, kind === 'thread' ? 'Discussion started' : 'Bait received'); });
+export const triageThread = (id: string, kind: unknown, now = new Date()) => update(id, (item) => classifyThread(item, kind, nextAt(item, now)));
 export function noteThread(id: string, notes: { decided?: string[]; open?: string[]; link?: string; text?: string }, now = new Date()): HelmThread {
   return update(id, (item) => {
     open(item);
@@ -148,7 +148,7 @@ export function noteThread(id: string, notes: { decided?: string[]; open?: strin
     }
     const noted = notes.decided !== undefined || notes.open !== undefined;
     const { rounds } = entry ? appendThreadEntry(item, entry) : item;
-    return recordThreadResponse({ ...item, rounds, ...(noted ? { notesAt: at } : {}), notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at }, at, entry && 'text' in entry ? entry.text : 'Notes updated');
+    return { ...item, rounds, ...(noted ? { notesAt: at } : {}), notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at };
   });
 }
 export function linkThreadCard(id: string, key: string, now = new Date()): HelmThread {
@@ -163,7 +163,7 @@ export function linkThreadCard(id: string, key: string, now = new Date()): HelmT
 export function resolveThread(id: string, outcome: unknown, note: unknown, now = new Date()): HelmThread {
   return update(id, (item) => {
     const at = nextAt(item, now), result = threadOutcome(outcome, note, at);
-    return recordThreadResponse({ ...item, state: 'resolved', outcome: result, updatedAt: at, lastHelmAt: at }, at, result.note);
+    return { ...item, state: 'resolved', outcome: result, updatedAt: at, lastHelmAt: at };
   });
 }
 export function reopenThread(id: string, now = new Date()): HelmThread {
