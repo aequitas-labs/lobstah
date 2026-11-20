@@ -204,6 +204,24 @@ describe('Reviews from source items', () => {
     expect(g.$$('.toast-content').map((toast) => toast.textContent)).toEqual(['This review has already been published.']);
   });
 
+  it('pins an action to the boat the merge chose, and waits while that boat is asleep', async () => {
+    const r = review(7, { state: 'drafted', verdict: 'comment' });
+    const g = await glass({ reviewItems: [{ ...asItem(r), origin: 'boat:b-south' }] }, 'cards', () => ({ status: 200, body: { ok: true } }));
+    (g.$$('#reviews [data-review="review:acme/web#7"] button').find((button) => button.textContent === 'Publish') as unknown as HTMLElement).click();
+    await g.settle();
+    expect(JSON.parse(g.posts()[0]!.body).payload.origin).toBe('boat:b-south');
+    const asleep = await glass({ reviewItems: [{ ...asItem(r), origin: 'boat:b-south', originAsleep: 'south' }] });
+    const publish = asleep.$$('#reviews [data-review="review:acme/web#7"] button').find((button) => button.textContent === 'Publish')!;
+    expect(publish.hasAttribute('disabled')).toBe(true);
+    expect(publish.getAttribute('title')).toBe("south is asleep. This item's actions wait until it is back.");
+  });
+
+  it('names the boats that still send the older format above the legacy records', async () => {
+    const g = await glass({ reviews: [review(7)], reviewFallback: ['south'] });
+    expect(g.$('#reviews [data-review-fallback]')?.textContent).toContain('south sends reviews in the older format');
+    expect(g.$$('#reviews [data-review]')).toHaveLength(1);
+  });
+
   it('keeps a held source’s items visible with its effects disabled and a reason', async () => {
     const r = review(7, { state: 'drafted', verdict: 'comment' });
     const g = await glass({ reviewItems: [{ ...asItem(r), watch: { ...watch, status: 'held' } }] });

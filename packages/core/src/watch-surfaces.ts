@@ -18,6 +18,10 @@ export interface WatchSurfaceItem {
   };
   source: WatchSourceBrand;
   item: WatchItem;
+  /** On a hosted glass with several boats: the routing token of the boat chosen to act on this item. */
+  origin?: string;
+  /** That boat's name, when it is asleep: the item shows, but its actions wait for the boat. */
+  originAsleep?: string;
 }
 
 /**
@@ -46,6 +50,8 @@ export interface WatchSurfaceSource {
   health: 'healthy' | 'stale' | 'held';
   message?: string;
   remedy?: string;
+  /** On a hosted glass with several boats: the boat that reported it. */
+  boat?: string;
 }
 
 /** Every source that contributes to a surface, whether or not it has items now, with its health. */

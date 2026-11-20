@@ -62,7 +62,8 @@ function timing(row: WatchInventoryRow): Children {
   ];
 }
 
-const ownerText = (row: WatchInventoryRow): string => row.owner.name ?? (row.owner.kind === 'trap' ? `wt:${row.owner.id}` : row.owner.id);
+const ownerText = (row: WatchInventoryRow): string =>
+  (row.owner.name ?? (row.owner.kind === 'trap' ? `wt:${row.owner.id}` : row.owner.id)) + (row.boat ? ` · ${row.boat}` : '');
 
 /** What the expanded card shows: exact times, the source and the watch's identity. */
 function details(row: WatchInventoryRow): Children {

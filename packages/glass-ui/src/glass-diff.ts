@@ -682,6 +682,8 @@ export interface SectionInputs {
     sources?: WatchSurfaceSource[];
     /** The source filter in force, when one source is chosen. */
     source?: string;
+    /** Boats that still send only the legacy records, so the page shows those. */
+    fallback?: string[];
     expanded?: GlassPrefs['reviewSections'];
   };
   notices: { list: Notice[] };
@@ -812,6 +814,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       view: st.view,
       list: reviews,
       ...(reviewItems ? { items: reviewItems, sources: d.reviewSources ?? [], ...(reviewSource ? { source: reviewSource } : {}) } : {}),
+      ...(d.reviewFallback?.length ? { fallback: d.reviewFallback } : {}),
     },
     notices: {
       list: (d.notices || []).filter(

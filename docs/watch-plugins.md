@@ -168,6 +168,67 @@ must grant each optional capability with `allowCapabilities`; the default is
   generic rows and routing through the same contract. An unavailable optional
   projection keeps the last valid presentation and cannot stop other sources.
 
+## Show items in Reviews and Watches (presentation v2)
+
+A source that has things for a person to review declares presentation version 2:
+`serveWatchPlugin(adapter, { presentationVersion: 2, actionSchemas })`. Its
+`present` then returns `version: 2`, a `source` brand, `items`, and optionally
+`surfaces` and a `glyph` for its Watches card, beside the version 1 fields:
+
+```ts
+return {
+  ...versionOneFields,
+  version: 2,
+  source: { id: 'acme-reviews', name: 'Acme', icon: { glyph: 'source' } },
+  surfaces: ['reviews'],
+  glyph: 'document',
+  items: [{
+    id: 'doc-42', revision: 'r3', title: 'Launch plan', kind: 'document',
+    glyph: { kind: 'document', variants: { completed: 'document-check' } },
+    lifecycle: { phase: 'active', label: 'Active' },
+    statuses: [{ code: 'requested', label: 'review requested', category: 'workflow', meaning: 'pending' }],
+    attention: 'needs-you', standing: true,
+    notification: { revision: 'request-7', unread: true, action: 'acknowledge' },
+    person: { id: 'dana', name: 'Dana', role: 'requested by' },
+    metadata: [{ kind: 'project', value: 'launch' }, { kind: 'time', value: requestedAt }],
+    target: { href: 'https://acme.example/doc-42' },
+    actions: [
+      { id: 'approve', label: 'Approve', placement: 'primary', enabled: true, binding: { effect: { action: 'approve' } } },
+      { id: 'open', label: 'Open', placement: 'open', enabled: true, acknowledges: true, binding: { link: { href: 'https://acme.example/doc-42' } } },
+    ],
+    surfaces: { list: ['reviews'], home: 'reviews' },
+  }],
+  actions: [
+    { id: 'approve', label: 'Approve', requiresAuthority: true },
+    { id: 'acknowledge', label: 'Mark seen', requiresAuthority: true },
+  ],
+};
+```
+
+Items fill named slots in the glass's shared card. The host owns every color,
+edge, glyph drawing and layout; a presentation with colors, CSS classes, HTML
+or other unknown fields is rejected. Keep the axes apart: `lifecycle` is the
+subject (active, draft, completed, closed, with `archived` as a separate flag),
+`statuses` are workflow, attention and health chips, `attention` sets the edge,
+and `notification` is what opening the item acknowledges. A logo is a host
+glyph or an `asset` with HTTPS light and dark images and a fallback glyph.
+Links must be absolute; `javascript:`, `data:`, `file:` and similar schemes are
+refused. Every effect an item control names must be a declared human action
+(`requiresAuthority: true`, not `automatic`); its `arguments` schema checks the
+control's arguments. When a person runs a control, the host resolves it again
+from the cached presentation, checks the item's revision, records authority and
+calls `watch.actions.execute` with `arguments: { item, values }`. A changed
+item returns a conflict and the glass shows its current controls.
+
+The glass renders cached presentations only, so Reviews and Watches show a
+plugin's last items without starting it. A failed check keeps those items and
+marks the source stale; a held source keeps them with its actions disabled.
+
+Upgrading: a host that knows version 2 accepts both versions, and version 1
+plugins run unchanged. An older host refuses a version 2 handshake and holds
+the plugin's watches instead of guessing; upgrade lobstah before the plugin.
+The version is stored with each cached presentation.
+
 ## Wire protocol and lifecycle
 
 The transport uses [JSON-RPC 2.0](https://www.jsonrpc.org/specification) with one
@@ -186,9 +247,9 @@ interface WatchPluginContext {
 ```
 
 `params.body` carries method-specific DTOs. `watch.handshake` runs before any
-other operation and after every restart. Its result includes protocol and
-presentation version 1, the descriptor, four schemas, registration bindings and
-capabilities. The configured type ID, API major and release must match. A restarted
+other operation and after every restart. Its result includes protocol version
+1, the presentation version (1 or 2), the descriptor, four schemas, registration
+bindings and capabilities. The configured type ID, API major and release must match. A restarted
 process must advertise the same manifest as the original connection.
 
 Required operations are `watch.identify`, `watch.key`, `watch.initialize`,

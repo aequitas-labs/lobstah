@@ -51,6 +51,8 @@ export interface WatchInventoryRow {
   error?: { message: string; remedy?: string; failures: number };
   /** Validated links, the first of which is the card's Open. */
   links: Array<{ label: string; url: string }>;
+  /** On a hosted glass with several boats: the boat that has this watch. */
+  boat?: string;
 }
 
 export interface WatchInventoryOptions {

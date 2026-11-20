@@ -815,6 +815,8 @@ async function itemRequest(entry: WatchSurfaceItem, control: string | { acknowle
           control,
           revision: entry.item.revision,
           idempotencyKey: actionKey(),
+          // A hosted glass pins the action to the boat its merge chose for this item.
+          ...(entry.origin ? { origin: entry.origin } : {}),
         },
         token,
       )

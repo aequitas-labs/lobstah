@@ -56,6 +56,7 @@ export interface MirrorRoute<T> {
 export class MirrorRouter {
   private labels = new Map<string, { boat: string; value: string | undefined }>();
   private ids = new Map<string, Set<string>>();
+  private pins = new Map<string, string>();
   constructor(
     /** The only boat, when there is one: it takes every call that names none. */
     readonly only: string | undefined,
@@ -73,11 +74,27 @@ export class MirrorRouter {
     boats.add(boat);
     this.ids.set(value, boats);
   }
+  /**
+   * A token that sends a call to one boat whatever else it names: a review
+   * two boats both have shows once, and its actions go to the origin the
+   * merge chose. The token never reaches the boat.
+   */
+  pin(boat: string): string {
+    const token = `boat:${boat}`;
+    this.pins.set(token, boat);
+    return token;
+  }
   /** The boat a call names, and the call as its boat knows it: every label taken back to the boat's own value. */
   resolve<T>(value: T): MirrorRoute<T> {
     const named = new Set<string>();
+    const pinned = new Set<string>();
     const walk = (v: unknown): unknown => {
       if (typeof v === 'string') {
+        const pin = this.pins.get(v);
+        if (pin) {
+          pinned.add(pin);
+          return undefined;
+        }
         const labelled = this.labels.get(v);
         if (labelled) {
           named.add(labelled.boat);
@@ -98,6 +115,8 @@ export class MirrorRouter {
       return v;
     };
     const mapped = walk(value) as T;
+    if (pinned.size > 1) return { ambiguous: true, value: mapped };
+    if (pinned.size === 1) return { boat: [...pinned][0]!, value: mapped };
     if (named.size > 1) return { ambiguous: true, value: mapped };
     const [boat] = named;
     return { boat: boat ?? this.only, value: mapped };
@@ -149,6 +168,8 @@ const LISTS: ReadonlyArray<keyof GlassSnapshot> = [
   'todos',
   'decisions',
   'recentRuns',
+  'reviewSources',
+  'watchInventory',
 ];
 /** The fields that say a row's place, labelled with its boat when there are several: [list, field, label even when empty]. */
 const LABELLED: ReadonlyArray<[keyof GlassSnapshot, string, boolean]> = [
@@ -236,6 +257,14 @@ export function mergeMirror(sources: readonly MirrorBoatSnapshot[], now: number,
   }
   // A PR two boats both watch shows once.
   snapshot.prs = [...new Map(snapshot.prs.map((pr) => [pr.url, pr])).values()];
+  mergeReviewItems(snapshot, parts, sources, boats, router);
+  if (several)
+    for (const [i, part] of parts.entries()) {
+      const name = boats[i]!.stale ? `${sources[i]!.name} (asleep)` : sources[i]!.name;
+      // Inventory stays per watch, owner and boat: two boats' watches on one PR are two watches.
+      for (const row of part.watchInventory ?? []) row.boat = name;
+      for (const entry of part.reviewSources ?? []) entry.boat = name;
+    }
   if (parts.length === 1) return { snapshot: { ...parts[0]!, viewer: snapshot.viewer, now: parts[0]!.now }, boats, router };
   snapshot.trapNames = Object.assign({}, ...parts.map((p) => p.trapNames ?? {}));
   snapshot.reviewTools = Object.assign({}, ...parts.map((p) => p.reviewTools ?? {}));
@@ -270,6 +299,42 @@ export function mergeMirror(sources: readonly MirrorBoatSnapshot[], now: number,
   snapshot.reports.sort((a, b) => newest(a as unknown as Row, b as unknown as Row, 'at'));
   snapshot.decisions?.sort((a, b) => newest(a as unknown as Row, b as unknown as Row, 'askedAt'));
   return { snapshot, boats, router };
+}
+
+/**
+ * Review items from every boat. A review two boats both report (the same
+ * source and item) shows once; its origin is the freshest awake boat, then
+ * the lowest boat ID, and its actions are pinned there. An item whose
+ * origin is asleep keeps showing, with its actions disabled. A boat too
+ * old to send items leaves the page on the legacy records and says so.
+ */
+function mergeReviewItems(
+  snapshot: GlassSnapshot,
+  parts: readonly GlassSnapshot[],
+  sources: readonly MirrorBoatSnapshot[],
+  boats: readonly MirrorBoatView[],
+  router: MirrorRouter,
+): void {
+  const older = parts.flatMap((part, i) => ((part.reviews?.length ?? 0) > 0 && part.reviewItems === undefined ? [sources[i]!.name] : []));
+  if (!parts.some((part) => part.reviewItems !== undefined) || older.length) {
+    delete snapshot.reviewItems;
+    if (older.length && parts.some((part) => part.reviewItems !== undefined)) snapshot.reviewFallback = older;
+    return;
+  }
+  const order = parts
+    .map((part, i) => ({ part, boat: boats[i]!, source: sources[i]! }))
+    .sort(
+      (a, b) =>
+        Number(a.boat.stale) - Number(b.boat.stale) || b.source.at.localeCompare(a.source.at) || a.source.boat.localeCompare(b.source.boat),
+    );
+  const kept = new Map<string, NonNullable<GlassSnapshot['reviewItems']>[number]>();
+  for (const { part, boat, source } of order)
+    for (const entry of part.reviewItems ?? []) {
+      const identity = `${entry.source.id}\u0000${entry.item.id}`;
+      if (kept.has(identity)) continue;
+      kept.set(identity, { ...entry, origin: router.pin(source.boat), ...(boat.stale ? { originAsleep: source.name } : {}) });
+    }
+  snapshot.reviewItems = [...kept.values()];
 }
 
 /** Each boat's settings under its own name: one section per boat, as each boat's glass shows them. */

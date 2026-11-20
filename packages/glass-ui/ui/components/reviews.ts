@@ -556,6 +556,8 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
   const publish = effective?.publish ?? false;
   return [
     reviewSettingsLine(setup, repo),
+    inp.fallback &&
+      html`<p class="rv-source-notice" data-review-fallback>${inp.fallback.join(', ')} ${inp.fallback.length === 1 ? 'sends' : 'send'} reviews in the older format, so Reviews shows only GitHub reviews until ${inp.fallback.length === 1 ? 'it updates' : 'they update'}.</p>`,
     ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
       const contents = groups.map(
         ({ stack, reviews }) =>
@@ -743,7 +745,7 @@ function ItemReviews({
       .filter((entry) => entry.health !== 'healthy' && (!inp.source || entry.source.id === inp.source))
       .map(
         (entry) =>
-          html`<p class="rv-source-notice" data-review-source=${entry.source.id}><span class="glead"><${SourceLogo} source=${entry.source} /></span><b>${entry.source.name}</b> · ${entry.health === 'held' ? 'stopped' : 'not up to date'}${entry.message && ` · ${entry.message}`}${entry.remedy && html` <span class="dim">${entry.remedy}</span>`}</p>`,
+          html`<p class="rv-source-notice" data-review-source=${entry.source.id}><span class="glead"><${SourceLogo} source=${entry.source} /></span><b>${entry.source.name}${entry.boat && ` · ${entry.boat}`}</b> · ${entry.health === 'held' ? 'stopped' : 'not up to date'}${entry.message && ` · ${entry.message}`}${entry.remedy && html` <span class="dim">${entry.remedy}</span>`}</p>`,
       ),
     ...itemSections(inp.items, sources.length > 1).map(({ id, title, groups, count }) => {
       const contents = groups.map(({ group, entries }) => {

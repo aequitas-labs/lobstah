@@ -258,6 +258,7 @@ const GLYPH_ICON: Record<NonNullable<WatchItemAction['glyph']>, Children> = {
 /** Why an effect cannot run here, or nothing when it can. */
 function blocked(entry: WatchSurfaceItem, action: WatchItemAction): string | undefined {
   if (!('effect' in action.binding)) return undefined;
+  if (entry.originAsleep) return `${entry.originAsleep} is asleep. This item's actions wait until it is back.`;
   if (entry.watch.status !== 'watching') return 'This source is unavailable. Its last items stay listed; release the watch to act on them.';
   if (!action.enabled) return action.reason ?? 'This action is not available now.';
   return undefined;
