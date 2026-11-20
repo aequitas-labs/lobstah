@@ -1047,9 +1047,10 @@ before the worker reads it; `man tend` then shows the dispatch as
 A newer `needs-decision` from the worker stands again. Set `remindSecs = 0`
 for pure at-most-once.
 
-The helm's Stop block lists standing items that need action, open cards at
-their reminder cadence, and one-line trap state changes since the previous
-block. A paused dispatch is reported once, then again every `remindSecs` while
+The helm's Stop block lists standing items that need action, every open card
+on the grounds, and one-line trap state changes since the previous block. A
+card missing from `open-cards` was answered or withdrawn. Cards alone block a
+Stop only when one is new or changed, or was last listed `remindSecs` ago. A paused dispatch is reported once, then again every `remindSecs` while
 it remains paused. A question covered by an unanswered card, through its
 dispatch id or the question’s `--link` to the card, wakes the helm once.
 After that, tend and Stop show `waiting on human · card <key>` without

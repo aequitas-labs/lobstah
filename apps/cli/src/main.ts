@@ -267,7 +267,7 @@ import { backgroundCuller, runCullWorker } from './background-cull.js';
 import { MANUAL } from './manual.js';
 import { decisionEventFields, decisionLine } from './decisions.js';
 import { readHelmPassRequest, requestHelmPass } from '@lobstah/core';
-import { openCardsAtStop, waitingCardsAtStop } from './open-cards.js';
+import { cardsDueAtStop, openCardsAtStop, waitingCardsAtStop } from './open-cards.js';
 import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
@@ -3158,16 +3158,21 @@ async function mainCli(): Promise<void> {
           await soakPark(trapReg.trapId, opt('--timeout'));
           break;
         }
-        /** Peek before blocking; record card reminders only when Stop emits them. */
-        const cardsAtStop = (consume: boolean): string => {
+        /** Every open card at an emitted Stop; recording the listing paces the next card-only block. */
+        const cardsAtStop = (): string => {
           const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
-          return helmNow ? openCardsAtStop(helmNow, loadConfig(), consume) : '';
+          return helmNow ? openCardsAtStop(helmNow, loadConfig(), true) : '';
+        };
+        /** Peek: whether cards alone block this Stop. */
+        const cardsDue = (): boolean => {
+          const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
+          return helmNow ? cardsDueAtStop(helmNow, loadConfig()) : false;
         };
         const emit = (reason: string) => {
           const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
           const rule = helmChatRule(helmNow?.grounds);
           stopBlocked = true;
-          console.log(JSON.stringify({ decision: 'block', reason: [reason, cardsAtStop(true), helmNow ? waitingCardsAtStop(helmNow, loadConfig()) : '', rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
+          console.log(JSON.stringify({ decision: 'block', reason: [reason, cardsAtStop(), helmNow ? waitingCardsAtStop(helmNow, loadConfig()) : '', rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
         };
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
@@ -3247,7 +3252,7 @@ async function mainCli(): Promise<void> {
           }
           const d = dueDigest();
           if (d) blockDigest(d);
-          else if (cardsAtStop(false)) emit('');
+          else if (cardsDue()) emit('');
           break; // otherwise conversational turns end free
         }
         const remindMs = (cfgHaul.remindSecs ?? 900) * 1000;
@@ -3278,7 +3283,7 @@ async function mainCli(): Promise<void> {
           // watcher; with no watcher it rides on the arm block below. Due sent
           // lines are listed with any block, paced like a question.
           const progress = progressLines();
-          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0 || !!cardsAtStop(false);
+          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0 || cardsDue();
           const unanswered = blocking ? dueUnanswered(true, remindMs, Date.now(), matchHelm) : [];
           if (blocking) {
             new IdleWait(hook.session_id, cfgHaul.wait).woke(helmWakeKeys({ events: evs, watches: watched, notices, replies }));
@@ -3325,7 +3330,7 @@ async function mainCli(): Promise<void> {
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
         const quiet = () =>
-          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0 && !cardsAtStop(false);
+          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0 && !cardsDue();
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (!idle.expired()) {
