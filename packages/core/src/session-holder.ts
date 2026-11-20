@@ -35,16 +35,28 @@ export interface ClaudeProcess {
 
 const claudeHomeDir = (): string => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 
-/** How long one `ps` answers for: a glass poll asks once per trap, and each `ps` costs a process spawn. */
-const PS_REUSE_MS = 2000;
-let psCache: { at: number; times: Map<number, string> | undefined } | undefined;
+/** One `ps` for a whole scan (withProcessTable): a glass build asks once per trap, and each `ps` is a process spawn. */
+let processTable: { times?: Map<number, string> | undefined; read: boolean } | undefined;
+
+/** Run fn with one process table: every session lookup inside it shares a single `ps`. */
+export function withProcessTable<T>(fn: () => T): T {
+  const outer = processTable;
+  processTable = outer ?? { read: false };
+  try {
+    return fn();
+  } finally {
+    processTable = outer;
+  }
+}
 
 /** Every process's start time as Claude records it: `ps lstart`, in UTC, whatever the machine's zone. */
-function utcStartTimes(now = Date.now()): Map<number, string> | undefined {
-  if (psCache && now - psCache.at >= 0 && now - psCache.at < PS_REUSE_MS) return psCache.times;
-  const times = readStartTimes();
-  psCache = { at: now, times };
-  return times;
+function utcStartTimes(): Map<number, string> | undefined {
+  if (!processTable) return readStartTimes();
+  if (!processTable.read) {
+    processTable.times = readStartTimes();
+    processTable.read = true;
+  }
+  return processTable.times;
 }
 function readStartTimes(): Map<number, string> | undefined {
   try {

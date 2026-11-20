@@ -1,4 +1,4 @@
-import { trapAvailability } from '@lobstah/core';
+import { trapAvailability, withProcessTable } from '@lobstah/core';
 import { questionParkNote } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
 import { requestHelmPass, resolveGrounds } from '@lobstah/core';
@@ -648,6 +648,10 @@ function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
  * request), so starting cards may carry their start command and ticket.
  */
 export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
+  // Every trap's session lookup in this build shares one process table.
+  return withProcessTable(() => buildSnapshot(options));
+}
+function buildSnapshot(options: { local?: boolean }): GlassFullSnapshot {
   reconcilePermissionCards();
   const cfg = loadConfig();
   refreshMissingDispatchPrs();
