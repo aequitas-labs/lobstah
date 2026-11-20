@@ -1,4 +1,4 @@
-import { ackPrAttention, requestPrMerge, requestStackMerge } from '../actions.js';
+import { ackPrAttention, requestPrMerge, requestStackMerge, setPrefs } from '../actions.js';
 import type { DeckAttention } from '../../src/glass-diff.js';
 import type { GlassPr, GlassStack } from '@lobstah/core';
 import { shownPrAttention } from '../../src/glass-diff.js';
@@ -77,8 +77,7 @@ function otherWatches(inp: Pick<PrsInputs, 'watches'>) {
   return [html`<h2>Other watches</h2>`, Table(['key', 'owner', 'cursor', 'last check', 'error'], rows, 'no other watches')];
 }
 
-function prTable(inp: PrsInputs, older: unknown) {
-  const groups = prGroups(inp);
+function prTable(inp: PrsInputs, older: unknown, hasOlder: boolean) {
   const rowsOf = (groups: ReturnType<typeof prGroups>) =>
     groups.flatMap(({ s, prs }) => [
       html`<tr key=${'stack:' + s.id}><th colspan="8">${stackTitle(s)}${chainText(s, prs)} · floor ${s.floor}${s.open ? ' · open' : ' · history'}<${PrAck} stack=${s} prs=${prs} attention=${inp.prAttention} />${s.readiness && html`<div class=${s.readiness.allReady ? 'ok' : 'dim'}>${s.readiness.state}</div>`}</th></tr>`,
@@ -88,11 +87,47 @@ function prTable(inp: PrsInputs, older: unknown) {
       ),
     ]);
   const cols = ['PR', 'title', 'state', 'checks', 'review', 'merge', 'watch', 'gate'];
-  return [Table(cols, rowsOf(groups), PRS_EMPTY), older, otherWatches(inp)];
+  const table = (groups: ReturnType<typeof prGroups>) => Table(cols, rowsOf(groups), PRS_NONE_OPEN);
+  return [prSections(inp, table, older, hasOlder), otherWatches(inp)];
+}
+
+/** Splits owned PRs into Open and Closed: a stack with any open PR stays whole under Open. */
+export function prSectionGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): {
+  open: ReturnType<typeof prGroups>;
+  closed: ReturnType<typeof prGroups>;
+} {
+  const groups = prGroups(inp);
+  return { open: groups.filter(({ s }) => s.open), closed: groups.filter(({ s }) => !s.open) };
+}
+
+/**
+ * The PRs tab's two sections, with no counts: Open always shows, and Closed
+ * is a disclosure, collapsed until this viewer opens it. Older history pages
+ * in under Closed, since only finished PRs are left out of /data.
+ */
+function prSections(
+  inp: PrsInputs,
+  render: (groups: ReturnType<typeof prGroups>) => Children,
+  older: unknown,
+  hasOlder: boolean,
+): Children {
+  const { open, closed } = prSectionGroups(inp);
+  if (!open.length && !closed.length && !hasOlder) return html`<div class="empty">${PRS_EMPTY}</div>`;
+  const onToggle = (event: Event) => {
+    const expanded = (event.currentTarget as HTMLDetailsElement).open;
+    if ((getState().prefs.prSections?.closed === true) !== expanded)
+      setPrefs({ prSections: { ...getState().prefs.prSections, closed: expanded } });
+  };
+  return [
+    html`<section class="pr-section" data-pr-section="open"><h2>Open</h2>${open.length ? render(open) : html`<p class="empty">${PRS_NONE_OPEN}</p>`}</section>`,
+    (closed.length || hasOlder) &&
+      html`<details class="pr-section" data-pr-section="closed" open=${inp.expanded?.closed === true} onToggle=${onToggle}><summary>Closed</summary>${closed.length ? render(closed) : null}${older}</details>`,
+  ];
 }
 
 /** How an owned PR gets onto the PRs page. */
 const PRS_EMPTY = 'no PRs of yours are watched: a trap’s PR shows here, and `lobstah watch add <url>` adds one you opened';
+const PRS_NONE_OPEN = 'No open PRs';
 
 const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', rebase: 'rebased commits' } as const;
 
@@ -481,8 +516,7 @@ export function PrStackCard({ s, prs, attention }: { s: GlassStack; prs: GlassPr
   });
 }
 
-function prCards(inp: PrsInputs, older: unknown) {
-  const groups = prGroups(inp);
+function prCards(inp: PrsInputs, older: unknown, hasOlder: boolean) {
   // A stack of several PRs is one card; a lone PR is its own card, whose Ack acks its stack too.
   const stacksOf = (groups: ReturnType<typeof prGroups>) =>
     html`<div class="cards">${groups.map(({ s, prs }) =>
@@ -490,7 +524,7 @@ function prCards(inp: PrsInputs, older: unknown) {
         ? html`<${PrStackCard} key=${'stack:' + s.id} s=${s} prs=${prs} attention=${inp.prAttention} />`
         : prCard(prs[0]!, { attention: inp.prAttention, stack: s }),
     )}</div>`;
-  return [groups.length ? stacksOf(groups) : html`<div class="empty">${PRS_EMPTY}</div>`, older, otherWatches(inp)];
+  return [prSections(inp, stacksOf, older, hasOlder), otherWatches(inp)];
 }
 
 /**
@@ -528,5 +562,6 @@ function AckButton({ pending, label, stack }: { pending: DeckAttention[]; label:
 
 export function PRs({ inp, more }: { inp: PrsInputs; more?: OlderControl }) {
   const older = more && html`<${ShowOlder} kind="prs" more=${more} />`;
-  return inp.view === 'cards' ? prCards(inp, older) : prTable(inp, older);
+  const hasOlder = !!more && can('older') && (more.left > 0 || !!more.error);
+  return inp.view === 'cards' ? prCards(inp, older, hasOlder) : prTable(inp, older, hasOlder);
 }

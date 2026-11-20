@@ -751,7 +751,7 @@ it.each(['needs', 'waiting', 'done'] as const)('places a complete stack only in 
   const container = g.$(`[data-review-section="${section}"] [data-review-stack]`)!;
   expect(container).toBeTruthy();
   expect(g.$(`[data-review-section="${section}"] > ${section === 'needs' ? 'h2' : 'summary'}`)!.textContent).toBe(
-    { needs: 'Needs your review (1)', waiting: 'Waiting on response (3)', done: 'Done' }[section],
+    { needs: 'Needs your review (3)', waiting: 'Waiting on response (3)', done: 'Done' }[section],
   );
   (container as unknown as HTMLElement).click(); await g.settle();
   expect(Array.from(container.querySelectorAll('[data-review]')).map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
@@ -797,7 +797,7 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
   const reviews = [review(7, { stack, state: 'posted', verdict: 'approve' }), review(8, { stack, state: 'stale', reReview: { headSha: 'new', at: ago(0) } }), review(9, { state: 'posted', verdict: 'request_changes' }), review(10, { state: 'merged', prState: 'MERGED' })];
   const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
   open.push(g);
-  expect(g.$('[data-review-section="needs"]')!.textContent).toContain('Needs your review (0)');
+  expect(g.$('[data-review-section="needs"]')!.textContent).toContain('Needs your review (2)');
   (g.$('[data-review-stack]') as unknown as HTMLElement).click(); await g.settle();
   expect(g.$('[data-review-section="needs"] [data-review="review:acme/web#7"]')).toBeTruthy();
   const waiting = g.$('[data-review-section="waiting"]')!;
@@ -818,7 +818,7 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
 });
 
 
-it('counts every review waiting on a response, whatever was seen or acknowledged, and gives Done no number', async () => {
+it('counts every row in Needs your review and Waiting on response, whatever was seen, acknowledged or muted, and gives Done no number', async () => {
   const reviews = [
     review(7, { state: 'posted', verdict: 'approve' }),
     review(8, { state: 'posted', verdict: 'request_changes', seenAt: ago(0), acknowledgedAt: ago(0) }),
@@ -828,15 +828,17 @@ it('counts every review waiting on a response, whatever was seen or acknowledged
     review(12, { state: 'posted', verdict: 'approve', requestRemoved: true }),
     review(13, { state: 'merged', prState: 'MERGED' }),
     review(14, { state: 'posted', verdict: 'approve', prState: 'CLOSED' }),
+    review(15, { state: 'drafted', staged: true, seenAt: ago(0), acknowledgedAt: ago(0) }),
+    review(16, { state: 'drafted', staged: true, mutedAt: ago(0) }),
   ];
   const sections = reviewSections(reviews);
-  expect(sections.map(({ id, count }) => [id, count])).toEqual([['needs', 1], ['waiting', 3], ['done', undefined]]);
+  expect(sections.map(({ id, count }) => [id, count])).toEqual([['needs', 4], ['waiting', 3], ['done', undefined]]);
   expect(sections[1]!.groups.flatMap(group => group.reviews).map(r => r.number).sort()).toEqual([7, 8, 9]);
   expect(sections[2]!.groups.flatMap(group => group.reviews).map(r => r.number).sort()).toEqual([12, 13, 14]);
-  expect(sections[0]!.groups.flatMap(group => group.reviews).map(r => r.number).sort()).toEqual([10, 11]);
+  expect(sections[0]!.groups.flatMap(group => group.reviews).map(r => r.number).sort()).toEqual([10, 11, 15, 16]);
   const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
   open.push(g);
-  expect(g.$('[data-review-section="needs"] > h2')!.textContent).toBe('Needs your review (1)');
+  expect(g.$('[data-review-section="needs"] > h2')!.textContent).toBe('Needs your review (4)');
   expect(g.$('[data-review-section="waiting"] > summary')!.textContent).toBe('Waiting on response (3)');
   expect(g.$('[data-review-section="done"] > summary')!.textContent).toBe('Done');
   expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
@@ -847,7 +849,7 @@ it('shows Waiting on response (0) when nothing waits, and Done stays bare when i
   expect(sections.map(({ id, count }) => [id, count])).toEqual([['needs', 1], ['waiting', 0], ['done', undefined]]);
 });
 
-it('files a review whose request was removed under Done, without counting it', async () => {
+it('files a review whose request was removed under Done, out of the Needs your review count', async () => {
   const reviews = [
     review(7, { state: 'dismissed', requestRemoved: true }),
     review(8, { state: 'drafted', staged: true, verdict: 'comment', requestRemoved: true }),
@@ -864,7 +866,7 @@ it('files a review whose request was removed under Done, without counting it', a
   expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
 });
 
-it('counts only actionable stack members and preserves disclosure across polls and PR actions', async () => {
+it('counts every stack member under Needs your review and preserves disclosure across polls and PR actions', async () => {
   const stack = { id: 'pr:acme/web#7', title: 'Files', keys: [7, 8, 9, 10, 11, 12].map(number => `review:acme/web#${number}`) };
   const reviews = [
     review(7, { stack, state: 'drafted', seenAt: ago(0), staged: true }),
@@ -876,7 +878,7 @@ it('counts only actionable stack members and preserves disclosure across polls a
   ];
   const snapshot = { ...fleet(), reviews };
   const g = await loadGlass(GLASS_PAGE, snapshot, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } }); open.push(g);
-  expect(g.$('[data-review-section="needs"] > h2')!.textContent).toBe('Needs your review (1)');
+  expect(g.$('[data-review-section="needs"] > h2')!.textContent).toBe('Needs your review (6)');
   const container = g.$('[data-review-stack]')!;
   container.dispatchEvent(new g.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await g.settle();
   expect(container.getAttribute('aria-expanded')).toBe('true');

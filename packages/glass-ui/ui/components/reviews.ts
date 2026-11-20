@@ -547,20 +547,6 @@ export function reviewGroups(reviews: readonly GlassReview[]): Array<{ stack?: G
   return groups;
 }
 
-/** Actionable reviews stay counted after opening; automatic work and waiting rounds do not. */
-export function reviewNeedsViewer(review: GlassReview): boolean {
-  if (
-    review.mutedAt ||
-    review.requestRemoved ||
-    reviewUpdating(review) ||
-    ['MERGED', 'CLOSED'].includes(review.prState ?? '') ||
-    ['merged', 'closed'].includes(review.state)
-  )
-    return false;
-  if (review.reReview) return true;
-  return review.state === 'drafted' || review.state === 'failed' || (review.state === 'requested' && !!(review.stands || review.needsYou));
-}
-
 /** Where a review sits on the Reviews tab: it needs the viewer, it waits on the author's response, or it is done. */
 export type ReviewSectionId = 'needs' | 'waiting' | 'done';
 
@@ -570,9 +556,9 @@ export interface ReviewSection {
   title: string;
   groups: ReturnType<typeof reviewGroups>;
   /**
-   * Needs your review counts the rows that still need the viewer. Waiting on
-   * response counts every row it holds, whatever has been seen or acknowledged.
-   * Done shows no number, so it has none.
+   * Needs your review and Waiting on response count every row they hold,
+   * whatever has been seen, acknowledged or muted. Done shows no number, so it
+   * has none.
    */
   count?: number;
 }
@@ -601,7 +587,8 @@ export function reviewSections(reviews: readonly GlassReview[]): ReviewSection[]
     if (!('stack' in group && group.stack) && previous && !previous.stack) previous.reviews.push(...group.reviews);
     else section.groups.push(group);
   }
-  needs.count = needs.groups.flatMap((group) => group.reviews).filter(reviewNeedsViewer).length;
-  waiting.count = waiting.groups.reduce((rows, group) => rows + group.reviews.length, 0);
+  const rows = (section: ReviewSection): number => section.groups.reduce((total, group) => total + group.reviews.length, 0);
+  needs.count = rows(needs);
+  waiting.count = rows(waiting);
   return sections;
 }

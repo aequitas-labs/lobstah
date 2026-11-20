@@ -33,6 +33,26 @@ function fleet(mine: number[]): GlassFullSnapshot {
   return d;
 }
 
+/** Adds #51, a merged PR the person owns, in a closed stack of its own. */
+function withClosed(d: GlassFullSnapshot): GlassFullSnapshot {
+  const lone = d.prs.find((p) => p.number === 50)!;
+  const merged = {
+    ...lone,
+    key: 'pr:acme/web#51',
+    url: 'https://github.com/acme/web/pull/51',
+    number: 51,
+    title: 'A merged PR',
+    stackId: 'pr:acme/web#51',
+    state: 'MERGED' as const,
+    mergedAt: d.now,
+    badge: { ...lone.badge, state: 'merged' as const },
+    mine: true,
+  };
+  d.prs = [...d.prs.filter((p) => p.number !== 51), merged];
+  d.stacks = [...d.stacks, { id: 'pr:acme/web#51', floor: 'main', repo: d.stacks[0]!.repo, numbers: [51], open: false, nextNumber: 51, behind: 0 }];
+  return d;
+}
+
 for (const view of ['cards', 'table'] as const) {
   describe(`the PRs tab, as ${view}`, () => {
     it('lists only owned PRs without an ownership section split', async () => {
@@ -55,6 +75,37 @@ for (const view of ['cards', 'table'] as const) {
       const listed = view === 'table' ? g.$$('#prs tr.rowhead td:first-child').map(text) : g.$$('#prs .prcard .gcontext').map(text);
       expect(listed).toHaveLength(1);
       expect(listed[0]).toContain('#42');
+    });
+
+    it('splits Open from a collapsed Closed section, with no counts, and remembers Closed for this viewer', async () => {
+      const d = withClosed(fleet([50, 51]));
+      const g = await page(d, { hash: '#prs', prefs: { view } });
+      const openSection = g.$('#prs [data-pr-section="open"]')!;
+      const closed = g.$('#prs [data-pr-section="closed"]')!;
+      expect(text(openSection.querySelector('h2'))).toBe('Open');
+      expect(closed.tagName).toBe('DETAILS');
+      expect(text(closed.querySelector('summary'))).toBe('Closed');
+      expect(closed.hasAttribute('open')).toBe(false);
+      expect(text(openSection)).toContain('A lone PR');
+      expect(text(openSection)).not.toContain('A merged PR');
+      expect(text(closed)).toContain('A merged PR');
+      closed.setAttribute('open', '');
+      closed.dispatchEvent(new g.window.Event('toggle'));
+      await g.settle();
+      const prefs = JSON.parse(g.window.localStorage.getItem('spyglass')!);
+      expect(prefs.prSections).toEqual({ closed: true });
+      const reload = await page(d, { hash: '#prs', prefs });
+      expect(reload.$('#prs [data-pr-section="closed"]')!.hasAttribute('open')).toBe(true);
+    });
+
+    it('keeps a stack with an open PR whole under Open, and says so when nothing is open', async () => {
+      const g = await page(withClosed(fleet([42, 43, 51])), { hash: '#prs', prefs: { view } });
+      await openStacks(g);
+      expect(text(g.$('#prs [data-pr-section="open"]'))).toContain('#42');
+      expect(g.$('#prs [data-pr-section="closed"]')!.textContent).not.toContain('#42');
+      const onlyClosed = await page(withClosed(fleet([51])), { hash: '#prs', prefs: { view } });
+      expect(text(onlyClosed.$('#prs [data-pr-section="open"]'))).toBe('Open No open PRs');
+      expect(text(onlyClosed.$('#prs [data-pr-section="closed"]'))).toContain('A merged PR');
     });
 
     it('explains how to add an owned PR when none is watched', async () => {
