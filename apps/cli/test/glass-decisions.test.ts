@@ -1131,6 +1131,62 @@ describe('glass: an answered card handed to the helm', () => {
     expect(row(g, KEY)).toBeUndefined();
   });
 
+  /** KEY handed off between two open cards: the question (older) and LATER (newer). */
+  const LATER = 'decision:0f0f0f0f';
+  function between(handoff: Parameters<typeof handedOff>[0]): GlassSnapshot {
+    const d = handedOff(handoff);
+    d.decisions.push({ ...d.decisions[0]!, key: LATER, title: 'Ship the tray now?', options: ['Yes', 'No'], askedAt: ago(60_000), stateHash: 'h3', handoff: undefined });
+    d.attention.push({ ...fleet().attention.find((a) => a.key === KEY)!, key: LATER, stateHash: 'h3', at: ago(60_000), standingSince: ago(60_000) });
+    return d;
+  }
+  /** Where the modal stands: its card, position and which of prev / next it offers. */
+  const at = (g: GlassDom) => {
+    const m = g.$('.dmodal')!;
+    return { key: m.getAttribute('data-decision'), pos: text(m.querySelector('.dpos')), prev: !(m.querySelector('.dprev') as HTMLButtonElement).disabled, next: !(m.querySelector('.dnext') as HTMLButtonElement).disabled };
+  };
+
+  it.each([
+    ['a spinning', { state: 'answered', answeredAt: ago(30_000) }],
+    ['an acked', { state: 'acked', answeredAt: ago(60_000), ackedAt: ago(10_000) }],
+  ] as const)('steps to the open cards on either side of %s card, by button and by arrow key', async (_name, handoff) => {
+    const g = await page(between(handoff));
+    await show(g, KEY);
+    expect(at(g)).toEqual({ key: KEY, pos: '2 open', prev: true, next: true });
+    await click(g, g.$('.dmodal .dprev'));
+    expect(at(g)).toEqual({ key: Q, pos: '1 of 2', prev: false, next: true });
+    await click(g, g.$('.dmodal .dnext'));
+    expect(at(g)).toEqual({ key: LATER, pos: '2 of 2', prev: true, next: false });
+
+    await show(g, KEY);
+    await key(g, 'ArrowRight');
+    expect(at(g).key).toBe(LATER);
+    await show(g, KEY);
+    await key(g, 'ArrowLeft');
+    expect(at(g).key).toBe(Q);
+    expect(answers(g)).toHaveLength(0);
+  });
+
+  it('steps on from a card answered here once the snapshot hands it to the helm', async () => {
+    const d = between({ state: 'answered', answeredAt: ago(0) });
+    const fresh = fleet();
+    d.attention.push(fresh.attention.find((a) => a.key === KEY)!);
+    d.decisions[0]!.handoff = undefined;
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
+    await click(g, card(g, KEY)!.querySelector('.dsend'));
+    expect(answers(g)).toHaveLength(1);
+    // The modal moved on to the next open card; return to the answered one.
+    g.serve(between({ state: 'answered', answeredAt: ago(0) }));
+    await g.poll();
+    await show(g, KEY);
+    expect(at(g)).toMatchObject({ key: KEY, prev: true, next: true });
+    await click(g, g.$('.dmodal .dnext'));
+    expect(at(g).key).toBe(LATER);
+    await click(g, g.$('.dmodal .dprev'));
+    expect(at(g).key).toBe(Q);
+  });
+
   it('a card answered on this page keeps its row and turns into the spinner on the next snapshot', async () => {
     const d = fleet();
     const g = await page(d, { post: ok });

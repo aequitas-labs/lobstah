@@ -104,6 +104,18 @@ export function handedOffCard(key: string): ReturnType<typeof decisionCards>[num
   return currentCards().find((c) => c.key === key && !isOpenDecision(c));
 }
 
+/**
+ * The card the modal shows for `key`: an open one in `order`, a finished run
+ * card the snapshot dropped, or an answered card handed to the helm. The
+ * modal and previous / next both read it, so every card shown can step.
+ */
+export function decisionOnScreen(
+  key: string,
+  order: ReturnType<typeof decisionCards>,
+): ReturnType<typeof decisionCards>[number] | undefined {
+  return order.find((c) => c.key === key) ?? getState().runs?.[key]?.card ?? handedOffCard(key);
+}
+
 /** The open decisions the modal steps through, oldest first. */
 export function modalOrder(): ReturnType<typeof decisionCards> {
   const state = getState();
@@ -195,14 +207,16 @@ async function loadClosedDecision(key: string): Promise<void> {
   }
 }
 
-/** Previous (-1) or next (+1) in the modal's order. It never wraps and never sends anything. */
-/** Previous or next from the decision on screen, including a finished run card the snapshot no longer lists. */
+/**
+ * Previous (-1) or next (+1) from the decision on screen, in the modal's
+ * order, including a card that is not among the open ones (decisionOnScreen).
+ * It never wraps and never sends anything.
+ */
 export function stepDecision(dir: -1 | 1): void {
-  const state = getState();
-  const open = state.decisionModal;
+  const open = getState().decisionModal;
   if (!open?.key) return;
   const order = modalOrder();
-  const shown = order.find((c) => c.key === open.key) ?? state.runs?.[open.key]?.card;
+  const shown = decisionOnScreen(open.key, order);
   if (!shown) return;
   const near = decisionNeighbours(order, shown);
   const next = dir < 0 ? near.prev : near.next;
