@@ -39,7 +39,9 @@ it('man wait --peek on a large state answers without running due watches; a cons
   }
   // Due watches whose checks are slow: a peek that ran them would take at least 20 × 0.5 s.
   const marker = (i: number) => path.join(home, `ran-${i}`);
-  for (let i = 0; i < 20; i++) addWatch(`slow-${i}`, `sleep 0.5; touch ${JSON.stringify(marker(i))}; echo '{"cursor":"1"}'`, { everySecs: 30 });
+  // A node one-liner, not sleep/touch: watch checks run under cmd.exe on Windows and sh elsewhere.
+  const slowCheck = `setTimeout(()=>{require('fs').writeFileSync(process.argv[1],'');console.log(JSON.stringify({cursor:'1'}))},500)`;
+  for (let i = 0; i < 20; i++) addWatch(`slow-${i}`, `"${process.execPath}" -e "${slowCheck}" "${marker(i)}"`, { everySecs: 30 });
   // Every watch last checked long ago, so all are due.
   const watches = path.join(home, 'watches');
   for (const name of fs.readdirSync(watches).filter((f) => f.endsWith('.json'))) {
