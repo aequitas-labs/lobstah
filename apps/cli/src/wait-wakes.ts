@@ -50,10 +50,12 @@ function wakeLabels(batch: Parameters<typeof helmWakeKeys>[0]): string[] {
 }
 
 /**
- * The first line of every man wait wake: how many events it carries, and
- * each one's kind and id, so a reader who stops early still sees them all.
+ * The first line of every man wait wake, such as `wake[3]: answer 7f277cd6,
+ * reply a89ad2ba, todo 1510`: how many events it carries, and each one's kind
+ * and id, so a reader who stops early still sees them all.
  */
 export function wakeIndex(batch: Parameters<typeof helmWakeKeys>[0]): string {
   const labels = wakeLabels(batch);
-  return `${labels.length} event${labels.length === 1 ? '' : 's'}: ${labels.join(', ')}`;
+  // A toon array header, never an `event:` key: readers grep those.
+  return `wake[${labels.length}]: ${labels.join(', ')}`;
 }

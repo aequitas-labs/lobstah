@@ -941,7 +941,7 @@ Every carrier shares the cursor (per grounds, for a helm):
 
 - **The wait loop.** A delivered `man wait` event (exit 0) advances the helm's
   cursor through the event time. A wake's first line indexes its events by
-  kind and id, such as `3 events: answer 7f277cd6, reply a89ad2ba, todo
+  kind and id, such as `wake[3]: answer 7f277cd6, reply a89ad2ba, todo
   1510`, so a reader who stops early still sees what arrived. A timeout (exit 3) prints the delta when
   something changed without advancing the cursor — see the loop idiom below.
 - **The blocking park.** A helm session's Stop-hook park delivers the digest as a wake

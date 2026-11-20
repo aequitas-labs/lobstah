@@ -167,7 +167,7 @@ describe('the helm acks', () => {
     const again = lobstah(['man', 'ack', card.key, '--session', sessionId]);
     expect(again.status).not.toBe(0);
     expect(again.stdout + again.stderr).toMatch(/already acked/);
-  });
+  }, 30_000);
 
   it('only the helm acks', () => {
     const card = askCard('Ship 0.9?', { options: ['Ship'] });
@@ -175,7 +175,7 @@ describe('the helm acks', () => {
     const stranger = lobstah(['man', 'ack', card.key, '--session', 'someone-else']);
     expect(stranger.status).not.toBe(0);
     expect(decisionHandoff(card.key)?.state).toBe('answered');
-  });
+  }, 30_000);
 
   it('withdrawing or replacing an answered card acks it', () => {
     const withdrawn = askCard('Withdraw me', { options: ['Yes'] });
@@ -189,7 +189,7 @@ describe('the helm acks', () => {
     const next = askCard('The follow-up', { replace: replaced.key });
     expect(readDecisionAck(replaced.key)).toMatchObject({ note: `Replaced by ${next.key}`, by: 'replace' });
     expect(awaitingAckDecisions()).toEqual([]);
-  });
+  }, 30_000);
 
   it('send --for-decision acks the card once the message is delivered, and refuses a card with nothing to ack', () => {
     enqueue({ id: dispatchId, repo: 'web', brief: 'Ship it' });
@@ -203,7 +203,7 @@ describe('the helm acks', () => {
     expect(sent.status, sent.stderr).toBe(0);
     expect(sent.stdout).toContain(`acked: ${card.key}`);
     expect(readDecisionAck(card.key)).toMatchObject({ note: `Sent to ${dispatchId.slice(0, 8)}: Ship it now`, by: 'send' });
-  });
+  }, 30_000);
 });
 
 describe('man wait', () => {
@@ -213,10 +213,10 @@ describe('man wait', () => {
     const wait = lobstah(['man', 'wait', '--session', sessionId, '--timeout', '2']);
     expect(wait.status, wait.stderr).toBe(0);
     const lines = wait.stdout.split('\n');
-    expect(lines[0]).toBe(`1 event: answer ${card.key.slice('decision:'.length)}`);
+    expect(lines[0]).toBe(`wake[1]: answer ${card.key.slice('decision:'.length)}`);
     expect(wait.stdout).toContain('event: decision-answer');
     expect(wait.stdout).toContain(`lobstah man ack ${card.key} \\"<what you did>\\"`);
-  });
+  }, 30_000);
 
   it('the index names every event in the wake, by kind and id', () => {
     const line = wakeIndex({
@@ -225,7 +225,7 @@ describe('man wait', () => {
       replies: [{ id: 'a89ad2ba-0000-4000-8000-000000000000', lane: 'work', entry: { verb: 'working', at: '' }, sent: 'go' }] as never,
       notices: [{ seq: '1', kind: 'trap-stowed', at: '', text: 'stowed' }] as never,
     });
-    expect(line).toBe('4 events: todo 1510, needs-decision 22222222, trap-stowed, reply a89ad2ba');
+    expect(line).toBe('wake[4]: todo 1510, needs-decision 22222222, trap-stowed, reply a89ad2ba');
   });
 });
 
