@@ -99,9 +99,7 @@ export function glassDecisions(decisions: DecisionMeta[] = [...standingDecisions
           handoff: {
             state: handoff.state,
             answeredAt: handoff.answer.answeredAt,
-            ...(handoff.answer.option !== undefined ? { option: handoff.answer.option } : {}),
-            ...(handoff.answer.text !== undefined ? { text: handoff.answer.text } : {}),
-            ...(handoff.ack ? { ackedAt: handoff.ack.ackedAt, ...(handoff.ack.note ? { note: handoff.ack.note } : {}) } : {}),
+            ...(handoff.ack ? { ackedAt: handoff.ack.ackedAt } : {}),
           },
         }
       : {}),

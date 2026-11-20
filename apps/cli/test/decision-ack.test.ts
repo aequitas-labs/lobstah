@@ -230,17 +230,19 @@ describe('man wait', () => {
 });
 
 describe('the glass', () => {
-  it('shows an answered card as handed off, outside the open order, then its ack, then clears it', () => {
+  it('hands the glass only the state, keeps the card out of the open order, then clears it', () => {
     const card = askCard('Ship 0.9?', { options: ['Ship'] });
     answerDecision({ key: card.key, option: 'Ship', text: 'today', by: 'glass', maxBytes: 1024 });
     const spinning = glassDecisions().find((d) => d.key === card.key);
-    expect(spinning?.handoff).toMatchObject({ state: 'answered', option: 'Ship', text: 'today' });
+    expect(spinning?.handoff).toEqual({ state: 'answered', answeredAt: readDecisionAnswer(card.key)!.answeredAt });
     const cards = decisionCards([], glassDecisions());
     expect(cards.map((c) => c.key)).toEqual([card.key]);
     expect(openDecisionOrder(cards, () => false)).toEqual([]);
 
     ackDecision(card.key, { note: 'Released' });
-    expect(glassDecisions().find((d) => d.key === card.key)?.handoff).toMatchObject({ state: 'acked', note: 'Released' });
+    // The glass gets the state only: the note stays in the record and the CLI.
+    const acked = glassDecisions().find((d) => d.key === card.key)?.handoff;
+    expect(acked).toEqual({ state: 'acked', answeredAt: readDecisionAnswer(card.key)!.answeredAt, ackedAt: readDecisionAck(card.key)!.ackedAt });
     expect(glassDecisions([...handoffDecisions(Date.now() + ACK_CLEAR_MS)])).toEqual([]);
   });
 });

@@ -858,12 +858,13 @@ the same rule.
 - **The ack.** An answered card stays `answered` until the helm acks it:
   `lobstah man ack decision:<key> ["<what I did>"]` moves it to `acked` and
   stores `ack.json` beside `answer.json`. The claimed helm alone acks, and
-  only once. Until then the glass shows the card with the run card's spinner
-  and "Helm is on it", the Stop hook lists it under `answered-cards` with its
-  answer and blocks every helm turn end on it (it is not paced like an open
-  card), and `man tend` lists it too. `man report` never acks it. Once
-  acked, the card shows a check and the note for two minutes, then leaves the
-  glass, as a finished run card does. Three other moves also ack the card:
+  only once. Until then, the glass shows the run card's spinner on the card
+  and nothing more. The Stop hook lists the card under `answered-cards` with
+  its answer and blocks every helm turn end on it; it is not paced like an
+  open card. `man tend` lists it too, and `man report` never acks it. Once
+  acked, the card shows the run card's check for two minutes, then leaves the
+  glass, as a finished run card does. The note stays in `ack.json` and the
+  CLI; the glass doesn't show it. Three other moves also ack the card:
   `man ask --replace <key>` (note `Replaced by <new key>`), `man ask --withdraw
   <key>` (note `Withdrawn`), and `lobstah send <target> --for-decision <key>
   "<instruction>"` once the message is delivered (note `Sent to <id>: <first

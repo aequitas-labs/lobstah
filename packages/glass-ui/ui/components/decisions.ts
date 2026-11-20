@@ -5,7 +5,7 @@ import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Attachment, GlassHandoff, RecentRun, RunResult } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
-import { answerSummary, decisionNeighbours, isOpenDecision } from '../../src/glass-diff.js';
+import { decisionNeighbours, isOpenDecision } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
 import {
   HOTKEY_MAX,
@@ -117,17 +117,14 @@ function stateOf(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: 
   return c.viewedAt || viewedHere ? 'read' : 'unread';
 }
 
-/** What the hand-off says: the helm is on it, or what the helm did. */
-const handoffWords = (h: GlassHandoff) => (h.state === 'acked' ? h.note || 'Helm has it' : 'Helm is on it');
-
 /**
- * An answered card's hand-off, drawn as a run card's lifecycle: a spinner
- * while the helm takes the answer up, then a check with the helm's note.
+ * An answered card's hand-off, drawn as a run card's status icon alone: a
+ * spinner while the helm takes the answer up, then a check once it acks.
+ * The words are the icon's accessible name and tooltip.
  */
-function Handoff({ handoff }: { handoff: GlassHandoff }) {
-  const words = handoffWords(handoff);
-  const label = handoff.state === 'acked' ? `Helm has it${handoff.note ? ` · ${handoff.note}` : ''}` : words;
-  return html`<span class="dsent dhandoff"><${RunStatusIcon} status=${handoff.state === 'acked' ? 'succeeded' : 'running'} label=${label} /><span class="dhandoff-text">${words}</span></span>`;
+function HandoffIcon({ handoff }: { handoff: GlassHandoff }) {
+  const acked = handoff.state === 'acked';
+  return html`<${RunStatusIcon} status=${acked ? 'succeeded' : 'running'} label=${acked ? 'Helm has it' : 'Helm is on it'} />`;
 }
 
 /** Where a decision came from: its dispatch (a link to it) and repo. */
@@ -166,7 +163,7 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   const status = runIcon
     ? html`<span class="dsent"><${RunStatusIcon} status=${runIcon} result=${run?.latest?.result} startedAt=${run?.latest?.startedAt} /></span>`
     : handoff
-      ? html`<${Handoff} handoff=${handoff} />`
+      ? html`<span class="dsent"><${HandoffIcon} handoff=${handoff} /></span>`
       : state === 'answered' && html`<span class="dsent ok">sent</span>`;
   return html`<${DecisionRow}
     key=${c.key} state=${state} focused=${focused} attrs=${{ 'data-decision': c.key }} onOpen=${open}
@@ -359,7 +356,7 @@ export function DecisionModal({
     : c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
       ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
       : handoff
-        ? html`<div class="danswered dhandoff-dock"><div class="dim">You answered: ${answerSummary({ option: handoff.option, text: handoff.text }) || 'sent'}</div><${Handoff} handoff=${handoff} /></div>`
+        ? html`<div class="danswered runstate"><${HandoffIcon} handoff=${handoff} /></div>`
         : c.kind === 'decision' && c.readOnly
           ? [runRow(false), !(run && ran?.busy) && html`<div class="dim">Closed decision</div>`]
           : run && (ran?.busy || ran?.result || run.latest)

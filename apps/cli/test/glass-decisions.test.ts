@@ -1067,14 +1067,15 @@ describe('glass: an answered card handed to the helm', () => {
     return d;
   }
 
-  it('spins with "Helm is on it" until the helm acks, outside the open count, the badge and the alert', async () => {
-    const g = await page(handedOff({ state: 'answered', answeredAt: ago(30_000), option: 'v2', text: 'and keep v1 readable' }));
+  it('spins like a run card until the helm acks, with no words beside it, outside the open count, the badge and the alert', async () => {
+    const g = await page(handedOff({ state: 'answered', answeredAt: ago(30_000) }));
     const r = row(g, KEY)!;
     expect(r.className).toContain('answered');
-    const icon = r.querySelector('.dhandoff .runicon')!;
-    expect(icon.className).toContain('run-running');
-    expect(icon.getAttribute('aria-label')).toBe('Helm is on it');
-    expect(text(r.querySelector('.dhandoff-text'))).toBe('Helm is on it');
+    const status = r.querySelector('.dsent')!;
+    expect(status.querySelector('.runicon')!.className).toContain('run-running');
+    expect(status.querySelector('.runicon')!.getAttribute('aria-label')).toBe('Helm is on it');
+    // The icon alone: no visible words beside it.
+    expect(text(status)).toBe('');
     // Only the raw question still waits on the person.
     expect(text(g.$('#deck .decisions h2 .section-count'))).toBe('· 1');
     expect(text(g.$('#tabs a[data-tab="deck"] .dbadge'))).toBe('1');
@@ -1084,19 +1085,19 @@ describe('glass: an answered card handed to the helm', () => {
     const c = card(g, KEY)!;
     expect(c.querySelector('textarea')).toBeNull();
     expect(c.querySelector('.doptions')).toBeNull();
-    expect(text(c.querySelector('.dhandoff-dock > .dim'))).toBe('You answered: v2 · and keep v1 readable');
-    expect(text(c.querySelector('.dhandoff-dock .dhandoff-text'))).toBe('Helm is on it');
+    const dock = c.querySelector('.ddock .runstate')!;
+    expect(dock.querySelector('.runicon')!.className).toContain('run-running');
+    expect(text(dock)).toBe('');
     expect(text(c.querySelector('.dpos'))).toBe('1 open');
   });
 
-  it('shows a check with the ack note once acked, then leaves when the snapshot drops it', async () => {
-    const d = handedOff({ state: 'acked', answeredAt: ago(60_000), option: 'v2', ackedAt: ago(10_000), note: 'Sent v2 to the worker' });
+  it('shows the check once acked, without the ack note, then leaves when the snapshot drops it', async () => {
+    const d = handedOff({ state: 'acked', answeredAt: ago(60_000), ackedAt: ago(10_000) });
     const g = await page(d);
-    const r = row(g, KEY)!;
-    const icon = r.querySelector('.dhandoff .runicon')!;
-    expect(icon.className).toContain('run-succeeded');
-    expect(icon.getAttribute('aria-label')).toBe('Helm has it · Sent v2 to the worker');
-    expect(text(r.querySelector('.dhandoff-text'))).toBe('Sent v2 to the worker');
+    const status = row(g, KEY)!.querySelector('.dsent')!;
+    expect(status.querySelector('.runicon')!.className).toContain('run-succeeded');
+    expect(status.querySelector('.runicon')!.getAttribute('aria-label')).toBe('Helm has it');
+    expect(text(status)).toBe('');
 
     d.decisions = [];
     g.serve(d);
@@ -1111,8 +1112,8 @@ describe('glass: an answered card handed to the helm', () => {
     await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
     await click(g, card(g, KEY)!.querySelector('.dsend'));
     expect(text(row(g, KEY)!.querySelector('.dsent'))).toBe('sent');
-    g.serve(handedOff({ state: 'answered', answeredAt: ago(0), option: 'v2' }));
+    g.serve(handedOff({ state: 'answered', answeredAt: ago(0) }));
     await g.poll();
-    expect(row(g, KEY)!.querySelector('.dhandoff .run-running')).toBeTruthy();
+    expect(row(g, KEY)!.querySelector('.dsent .run-running')).toBeTruthy();
   });
 });
