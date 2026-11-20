@@ -4494,6 +4494,10 @@ footer .glass-brand {
 .thread-tracked li > :nth-child(2) {
   overflow-wrap: anywhere;
 }
+/* Each item's state icon, right-aligned in one column. */
+.thread-tracked li > .workstate {
+  justify-self: end;
+}
 .thread-tracking {
   margin-top: 16px;
 }

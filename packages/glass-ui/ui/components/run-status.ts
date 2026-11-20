@@ -176,3 +176,28 @@ export function VerbIcon({ verb, at, waitingOn }: { verb: VerbIconVerb; at?: str
   const label = verbIconLabel(verb, at, waitingOn);
   return html`<span class=${`runicon verbicon verb-${verb} ${VERB_TONE[verb]}`} role="img" aria-label=${label} title=${label}>${VERB_ICON[verb]}</span>`;
 }
+
+/**
+ * The state of a thread's linked work as an icon in the verb pill: a
+ * dispatch's own verb icons, plus a PR's merged, open and closed states.
+ * Merged is a branch joining, green; open is a ring, amber like work in
+ * progress; closed is a slashed circle, grey. Every pill is the same size,
+ * so a column of them lines up.
+ */
+export type WorkStateIconState = VerbIconVerb | 'merged' | 'open' | 'closed';
+
+const WORK_STATE_TONE: Record<WorkStateIconState, VerbTone> = { ...VERB_TONE, merged: 'ok', open: 'warn', closed: 'dim' };
+
+const WORK_STATE_ICON: Record<WorkStateIconState, unknown> = {
+  ...VERB_ICON,
+  merged: svg(
+    '<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="8" r="1.6"/><path d="M4.5 5.1v5.8M4.5 5.1c0 2.4 2.6 2.9 5.4 2.9"/>',
+  ),
+  open: svg('<circle cx="8" cy="8" r="5.2"/>'),
+  closed: svg('<circle cx="8" cy="8" r="5.6"/><path d="M4 12l8-8"/>'),
+};
+
+/** Linked work's state as an icon in its pill, named and titled with `label`. */
+export function WorkStateIcon({ state, label }: { state: WorkStateIconState; label: string }) {
+  return html`<span class=${`runicon verbicon workstate work-${state} ${WORK_STATE_TONE[state]}`} role="img" aria-label=${label} title=${label}>${WORK_STATE_ICON[state]}</span>`;
+}

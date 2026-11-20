@@ -13,7 +13,7 @@ import { SectionHead } from './section-head.js';
 import { LinkedText } from './links.js';
 import { Age, ImageThumb } from './common.js';
 import { DecisionRow } from './decision-row.js';
-import { VerbIcon } from './run-status.js';
+import { isIconVerb, VerbIcon, WorkStateIcon, type WorkStateIconState } from './run-status.js';
 import { dispatchCard, dispatchHeadCard } from './dispatches.js';
 import { ReportEmbed } from './decision-embeds.js';
 import { prCard } from './prs.js';
@@ -272,18 +272,42 @@ export function ThreadSheet({ id }: { id: string }) {
     <div class="thread-sheet-body" ref=${body}>${error && !view ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
   <//>`;
 }
-const TRACKED_TONE: Record<ThreadTrackedItem['state'], string> = { open: '', done: 'ok', stalled: 'warn' };
-/** Work the thread waits on, with its live state. Read-only: each item is acted on in its own view. */
+/** Status words that name a state other than the dispatch verb of the same name. */
+const TRACKED_STATUS: Record<string, WorkStateIconState> = {
+  merged: 'merged',
+  open: 'open',
+  draft: 'open',
+  'closed without merging': 'closed',
+  'checks failing': 'failed',
+  'not watched yet': 'unknown',
+  gone: 'unknown',
+  answered: 'done',
+  'waiting for you': 'needs-decision',
+  withdrawn: 'closed',
+  dropped: 'closed',
+  overdue: 'limited',
+  stale: 'paused',
+};
+/** Without a known status word, the item's state decides: done, stalled, or still open. */
+const TRACKED_FALLBACK: Record<ThreadTrackedItem['state'], WorkStateIconState> = { done: 'done', stalled: 'blocked', open: 'open' };
+
+/** A linked item's state icon, and its status in words for its name and tooltip. */
+export function trackedStateIcon(item: Pick<ThreadTrackedItem, 'state' | 'status'>): { state: WorkStateIconState; label: string } {
+  const state = TRACKED_STATUS[item.status] ?? (isIconVerb(item.status) ? item.status : TRACKED_FALLBACK[item.state]);
+  const words = item.status.replace(/-/g, ' ');
+  return { state, label: words.charAt(0).toUpperCase() + words.slice(1) };
+}
+/** Work the thread waits on, with its live state as an icon in one right-hand column. Read-only: each item is acted on in its own view. */
 function Tracked(view: ThreadView) {
   const items = view.tracked ?? [];
   return (
     items.length > 0 &&
     html`<section class="thread-tracked" aria-label="Linked work">
       <p class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Linked work'}</p>
-      <ul>${items.map(
-        (item) =>
-          html`<li><${WorkIcon} kind=${item.kind} />${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`} <span class=${`badge ${TRACKED_TONE[item.state]}`}>${item.status}</span></li>`,
-      )}</ul>
+      <ul>${items.map((item) => {
+        const icon = trackedStateIcon(item);
+        return html`<li><${WorkIcon} kind=${item.kind} />${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
+      })}</ul>
     </section>`
   );
 }
