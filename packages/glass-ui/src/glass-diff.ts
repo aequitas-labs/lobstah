@@ -106,6 +106,8 @@ export interface GlassPrefs {
   trapGroup?: TrapGrouping;
   /** This viewer's remembered Reviews disclosure state. */
   reviewSections?: { waiting?: boolean; done?: boolean };
+  /** This viewer's remembered PRs disclosure state. */
+  prSections?: { closed?: boolean };
 }
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
@@ -634,6 +636,7 @@ export interface PrsInputs {
   prs: GlassPr[];
   watches: Watch[];
   prAttention: DeckAttention[];
+  expanded?: GlassPrefs['prSections'];
 }
 
 /** Attention belonging to PRs/stacks actually visible in this section. */
@@ -743,6 +746,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       list: traps.map((t) => seat(trapView(d, t))),
     },
     prs: {
+      expanded: st.prSections,
       view: st.view,
       stacks,
       prs: prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)),
