@@ -43,8 +43,10 @@ it('shows current notes, cards, every round, chat provenance, and the long-threa
   expect(g.$('.tsheet')?.textContent).toContain('Choose the middle tab');
   expect(g.$('.tsheet')?.textContent).toContain('Card for you');
   expect(g.$('.thread-hint')?.textContent).toContain('long thread');
-  expect(g.$$('.thread-round')).toHaveLength(6);
-  expect(g.$('.thread-round-label')?.textContent).toBe('Round 1 · in chat');
+  // One continuous chat: every message, no round headers.
+  expect(g.$$('.thread-timeline .thread-msg.from-person').map((el) => el.querySelector('.thread-text')?.textContent)).toEqual(['Round 1', 'Round 2', 'Round 3', 'Round 4', 'Round 5', 'Round 6']);
+  expect(g.$('.thread-timeline section, .thread-round, .thread-round-label')).toBeNull();
+  expect(g.$('.thread-timeline')?.textContent).not.toMatch(/Round \d+ ·/);
   expect(g.$('.thread-msg.from-person .thread-meta')?.textContent).toContain('You · in chat');
   expect(g.$('.dcompose')).not.toBeNull();
   await g.go('#helm'); expect(g.$('#helm [aria-label="Waiting for you"]')).not.toBeNull();
@@ -138,18 +140,21 @@ it('waits until the response enters the viewport before acknowledging it', async
   expect(g.posts().map(p=>JSON.parse(p.body))).toContainEqual({kind:'thread-seen',payload:{id:ID,through:2}});
 });
 
-it('groups all open conversation kinds together and keeps resolved unread responses in the collapsed section', async () => {
+it('groups all open conversation kinds together and keeps resolved ones, read, in the collapsed section', async () => {
   const d = fleet();
   d.threads = [
     { ...summary(), id: 'open-bait', kind: 'bait', title: 'Queued work', cards: [], waitingForHelm: true },
     { ...summary(), id: 'unread-thread', unreadResponse: true, responseText: 'Please choose a target', title: 'A discussion' },
     { ...summary(), id: 'acked-thread', cards: [], title: 'Acknowledged work' },
-    { ...summary(), id: 'resolved-thread', state: 'resolved', unreadResponse: true, title: 'Finished work' },
+    { ...summary(), id: 'resolved-thread', state: 'resolved', cards: [], unreadResponse: false, responseSeq: 4, seenThrough: 2, title: 'Finished work' },
   ];
   const g = await page(d, { hash: '#helm' });
   expect(g.$$('#helm > section > .dlist .drow').map((row) => row.getAttribute('data-thread')).sort()).toEqual(['acked-thread', 'open-bait', 'unread-thread']);
   expect(g.$('#helm .thread-resolved')?.hasAttribute('open')).toBe(false);
-  expect(g.$('#helm .thread-resolved [data-thread="resolved-thread"]')).not.toBeNull();
+  expect(g.$('#helm .thread-resolved > summary')?.textContent).toBe('Resolved (1)');
+  expect(g.$('#helm .thread-resolved [data-thread="resolved-thread"].read')).not.toBeNull();
+  expect(g.$('#helm .thread-resolved [aria-label="Resolved"]')).not.toBeNull();
+  expect(g.$('.bbitem[href="#helm"] .dbadge')?.textContent).toBe('1');
   expect(g.$('#helm [data-thread="unread-thread"].unread')).not.toBeNull();
   expect(g.$('#helm [data-thread="acked-thread"].unread')).toBeNull();
   expect(g.$('#helm [aria-label="Waiting for helm"]')).not.toBeNull();

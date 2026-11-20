@@ -1869,10 +1869,13 @@ on the configured reminder cadence. Discussion threads with no new message for
 seven days and no standing card close as dropped; bait and standing questions
 remain open. Reads never run this maintenance; the helm wait does.
 
-A conversation reads as a chat: the helm's notes pinned on top (decided lines
-with a check, open lines with a question mark), then each round in order, with
-the person's messages on the right and the helm's beside its wheel on the left.
-Cards, links and triage show inline; the outcome and Reopen sit at the end.
+A conversation reads as one continuous chat: the helm's notes pinned on top
+(decided lines with a check, open lines with a question mark), then every
+message in order, with the person's messages on the right and the helm's beside
+its wheel on the left. Rounds stay in the stored conversation for the helm but
+are not shown. Cards, links and triage show inline; the outcome and Reopen sit
+at the end. A conversation opens at its newest message and stays there as
+messages arrive, unless you have scrolled up to read.
 
 The glass's Threads page shows one list of conversations as compact decision cards.
 Unread responses use the decision highlight; a state icon distinguishes messages
@@ -1887,15 +1890,20 @@ with their attention count. Message the helm on a dispatch supplies that dispatc
 as context to the same composer. Desktop header navigation keeps PRs visible.
 Conversation notes are a compact checklist: open items are unchecked and decided
 items are checked. Linked dispatches, reports and known PRs use their usual cards.
+Each linked item, cards and plans included, sits beside the icon its kind has
+in the glass views.
 
 Wharf grounds support the same conversation commands. The wharf stores phone
 attachments as account files and emits the conversation in `man wait` over the
 existing wake socket. Thread reads and glass polls write no rows; the wharf's
 alarm repeats unanswered messages and closes idle discussions.
 
-Unread helm responses count once per conversation on Threads. Opening a conversation or its card records only the
-response sequence shown. A later response remains unread, and a standing card
-still needs its answer. Resolved conversations stay in the expandable Resolved section while unread.
+Unread helm responses count once per conversation on Threads. Only a helm
+message (`man say`) or a new card is a response; triage, notes, links and
+resolving update the conversation without one. Opening a conversation or its
+card records only the response sequence shown. A later response remains
+unread, and a standing card still needs its answer. A resolved conversation is
+never unread and sends no notice.
 
 `GET /thread-notices` on a boat and `GET /api/glass/threads/notices` on the wharf
 expose one pending subscriber notice per conversation and person, with the latest

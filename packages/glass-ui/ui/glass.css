@@ -4246,32 +4246,12 @@ footer .glass-brand {
   max-width: 760px;
   margin: 0 auto;
 }
-/* The conversation: rounds read top to bottom, the person on the right, the helm on the left. */
+/* The conversation: one chat top to bottom, the person on the right, the helm on the left. */
 .thread-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.thread-round {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px 0 4px;
-}
-.thread-round-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  color: var(--dim);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.thread-round-label::after {
-  content: '';
-  flex: 1;
-  border-top: 1px solid var(--line);
 }
 .thread-msg {
   display: flex;

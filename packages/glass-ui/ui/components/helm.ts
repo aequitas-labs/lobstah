@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import type { ThreadSummary, ThreadView, ThreadRound, ThreadEntry, ThreadAttachment } from '@lobstah/core';
+import type { ThreadSummary, ThreadView, ThreadEntry, ThreadAttachment } from '@lobstah/core';
 import type { ComponentChildren } from 'preact';
 import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
@@ -212,11 +212,13 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
   }
   return html`<article class="thread-entry thread-msg from-person"><div class="thread-bubble"><p class="thread-meta">You${entry.via === 'chat' ? ' · in chat' : ''} · ${Age(at)} ago</p>${entry.text && html`<div class="thread-text">${LinkedText(entry.text)}</div>`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
 }
-function Round({ round, view, number }: { round: ThreadRound; view: ThreadView; number: number }) {
-  const chat = round.entries.some((e) => 'by' in e && e.by === 'person' && e.via === 'chat');
-  return html`<section class="thread-round" aria-label=${`Round ${number}`}><p class="thread-round-label">Round ${number}${chat ? ' · in chat' : ''}</p>${round.entries.map(
-    (entry, i) => html`<${Entry} key=${i} entry=${entry} view=${view} at=${('at' in entry && entry.at) || round.at} />`,
-  )}</section>`;
+/** The conversation as one chat: rounds stay in the stored thread for the helm, but the reader sees only the messages. */
+function Timeline({ view }: { view: ThreadView }) {
+  return html`<div class="thread-timeline">${view.rounds.flatMap((round, r) =>
+    round.entries.map(
+      (entry, i) => html`<${Entry} key=${`${r}:${i}`} entry=${entry} view=${view} at=${('at' in entry && entry.at) || round.at} />`,
+    ),
+  )}</div>`;
 }
 /** Within this many pixels of the end, the reader counts as at the newest message. */
 const PIN_SLACK = 24;
@@ -268,12 +270,12 @@ function Conversation({ view }: { view: ThreadView }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
     ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
-    <div class="thread-timeline">${view.rounds.map((round, i) => html`<${Round} key=${round.at} round=${round} view=${view} number=${i + 1} />`)}</div>
+    <${Timeline} view=${view} />
     ${outcome(view)}<${SeenMark} view=${view} />
     ${view.state === 'resolved' ? html`<${Button} action=${() => reopenConversation(view.id)} done="Conversation reopened">Reopen<//>` : html`<${ThreadComposer} id=${view.id} />`}
   </div>`;
 }
-/** Resolved conversations stay separate even while their last response is unread. */
+/** Resolved conversations sit apart from the open ones; they are never unread. */
 export function threadSections(items: readonly ThreadSummary[]) {
   const newest = [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   return { open: newest.filter((t) => t.state === 'open'), resolved: newest.filter((t) => t.state === 'resolved') };
@@ -305,6 +307,6 @@ export function Threads() {
     html`<ul class="dlist">${items.map((item) => html`<${ThreadCard} key=${item.id} item=${item} />`)}</ul>`;
   return html`<section class="threads-page"><${SectionHead} title="Threads" page />
     ${sections.open.length ? list(sections.open) : html`<p class="empty">No open threads</p>`}
-    ${sections.resolved.length > 0 && html`<details class="thread-resolved"><summary>Resolved (${sections.resolved.length})${sections.resolved.some((t) => t.unreadResponse) ? ' · unread responses' : ''}</summary>${list(sections.resolved)}</details>`}
+    ${sections.resolved.length > 0 && html`<details class="thread-resolved"><summary>Resolved (${sections.resolved.length})</summary>${list(sections.resolved)}</details>`}
   </section>`;
 }
