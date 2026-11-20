@@ -71,10 +71,12 @@ describe('tracking threads', () => {
     noteThread(id, { link: 'dispatched:work:d2', text: 'Dispatched' }, later(1));
     const shown = resolveThread(id, 'answered', 'Handed off', later(2));
     expect(shown.state).toBe('tracking');
+    // Resolving into tracking is quiet: nothing for the person to read yet.
+    expect(threadSummaries('home', later(2).getTime())[0]).toMatchObject({ state: 'tracking', unreadResponse: false });
     appendStatus('d2', 'work', 'blocked', 'needs a token');
     const [back] = trackThreads('home', later(3).getTime());
     expect(back).toMatchObject({ state: 'open', responseText: 'Dispatch Fix the flaky deck test is blocked' });
-    expect(back!.responseSeq).toBeGreaterThan(shown.responseSeq!);
+    expect(back!.responseSeq).toBe((shown.responseSeq ?? 0) + 1);
     expect(threadSummaries('home')[0]).toMatchObject({ state: 'open', unreadResponse: true });
   });
 

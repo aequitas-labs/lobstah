@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
-import type { ThreadSummary, ThreadView, ThreadRound, ThreadEntry, ThreadAttachment, ThreadTrackedItem } from '@lobstah/core';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import type { ThreadSummary, ThreadView, ThreadEntry, ThreadAttachment, ThreadTrackedItem } from '@lobstah/core';
+import type { ComponentChildren } from 'preact';
 import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
 import { getState, viewOf } from '../store.js';
@@ -16,25 +17,34 @@ import { VerbIcon } from './run-status.js';
 import { dispatchCard, dispatchHeadCard } from './dispatches.js';
 import { ReportEmbed } from './decision-embeds.js';
 import { prCard } from './prs.js';
-import { HelmIcon } from './icons.js';
+import { HelmIcon, WORK_ICON } from './icons.js';
+import type { WorkKind } from './icons.js';
 import { Sheet } from './sheet.js';
 
+/**
+ * A conversation, fetched again whenever the snapshot says it changed. The
+ * loaded one stays on screen while it refreshes, so the page keeps its
+ * height and scroll; another conversation's never shows under this id.
+ */
 function useThread(id: string | undefined) {
-  const [view, setView] = useState<ThreadView>(),
+  const [loaded, setLoaded] = useState<{ id: string; view: ThreadView }>(),
     [error, setError] = useState('');
   const snapshot = getState().snapshot;
   const revision = snapshot?.threads?.find((t) => t.id === id)?.updatedAt;
   const cards = snapshot?.decisions?.map((c) => c.key).join(',');
   useEffect(() => {
-    let live = true;
-    setView(undefined);
     setError('');
+  }, [id]);
+  useEffect(() => {
+    let live = true;
     if (id && backend().thread)
       backend().thread!(id).then(
         (r) => {
           if (!live) return;
-          if (r.ok) setView(r.data);
-          else setError('This conversation is unavailable');
+          if (r.ok) {
+            setLoaded({ id, view: r.data });
+            setError('');
+          } else setError('This conversation is unavailable');
         },
         () => live && setError('The conversation could not be loaded'),
       );
@@ -43,7 +53,7 @@ function useThread(id: string | undefined) {
       live = false;
     };
   }, [id, revision, cards]);
-  return { view, error };
+  return { view: loaded && loaded.id === id ? loaded.view : undefined, error };
 }
 /** A response is read only while its content is visible on this page. */
 function useSeen(view: ThreadView) {
@@ -109,18 +119,27 @@ function Notes(view: Pick<ThreadView, 'notes' | 'notesAt'>) {
   );
 }
 
+const WORK_LABEL: Record<WorkKind, string> = { dispatch: 'Dispatch', pr: 'PR', card: 'Card', todo: 'Todo', report: 'Report', plan: 'Plan' };
+/** A kind of work's icon, named for screen readers. */
+function WorkIcon({ kind }: { kind: WorkKind }) {
+  return html`<span class="thread-work-icon" title=${WORK_LABEL[kind]}>${WORK_ICON[kind]}<span class="sr-only">${WORK_LABEL[kind]}: </span></span>`;
+}
+/** Linked work in a conversation: its kind's icon beside its card or link. */
+function Work({ kind, children }: { kind: WorkKind; children: ComponentChildren }) {
+  return html`<div class=${`thread-work thread-work-${kind}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${children}</div></div>`;
+}
 /** References keep the same cards and destinations as their own overview pages. */
 function ThreadLink({ kind, reference: ref, text }: { kind: string; reference: string; text: string }) {
   const snapshot = viewOf(getState());
   if (kind === 'report') {
     const key = ref.startsWith('report:') ? ref : `report:${ref}`;
-    return html`<div class="thread-links cards"><${ReportEmbed} reference=${{ kind: 'report', key }} /></div>`;
+    return html`<${Work} kind="report"><div class="thread-links cards"><${ReportEmbed} reference=${{ kind: 'report', key }} /></div><//>`;
   }
   if (kind === 'dispatched') return html`<${ThreadDispatch} id=${ref} text=${text} />`;
   const pr = snapshot?.prs.find((p) => p.url === ref || p.key === ref);
   return pr
-    ? html`<div class="thread-links cards">${prCard(pr)}</div>`
-    : html`<p><a href=${safeHref(ref)} target="_blank" rel="noopener">${LinkedText(text)}</a></p>`;
+    ? html`<${Work} kind="pr"><div class="thread-links cards">${prCard(pr)}</div><//>`
+    : html`<${Work} kind="plan"><p><a href=${safeHref(ref)} target="_blank" rel="noopener">${LinkedText(text)}</a></p><//>`;
 }
 /** The dispatch a conversation started on: its card heads the conversation, loaded when the snapshot no longer lists it. */
 function useDispatch(id: string) {
@@ -155,9 +174,11 @@ function AboutDispatch({ id }: { id: string }) {
 }
 function ThreadDispatch({ id, text }: { id: string; text: string }) {
   const dispatch = useDispatch(id);
-  return dispatch
-    ? html`<div class="thread-links cards">${dispatchCard(dispatch)}</div>`
-    : html`<p><a href=${`#dispatch/${encodeURIComponent(id)}`}>${LinkedText(text)}</a></p>`;
+  return html`<${Work} kind="dispatch">${
+    dispatch
+      ? html`<div class="thread-links cards">${dispatchCard(dispatch)}</div>`
+      : html`<p><a href=${`#dispatch/${encodeURIComponent(id)}`}>${LinkedText(text)}</a></p>`
+  }<//>`;
 }
 function outcome(item: ThreadSummary | ThreadView) {
   const result = item.outcome;
@@ -179,7 +200,7 @@ const SYSTEM_EVENT: Record<string, string> = { thread: 'Discussion started', bai
 function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: string }) {
   if ('card' in entry) {
     const card = view.cards.find((c) => c.key === entry.card);
-    return html`<article class="thread-entry thread-card-entry">${card?.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} onClick=${() => openDecision(entry.card)}>${card?.title ?? 'Open card'}<//>${card?.answer ? html`<p class="thread-answer">${LinkedText([card.answer.option, card.answer.text].filter(Boolean).join(' · '))}</p>` : !card?.standing && html`<p class="dim">Closed card</p>`}${card?.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
+    return html`<article class="thread-entry thread-card-entry"><${WorkIcon} kind="card" />${card?.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} onClick=${() => openDecision(entry.card)}>${card?.title ?? 'Open card'}<//>${card?.answer ? html`<p class="thread-answer">${LinkedText([card.answer.option, card.answer.text].filter(Boolean).join(' · '))}</p>` : !card?.standing && html`<p class="dim">Closed card</p>`}${card?.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
   }
   if ('link' in entry)
     return html`<div class="thread-entry thread-system"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} /></div>`;
@@ -191,19 +212,58 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
   }
   return html`<article class="thread-entry thread-msg from-person"><div class="thread-bubble"><p class="thread-meta">You${entry.via === 'chat' ? ' · in chat' : ''} · ${Age(at)} ago</p>${entry.text && html`<div class="thread-text">${LinkedText(entry.text)}</div>`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
 }
-function Round({ round, view, number }: { round: ThreadRound; view: ThreadView; number: number }) {
-  const chat = round.entries.some((e) => 'by' in e && e.by === 'person' && e.via === 'chat');
-  return html`<section class="thread-round" aria-label=${`Round ${number}`}><p class="thread-round-label">Round ${number}${chat ? ' · in chat' : ''}</p>${round.entries.map(
-    (entry, i) => html`<${Entry} key=${i} entry=${entry} view=${view} at=${('at' in entry && entry.at) || round.at} />`,
-  )}</section>`;
+/** The conversation as one chat: rounds stay in the stored thread for the helm, but the reader sees only the messages. */
+function Timeline({ view }: { view: ThreadView }) {
+  return html`<div class="thread-timeline">${view.rounds.flatMap((round, r) =>
+    round.entries.map(
+      (entry, i) => html`<${Entry} key=${`${r}:${i}`} entry=${entry} view=${view} at=${('at' in entry && entry.at) || round.at} />`,
+    ),
+  )}</div>`;
+}
+/** Within this many pixels of the end, the reader counts as at the newest message. */
+const PIN_SLACK = 24;
+/**
+ * Keep a conversation's sheet at its newest message: set before the first
+ * paint when it opens or another opens in its place, and again as it grows
+ * (a new message, an image, a card that loads) while the reader is at the
+ * bottom. Once they scroll up to read, it stays where they put it.
+ */
+function usePinnedBottom(id: string, ready: boolean) {
+  const body = useRef<HTMLDivElement>(null),
+    pinned = useRef(true);
+  const scroller = () => body.current?.closest<HTMLElement>('.rbody') ?? undefined;
+  const stick = () => {
+    const box = scroller();
+    if (box && pinned.current && box.scrollTop !== box.scrollHeight - box.clientHeight) box.scrollTop = box.scrollHeight;
+  };
+  useLayoutEffect(() => {
+    pinned.current = true;
+  }, [id]);
+  useLayoutEffect(stick);
+  useLayoutEffect(() => {
+    const box = scroller();
+    if (!box || !ready) return;
+    const onScroll = () => {
+      pinned.current = box.scrollHeight - box.scrollTop - box.clientHeight <= PIN_SLACK;
+    };
+    box.addEventListener('scroll', onScroll, { passive: true });
+    const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(stick) : undefined;
+    if (body.current) grown?.observe(body.current);
+    return () => {
+      box.removeEventListener('scroll', onScroll);
+      grown?.disconnect();
+    };
+  }, [id, ready]);
+  return body;
 }
 /** A conversation in the sheet over the Threads tab, as a report opens; Back returns to the list. */
 export function ThreadSheet({ id }: { id: string }) {
   const { view, error } = useThread(id);
+  const body = usePinnedBottom(id, !!view);
   // The snapshot already names it, so the bar has its title before the conversation loads.
   const title = view?.title ?? getState().snapshot?.threads?.find((t) => t.id === id)?.title ?? 'Conversation';
   return html`<${Sheet} page=${id} title=${title} titleId="tsheet-title" cls="tsheet" onBack=${closeThreadSheet}>
-    <div class="thread-sheet-body">${error ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
+    <div class="thread-sheet-body" ref=${body}>${error && !view ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
   <//>`;
 }
 const TRACKED_KIND: Record<ThreadTrackedItem['kind'], string> = { dispatch: 'Dispatch', card: 'Card', pr: 'PR', todo: 'Todo' };
@@ -226,12 +286,12 @@ function Conversation({ view }: { view: ThreadView }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
     ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}${Tracked(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
-    <div class="thread-timeline">${view.rounds.map((round, i) => html`<${Round} key=${round.at} round=${round} view=${view} number=${i + 1} />`)}</div>
+    <${Timeline} view=${view} />
     ${outcome(view)}<${SeenMark} view=${view} />
     ${view.state === 'resolved' ? html`<${Button} action=${() => reopenConversation(view.id)} done="Conversation reopened">Reopen<//>` : html`<${ThreadComposer} id=${view.id} />`}
   </div>`;
 }
-/** Tracking and resolved conversations stay out of the open list, even while their last response is unread. */
+/** Tracking and resolved conversations sit apart from the open ones; neither is ever unread. */
 export function threadSections(items: readonly ThreadSummary[]) {
   const newest = [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   return {
@@ -268,7 +328,7 @@ export function Threads() {
     html`<ul class="dlist">${items.map((item) => html`<${ThreadCard} key=${item.id} item=${item} />`)}</ul>`;
   return html`<section class="threads-page"><${SectionHead} title="Threads" page />
     ${sections.open.length ? list(sections.open) : html`<p class="empty">No open threads</p>`}
-    ${sections.tracking.length > 0 && html`<details class="thread-resolved thread-tracking"><summary>Tracking (${sections.tracking.length})${sections.tracking.some((t) => t.unreadResponse) ? ' · unread responses' : ''}</summary>${list(sections.tracking)}</details>`}
-    ${sections.resolved.length > 0 && html`<details class="thread-resolved"><summary>Resolved (${sections.resolved.length})${sections.resolved.some((t) => t.unreadResponse) ? ' · unread responses' : ''}</summary>${list(sections.resolved)}</details>`}
+    ${sections.tracking.length > 0 && html`<details class="thread-resolved thread-tracking"><summary>Tracking (${sections.tracking.length})</summary>${list(sections.tracking)}</details>`}
+    ${sections.resolved.length > 0 && html`<details class="thread-resolved"><summary>Resolved (${sections.resolved.length})</summary>${list(sections.resolved)}</details>`}
   </section>`;
 }

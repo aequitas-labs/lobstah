@@ -67,7 +67,7 @@ export class Threads {
       if (item.state !== 'open') continue;
       const at = this.at(item, now), personAt = this.personAt(item);
       if (item.kind === 'thread' && now - Date.parse(personAt) >= THREAD_IDLE_MS && !this.view(item).cards.some(c => c.standing)) {
-        this.put(recordThreadResponse({ ...item, state: 'resolved', outcome: threadOutcome('dropped', 'No new message for seven days', at), updatedAt: at, lastHelmAt: at }, at, 'No new message for seven days'));
+        this.put({ ...item, state: 'resolved', outcome: threadOutcome('dropped', 'No new message for seven days', at), updatedAt: at, lastHelmAt: at });
         this.hooks.event('thread-updated', undefined, item.id);
       } else if ((!item.lastHelmAt || personAt > item.lastHelmAt) && (!item.notifiedAt || now - Date.parse(item.notifiedAt) >= this.hooks.remindMs())) this.notify(item, now);
     }
@@ -139,8 +139,8 @@ export class Threads {
         this.open(item);
         const attachments = this.files(item.id, b.files ?? [], item), words = (b.text === undefined || b.text === '') && attachments.length ? '' : threadWords(b.text);
         this.put(sayInThread(item, words, attachments, at));
-      } else if (parts[2] === 'triage') this.put(recordThreadResponse(classifyThread(item, b.kind, at), at, b.kind === 'thread' ? 'Discussion started' : 'Bait received'));
-      else if (parts[2] === 'resolve') this.put(recordThreadResponse({ ...item, state: 'resolved', outcome: threadOutcome(b.outcome, b.note, at), updatedAt: at, lastHelmAt: at }, at, threadWords(b.note, 'an outcome note', 1000)));
+      } else if (parts[2] === 'triage') this.put(classifyThread(item, b.kind, at));
+      else if (parts[2] === 'resolve') this.put({ ...item, state: 'resolved', outcome: threadOutcome(b.outcome, b.note, at), updatedAt: at, lastHelmAt: at });
       else if (parts[2] === 'note') {
         this.open(item);
         const lines = (value: unknown, old: string[]) => { if (value === undefined) return old; requireThat(Array.isArray(value) && value.length <= 50, 400, 'Keep notes to 50 lines'); return value.filter(v => v !== '').map(v => threadWords(v, 'a note', 2000)); };
@@ -150,7 +150,7 @@ export class Threads {
           requireThat(['dispatched','report','planned'].includes(link) && ref && (link !== 'planned' || ref.startsWith('https://')), 400, 'Choose a dispatch, report or HTTPS plan link');
           item.rounds = appendThreadEntry(item, { link: link as 'dispatched'|'report'|'planned', ref, text: threadWords(b.text ?? ref, 'a link note', 1000), at }).rounds;
         }
-        this.put(recordThreadResponse({ ...item, notes, ...(b.decided !== undefined || b.open !== undefined ? { notesAt: at } : {}), updatedAt: at, lastHelmAt: at }, at, b.link ? threadWords(b.text ?? b.link, 'a link note', 1000) : 'Notes updated'));
+        this.put({ ...item, notes, ...(b.decided !== undefined || b.open !== undefined ? { notesAt: at } : {}), updatedAt: at, lastHelmAt: at });
       } else throw new ApiError(404, 'Conversation action not found');
     }
     if (!['post', 'reopen', 'seen', 'dismiss-notice'].includes(parts[2]!)) this.hooks.event('thread-updated', undefined, item.id);

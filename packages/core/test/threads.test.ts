@@ -115,6 +115,8 @@ describe('unread helm responses', () => {
     expect(threadSummaries()[0]?.unreadResponse).toBe(true);
     expect(readDecisionAnswer(meta.key)).toBeUndefined();
     noteThread(item.id,{open:['One more choice']},at);
+    expect(threadSubscriberNotices()).toEqual([]);
+    sayThread(item.id,{text:'One more choice to make',now:at});
     expect(threadSubscriberNotices()[0]?.seq).toBe(seq+1);
     markThreadResponsesSeen(item.id, seq);
     expect(threadSummaries()[0]?.unreadResponse).toBe(true);
@@ -125,16 +127,26 @@ describe('unread helm responses', () => {
     expect(threadSubscriberNotices('another-person')).toHaveLength(1);
     expect(() => markThreadResponsesSeen(item.id, seq+2)).toThrow('shown');
   });
-  it('keeps a resolved conversation beyond a day until its response is read', async () => {
-    const {markThreadResponsesSeen, threadSubscriberNotices} = await import('../src/threads.js');
+  it('resolves quietly: a resolved conversation is never unread, sends no notice and leaves the list after a day', async () => {
+    const {threadSubscriberNotices} = await import('../src/threads.js');
     const old = new Date(Date.now()-3*86400_000);
     const item = startThread({grounds:'home',text:'An old exchange',via:'chat',now:old});
+    triageThread(item.id,'thread',old);
+    noteThread(item.id,{decided:['Keep Reviews']},old);
+    expect(readThread(item.id)?.responseSeq ?? 0).toBe(0);
     resolveThread(item.id,'answered','The notes have the answer',old);
-    expect(threadSummaries()).toHaveLength(1);
-    expect(threadSubscriberNotices()).toHaveLength(1);
-    markThreadResponsesSeen(item.id,1);
+    expect(readThread(item.id)?.responseSeq ?? 0).toBe(0);
+    expect(threadSubscriberNotices()).toEqual([]);
     expect(threadSummaries()).toEqual([]);
     expect(readThread(item.id)?.outcome?.note).toBe('The notes have the answer');
+  });
+  it('stops counting an unread helm message once the helm resolves its conversation', () => {
+    const item = start();
+    sayThread(item.id,{text:'Done: Reviews stays',now:at});
+    expect(threadSummaries()[0]?.unreadResponse).toBe(true);
+    resolveThread(item.id,'answered','Reviews stays',at);
+    expect(threadSummaries(undefined, at.getTime())[0]).toMatchObject({state:'resolved',unreadResponse:false});
+    expect(threadView(readThread(item.id)!).unreadResponse).toBe(false);
   });
 });
 
