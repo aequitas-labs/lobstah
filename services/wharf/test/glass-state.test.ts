@@ -34,6 +34,17 @@ async function dispatch(token: string, session: string) {
 async function document(id: string, kind: string, token: string, session: string) {
   expect((await call('documents', { id, kind, title: 'Choose a direction', options: kind === 'decision' ? ['One', 'Two'] : [] }, token, session)).status).toBe(200);
 }
+
+it('retains typed decision references and rejects unsafe keys before creating a document', async () => {
+  const boat = await helmBoat();
+  const references = [{ kind: 'report', key: 'report-a' }, { kind: 'pr', key: 'pr:acme/web#42' }];
+  expect((await call('documents', { id: 'context-card', kind: 'decision', title: 'Ship this?', references }, boat.token, 'boat-seat')).status).toBe(200);
+  expect((await call('documents/context-card/publish', {}, boat.token, 'boat-seat')).status).toBe(200);
+  const documents = await (await call('documents')).json<WharfDocument[]>();
+  expect(documents.find((doc) => doc.id === 'context-card')?.references).toEqual(references);
+  expect((await call('documents', { id: 'bad-context', kind: 'decision', title: 'No', references: [{ kind: 'report', key: '../private' }] }, boat.token, 'boat-seat')).status).toBe(400);
+  expect(await sql('SELECT count(*) AS n FROM documents WHERE id=?', 'bad-context')).toEqual([{ n: 0 }]);
+});
 async function upload(id: string, name: string, bytes: string, token: string, session: string) {
   const res = await SELF.fetch(`https://state.test/v1/accounts/a/documents/${id}/files`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'X-Lobstah-Helm': session, 'Idempotency-Key': `upload-${++sequence}`, 'X-File-Name': name }, body: bytes });
   expect(res.status, await res.clone().text()).toBe(200); return (await res.json<{ id: string }>()).id;

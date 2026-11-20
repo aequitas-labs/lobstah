@@ -1,5 +1,6 @@
 import { validDesktopStartLink, type DesktopAppStart } from './desktop-start-link.js';
 import type { GrantIntent } from './grants.js';
+import { validDecisionReferences, type DecisionReference } from './backend-model.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -84,6 +85,7 @@ export interface PermissionsProposal {
 }
 
 export interface DecisionMeta {
+  references?: DecisionReference[];
   /** A configured desktop session start action, separate from tool approval. */
   appStart?: DesktopAppStart;
   /** `decision:<rid>`. */
@@ -407,6 +409,7 @@ export function runCardSettled(d: Pick<DecisionMeta, 'key' | 'run'>, now = Date.
 }
 
 export interface AskOptions {
+  references?: DecisionReference[];
   appStart?: DesktopAppStart;
   title: string;
   /** A markdown file to copy as the detail page. */
@@ -464,6 +467,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   if (opts.appStart && (!validDesktopStartLink(opts.appStart.url) || !/^[a-z][a-z0-9-]{0,63}$/.test(opts.appStart.profile))) throw new DecisionError('invalid desktop app start action');
   const title = checkTitle(opts.title);
   const options = checkOptions(opts.options ?? []);
+  if (opts.references !== undefined && !validDecisionReferences(opts.references)) throw new DecisionError('Choose up to 16 report or PR keys for the decision');
   let detail = opts.detailText ?? '';
   if (opts.detailFile !== undefined) {
     let stat: fs.Stats;
@@ -516,6 +520,7 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
     title,
     ...(opts.appStart ? { appStart: opts.appStart } : {}),
     options,
+    ...(opts.references?.length ? { references: opts.references.map(({ kind, key }) => ({ kind, key })) } : {}),
     ...(opts.optionNotes ? { optionNotes: Object.fromEntries(Object.entries(opts.optionNotes).filter(([o]) => options.includes(o))) } : {}),
     attachments: attached,
     ...(Object.keys(renamed).length ? { renamed } : {}),

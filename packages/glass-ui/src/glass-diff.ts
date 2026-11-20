@@ -283,6 +283,7 @@ export type DecisionCard =
       detail: string;
       options: string[];
       optionNotes?: Record<string, string>;
+      references?: import('@lobstah/core').DecisionReference[];
       permission?: boolean;
       permissionsProposal?: PermissionsProposal;
       /** A run card: the script the local glass runs once Chris confirms it. */
@@ -337,6 +338,7 @@ export function decisionCards(
         ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
         ...(d.run ? { run: d.run } : {}),
         ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
+        ...(d.references?.length ? { references: d.references } : {}),
         attachments: d.attachments,
         ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
         ...(repo ? { repo } : {}),

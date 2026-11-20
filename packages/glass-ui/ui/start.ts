@@ -209,6 +209,11 @@ function startGlass(): Array<() => void> {
     const modal = detailFromHash(location.hash);
     const focusDecision = decisionFromHash(location.hash);
     if (focusDecision || location.hash === '#decisions') {
+      if (history.state?.decisionEmbed) {
+        const { decisionEmbed: _embedded, ...state } = history.state;
+        history.replaceState(state, '', location.href);
+        routeDetailView(null);
+      }
       routeDecision({ key: focusDecision });
       return;
     }

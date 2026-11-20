@@ -79,6 +79,7 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
     ...(d.appStart ? { appStart: d.appStart } : {}),
     detail: readDecisionDetail(d.key) ?? '',
     options: d.options,
+    ...(d.references?.length ? { references: d.references } : {}),
     ...(d.permission ? { permission: true } : {}),
     ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
     ...(d.run ? { run: glassRunCard(d) } : {}),

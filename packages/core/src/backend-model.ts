@@ -36,6 +36,19 @@ export interface BackendEvent { cursor: string; kind: string; dispatchId?: strin
 export interface EventBatch { events: BackendEvent[]; cursor: string }
 /** Hosted glass records contain IDs and uploaded file metadata, never local paths. */
 export interface WharfFile { id: string; name: string; size: number }
+/** An existing item shown inside a decision, in the helm's chosen order. */
+export interface DecisionReference { kind: 'report' | 'pr'; key: string }
+
+/** Portable validation shared by local storage and the hosted document API. */
+export function validDecisionReferences(value: unknown): value is DecisionReference[] {
+  return Array.isArray(value) && value.length <= 16 && value.every((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const { kind, key } = entry as Record<string, unknown>;
+    if (typeof key !== 'string' || key.length > 300) return false;
+    if (kind === 'pr') return /^pr:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*$/.test(key);
+    return kind === 'report' && (/^report:(work|chore):[A-Za-z0-9-]+$/.test(key) || /^report:helm:[A-Za-z0-9_-][A-Za-z0-9._-]*:[a-f0-9]{8}$/.test(key) || /^[A-Za-z0-9_-]{1,128}$/.test(key));
+  });
+}
 /** A review document's PR and round state, kept by the boat that publishes it. */
 export interface WharfReviewMeta {
   pr: string; round: string; state: string; requestedBy?: string; headSha?: string; stands?: boolean; muted?: boolean; reason?: string;
@@ -46,6 +59,7 @@ export interface WharfDocumentInput {
   id: string; kind: 'decision' | 'report' | 'review'; title: string; grounds?: string; options?: string[]; dispatch?: string;
   /** kind review only. */
   review?: WharfReviewMeta;
+  references?: DecisionReference[];
 }
 export interface WharfDocument extends WharfDocumentInput {
   at: string; author: string; published: boolean; withdrawn?: boolean;

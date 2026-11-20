@@ -318,7 +318,7 @@ import { reviewRows } from './reviews.js';
 import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
-import { UsageError, parseArgs, usageFor, type FlagValue } from './usage.js';
+import { UsageError, parseArgs, usageFor, decisionReferences, type FlagValue } from './usage.js';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
@@ -1011,7 +1011,7 @@ async function mainCli(): Promise<void> {
     flags.set('--grounds', storageGrounds(groundsFlag, groundsConfig));
   }
   const { wharfCommand } = await import('./wharf-commands.js');
-  if (await wharfCommand(cmd, pos, { opt, has, values }, loadConfig())) return;
+  if (await wharfCommand(cmd, pos, { opt, has, values, references: cmd === 'man:ask' ? decisionReferences(args) : [] }, loadConfig())) return;
   const copyFiles = (files: string[], dir: string): Descriptor['attachments'] => {
     if (files.length === 0) return [];
     try {
@@ -2218,6 +2218,7 @@ async function mainCli(): Promise<void> {
         asked = askDecision({
           title,
           detailFile: opt('--detail'),
+          references: decisionReferences(args),
           options: run ? [RUN_DECLINE_OPTION] : values('--option'),
           attach: values('--attach'),
           ...(run ? { run } : {}),

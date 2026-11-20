@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { CONFIGURED_TRAP_INSTRUCTION, IdleWait, lobstahVersion, injectedPrompt, resetWaitBackoff, backendScope, backendScopes, BackendError, wharfFor, wharfCredential, refreshHostedViews, recordHostedAck, isVerb, waitingFields, toonKV,
   readBrokerAgent, brokerRequest, WharfBackend, recordWharfCatch, type BrokerPoll } from '@lobstah/core';
-import type { BackendEvent, BackendScope, Config, ReportInput } from '@lobstah/core';
+import type { BackendEvent, BackendScope, Config, ReportInput, DecisionReference } from '@lobstah/core';
 import { resolveSessionId } from './session-id.js';
 import { hostedItem, isHostedKey } from './hosted-view.js';
 import { wharfRepoIdentity } from './wharf-repo.js';
@@ -37,7 +37,7 @@ export function commandScope(config: Config, grounds?: string, repo?: string): B
   // No implicit remote writes. Fleet-wide reads use the independent caches.
   return undefined;
 }
-type Options = { opt: (flag: string) => string | undefined; has: (flag: string) => boolean; values: (flag: string) => string[] };
+type Options = { opt: (flag: string) => string | undefined; has: (flag: string) => boolean; values: (flag: string) => string[]; references?: DecisionReference[] };
 const GLOBAL = new Set(['goals', 'version', 'daemon', 'glass', 'pet', 'doctor', 'telemetry', 'init', 'repos', 'pick', 'man:manual', '__runner', '__pool-warm']);
 const OVERVIEW = new Set(['ls', 'status', 'man:tend', 'man:report', 'prs', 'reports', 'stats', 'attention']);
 /** Resolve once per command; remote mutations can never enter local handlers. */
@@ -118,7 +118,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     const attached = opts.values('--attach').map((file) => ({ name: path.basename(file), bytes: readFile(file) }));
     if (attached.length > 32 || new Set(attached.map((f) => f.name)).size !== attached.length) throw new Error('at most 32 attachments, with different basenames');
     const base = key(), id = opts.opt('--id') ?? partKey(base, 'document').slice(0, 32);
-    await backend.request('documents', { id, kind, title, grounds: scope.grounds, options: kind === 'decision' ? opts.values('--option') : [], ...(kind === 'decision' && pos[0] ? { dispatch: pos[0] } : {}) }, partKey(base, 'create'));
+    await backend.request('documents', { id, kind, title, grounds: scope.grounds, options: kind === 'decision' ? opts.values('--option') : [], ...(kind === 'decision' && opts.references?.length ? { references: opts.references } : {}), ...(kind === 'decision' && pos[0] ? { dispatch: pos[0] } : {}) }, partKey(base, 'create'));
     const detail = contents ? await backend.uploadDocument(id, kind === 'decision' ? 'detail.md' : 'report.md', contents, partKey(base, 'markdown')) : undefined;
     const files: string[] = [];
     for (const [i, file] of attached.entries()) files.push(await backend.uploadDocument(id, file.name, file.bytes, partKey(base, `file-${i}`)));

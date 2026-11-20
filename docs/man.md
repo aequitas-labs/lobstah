@@ -788,6 +788,11 @@ the same rule.
   for a question such as "cut 0.6.0?"), who asked (`helm`), and when. It is
   stored in `~/.lobstah/decisions/<rid>/`: `decision.json`, `detail.md`, and
   `attachments/`. The claimed helm alone may ask.
+- **Context cards.** Repeat `--report <report-key>` and `--pr <pr-key>` to embed
+  up to 16 existing report and PR cards in argument order. They appear above
+  the answer controls. Opening a report or PR retains the decision's draft;
+  reading its context never answers the decision. Missing references remain
+  visible while the answer controls stay usable.
 - **Checklists.** Task items (`- [ ] step` or `- [x] step`), including nested
   items, are tickable in decision details and filed reports. Ticks are saved
   with the document and shared between desktop and phone; ticking never

@@ -67,19 +67,23 @@ const reportDestination = (r: GlassReport) => ({
 });
 
 /** A report card: no status word; greyed once read (its page acks it). */
-export function reportCard(r: GlassReport) {
+export function reportCard(r: GlassReport, onOpen?: () => void) {
   const from = reportFrom(r);
   const lead = [r.repo, from].filter(Boolean).join(' · ');
+  const open = (event?: Event) => {
+    if (!newTab(event)) onOpen?.();
+    openReport(r)(event);
+  };
   return html`<${Card}
     key=${r.key}
     title=${r.title}
     titleAttr=${r.title}
     context=${[r.repo && [RepoName(r.repo), ' · '], from && [r.trap ? `${TRAP_MARK} ${from}` : from, ' · '], Age(r.filedAt), ' ago']}
     contextTitle=${[lead, `${ageText(r.filedAt)} ago`].filter(Boolean).join(' · ')}
-    open=${reportDestination(r)}
+    open=${{ ...reportDestination(r), here: open }}
     quiet=${!!r.acked}
     cls=${r.acked ? 'acked report-card' : 'report-card'}
-    onClick=${openReport(r)}
+    onClick=${open}
   />`;
 }
 
@@ -95,7 +99,9 @@ function row(r: GlassReport, phone: boolean) {
 export function Reports({ inp }: { inp: SectionInputs['reports'] }) {
   const phone = usePhone();
   if (inp.view === 'cards')
-    return inp.list.length ? html`<div class="cards">${inp.list.map(reportCard)}</div>` : html`<div class="empty">no reports match</div>`;
+    return inp.list.length
+      ? html`<div class="cards">${inp.list.map((report) => reportCard(report))}</div>`
+      : html`<div class="empty">no reports match</div>`;
   return Table(
     ['title', 'from', 'filed', 'acked', ...(phone ? [''] : [])],
     inp.list.map((r) => row(r, phone)),
