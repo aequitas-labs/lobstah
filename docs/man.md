@@ -1852,6 +1852,12 @@ notes; an empty line clears it. `--link dispatched:<id>|report:<key>|planned:<ur
 adds context. `man ask --thread <id>` asks on a card; its answer stays on the card
 and the answer event names the conversation. Bait always goes through the helm.
 
+`man say <id> "<text>" [--attach <file>]...` writes to the person in the
+conversation. The message joins the current round after what the person said
+last, marks the conversation unread in the glass, and stops its reminder. The
+person's next message wakes `man wait` as before. Use a card when you need an
+answer; use `man say` for everything else you would tell the person.
+
 Record a chat that remains open with `man discuss "<title>" --said "<exchange>"`,
 or append it with `man discuss <id> --said "<exchange>"`. Tell the person it was
 recorded. Quick answers in chat need no thread; quick glass answers go on a card
@@ -1862,6 +1868,11 @@ to read. Consider a report or plan at six rounds; further messages stop at 100.
 on the configured reminder cadence. Discussion threads with no new message for
 seven days and no standing card close as dropped; bait and standing questions
 remain open. Reads never run this maintenance; the helm wait does.
+
+A conversation reads as a chat: the helm's notes pinned on top (decided lines
+with a check, open lines with a question mark), then each round in order, with
+the person's messages on the right and the helm's beside its wheel on the left.
+Cards, links and triage show inline; the outcome and Reopen sit at the end.
 
 The glass's Threads page shows one list of conversations as compact decision cards.
 Unread responses use the decision highlight; a state icon distinguishes messages

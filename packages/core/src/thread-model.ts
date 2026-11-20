@@ -5,10 +5,13 @@ type Attachment = ThreadAttachment;
 export type ThreadKind = 'untriaged' | 'bait' | 'thread';
 export type ThreadOutcomeKind = 'dispatched' | 'planned' | 'answered' | 'dropped';
 export interface ThreadOutcome { kind: ThreadOutcomeKind; ref?: string; note: string; at: string }
+/** Entries keep the order they happened in; `at` is absent only on entries written before helm messages. */
 export type ThreadEntry =
-  | { by: 'person'; via: 'glass' | 'chat'; text: string; attachments: Attachment[] }
+  | { by: 'person'; via: 'glass' | 'chat'; text: string; attachments: Attachment[]; at?: string }
+  | { by: 'helm'; text: string; attachments: Attachment[]; at: string; seq: number }
   | { card: string }
-  | { link: 'dispatched' | 'report' | 'planned'; ref: string; text: string };
+  | { link: 'dispatched' | 'report' | 'planned'; ref: string; text: string; at?: string }
+  | { event: 'triaged'; kind: 'bait' | 'thread'; at: string };
 export interface ThreadRound { at: string; entries: ThreadEntry[] }
 export interface HelmThread {
   responseSeq?: number;
@@ -26,6 +29,7 @@ export interface HelmThread {
   about?: string;
   state: 'open' | 'resolved';
   notes: { decided: string[]; open: string[] };
+  notesAt?: string;
   rounds: ThreadRound[];
   createdAt: string;
   updatedAt: string;
@@ -66,6 +70,8 @@ export const THREAD_GROUNDS = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/;
 export const THREAD_MESSAGES_MAX = 100;
 export const THREAD_TEXT_MAX = 20_000;
 export const THREAD_IDLE_MS = 7 * 86400_000;
+/** Entries one round may hold, so a helm talking to itself can't grow a thread without bound. */
+export const THREAD_ROUND_ENTRIES_MAX = 100;
 
 export class ThreadError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -80,7 +86,27 @@ export function threadWords(value: unknown, label = 'message', max = THREAD_TEXT
 export function classifyThread(item: HelmThread, kind: unknown, at: string): HelmThread {
   if (item.state !== 'open') throw new ThreadError('Reopen this conversation before changing it', 409);
   if (kind !== 'bait' && kind !== 'thread') throw new ThreadError('Choose bait or thread');
-  return { ...item, kind, updatedAt: at, lastHelmAt: at };
+  return { ...appendThreadEntry(item, { event: 'triaged', kind, at }), kind, updatedAt: at, lastHelmAt: at };
+}
+
+/** Adds an entry to the current round: a round starts only when the person speaks. */
+export function appendThreadEntry(item: HelmThread, entry: ThreadEntry): HelmThread {
+  const last = item.rounds.length - 1;
+  if ((item.rounds[last]?.entries.length ?? 0) >= THREAD_ROUND_ENTRIES_MAX) throw new ThreadError('This conversation needs a report or plan before more messages', 409);
+  return { ...item, rounds: item.rounds.map((round, i) => i === last ? { ...round, entries: [...round.entries, entry] } : round) };
+}
+
+/** A helm message is a response: it raises unread for the person and stops the reminder. */
+export function sayInThread(item: HelmThread, text: string, attachments: Attachment[], at: string): HelmThread {
+  if (item.state !== 'open') throw new ThreadError('Reopen this conversation before adding to it', 409);
+  const seq = (item.responseSeq ?? 0) + 1;
+  const said = appendThreadEntry(item, { by: 'helm', text, attachments, at, seq });
+  return recordThreadResponse({ ...said, updatedAt: at, lastHelmAt: at }, at, text || attachments.map((file) => file.name).join(', '));
+}
+
+/** What the person said in a round, for the helm's wake: never the helm's own words. */
+export function personWords(round: ThreadRound | undefined): string {
+  return round?.entries.flatMap((entry) => 'by' in entry && entry.by === 'person' ? [entry.text] : []).join(' ') ?? '';
 }
 
 export function threadOutcome(value: unknown, note: unknown, at: string): ThreadOutcome {

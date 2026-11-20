@@ -1,5 +1,5 @@
 import type { HelmThread, ThreadSummary, ThreadView } from '../../../packages/core/src/thread-model.js';
-import { responseState, recordThreadResponse, acknowledgeThreadResponse, pendingThreadNotice, classifyThread, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from '../../../packages/core/src/thread-model.js';
+import { responseState, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, classifyThread, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from '../../../packages/core/src/thread-model.js';
 import { messageFileType } from '../../../packages/core/src/message-files.js';
 import type { ThreadAttachment as Attachment } from '../../../packages/core/src/thread-model.js';
 import type { WharfDocument } from '../../../packages/core/src/backend-model.js';
@@ -53,8 +53,7 @@ export class Threads {
   }
   linkCard(id: string, key: string, now: number) {
     const item = this.checkCard(id), at = this.at(item, now);
-    item.rounds.at(-1)!.entries.push({ card: key });
-    this.put(recordThreadResponse({ ...item, updatedAt: at, lastHelmAt: at }, at, 'A card is ready for you'));
+    this.put(recordThreadResponse({ ...appendThreadEntry(item, { card: key }), updatedAt: at, lastHelmAt: at }, at, 'A card is ready for you'));
   }
   /** Called only by the alarm; reads never perform maintenance. */
   maintain(now: number) {
@@ -80,9 +79,11 @@ export class Threads {
     this.hooks.event('thread', undefined, item.id);
     this.put({ ...item, notifiedAt: new Date(now).toISOString() });
   }
-  event(id: string) { const item = this.read(id); return item ? { id, grounds: item.grounds, kind: item.kind, title: item.title, text: item.rounds.at(-1)?.entries.flatMap(e => 'text' in e ? [e.text] : []).join(' ') ?? '' } : undefined; }
-  uploadScope(c: Command, actor: Actor): string {
-    this.person(actor); const id = c.path.split('/')[1]!;
+  event(id: string) { const item = this.read(id); return item ? { id, grounds: item.grounds, kind: item.kind, title: item.title, text: personWords(item.rounds.at(-1)) } : undefined; }
+  /** The person attaches to a message; the helm attaches to what it says. */
+  uploadScope(c: Command, actor: Actor, now: number): string {
+    if (actor.kind === 'person') this.person(actor); else this.hooks.helm(c, actor, now);
+    const id = c.path.split('/')[1]!;
     requireThat(THREAD_ID.test(id), 400, 'Choose a conversation'); const item = this.read(id); if (item) this.open(item);
     return `thread:${id}`;
   }
@@ -102,7 +103,7 @@ export class Threads {
       const attachments = this.files(id, b.files ?? []), words = (b.text === undefined || b.text === '') && attachments.length ? '' : threadWords(b.text);
       const at = new Date(now).toISOString(), grounds = identifier(b.grounds ?? 'home');
       const item: HelmThread = { id, grounds, kind: b.via === 'chat' ? 'thread' : 'untriaged', title: b.title === undefined ? (words.split('\n')[0] || attachments[0]!.name).slice(0, 200) : threadWords(b.title, 'a title', 200), text: words, attachments,
-        state: 'open', notes: { decided: [], open: [] }, rounds: [{ at, entries: [{ by: 'person', via: b.via === 'chat' ? 'chat' : 'glass', text: words, attachments }] }], createdAt: at, updatedAt: at, lastPersonAt: at,
+        state: 'open', notes: { decided: [], open: [] }, rounds: [{ at, entries: [{ by: 'person', via: b.via === 'chat' ? 'chat' : 'glass', text: words, attachments, at }] }], createdAt: at, updatedAt: at, lastPersonAt: at,
         ...(b.about === undefined ? {} : { about: identifier(b.about) }) };
       this.put(item); if (b.via !== 'chat') this.notify(item, now); return ok(this.view(item), 201);
     }
@@ -120,14 +121,18 @@ export class Threads {
       this.open(item); if (b.via === 'chat') this.hooks.helm(c, actor, now); else this.person(actor);
       requireThat(item.rounds.length < THREAD_MESSAGES_MAX, 409, 'This conversation needs a report or plan before more messages');
       const attachments = this.files(item.id, b.files ?? [], item), words = (b.text === undefined || b.text === '') && attachments.length ? '' : threadWords(b.text);
-      item.rounds.push({ at, entries: [{ by: 'person', via: b.via === 'chat' ? 'chat' : 'glass', text: words, attachments }] });
+      item.rounds.push({ at, entries: [{ by: 'person', via: b.via === 'chat' ? 'chat' : 'glass', text: words, attachments, at }] });
       this.put({ ...item, updatedAt: at, lastPersonAt: at, notifiedAt: undefined });
       if (b.via !== 'chat') this.notify(this.read(item.id)!, now);
     } else if (parts[2] === 'reopen') {
       this.person(actor); this.put({ ...item, state: 'open', outcome: undefined, updatedAt: at, lastPersonAt: at, lastHelmAt: undefined, notifiedAt: undefined }); this.notify(this.read(item.id)!, now);
     } else {
       this.hooks.helm(c, actor, now);
-      if (parts[2] === 'triage') this.put(recordThreadResponse(classifyThread(item, b.kind, at), at, b.kind === 'thread' ? 'Discussion started' : 'Bait received'));
+      if (parts[2] === 'say') {
+        this.open(item);
+        const attachments = this.files(item.id, b.files ?? [], item), words = (b.text === undefined || b.text === '') && attachments.length ? '' : threadWords(b.text);
+        this.put(sayInThread(item, words, attachments, at));
+      } else if (parts[2] === 'triage') this.put(recordThreadResponse(classifyThread(item, b.kind, at), at, b.kind === 'thread' ? 'Discussion started' : 'Bait received'));
       else if (parts[2] === 'resolve') this.put(recordThreadResponse({ ...item, state: 'resolved', outcome: threadOutcome(b.outcome, b.note, at), updatedAt: at, lastHelmAt: at }, at, threadWords(b.note, 'an outcome note', 1000)));
       else if (parts[2] === 'note') {
         this.open(item);
@@ -136,9 +141,9 @@ export class Threads {
         if (b.link !== undefined) {
           const value = threadWords(b.link, 'a link', 1000), split = value.indexOf(':'), link = value.slice(0, split), ref = value.slice(split + 1);
           requireThat(['dispatched','report','planned'].includes(link) && ref && (link !== 'planned' || ref.startsWith('https://')), 400, 'Choose a dispatch, report or HTTPS plan link');
-          item.rounds.at(-1)!.entries.push({ link: link as 'dispatched'|'report'|'planned', ref, text: threadWords(b.text ?? ref, 'a link note', 1000) });
+          item.rounds = appendThreadEntry(item, { link: link as 'dispatched'|'report'|'planned', ref, text: threadWords(b.text ?? ref, 'a link note', 1000), at }).rounds;
         }
-        this.put(recordThreadResponse({ ...item, notes, updatedAt: at, lastHelmAt: at }, at, b.link ? threadWords(b.text ?? b.link, 'a link note', 1000) : 'Notes updated'));
+        this.put(recordThreadResponse({ ...item, notes, ...(b.decided !== undefined || b.open !== undefined ? { notesAt: at } : {}), updatedAt: at, lastHelmAt: at }, at, b.link ? threadWords(b.text ?? b.link, 'a link note', 1000) : 'Notes updated'));
       } else throw new ApiError(404, 'Conversation action not found');
     }
     if (!['post', 'reopen', 'seen', 'dismiss-notice'].includes(parts[2]!)) this.hooks.event('thread-updated', undefined, item.id);

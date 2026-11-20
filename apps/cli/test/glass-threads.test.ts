@@ -14,7 +14,7 @@ afterEach(async () => { for (const page of pages) await page.close(); pages.leng
 function fleet() { const d = emptyFleet(); d.focusToken = 'tok'; d.threads = [summary()]; d.answerLimits = { maxBytes: 1024, maxFiles: 8, textMax: 20000, extensions: ['.png', '.txt'] }; return d; }
 async function page(d: GlassSnapshot, options: Partial<GlassDomOptions> = {}) { const p = await loadGlass(GLASS_PAGE, d, { now: NOW, get: url => url === `/threads/${ID}` ? { status: 200, body: view() } : undefined, ...options, prepare: w => { Object.defineProperty(w, 'IntersectionObserver', { value: undefined, configurable: true }); options.prepare?.(w); } }); pages.push(p); return p; }
 async function click(g: GlassDom, selector: string) { (g.$(selector) as HTMLElement).click(); await g.settle(); }
-async function type(g: GlassDom, text: string) { const input = g.$('textarea[aria-label="Your message"]') as HTMLTextAreaElement; input.value = text; input.dispatchEvent(new g.window.Event('input', { bubbles: true })); await g.settle(); }
+async function type(g: GlassDom, text: string, label = 'Your message') { const input = g.$(`textarea[aria-label="${label}"]`) as HTMLTextAreaElement; input.value = text; input.dispatchEvent(new g.window.Event('input', { bubbles: true })); await g.settle(); }
 it('opens one card composer from the message button and retains its draft after closing', async () => {
   const g = await page(fleet());
   await click(g, '.message-fab');
@@ -38,14 +38,14 @@ it('keeps a failed send for retry and opens its stored conversation after succes
   expect(g.$('.tsheet')?.textContent).toContain('Keep Reviews');
   expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'thread-start', payload: { text: 'Where should Helm go?', grounds: 'home' } });
 });
-it('shows current notes, cards, collapsed past rounds, chat provenance, and the long-thread hint', async () => {
+it('shows current notes, cards, every round, chat provenance, and the long-thread hint', async () => {
   const g = await page(fleet(), { hash: `#thread/${ID}` });
   expect(g.$('.tsheet')?.textContent).toContain('Choose the middle tab');
   expect(g.$('.tsheet')?.textContent).toContain('Card for you');
   expect(g.$('.thread-hint')?.textContent).toContain('long thread');
   expect(g.$$('.thread-round')).toHaveLength(6);
-  expect(g.$$('.thread-round[open]')).toHaveLength(1);
-  expect(g.$('.tsheet')?.textContent).toContain('In chat');
+  expect(g.$('.thread-round-label')?.textContent).toBe('Round 1 · in chat');
+  expect(g.$('.thread-msg.from-person .thread-meta')?.textContent).toContain('You · in chat');
   expect(g.$('.dcompose')).not.toBeNull();
   await g.go('#helm'); expect(g.$('#helm [aria-label="Waiting for you"]')).not.toBeNull();
   expect(g.$('.bbitem[href="#helm"]')).not.toBeNull();
@@ -107,7 +107,7 @@ it('counts one unread response per thread, marks only its displayed sequence rea
 });
 it('retains message and thread drafts when read receipts or polls replace the snapshot', async () => {
   const d=fleet(); const g=await page(d,{hash:`#thread/${ID}`});
-  await type(g,'A thread draft');
+  await type(g,'A thread draft','Add to this thread');
   d.threads![0]={...summary(),openLine:'A fresh note'}; g.serve(d); await g.poll();
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('A thread draft');
   await g.go('#helm'); await click(g,'.message-fab'); await type(g,'A new message draft');
@@ -160,7 +160,7 @@ it('groups all open conversation kinds together and keeps resolved unread respon
   expect(g.posts().some((p) => JSON.parse(p.body).kind === 'thread-seen')).toBe(false);
 });
 
-it('shows checklist notes and existing dispatch, report and PR cards in conversation rounds', async () => {
+it('shows the notes box and existing dispatch, report and PR cards in conversation rounds', async () => {
   const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [summary()];
   const dispatch = d.dispatches[0]!, report = d.reports[0]!, pr = d.prs[0]!; dispatch.title = 'Implement the navigation change';
   const detail = view();
@@ -170,8 +170,10 @@ it('shows checklist notes and existing dispatch, report and PR cards in conversa
     { link: 'planned', ref: pr.url, text: 'PR link' },
   ] }];
   const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
-  expect(g.$('.thread-checklist input[aria-label="Open"]')?.hasAttribute('checked')).toBe(false);
-  expect((g.$('.thread-checklist input[aria-label="Decided"]') as HTMLInputElement).checked).toBe(true);
+  expect(g.$$('.thread-notes-box li').map((li) => [li.className, li.querySelector('.thread-note-mark')?.textContent, li.textContent])).toEqual([
+    ['decided', '✓', '✓Decided: Keep Reviews'],
+    ['open', '?', '?Open: Choose the middle tab'],
+  ]);
   expect(g.$$('.thread-links .card')).toHaveLength(3);
   expect(g.$('.thread-links')?.textContent).toContain(dispatch.title);
   expect(g.$('.tsheet')?.textContent).toContain(report.title);
@@ -200,4 +202,35 @@ it('closes a linked conversation to the Threads list without leaving the glass',
   expect(g.window.location.hash).toBe('#helm');
   expect(g.$('.tsheet')).toBeNull();
   expect(g.$('#helm .page-head h1')?.textContent).toBe('Threads');
+});
+
+it('reads as a chat: the person on the right, the helm beside its wheel, system lines between, in order', async () => {
+  const detail = view();
+  detail.notesAt = new Date(NOW - 4 * 60_000).toISOString();
+  detail.responseSeq = 3; detail.seenThrough = 2; detail.unreadResponse = true;
+  detail.rounds = [
+    { at: AT, entries: [
+      { by: 'person', via: 'glass', text: 'Reviews barely gets used on the phone', attachments: [], at: AT },
+      { event: 'triaged', kind: 'thread', at: AT },
+      { by: 'helm', text: 'Is that true on desktop too?', attachments: [], at: AT, seq: 2 },
+    ] },
+    { at: AT, entries: [
+      { by: 'person', via: 'glass', text: 'Only on the phone', attachments: [], at: AT },
+      { by: 'helm', text: 'I will keep the question open for you', attachments: [{ name: 'sketch.png', path: '/x/sketch.png', bytes: 12, type: 'image/png' }], at: AT, seq: 3 },
+      { card: KEY },
+    ] },
+  ];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const order = g.$$('.thread-timeline .thread-entry').map((el) => el.classList.contains('from-person') ? 'person' : el.classList.contains('from-helm') ? 'helm' : el.classList.contains('thread-card-entry') ? 'card' : 'system');
+  expect(order).toEqual(['person', 'system', 'helm', 'person', 'helm', 'card']);
+  expect(g.$('.thread-system')?.textContent).toContain('Discussion started');
+  expect(g.$$('.from-helm .thread-avatar svg')).toHaveLength(2);
+  expect(g.$$('.from-helm.unread').map((el) => el.textContent)).toEqual([expect.stringContaining('I will keep the question open for you')]);
+  expect(g.$('.from-helm.unread .thread-meta')?.textContent).toContain('New');
+  expect(g.$('.from-helm.unread img, .from-helm.unread a[download]')).not.toBeNull();
+  expect(g.$('.thread-notes-head')?.textContent).toBe('Notes · helm · updated 4m ago');
+  expect(g.$('textarea[aria-label="Add to this thread"]')).not.toBeNull();
+  const notes = g.$('.thread-notes-box')!, timeline = g.$('.thread-timeline')!, composer = g.$('.thread-view .dcompose')!;
+  expect(notes.compareDocumentPosition(timeline) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(timeline.compareDocumentPosition(composer) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

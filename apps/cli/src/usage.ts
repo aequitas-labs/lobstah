@@ -330,6 +330,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:triage': { flags: { '--as': { value: 'bait|thread', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
   'man:discuss': { flags: { '--said': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<title|thread-id>' },
   'man:note': { flags: { '--decided': { value: '<line>', repeatable: true }, '--open': { value: '<line>', repeatable: true }, '--link': { value: '<kind:ref>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> [<note>]' },
+  'man:say': { flags: { '--attach': { value: '<file>', repeatable: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> <text>' },
   'man:resolve': { flags: { '--outcome': { value: '<kind:ref>', required: true }, '--note': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
   'man:answer': {
     flags: { '--option': { value: '<label>' }, '--text': { value: '<text>' }, '--attach': { value: '<file>', repeatable: true } },
@@ -540,6 +541,7 @@ Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:triage': `Classify a new glass message as bait or a discussion thread. Helm only.`,
   'man:discuss': `Record an open exchange from chat, or append a chat round to its existing thread. Helm only.`,
   'man:note': `Replace decided/open notes or add a dispatch, report or plan link. Helm only.`,
+  'man:say': `Write to the person in a conversation, with optional --attach files. It shows as unread in the glass. Helm only.`,
   'man:resolve': `Close a conversation with its outcome and a one-line note. The person can reopen it. Helm only.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,

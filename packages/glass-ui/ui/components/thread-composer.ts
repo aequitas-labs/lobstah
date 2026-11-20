@@ -18,7 +18,7 @@ export function MessageButton() {
 export function ThreadComposer({ id }: { id: string }) {
   const key = `thread:${id}`,
     state = getState();
-  return html`<${Composer} allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Your message" onSend=${() => sendMessage(key, { id })} done="Message sent" />`;
+  return html`<${Composer} allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Add to this thread" onSend=${() => sendMessage(key, { id })} done="Message sent" />`;
 }
 export function MessageSheet() {
   const state = getState(),

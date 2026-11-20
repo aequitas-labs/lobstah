@@ -853,7 +853,7 @@ export class Account extends DurableObject<Env> {
     if (parts[0] === 'documents' && parts[2] === 'files' && !parts[3] && c.method === 'POST') {
       const scope = this.glass.uploadScope(c, actor, now); return this.reserveFile(c, b, scope);
     }
-    if (parts[0] === 'threads' && parts[2] === 'files' && !parts[3] && c.method === 'POST') return this.reserveFile(c, b, this.threads.uploadScope(c, actor));
+    if (parts[0] === 'threads' && parts[2] === 'files' && !parts[3] && c.method === 'POST') return this.reserveFile(c, b, this.threads.uploadScope(c, actor, now));
     const conversation = this.threads.execute(c, actor, now); if (conversation) return conversation;
     const cards = this.cards.execute(c, actor, now); if (cards) return cards;
     const glass = this.glass.execute(c, actor, now); if (glass) return glass;

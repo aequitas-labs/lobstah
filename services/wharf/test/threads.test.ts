@@ -73,6 +73,25 @@ it('stores validated phone attachments and refuses foreign file references and m
   expect((await call('threads',{id:other,text:'No',files:[key]})).status).toBe(400);
   expect((await call(`threads/${other}/files/${key}`)).status).toBe(404);
 });
+it('lets the helm write in the conversation with an attachment, marking it unread until the person reads it', async () => {
+  await create();
+  expect((await call(`threads/${ID}/say`, {text:'Which screen?'})).status).toBe(409);
+  await call('helm/take', {session:'helm',grounds:'harbor'});
+  const png = new Uint8Array([137,80,78,71,13,10,26,10,0]);
+  const file = await SELF.fetch(`https://state.test/v1/accounts/a/threads/${ID}/files`, {method:'POST',headers:{Authorization:`Bearer ${token}`,'X-Lobstah-Helm':'helm','X-File-Name':'sketch.png','Idempotency-Key':`upload-${++sequence}`},body:png});
+  expect(file.status, await file.clone().text()).toBe(200);
+  const said = await call(`threads/${ID}/say`, {text:'Which screen?',files:[(await file.json<{id:string}>()).id]});
+  expect(said.status, await said.clone().text()).toBe(200);
+  const view = await said.json<ThreadView>();
+  expect(view.rounds[0]!.entries.at(-1)).toMatchObject({by:'helm',text:'Which screen?',attachments:[{name:'sketch.png',type:'image/png'}],seq:view.responseSeq});
+  expect(view).toMatchObject({unreadResponse:true,responseText:'Which screen?'});
+  expect((await (await call('threads')).json<ThreadSummary[]>())[0]).toMatchObject({unreadResponse:true,waitingForHelm:false});
+  expect((await call(`threads/${ID}/say`, {text:''})).status).toBe(400);
+  expect((await call(`threads/${ID}/post`, {text:'The deck'})).status).toBe(201);
+  expect((await (await call('threads')).json<ThreadSummary[]>())[0]).toMatchObject({waitingForHelm:true});
+  const events = await (await call('events')).json<{events: Array<{kind:string;thread?:{text:string}}>}>();
+  expect(events.events.filter((e) => e.kind === 'thread').at(-1)?.thread?.text).toBe('The deck');
+});
 it('writes no rows on glass polls, list reads or detail reads, even when a discussion is due to expire', async () => {
   await create(); await call('helm/take',{session:'helm'}); await call(`threads/${ID}/triage`,{kind:'thread'});
   await sql("UPDATE helm_threads SET data=json_set(data,'$.lastPersonAt','2000-01-01T00:00:00.000Z') WHERE id=?", ID);

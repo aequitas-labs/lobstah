@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, readThread, takeHelm, startThread, triageThread, noteThread, askDecision, readDecisionAnswer, listThreads, mirrorReadAllowed, mirrorWriteAllowed } from '@lobstah/core';
+import { ensureLayout, readThread, takeHelm, startThread, postThread, triageThread, noteThread, askDecision, readDecisionAnswer, listThreads, mirrorReadAllowed, mirrorWriteAllowed } from '@lobstah/core';
 import { buildGlassSnapshot, serveGlass } from '../src/glass.js';
 import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -43,6 +43,23 @@ it('delivers a thread event and supports triage, notes, card answers, chat round
   expect(JSON.parse(view.stdout)).toMatchObject({ state: 'resolved', kind: 'thread', cards: [{ answer: { option: 'Yes' } }] });
   expect(readThread(item.id)?.rounds.at(-1)?.entries[0]).toMatchObject({ via: 'chat' });
   expect(HELM_STOP_REMINDER).toBe('If this reply requires human action, put it on a card.');
+});
+it('lets the helm write in the conversation with man say, with attachments, and wakes it on the reply', () => {
+  const item = startThread({ grounds: 'home', text: 'Is the deck too busy?' });
+  takeHelm({ sessionId: 'test-helm', grounds: { name: 'home', repos: ['web'] }, ttlMs: 60_000 });
+  run('man', 'wait', '--timeout', '0', '--session', 'test-helm');
+  const shot = path.join(home, 'deck.png');
+  fs.writeFileSync(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
+  const said = run('man', 'say', item.id, 'A', 'little:', 'see', 'the', 'sketch', '--attach', shot, '--session', 'test-helm');
+  expect(said.status, said.stderr).toBe(0);
+  expect(JSON.parse(said.stdout)).toMatchObject({ unreadResponse: true, responseText: 'A little: see the sketch' });
+  expect(readThread(item.id)?.rounds[0]?.entries.at(-1)).toMatchObject({ by: 'helm', text: 'A little: see the sketch', attachments: [{ name: 'deck.png' }] });
+  expect(buildGlassSnapshot().threads?.[0]).toMatchObject({ unreadResponse: true, waitingForHelm: false });
+  expect(run('man', 'say', item.id, '--session', 'test-helm').status).toBe(2);
+  expect(run('man', 'say', item.id, 'Not the helm').status).not.toBe(0);
+  postThread(item.id, { text: 'Show me the other one' });
+  const wake = run('man', 'wait', '--timeout', '0', '--session', 'test-helm');
+  expect(wake.stdout).toContain('event: thread'); expect(wake.stdout).toContain('Show me the other one'); expect(wake.stdout).not.toContain('see the sketch');
 });
 it('authorizes writes, validates uploads, serves rounds on demand, and keeps snapshots small', async () => {
   server = serveGlass(0); await new Promise<void>(resolve => server!.once('listening', resolve));

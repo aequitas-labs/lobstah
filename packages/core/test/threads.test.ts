@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureLayout, startThread, postThread, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, readDecisionAnswer, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
+import { ensureLayout, startThread, postThread, sayThread, markThreadResponsesSeen, threadSubscriberNotices, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, readDecisionAnswer, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
 const at = new Date('2026-11-19T10:00:00Z');
@@ -134,5 +134,54 @@ describe('unread helm responses', () => {
     markThreadResponsesSeen(item.id,1);
     expect(threadSummaries()).toEqual([]);
     expect(readThread(item.id)?.outcome?.note).toBe('The notes have the answer');
+  });
+});
+
+describe('chat with the helm', () => {
+  const later = (minutes: number) => new Date(at.getTime() + minutes * 60_000);
+  it('keeps the person and the helm in one timeline, in order, each with its time', () => {
+    const item = start();
+    triageThread(item.id, 'thread', later(1));
+    sayThread(item.id, { text: 'Which part of the deck?', now: later(2) });
+    noteThread(item.id, { decided: ['Rethink the deck'], open: ['Which part'] }, later(3));
+    postThread(item.id, { text: 'The decisions row', now: later(4) });
+    sayThread(item.id, { text: 'I will sketch two options', uploads: [{ name: 'sketch.png', data: png }], now: later(5) });
+    const thread = readThread(item.id)!;
+    expect(thread.rounds.map((round) => round.entries.map((entry) => 'by' in entry ? `${entry.by}:${entry.text}` : 'event' in entry ? `event:${entry.kind}` : 'other'))).toEqual([
+      ['person:Can we rethink the deck?', 'event:thread', 'helm:Which part of the deck?'],
+      ['person:The decisions row', 'helm:I will sketch two options'],
+    ]);
+    const times = thread.rounds.flatMap((round) => round.entries.map((entry) => ('at' in entry ? entry.at : undefined)));
+    expect(times).toEqual([at, later(1), later(2), later(4), later(5)].map((d) => d.toISOString()));
+    expect(thread.notesAt).toBe(later(3).toISOString());
+    const said = thread.rounds[1]!.entries[1]!;
+    expect(said).toMatchObject({ by: 'helm', attachments: [{ name: 'sketch.png' }], seq: thread.responseSeq });
+    expect(fs.readFileSync(resolveThreadFile(item.id, 'sketch.png')!)).toEqual(png);
+  });
+  it('marks the conversation unread for the person and stops waiting for the helm', () => {
+    const item = start();
+    expect(threadSummaries('home')[0]).toMatchObject({ waitingForHelm: true, unreadResponse: false });
+    const said = sayThread(item.id, { text: 'On it', now: later(1) });
+    expect(threadSummaries('home')[0]).toMatchObject({ waitingForHelm: false, unreadResponse: true, responseText: 'On it', responseSeq: said.responseSeq });
+    expect(threadSubscriberNotices()).toMatchObject([{ thread: item.id, seq: said.responseSeq, text: 'On it' }]);
+    markThreadResponsesSeen(item.id, said.responseSeq);
+    expect(threadSummaries('home')[0]?.unreadResponse).toBe(false);
+  });
+  it("wakes the helm with the person's next message, not with its own words", () => {
+    const item = start();
+    sayThread(item.id, { text: 'Helm words', now: later(1) });
+    const before = listNotices().length;
+    remindThreads('home', 900_000, later(2).getTime());
+    expect(listNotices()).toHaveLength(before);
+    postThread(item.id, { text: 'Person reply', now: later(3) });
+    const wake = listNotices().filter((notice) => notice.kind === 'thread').at(-1)!;
+    expect(wake.text).toContain('Person reply');
+    expect(wake.text).not.toContain('Helm words');
+  });
+  it('refuses empty or closed messages', () => {
+    const item = start();
+    expect(() => sayThread(item.id, { text: '  ' })).toThrow('Enter message');
+    resolveThread(item.id, 'answered', 'Done', later(1));
+    expect(() => sayThread(item.id, { text: 'Late' })).toThrow('Reopen');
   });
 });
