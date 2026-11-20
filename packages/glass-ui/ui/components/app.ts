@@ -1,3 +1,5 @@
+import { Helm } from './helm.js';
+import { FishButton, MessageSheet } from './thread-composer.js';
 import { isActiveTrap, olderLeft, sectionInputs } from '../../src/glass-diff.js';
 import { visibleTabs } from '../backend.js';
 import type { GlassOlderKind } from '@lobstah/core';
@@ -54,6 +56,7 @@ export function App({ state }: { state: GlassState }) {
         html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
         host().deck?.(),
       ];
+    if (t === 'helm') return html`<${Helm} />`;
     if (t === 'boats') return host().boats?.() ?? null;
     if (t === 'dispatches')
       return [
@@ -118,6 +121,13 @@ export function App({ state }: { state: GlassState }) {
       (t) =>
         html`<main key=${t} id=${'page-' + t} class=${d ? (t === tab ? 'tabpage on' : 'tabpage') : 'tabpage'}><div id=${t}>${page(t)}</div></main>`,
     ),
+    d &&
+      (tab === 'deck' || (tab === 'helm' && !location.hash.startsWith('#thread/'))) &&
+      !state.messageSheet &&
+      !state.decisionModal &&
+      !state.modal &&
+      html`<${FishButton} />`,
+    state.messageSheet && html`<${MessageSheet} key=${state.messageSheet.about ?? 'new'} />`,
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
     d && html`<${ReportSheet} reportKey=${state.reportSheet ?? null} />`,

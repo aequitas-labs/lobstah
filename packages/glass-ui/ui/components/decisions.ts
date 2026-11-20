@@ -1,3 +1,5 @@
+import { ThreadNotes } from './helm.js';
+import { Composer } from './composer.js';
 import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
 import type { Attachment, RecentRun, RunResult } from '@lobstah/core';
@@ -5,14 +7,11 @@ import { useEffect, useRef } from 'preact/hooks';
 import { decisionNeighbours } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
 import {
-  addFiles,
   HOTKEY_MAX,
   closeDecision,
   dismissAlert,
   markViewed,
   openDecision,
-  pasteImages,
-  removeFile,
   sendAnswer,
   setDraft,
   stepDecision,
@@ -29,9 +28,9 @@ import { PermissionsProposalCard } from './permissions-proposal.js';
 import { RunActions, RunCardBody } from './run-card.js';
 import { RUN_DECLINE, RunKindIcon, RunStatusIcon, runStatus } from './run-status.js';
 import type { RunStatus } from './run-status.js';
-import { can, fileUrl } from '../backend.js';
-import { SendHint, onSendKey, sendShortcut, touchOnly } from '../send-key.js';
-import { Button, buttonClass } from './button.js';
+import { fileUrl } from '../backend.js';
+import { touchOnly } from '../send-key.js';
+import { Button } from './button.js';
 import { Toast } from './toast.js';
 import { DecisionEmbeds } from './decision-embeds.js';
 
@@ -47,13 +46,6 @@ import { DecisionEmbeds } from './decision-embeds.js';
  */
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
-
-/** Grow a text box with its content; empty, it returns to its CSS height, which fits the placeholder. */
-const grow = (el: HTMLTextAreaElement) => {
-  el.style.height = 'auto';
-  // scrollHeight leaves out the border, which a border-box height includes.
-  el.style.height = el.value ? el.scrollHeight + el.offsetHeight - el.clientHeight + 'px' : '';
-};
 
 function attachments(key: string, list: Attachment[]) {
   if (!list.length) return null;
@@ -72,8 +64,6 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
   const instant = permission || (c.kind === 'decision' && !!c.run);
   const options = c.kind === 'decision' ? c.options : [];
   const notes = (c.kind === 'decision' && c.optionNotes) || {};
-  const text = draft?.text ?? '';
-  const files = draft?.files ?? [];
   const sending = !!draft?.sending;
   // 1..N choose an option, N+1 the text field; only 1–9 are keys, and none on a touch screen.
   const touch = touchOnly();
@@ -93,52 +83,8 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
         }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</span><//>`;
       })}</div>`,
     instant && options.length > 0 && draft?.option && draft?.error && html`<div class="bad derr">${draft.error}</div>`,
-    // The dock's composer, one box as in a chat app: the text box across the full width, then a slim
-    // toolbar inside the same box, attach at its left and Send at its right.
     !permission &&
-      html`<div class="dcompose"><div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
-      class="danswer"
-      rows="2"
-      aria-keyshortcuts=${textKey}
-      aria-label=${options.length && !instant ? 'Your answer, in your own words' : 'Your answer'}
-      placeholder=${options.length && !instant ? 'Add to your answer, or answer in your own words' : 'Your answer'}
-      value=${text}
-      disabled=${sending}
-      onInput=${(e: Event) => {
-        const el = e.currentTarget as HTMLTextAreaElement;
-        grow(el);
-        setDraft(key, { text: el.value, error: undefined });
-      }}
-      onPaste=${can('answer-files') ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
-      onKeyDown=${onSendKey(
-        () => !getState().drafts[key]?.sending,
-        () => void sendAnswer(key),
-      )}
-    ></textarea></div><div class="dtools">${
-      can('answer-files') &&
-      html`<label class=${buttonClass('icon', 'lg', 'dattach')} title="Attach images or files">${AttachIcon}<input
-          type="file"
-          multiple
-          aria-label="Attach"
-          accept=${accept}
-          disabled=${sending}
-          onChange=${(e: Event) => {
-            const input = e.currentTarget as HTMLInputElement;
-            void addFiles(key, input.files).then(() => {
-              input.value = '';
-            });
-          }}
-        /></label>`
-    }${!touch && html`<${SendHint} />`}<${Button} variant="icon" size="lg" class="dsend" aria-label="Send" title="Send" aria-keyshortcuts=${sendShortcut()} disabled=${sending} action=${() => sendAnswer(key)} sending="Send" preserveLabel pendingTitle="Sending…" done="Answer sent" showError=${false}>${SendIcon}<//></div></div>`,
-    !permission &&
-      (files.length > 0 || (draft?.error && !(instant && draft.option))) &&
-      html`<div class="dfoot">
-      ${files.map(
-        (f, i) =>
-          html`<span key=${f.name + i} class="dchip">${f.name}<${Button} variant="icon" class="dx" label="remove" disabled=${sending} onClick=${() => removeFile(key, i)}>×<//></span>`,
-      )}
-      ${draft?.error && !(instant && draft.option) && html`<span class="bad derr">${draft.error}</span>`}
-    </div>`,
+      html`<${Composer} draftKey=${key} draft=${draft} accept=${accept} textKey=${textKey} label=${options.length && !instant ? 'Your answer, in your own words' : 'Your answer'} placeholder=${options.length && !instant ? 'Add to your answer, or answer in your own words' : 'Your answer'} onSend=${() => sendAnswer(key)} hideError=${!!(instant && draft?.option)} />`,
   ];
 }
 
@@ -156,10 +102,6 @@ function RunDecline({ c, draft }: { c: DecisionCard; draft: DecisionDraft | unde
     void sendAnswer(c.key);
   }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(option)}</span></span><//>`;
 }
-
-/** The dock's icons: a paperclip to attach, and the paper plane of Material's `send` to send. Each button carries its own label. */
-const AttachIcon = html`<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>`;
-const SendIcon = html`<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" /></svg>`;
 
 /** A decision's title: the helm's, or the worker's note for a raw question. */
 const titleOf = (c: DecisionCard) => (c.kind === 'decision' ? LinkedText(c.title) : NamedText(c.note));
@@ -213,6 +155,7 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
       ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
       ${run && RunKindIcon}
       <b class="dtitle">${titleOf(c)}</b>
+      ${c.kind === 'decision' && c.thread && html`<span class="dim">${getState().snapshot?.threads?.find((t) => t.id === c.thread)?.title ?? 'Conversation'}</span>`}
       <span class="dmeta dim">${meta}</span>
       ${boat && html`<span class="dboat dim">⛵ ${boat}</span>`}
       ${status}
@@ -419,6 +362,7 @@ export function DecisionModal({
         </div>
       </div>
       <div class="dbody">
+        ${c.kind === 'decision' && c.thread && html`<${ThreadNotes} id=${c.thread} />`}
         <div class="dtop">
           ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
           <b class="dtitle">${titleOf(c)}</b>

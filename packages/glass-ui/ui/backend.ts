@@ -30,6 +30,8 @@ export interface GlassBackend {
   pollMs?: number;
   /** One poll. With the last ETag, an unchanged snapshot answers only its beats. Throws when the server answers an error. */
   poll(etag: string | null): Promise<GlassPoll>;
+  /** A conversation and its rounds, read only when opened. */
+  thread?(id: string): Promise<GlassRead<import('@lobstah/core').ThreadView>>;
   /** The whole snapshot now, read once after a write so its result shows. */
   snapshot(): Promise<GlassSnapshot>;
   /** Fresh PR description; optional on sources without GitHub reads. */
@@ -62,7 +64,10 @@ export interface GlassBackend {
 
 /** What a listed file belongs to, as fileUrl names it. */
 export type GlassFileOwner =
-  { kind: 'decision' | 'report'; key: string } | { kind: 'dispatch'; lane: string; id: string } | { kind: 'trap'; trapId: string };
+  | { kind: 'decision' | 'report'; key: string }
+  | { kind: 'thread'; id: string }
+  | { kind: 'dispatch'; lane: string; id: string }
+  | { kind: 'trap'; trapId: string };
 
 /** A poll's answer: a new snapshot (and its ETag), or `unchanged` with the beats an unchanged answer carried. */
 export type GlassPoll =
@@ -80,6 +85,7 @@ export interface GlassCapabilities {
 
 /** The actions a glass can offer that not every source takes. */
 export const GLASS_ACTIONS = [
+  'thread-message',
   /** Raise a live trap's window on this machine. */
   'focus',
   /** Ask the helm for a new trap. */

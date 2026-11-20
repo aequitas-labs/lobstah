@@ -1,3 +1,4 @@
+import { openMessage } from '../thread-actions.js';
 import type { GlassDispatch, GlassDispatchSummary, GlassMessage, GlassSnapshot } from '@lobstah/core';
 import { useState } from 'preact/hooks';
 import { dispatchReport, type DispatchDetail, trapView } from '../../src/glass-diff.js';
@@ -52,10 +53,11 @@ export function DispatchView({
     : capabilities().daemon && viewerHasTerminal()
       ? html`<${Button} action=${copy(attach)} done="Attach command copied">Open session<//>`
       : null;
-  const top =
+  const sessionControl =
     can('cancel') && x.bucket !== 'done'
       ? html`<${SplitButton} main=${open} more=${[{ label: 'Cancel dispatch…', onClick: () => setConfirming(true) }]} />`
       : open;
+  const top = html`<div>${sessionControl}${can('thread-message') && html`<${Button} onClick=${() => openMessage(x.id)}>Message the helm<//>`}</div>`;
   const urls = new Set(
     [x.evidence?.prUrl, ...(x.evidence?.prUrls ?? []), x.evidence?.pr?.url, ...(x.prList ?? []).map((pr) => pr.url)].filter(Boolean),
   );

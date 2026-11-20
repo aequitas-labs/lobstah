@@ -24,6 +24,8 @@ export interface RunView {
 }
 
 export interface GlassState {
+  messageSheet?: { grounds?: string; about?: string };
+
   /** A closed decision opened by its deep link, outside the live queue. */
   archivedDecision?: import('@lobstah/core').GlassDecision;
   /** The latest /data snapshot; undefined until the first fetch lands. */

@@ -21,6 +21,7 @@ import { ITEM_ICON, TAB_ICON } from './icons.js';
 
 const TAB_LABEL: Record<GlassTab, string> = {
   deck: 'On deck',
+  helm: 'Helm',
   dispatches: 'Dispatches',
   traps: 'Traps',
   boats: 'Boats',
@@ -132,7 +133,7 @@ function badgeLabel(t: GlassTab, n: number): string {
  * Always in the bar, in the phone bar's order. The other tabs join them where
  * the screen fits every tab on one line (glass.css), else sit behind More.
  */
-const PINNED: readonly GlassTab[] = ['deck', 'reviews', 'prs'];
+const PINNED: readonly GlassTab[] = ['deck', 'reviews', 'helm'];
 /** glass.css's breakpoint: from this width every tab is inline and More is hidden. */
 const ALL_TABS_FIT = '(min-width: 1200px)';
 
@@ -306,7 +307,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
       mode === 'menu' &&
       html`<${Dialog} title="Menu" cls="phone-menu-dialog" onClose=${() => setMode('bar')}><div class="phonemenu" id="phone-menu" role="menu" aria-label="Spyglass menu">
         <div class="pmsec">views</div>
-        <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${(event: MouseEvent) => navigate(event, t)}>${TAB_ICON[t]}${TAB_LABEL[t]}</a>`)}</nav>
+        <nav aria-label="Spyglass views">${tabs.map((t) => html`<a key=${t} href=${'#' + t} role="menuitem" class=${t === tab ? 'on' : ''} aria-current=${t === tab ? 'page' : undefined} onClick=${(event: MouseEvent) => navigate(event, t)}>${TAB_ICON[t]}${TAB_LABEL[t]}${t === 'prs' && count(prsWaiting, badgeLabel('prs', prsWaiting))}</a>`)}</nav>
         ${fleet && html`<div class="pmsec">fleet</div><div class="pmchips">${fleet}</div>`}
         <div class="pmsec">you</div>
         <div class="pmyou"><${Button} role="menuitem" onClick=${() => {
@@ -318,7 +319,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
     <nav class="bbrow" aria-label="Spyglass">
       ${link('deck', TAB_ICON.deck, count(unread, badgeLabel('deck', unread)))}
       ${link('reviews', TAB_ICON.reviews, count(reviews, badgeLabel('reviews', reviews)))}
-      ${link('prs', TAB_ICON.prs, count(prsWaiting, badgeLabel('prs', prsWaiting)))}
+      ${link('helm', TAB_ICON.helm, null)}
       <button type="button" class=${'bbitem bbiconly' + (st.q || st.repo ? ' on' : '')} aria-label="Search" onClick=${() => setMode('search')}><span class="bbicon">${ITEM_ICON.search}</span></button>
       <button type="button" class=${'bbitem bbiconly' + (mode === 'menu' ? ' on' : '')} aria-label="Menu" aria-expanded=${mode === 'menu'} aria-controls="phone-menu" onClick=${() => setMode(mode === 'menu' ? 'bar' : 'menu')}><span class="bbicon">${ITEM_ICON.menu}</span></button>
     </nav>

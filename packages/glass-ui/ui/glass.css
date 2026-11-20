@@ -248,7 +248,7 @@ h2 {
   color: var(--fg);
 }
 @media (max-width: 1199px) {
-  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='prs']) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='helm']) {
     display: none;
   }
   .nav-toggle {
@@ -4199,5 +4199,61 @@ footer .glass-brand {
   }
   #reports td.grow {
     min-width: 0;
+  }
+}
+
+/* One message entry, above the phone navigation and outside its hit targets. */
+.fish-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 35;
+  border-radius: 50%;
+  width: 52px;
+  height: 52px;
+  box-shadow: 0 4px 18px #0008;
+}
+.fish-fab svg {
+  width: 28px;
+  height: 28px;
+}
+.thread-view {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.thread-round {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.thread-round summary {
+  cursor: pointer;
+  color: var(--dim);
+  margin-bottom: 12px;
+}
+.thread-notes {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.thread-outcome {
+  padding: 8px 12px;
+}
+.thread-view .dcompose {
+  margin-top: 16px;
+}
+.thread-view .dimg img {
+  max-width: 100%;
+}
+@media (max-width: 699px) {
+  .fish-fab {
+    right: 16px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 699px) {
+  .fish-fab.above-alert {
+    bottom: calc(144px + env(safe-area-inset-bottom, 0px));
   }
 }

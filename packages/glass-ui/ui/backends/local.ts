@@ -19,6 +19,7 @@ export const localBackend: GlassBackend = {
   async snapshot() {
     return (await (await fetch('/data')).json()) as GlassSnapshot;
   },
+  thread: (id) => read(`/threads/${encodeURIComponent(id)}`, { cache: 'no-store' }),
   prDetails: (key) => read(`/data/pr/${encodeURIComponent(key)}`, { cache: 'no-store' }),
   dispatch: (id) => read(`/data/dispatch/${encodeURIComponent(id)}`, { cache: 'no-store' }),
   decision: (key) => read(`/data/decision/${encodeURIComponent(key)}`),
@@ -49,6 +50,7 @@ export const localBackend: GlassBackend = {
     return r.ok ? { ok: true, status: r.status, data: await r.text() } : { ok: false, status: r.status };
   },
   fileUrl(owner, name) {
+    if (owner.kind === 'thread') return `/threads/${encodeURIComponent(owner.id)}/files/${encodeURIComponent(name)}`;
     if (owner.kind === 'dispatch') return dispatchFileUrl(owner.lane, owner.id, name);
     if (owner.kind === 'trap') return trapFileUrl(owner.trapId, name);
     return owner.kind === 'decision' ? decisionFileUrl(owner.key, name) : reportFileUrl(owner.key, name);
