@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureLayout, startThread, postThread, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
+import { ensureLayout, startThread, postThread, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, readDecisionAnswer, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
 const at = new Date('2026-11-19T10:00:00Z');
@@ -93,5 +93,46 @@ describe('helm conversations', () => {
     for (let n = 1; n < 100; n++) postThread(item.id, { text: 'Round ' + n, via: 'chat' });
     expect(() => postThread(item.id, { text: 'Too many', via: 'chat' })).toThrow('report or plan');
     expect(readThread(item.id)?.rounds).toHaveLength(100);
+  });
+});
+
+describe('unread helm responses', () => {
+  it('coalesces durable notices and preserves responses newer than the seen cursor', async () => {
+    const { markThreadResponsesSeen, dismissThreadNotice, threadSubscriberNotices } = await import('../src/threads.js');
+    const item = start();
+    triageThread(item.id, 'thread', at);
+    noteThread(item.id, {decided:['Keep Reviews']}, at);
+    const {meta} = askDecision({title:'Use Helm?',thread:item.id,askedBy:'helm',maxBytes:100});
+    const seq = readThread(item.id)!.responseSeq!;
+    expect(threadSubscriberNotices()).toMatchObject([{thread:item.id,person:'owner',seq,href:`#thread/${item.id}`}]);
+    expect(threadSubscriberNotices()).toHaveLength(1);
+    markThreadResponsesSeen(item.id, seq - 1);
+    expect(threadSummaries()[0]).toMatchObject({responseSeq:seq,seenThrough:seq-1,unreadResponse:true});
+    expect(threadSubscriberNotices()[0]?.seq).toBe(seq);
+    dismissThreadNotice(item.id, seq);
+    expect(threadSubscriberNotices()).toEqual([]);
+    expect(threadSummaries()[0]?.unreadResponse).toBe(true);
+    expect(readDecisionAnswer(meta.key)).toBeUndefined();
+    noteThread(item.id,{open:['One more choice']},at);
+    expect(threadSubscriberNotices()[0]?.seq).toBe(seq+1);
+    markThreadResponsesSeen(item.id, seq);
+    expect(threadSummaries()[0]?.unreadResponse).toBe(true);
+    markThreadResponsesSeen(item.id, seq+1);
+    expect(threadSubscriberNotices()).toEqual([]);
+    expect(threadSummaries()[0]?.unreadResponse).toBe(false);
+    expect(threadView(readThread(item.id)!).cards[0]?.standing).toBe(true);
+    expect(threadSubscriberNotices('another-person')).toHaveLength(1);
+    expect(() => markThreadResponsesSeen(item.id, seq+2)).toThrow('shown');
+  });
+  it('keeps a resolved conversation beyond a day until its response is read', async () => {
+    const {markThreadResponsesSeen, threadSubscriberNotices} = await import('../src/threads.js');
+    const old = new Date(Date.now()-3*86400_000);
+    const item = startThread({grounds:'home',text:'An old exchange',via:'chat',now:old});
+    resolveThread(item.id,'answered','The notes have the answer',old);
+    expect(threadSummaries()).toHaveLength(1);
+    expect(threadSubscriberNotices()).toHaveLength(1);
+    markThreadResponsesSeen(item.id,1);
+    expect(threadSummaries()).toEqual([]);
+    expect(readThread(item.id)?.outcome?.note).toBe('The notes have the answer');
   });
 });

@@ -44,7 +44,7 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
     || /^(documents|dispatches|threads)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));
   const input = request.method === 'POST' && (route === 'requests' || route === 'threads'
-    || /^threads\/[A-Za-z0-9_-]+\/(post|reopen)$/.test(route)
+    || /^threads\/[A-Za-z0-9_-]+\/(post|reopen|seen|dismiss-notice)$/.test(route)
     || /^documents\/[A-Za-z0-9_-]+\/(answer|ack)$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/ack$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/cancel$/.test(route)

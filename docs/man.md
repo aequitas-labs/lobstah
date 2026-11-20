@@ -1866,3 +1866,16 @@ Wharf grounds support the same conversation commands. The wharf stores phone
 attachments as account files and emits the conversation in `man wait` over the
 existing wake socket. Thread reads and glass polls write no rows; the wharf's
 alarm repeats unanswered messages and closes idle discussions.
+
+Unread helm responses appear first under Response waiting and count once per
+conversation on Helm. Opening a conversation or its card records only the
+response sequence shown. A later response remains unread, and a standing card
+still needs its answer. Resolved conversations remain visible while unread.
+
+`GET /thread-notices` on a boat and `GET /api/glass/threads/notices` on the wharf
+expose one pending subscriber notice per conversation and person, with the latest
+response sequence and its link. A new response updates that durable notice.
+`thread-seen` and `thread-notice-dismiss` take `id` and `through` on the boat's
+requests route; native wharf actions are `threads/<id>/seen` and
+`threads/<id>/dismiss-notice`. A read clears notices through that sequence;
+dismissing a notice leaves the response unread. Neither action answers a card.

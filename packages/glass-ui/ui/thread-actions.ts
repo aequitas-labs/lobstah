@@ -68,3 +68,19 @@ export async function reopenConversation(id: string): Promise<string | undefined
     return 'The conversation could not be reopened';
   }
 }
+
+/** Acknowledge only the response sequence this page actually rendered. */
+export async function markThreadResponseSeen(id: string, through: number): Promise<boolean> {
+  const token = getState().snapshot?.focusToken;
+  if (!token) return false;
+  try {
+    const response = await backend().request('thread-seen', { id, through }, token);
+    if (response.ok && response.body.ok) {
+      receive(await backend().snapshot());
+      return true;
+    }
+  } catch {
+    /* Keep the unread badge until a read is stored. */
+  }
+  return false;
+}

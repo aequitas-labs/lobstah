@@ -11,6 +11,12 @@ export type ThreadEntry =
   | { link: 'dispatched' | 'report' | 'planned'; ref: string; text: string };
 export interface ThreadRound { at: string; entries: ThreadEntry[] }
 export interface HelmThread {
+  responseSeq?: number;
+  responseAt?: string;
+  responseText?: string;
+  notice?: { seq: number; at: string; text: string; href: string };
+  readers?: Record<string, { seenThrough: number; dismissedThrough: number }>;
+
   id: string;
   grounds: string;
   kind: ThreadKind;
@@ -30,6 +36,12 @@ export interface HelmThread {
 }
 /** Polls carry summaries, never the conversation or attachment bytes. */
 export interface ThreadSummary {
+  responseSeq?: number;
+  seenThrough?: number;
+  unreadResponse?: boolean;
+  responseAt?: string;
+  responseText?: string;
+
   id: string;
   grounds: string;
   kind: ThreadKind;
@@ -43,6 +55,9 @@ export interface ThreadSummary {
   outcome?: ThreadOutcome;
 }
 export interface ThreadView extends HelmThread {
+  seenThrough?: number;
+  unreadResponse?: boolean;
+
   cards: Array<{ key: string; title: string; options: string[]; answer?: { option?: string; text?: string; attachments: Attachment[]; answeredAt: string }; standing: boolean }>;
 }
 
@@ -78,4 +93,33 @@ export function threadOutcome(value: unknown, note: unknown, at: string): Thread
   if (kind === 'dispatched' && (!ref || !/^[A-Za-z0-9_-]{1,128}$/.test(ref))) throw new ThreadError('Include the dispatch id');
   if ((kind === 'answered' || kind === 'dropped') && ref) throw new ThreadError('Answered and dropped outcomes take only a note');
   return { kind, ...(ref ? { ref } : {}), note: threadWords(note, 'an outcome note', 1000), at };
+}
+
+export interface ThreadSubscriberNotice {
+  thread: string;
+  person: string;
+  seq: number;
+  at: string;
+  text: string;
+  href: string;
+}
+export const THREAD_PERSON = 'owner';
+export function responseState(item: HelmThread, person = THREAD_PERSON) {
+  const responseSeq = item.responseSeq ?? 0, seenThrough = item.readers?.[person]?.seenThrough ?? 0;
+  return { responseSeq, seenThrough, unreadResponse: responseSeq > seenThrough, responseAt: item.responseAt, responseText: item.responseText };
+}
+/** A response and its coalesced subscriber notice commit with the thread. */
+export function recordThreadResponse(item: HelmThread, at: string, text: string): HelmThread {
+  const responseSeq = (item.responseSeq ?? 0) + 1;
+  return { ...item, responseSeq, responseAt: at, responseText: text, notice: { seq: responseSeq, at, text, href: `#thread/${item.id}` } };
+}
+export function acknowledgeThreadResponse(item: HelmThread, person: string, through: unknown, dismiss = false): HelmThread {
+  if (!Number.isSafeInteger(through) || (through as number) < 0 || (through as number) > (item.responseSeq ?? 0)) throw new ThreadError('Choose a response that has been shown');
+  const previous = item.readers?.[person] ?? { seenThrough: 0, dismissedThrough: 0 };
+  const next = { ...previous, [dismiss ? 'dismissedThrough' : 'seenThrough']: Math.max(through as number, previous[dismiss ? 'dismissedThrough' : 'seenThrough']) };
+  return { ...item, readers: { ...item.readers, [person]: next } };
+}
+export function pendingThreadNotice(item: HelmThread, person = THREAD_PERSON): ThreadSubscriberNotice | undefined {
+  const notice = item.notice, reader = item.readers?.[person];
+  return notice && notice.seq > (reader?.seenThrough ?? 0) && notice.seq > (reader?.dismissedThrough ?? 0) ? { ...notice, thread: item.id, person } : undefined;
 }

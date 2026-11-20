@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ThreadSummary, ThreadView, ThreadRound } from '@lobstah/core';
 import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
 import { getState } from '../store.js';
 import { openDecision } from '../actions.js';
-import { openThread, reopenConversation, threadId } from '../thread-actions.js';
+import { markThreadResponseSeen, openThread, reopenConversation, threadId } from '../thread-actions.js';
 import { safeHref } from '../../src/glass-markdown.js';
 import { ThreadComposer } from './thread-composer.js';
 import { Button } from './button.js';
@@ -38,9 +38,41 @@ function useThread(id: string | undefined) {
   }, [id, revision, cards]);
   return { view, error };
 }
+/** A response is read only while its content is visible on this page. */
+function ThreadResponse({ view }: { view: ThreadView }) {
+  const box = useRef<HTMLDivElement>(null);
+  const state = getState(),
+    covered = !!(state.reportSheet || state.lightbox || state.messageSheet);
+  useEffect(() => {
+    let marked = false,
+      busy = false,
+      visible = typeof IntersectionObserver !== 'function';
+    const seen = async () => {
+      if (covered || document.hidden || !visible || marked || busy || !view.unreadResponse || !view.responseSeq) return;
+      busy = true;
+      marked = await markThreadResponseSeen(view.id, view.responseSeq);
+      busy = false;
+    };
+    const observer =
+      typeof IntersectionObserver === 'function'
+        ? new IntersectionObserver((entries) => {
+            visible = entries.some((entry) => entry.isIntersecting);
+            void seen();
+          })
+        : undefined;
+    if (box.current) observer?.observe(box.current);
+    void seen();
+    document.addEventListener('visibilitychange', seen);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener('visibilitychange', seen);
+    };
+  }, [view.id, view.responseSeq, view.unreadResponse, covered]);
+  return html`<div class="thread-response" ref=${box}>${outcome(view)}${view.responseText && html`<p>Helm · ${LinkedText(view.responseText)}</p>`}</div>`;
+}
 export function ThreadNotes({ id }: { id: string }) {
   const { view, error } = useThread(id);
-  return html`<aside class="thread-notes"><a href=${`#thread/${id}`}>${view?.title ?? 'Conversation'}</a>${error && html`<p class="dim">${error}</p>`}${view && Notes(view)}</aside>`;
+  return html`<aside class="thread-notes"><a href=${`#thread/${id}`}>${view?.title ?? 'Conversation'}</a>${error && html`<p class="dim">${error}</p>`}${view && html`<${ThreadResponse} view=${view} />`}${view && Notes(view)}</aside>`;
 }
 function Notes(view: ThreadView) {
   return [
@@ -72,7 +104,7 @@ function Conversation({ id }: { id: string }) {
   if (error) return html`<p role="status">${error}</p>`;
   if (!view) return html`<p class="dim">Loading conversation</p>`;
   return html`<div class="thread-view"><a href="#helm">All conversations</a><${SectionHead} title=${view.title} page />
-    ${outcome(view)}${Notes(view)}
+    ${html`<${ThreadResponse} view=${view} />`}${Notes(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
     ${view.rounds.map((round, i) => html`<${Round} key=${round.at} round=${round} view=${view} number=${i + 1} current=${i === view.rounds.length - 1} />`)}
     ${view.state === 'resolved' ? html`<${Button} action=${() => reopenConversation(view.id)} done="Conversation reopened">Reopen<//>` : html`<${ThreadComposer} id=${view.id} />`}
@@ -85,20 +117,24 @@ export function Helm() {
   const query = state.prefs.q.toLowerCase();
   const items = (state.snapshot?.threads ?? []).filter((t) => !query || `${t.title} ${t.openLine ?? ''}`.toLowerCase().includes(query));
   const section = (title: string, list: ThreadSummary[]) =>
-    html`<section><${SectionHead} title=${title} count=${list.length} />${list.length ? html`<ul class="dlist">${list.map((item) => html`<li key=${item.id} class="drow"><button class="dopen" type="button" onClick=${() => openThread(item.id)}><b class="dtitle">${item.title}</b><span class="dmeta dim">${item.state === 'resolved' ? 'Resolved' : item.cards.length ? 'Card for you' : item.waitingForHelm ? 'Waiting for helm' : 'Open'} · ${item.grounds} · ${Age(item.updatedAt)} ago</span>${item.openLine && html`<span class="dim">${item.openLine}</span>`}</button>${outcome(item)}</li>`)}</ul>` : html`<p class="dim">Nothing here</p>`}</section>`;
+    html`<section><${SectionHead} title=${title} count=${list.length} />${list.length ? html`<ul class="dlist">${list.map((item) => html`<li key=${item.id} class="drow"><button class="dopen" type="button" onClick=${() => openThread(item.id)}><b class="dtitle">${item.title}</b>${item.unreadResponse && html`<span class="badge">Unread</span>`}<span class="dmeta dim">${item.state === 'resolved' ? 'Resolved' : item.cards.length ? 'Card for you' : item.waitingForHelm ? 'Waiting for helm' : 'Open'} · ${item.grounds} · ${Age(item.updatedAt)} ago</span>${item.unreadResponse && item.responseText && html`<span>${LinkedText(item.responseText)}</span>`}${item.openLine && html`<span class="dim">${item.openLine}</span>`}</button>${outcome(item)}</li>`)}</ul>` : html`<p class="dim">Nothing here</p>`}</section>`;
   return [
     html`<${SectionHead} title="Helm" page />`,
     section(
+      'Response waiting',
+      items.filter((t) => t.unreadResponse),
+    ),
+    section(
       'Bait',
-      items.filter((t) => t.state === 'open' && t.kind !== 'thread'),
+      items.filter((t) => !t.unreadResponse && t.state === 'open' && t.kind !== 'thread'),
     ),
     section(
       'Threads',
-      items.filter((t) => t.state === 'open' && t.kind === 'thread'),
+      items.filter((t) => !t.unreadResponse && t.state === 'open' && t.kind === 'thread'),
     ),
     section(
       'Resolved today',
-      items.filter((t) => t.state === 'resolved'),
+      items.filter((t) => !t.unreadResponse && t.state === 'resolved'),
     ),
   ];
 }

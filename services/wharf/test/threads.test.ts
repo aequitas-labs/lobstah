@@ -82,3 +82,35 @@ it('writes no rows on glass polls, list reads or detail reads, even when a discu
   expect(await runDurableObjectAlarm(stub())).toBe(true);
   expect(await (await call(`threads/${ID}`)).json()).toMatchObject({state:'resolved',outcome:{kind:'dropped'}});
 });
+
+it('keeps a later response unread, coalesces subscriber notices and leaves cards unanswered', async () => {
+  await create(); await call('helm/take',{session:'helm',grounds:'harbor'});
+  await call(`threads/${ID}/triage`,{kind:'thread'});
+  await call('documents',{id:'read-card',kind:'decision',title:'Use Helm?',thread:ID,grounds:'harbor'});
+  await call('documents/read-card/publish',{});
+  const shown = (await (await call(`threads/${ID}`)).json<ThreadView>()).responseSeq!;
+  await call(`threads/${ID}/note`,{decided:['Keep Reviews']});
+  expect((await call(`threads/${ID}/seen`,{through:shown})).status).toBe(200);
+  expect(await (await call(`threads/${ID}`)).json()).toMatchObject({responseSeq:shown+1,seenThrough:shown,unreadResponse:true});
+  expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,person:'a',seq:shown+1,href:`#thread/${ID}`}]);
+  expect((await call(`threads/${ID}/dismiss-notice`,{through:shown+1})).status).toBe(200);
+  expect(await (await call('threads/notices')).json()).toEqual([]);
+  expect(await (await call(`threads/${ID}`)).json()).toMatchObject({unreadResponse:true,cards:[{key:'read-card',standing:true}]});
+  expect(await (await call('documents/read-card')).json()).not.toHaveProperty('answer');
+  await call(`threads/${ID}/note`,{open:['Choose the middle tab']});
+  expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,seq:shown+2}]);
+  expect((await call(`threads/${ID}/seen`,{through:shown+3})).status).toBe(400);
+  await call(`threads/${ID}/seen`,{through:shown+2});
+  expect(await (await call('threads/notices')).json()).toEqual([]);
+  expect(await rowsWritten(stub(),async()=>{await call('threads/notices');await call('threads');})).toBe(0);
+});
+it('retains an old resolved item while unread and drops it from the summary after reading', async () => {
+  await create(); await call('helm/take',{session:'helm'});
+  await call(`threads/${ID}/resolve`,{outcome:'answered',note:'Keep Reviews'});
+  await sql("UPDATE helm_threads SET data=json_set(data,'$.updatedAt','2000-01-01T00:00:00.000Z') WHERE id=?",ID);
+  expect(await (await call('threads')).json()).toMatchObject([{id:ID,unreadResponse:true}]);
+  expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,seq:1}]);
+  await call(`threads/${ID}/seen`,{through:1});
+  expect(await (await call('threads')).json()).toEqual([]);
+  expect((await call(`threads/${ID}`)).status).toBe(200);
+});
