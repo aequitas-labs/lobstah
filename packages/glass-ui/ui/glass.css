@@ -4484,8 +4484,8 @@ footer .glass-brand {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: baseline;
-  margin: 4px 0;
+  align-items: center;
+  margin: 2px 0;
 }
 .thread-tracked li > :nth-child(2) {
   overflow-wrap: anywhere;

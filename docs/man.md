@@ -1871,7 +1871,8 @@ links are the dispatches it names (`--link dispatched:<id>` or a dispatched
 outcome), its cards, its PRs (`man note <id> --link pr:<url>`) and any todo added
 with `lobstah todo add "<text>" --thread <id>`, which stays in the todo list.
 Tracking threads leave the person's open list for a collapsed Tracking section,
-and the thread shows each link's live state, read-only. `man wait` resolves a
+and the thread shows each link's live state, read-only, beside its kind's icon.
+Moving to tracking is quiet: it raises no unread. `man wait` resolves a
 tracking thread with a one-line system message once every link is done (a
 dispatch done, a card answered or withdrawn, a PR merged, a todo closed). It
 returns the thread to the open list, unread, when a link stalls: a dispatch

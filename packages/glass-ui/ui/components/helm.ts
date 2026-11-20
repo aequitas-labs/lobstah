@@ -128,6 +128,11 @@ function WorkIcon({ kind }: { kind: WorkKind }) {
 function Work({ kind, children }: { kind: WorkKind; children: ComponentChildren }) {
   return html`<div class=${`thread-work thread-work-${kind}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${children}</div></div>`;
 }
+/** A PR reference (`owner/repo#7`, `pr:owner/repo#7`, or already its URL) as its GitHub URL. */
+function prUrl(ref: string): string {
+  const m = /^(?:pr:)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/.exec(ref.trim());
+  return m ? `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}` : ref;
+}
 /** References keep the same cards and destinations as their own overview pages. */
 function ThreadLink({ kind, reference: ref, text }: { kind: string; reference: string; text: string }) {
   const snapshot = viewOf(getState());
@@ -137,9 +142,10 @@ function ThreadLink({ kind, reference: ref, text }: { kind: string; reference: s
   }
   if (kind === 'dispatched') return html`<${ThreadDispatch} id=${ref} text=${text} />`;
   const pr = snapshot?.prs.find((p) => p.url === ref || p.key === ref);
-  return pr
-    ? html`<${Work} kind="pr"><div class="thread-links cards">${prCard(pr)}</div><//>`
-    : html`<${Work} kind="plan"><p><a href=${safeHref(ref)} target="_blank" rel="noopener">${LinkedText(text)}</a></p><//>`;
+  if (pr) return html`<${Work} kind="pr"><div class="thread-links cards">${prCard(pr)}</div><//>`;
+  // A PR the snapshot doesn't list keeps its icon and links to GitHub.
+  const href = kind === 'pr' ? prUrl(ref) : ref;
+  return html`<${Work} kind=${kind === 'pr' ? 'pr' : 'plan'}><p><a href=${safeHref(href)} target="_blank" rel="noopener">${LinkedText(text)}</a></p><//>`;
 }
 /** The dispatch a conversation started on: its card heads the conversation, loaded when the snapshot no longer lists it. */
 function useDispatch(id: string) {
@@ -266,7 +272,6 @@ export function ThreadSheet({ id }: { id: string }) {
     <div class="thread-sheet-body" ref=${body}>${error && !view ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
   <//>`;
 }
-const TRACKED_KIND: Record<ThreadTrackedItem['kind'], string> = { dispatch: 'Dispatch', card: 'Card', pr: 'PR', todo: 'Todo' };
 const TRACKED_TONE: Record<ThreadTrackedItem['state'], string> = { open: '', done: 'ok', stalled: 'warn' };
 /** Work the thread waits on, with its live state. Read-only: each item is acted on in its own view. */
 function Tracked(view: ThreadView) {
@@ -277,7 +282,7 @@ function Tracked(view: ThreadView) {
       <p class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Linked work'}</p>
       <ul>${items.map(
         (item) =>
-          html`<li><span class="dim">${TRACKED_KIND[item.kind]}</span> ${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`} <span class=${`badge ${TRACKED_TONE[item.state]}`}>${item.status}</span></li>`,
+          html`<li><${WorkIcon} kind=${item.kind} />${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`} <span class=${`badge ${TRACKED_TONE[item.state]}`}>${item.status}</span></li>`,
       )}</ul>
     </section>`
   );

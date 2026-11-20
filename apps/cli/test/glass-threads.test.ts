@@ -312,15 +312,35 @@ it('shows linked work with its live state, read-only, and keeps the composer on 
   const panel = g.$('.thread-tracked')!;
   expect(panel.querySelector('.thread-notes-head')?.textContent).toBe('Tracking · closes when this work finishes');
   expect(g.$$('.thread-tracked li').map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
-    'Dispatch Fix the flaky deck test working',
-    'PR Deflake the deck test checks failing',
-    'Todo Check it tomorrow done',
+    'Dispatch: Fix the flaky deck test working',
+    'PR: Deflake the deck test checks failing',
+    'Todo: Check it tomorrow done',
+  ]);
+  // Each kind wears the icon its view has in the glass, not a word.
+  const tab = (name: string) => g.$$(`a[href="#${name}"]`).map((a) => a.querySelector('svg')?.outerHTML).find(Boolean);
+  expect(g.$$('.thread-tracked li .thread-work-icon').map((el) => [el.getAttribute('title'), el.querySelector('svg')?.outerHTML])).toEqual([
+    ['Dispatch', tab('dispatches')],
+    ['PR', tab('prs')],
+    ['Todo', tab('todos')],
   ]);
   expect(g.$$('.thread-tracked .badge').map((b) => b.className)).toEqual(['badge ', 'badge warn', 'badge ok']);
   expect(panel.querySelector('a[href="#dispatch/d1"]')).not.toBeNull();
   expect(panel.querySelector('button, input, textarea')).toBeNull();
   expect(g.$('.thread-system')?.textContent).toContain('All linked work finished');
   expect(g.$('textarea[aria-label="Add to this thread"]')).not.toBeNull();
+});
+
+it('marks a PR link with the PR icon and a linked card with the card icon, even when the snapshot lists neither', async () => {
+  const detail = { ...view(), state: 'tracking' as const };
+  detail.tracked = [{ kind: 'card', ref: KEY, title: 'Use Helm?', state: 'open', status: 'waiting for you', href: `#decision/${KEY}` }];
+  detail.rounds = [{ at: AT, entries: [{ link: 'pr', ref: 'pr:o/r#7', text: 'The fix', at: AT }] }];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const tab = (name: string) => g.$$(`a[href="#${name}"]`).map((a) => a.querySelector('svg')?.outerHTML).find(Boolean);
+  const link = g.$('.thread-timeline .thread-work-pr')!;
+  expect(link.querySelector('.thread-work-icon svg')?.outerHTML).toBe(tab('prs'));
+  expect(link.querySelector('a')?.getAttribute('href')).toBe('https://github.com/o/r/pull/7');
+  const card = g.$('.thread-tracked li .thread-work-icon')!;
+  expect([card.getAttribute('title'), card.querySelector('svg')?.outerHTML]).toEqual(['Card', tab('deck')]);
 });
 
 it('marks each linked item with the icon its kind has in the glass views', async () => {
