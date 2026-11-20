@@ -1882,6 +1882,12 @@ notes; an empty line clears it. `--link dispatched:<id>|report:<key>|planned:<ur
 adds context. `man ask --thread <id>` asks on a card; its answer stays on the card
 and the answer event names the conversation. Bait always goes through the helm.
 
+A Slack message for a grounds this machine helms arrives the same way, through
+the wharf this machine mirrors to (`[glass].mirror`). Its event says `via:
+slack`. What the person adds in that Slack thread joins the conversation, and
+reopens it if it was resolved. Each helm response (triage, notes, a card,
+the outcome) goes back to the Slack thread.
+
 Record a chat that remains open with `man discuss "<title>" --said "<exchange>"`,
 or append it with `man discuss <id> --said "<exchange>"`. Tell the person it was
 recorded. Quick answers in chat need no thread; quick glass answers go on a card

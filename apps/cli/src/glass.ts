@@ -7,6 +7,7 @@ import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
+import { takeSlackRequest } from './slack-threads.js';
 import { readPrDetails } from './pr-details.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
@@ -169,6 +170,7 @@ export function requestBodyCap(): number {
 /** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
+  ['helm-request', 80 * 1024],
   ['todo-schedule', 1024],
   ['helm-pass-request', 1024],
   ['decision-viewed', 1024],
@@ -1377,6 +1379,12 @@ export function serveGlass(
               () => reply(500, { ok: false, reason: 'The run request failed.' }),
             );
             return;
+          }
+          case 'helm-request': {
+            // Only the mirror relays a Slack message from its wharf; this glass's own page never makes one.
+            if (source !== 'wharf') return reply(403, { ok: false, reason: 'Only the wharf relays helm requests.' });
+            const taken = takeSlackRequest(loadConfig(), body.payload);
+            return reply(taken.status, taken.body);
           }
           case 'trap-request': {
             const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
