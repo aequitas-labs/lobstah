@@ -130,11 +130,26 @@ describe("a Codex trap's project hooks", () => {
       ['ume@ume:hooks/hooks.json:stop:0:0', 'ume@ume never trusted'],
       ['ume@ume:hooks/hooks.json:session_start:0:0', 'ume@ume changed since it was trusted'],
     ]);
-    expect(codexStallReason(worktree, { env: { CODEX_HOME: home }, listed })).toContain('ume@ume:hooks/hooks.json:stop:0:0 (`ume hook stop`, ume@ume never trusted)');
-    const row = codexTrapHooksRow({ web: { path: main }, api: { path: main } }, { env: { CODEX_HOME: home }, listed });
-    expect(row.status).toBe('fail');
-    expect(row.detail.match(/ume@ume:hooks\/hooks\.json:stop:0:0/g)).toHaveLength(1);
-    expect(row.detail).toContain('every repo: ume@ume:hooks/hooks.json:stop:0:0');
+    expect(blockers.map((b) => b.plugin)).toEqual(['ume@ume', 'ume@ume']);
+    expect(codexStallReason(worktree, { env: { CODEX_HOME: home }, listed })).toBe(
+      "Codex needs you to review ume@ume's hooks — in that session press Esc to start without them, or trust them there",
+    );
+    const repos = { web: { path: main }, api: { path: main } };
+    // The default skips them at launch: a warning, named once for every repo.
+    const row = codexTrapHooksRow(repos, { env: { CODEX_HOME: home }, listed });
+    expect(row.status).toBe('warn');
+    expect(row.detail).toBe(
+      "Codex wants ume@ume's hooks reviewed (2 hooks). Traps in tmux start without them; in other terminals, press Esc at \"Hooks need review\". To run them in traps, trust them once in Codex's /hooks",
+    );
+    // `ask` leaves the review to a person: the trap can't start until then.
+    const ask = codexTrapHooksRow(repos, { env: { CODEX_HOME: home }, listed, pluginHooks: 'ask' });
+    expect(ask.status).toBe('fail');
+    expect(ask.detail).toContain("so Codex traps can't start until you answer");
+    // `trust` names each hook it couldn't trust.
+    const trust = codexTrapHooksRow(repos, { env: { CODEX_HOME: home }, listed, pluginHooks: 'trust' });
+    expect(trust.status).toBe('fail');
+    expect(trust.detail.match(/ume@ume:hooks\/hooks\.json:stop:0:0/g)).toHaveLength(1);
+    expect(trust.detail).toContain('every repo: ume@ume:hooks/hooks.json:stop:0:0');
   });
 
   describe('launch-only folder trust', () => {

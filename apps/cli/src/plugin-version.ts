@@ -99,6 +99,49 @@ export function installedCodexPlugin(opts: Env = {}): InstalledPlugin | undefine
   return undefined;
 }
 
+/** An installed Codex plugin: its `<plugin>@<marketplace>` id and the directory Codex loads it from. */
+export interface CodexPluginInstall {
+  id: string;
+  root: string;
+}
+
+/**
+ * Every plugin `$CODEX_HOME/config.toml` enables whose files are in Codex's
+ * plugin cache, at `plugins/cache/<marketplace>/<plugin>/<version>/`. A plugin
+ * the config disables, or one with no cached copy, is not listed.
+ */
+export function enabledCodexPlugins(opts: Env = {}): CodexPluginInstall[] {
+  const env = opts.env ?? process.env;
+  const codexDir = env.CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
+  let cfg: Record<string, unknown>;
+  try {
+    cfg = parse(fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const out: CodexPluginInstall[] = [];
+  for (const [id, entry] of Object.entries((cfg.plugins ?? {}) as Record<string, { enabled?: boolean }>)) {
+    const [name, marketplace, extra] = id.split('@');
+    if (!name || !marketplace || extra !== undefined || entry?.enabled === false) continue;
+    if ([name, marketplace].some((part) => part === '.' || part === '..' || /[/\\]/.test(part))) continue;
+    const cache = path.join(codexDir, 'plugins', 'cache', marketplace, name);
+    let dirs: string[];
+    try {
+      dirs = fs.readdirSync(cache);
+    } catch {
+      continue;
+    }
+    // Several cached versions can sit side by side; the newest is the live one.
+    const root = dirs
+      .sort(compareVersions)
+      .reverse()
+      .map((d) => path.join(cache, d))
+      .find((dir) => readJson<{ name?: string }>(path.join(dir, '.codex-plugin', 'plugin.json'))?.name === name);
+    if (root) out.push({ id, root });
+  }
+  return out;
+}
+
 interface Semver {
   core: [number, number, number];
   pre: string[];

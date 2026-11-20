@@ -40,7 +40,8 @@ import { codexThreadHolders, modelForHarness, toonHelp, toonKV, toonTable } from
 import { randomUUID } from 'node:crypto';
 import { listCodexHooks, type CodexHookList } from './codex-hook-list.js';
 import { prepareCodexServer } from './codex-server.js';
-import { codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers } from './codex-startup.js';
+import { codexPluginReviews, codexTrapFolderTrust, codexTrapHookArgs, codexTrapHookBlockers, pluginHooksPhrase, type CodexHookOpts } from './codex-startup.js';
+import { planPluginReview, pluginReviewWatch, type PluginReviewPlan } from './codex-plugin-review.js';
 import { trapTabTitle } from './terminal-title.js';
 import { openTmuxPane, tmuxPaneTail, type TmuxPaneRef, type TmuxRunner } from './tmux-terminal.js';
 import { stopStaleCodexWriters } from './codex-stale.js';
@@ -290,6 +291,8 @@ export interface ThrowOptions {
   stopStale?: boolean;
   /** Test seam: stops those processes; production uses stopStaleCodexWriters. */
   stopStaleWriters?: typeof stopStaleCodexWriters;
+  /** Test seam: reads and keys the trap's tmux pane; production uses lobstah's tmux server. */
+  tmux?: TmuxRunner;
 }
 
 /** Explicit CLI timeout wins; Codex gets time for plugin and model startup. */
@@ -333,11 +336,18 @@ function giveUp(trapId: string, label: string, repo: string | undefined, retry: 
  * Why a Codex trap may not have signed on: the hooks that would hold it at
  * "Hooks need review" before its first prompt, or that none would.
  */
-export function codexStallReason(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string; listed?: CodexHookList } = {}): string {
+export function codexStallReason(cwd: string, opts: CodexHookOpts = {}): string {
   const blockers = codexTrapHookBlockers(cwd, opts);
   if (blockers.length === 0) return 'no hook would hold it at Codex\'s hook review';
-  const named = blockers.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ');
-  return `Codex is likely waiting at "Hooks need review" for ${named} — trust them in that session's /hooks`;
+  const others = blockers.filter((b) => !b.plugin || opts.pluginHooks === 'trust');
+  const reviews = opts.pluginHooks === 'trust' ? [] : codexPluginReviews(blockers);
+  const named = others.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ');
+  return [
+    ...(others.length ? [`Codex is likely waiting at "Hooks need review" for ${named} — trust them in that session's /hooks`] : []),
+    ...(reviews.length
+      ? [`Codex needs you to review ${pluginHooksPhrase(reviews)} — in that session press Esc to start without them, or trust them there`]
+      : []),
+  ].join('; ');
 }
 
 /**
@@ -353,7 +363,7 @@ export function codexScreenNote(screen: string, threadId: string | undefined, ho
     return `${who} still holds this trap's thread (Codex shows that as "open in another app"), so this one can't take a turn: re-throw with --stop-stale to stop it first`;
   }
   if (/hooks need review|hook approval required/i.test(screen)) {
-    return "Codex doesn't trust lobstah's hooks for this session (they changed since it was trusted); in that pane choose Review in /hooks, or stow and re-throw it so lobstah supplies trust for the current plugin";
+    return 'Codex is asking to review hooks. In that pane, press Esc to continue without them, or trust them in /hooks. If they\'re lobstah\'s own, stow and re-throw it instead';
   }
   return undefined;
 }
@@ -366,6 +376,8 @@ async function launchAndWait(
   const timeoutSecs = startTimeoutSecs(opts, w.launched.harness);
   let opened: TmuxPaneRef | undefined;
   let folderTrust: string | undefined;
+  let review: PluginReviewPlan | undefined;
+  const pluginHooks = opts.cfg.soak.codexPluginHooks;
   try {
     if (w.launched.harness === 'codex') {
       const folder = codexTrapFolderTrust(w.command.cwd, w.trapId);
@@ -377,7 +389,9 @@ async function launchAndWait(
         w.command.preface = `lobstah soak remember-window --ticket ${w.ticket}`;
       }
       // An unattended throw must not park at the interactive update picker.
-      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd, listed: await (opts.listHooks ?? listCodexHooks)(w.command.cwd) }));
+      const listed = await (opts.listHooks ?? listCodexHooks)(w.command.cwd);
+      w.command.argv.splice(1, 0, '-c', 'check_for_update_on_startup=false', ...folder.args, ...codexTrapHookArgs({ cwd: w.command.cwd, listed, pluginHooks }));
+      review = planPluginReview(w.command.cwd, { listed, pluginHooks, tmux: w.adapter.app === 'tmux' });
     }
     opened = (await w.adapter.launch({ ...w.command, trap: w.name ? trapTabTitle(w.name, w.repo) : w.label, ...(w.repo ? { repo: w.repo } : {}) })) || undefined;
     if (opened) rememberTrapPane(w.trapId, { ...opened, tmuxSocket: 'lobstah' });
@@ -387,6 +401,8 @@ async function launchAndWait(
   }
   const command = launchShellText({ ...w.command, preface: w.command.preface?.replace(w.ticket, '<ticket>'), argv: w.command.argv.map((a) => a.replace(w.ticket, '<ticket>')) });
   opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode, timeoutSecs, ...(folderTrust ? { folderTrust } : {}) });
+  // Other plugins' new or changed hooks: Esc at Codex's review, or a notice that it waits for a person.
+  const reviewWatch = pluginReviewWatch(review, { label: w.label, trapId: w.trapId, repo: w.repo, pane: opened?.tmuxPane, run: opts.tmux, started: w.started });
   const deadline = w.started + timeoutSecs * 1000;
   for (;;) {
     const reg = readTrap(w.trapId);
@@ -404,18 +420,19 @@ async function launchAndWait(
     }
     if (Date.now() >= deadline) {
       // A tmux pane can be read: say what its screen shows.
-      const screen = opened ? await tmuxPaneTail(opened.tmuxPane) : undefined;
+      const screen = opened ? await tmuxPaneTail(opened.tmuxPane, undefined, opts.tmux) : undefined;
       const note = screen && w.launched.harness === 'codex' ? codexScreenNote(screen, readTrap(w.trapId)?.sessionId ?? w.sessionId) : undefined;
       const shows = screen ? `; its tmux pane ${opened!.tmuxPane} shows: ${screen}${note ? ` — ${note}` : ''}` : '';
       if (fresh) throw new (w.launched.harness === 'codex' ? ThrowPendingError : ThrowTimeoutError)(`${w.label} signed on but has not listened within ${timeoutSecs}s — it is live; check its session${shows}`);
       if (w.launched.harness === 'codex') {
         // Keep both the ticket and the fence: an already-open slow session
         // can redeem late, and retry cannot create a competing writer.
-        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${folderTrust}; ${codexStallReason(w.command.cwd, { listed: await (opts.listHooks ?? listCodexHooks)(w.command.cwd) })}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying${shows}`);
+        throw new ThrowPendingError(`${w.label} has not signed on within ${timeoutSecs}s; ${folderTrust}; ${codexStallReason(w.command.cwd, { listed: await (opts.listHooks ?? listCodexHooks)(w.command.cwd), pluginHooks })}; its ticket remains valid for late sign-on — check its terminal, or withdraw with \`lobstah stow --wt ${w.trapId}\` before retrying${shows}`);
       }
       giveUp(w.trapId, w.label, w.repo, w.retry, w.started, `no sign-on within ${timeoutSecs}s`);
       throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged${shows}`);
     }
+    await reviewWatch.tick();
     await sleep(opts.pollMs ?? 500);
   }
 }

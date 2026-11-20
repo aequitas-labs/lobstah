@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
 import WebSocket from 'ws';
-import { atomicRenameSync, codexInvocation, listTraps, lobstahHome, uniqueTempPath, type TrapRegistration } from '@lobstah/core';
+import { atomicRenameSync, codexInvocation, listTraps, loadConfig, lobstahHome, uniqueTempPath, type CodexPluginHooks, type TrapRegistration } from '@lobstah/core';
 import { listCodexHooks, type CodexHookList } from './codex-hook-list.js';
 import { codexTrapFolderTrust, codexTrapHookTrust } from './codex-startup.js';
 
@@ -156,10 +156,18 @@ export function setTomlTableFields(text: string, header: string, fields: Readonl
  * pane's TUI don't reach a server it attaches to, so this one trust has to be
  * in `config.toml`; the server reads it without a restart. It covers exactly
  * what a session flag would: lobstah's own vetted hook commands, committed
- * project hooks, and a lobstah-created worktree. An explicit untrusted folder
- * stays untrusted, and a hook's `enabled` setting isn't touched.
+ * project hooks, a lobstah-created worktree, and with the opt-in
+ * `[soak] codexPluginHooks = "trust"`, other installed plugins' hooks. An
+ * explicit untrusted folder stays untrusted, and a hook's `enabled` setting
+ * isn't touched.
  */
-export function trustForCodexServer(cwd: string, trapId: string, listed: CodexHookList | undefined, env: NodeJS.ProcessEnv = process.env): void {
+export function trustForCodexServer(
+  cwd: string,
+  trapId: string,
+  listed: CodexHookList | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  pluginHooks: CodexPluginHooks = pluginHooksChoice(),
+): void {
   const configFile = path.join(codexHome(env), 'config.toml');
   let text = '';
   try {
@@ -168,7 +176,7 @@ export function trustForCodexServer(cwd: string, trapId: string, listed: CodexHo
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   const before = text;
-  for (const { key, values } of codexTrapHookTrust({ env, cwd, listed })) text = setTomlTableFields(text, `hooks.state.${JSON.stringify(key)}`, { ...values });
+  for (const { key, values } of codexTrapHookTrust({ env, cwd, listed, pluginHooks })) text = setTomlTableFields(text, `hooks.state.${JSON.stringify(key)}`, { ...values });
   const { trustedPath } = codexTrapFolderTrust(cwd, trapId, { env });
   if (trustedPath) text = setTomlTableFields(text, `projects.${JSON.stringify(trustedPath)}`, { trust_level: 'trusted' });
   if (text === before) return;
@@ -177,6 +185,15 @@ export function trustForCodexServer(cwd: string, trapId: string, listed: CodexHo
   fs.mkdirSync(path.dirname(configFile), { recursive: true });
   fs.writeFileSync(temporary, text, { mode: fs.existsSync(configFile) ? fs.statSync(configFile).mode : 0o600 });
   atomicRenameSync(temporary, configFile);
+}
+
+/** `[soak].codexPluginHooks`, or its default when the config can't be read. */
+export function pluginHooksChoice(): CodexPluginHooks {
+  try {
+    return loadConfig().soak.codexPluginHooks;
+  } catch {
+    return 'skip';
+  }
 }
 
 /** Everything a thrown trap needs from the shared server before it attaches. */

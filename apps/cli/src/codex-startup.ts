@@ -4,10 +4,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse } from 'smol-toml';
-import { readTrapAnchor } from '@lobstah/core';
+import { readTrapAnchor, type CodexPluginHooks } from '@lobstah/core';
 import { codexHookHash, type CodexHook, type HookHandler } from './hook-readiness.js';
 import { codexHookTrustToml, codexHookTrustValues, type CodexHookList, type CodexHookTrustValues } from './codex-hook-list.js';
-import { installedCodexPlugin } from './plugin-version.js';
+import { enabledCodexPlugins, installedCodexPlugin } from './plugin-version.js';
 
 type HookGroups = Record<string, Array<{ matcher?: string; hooks?: HookHandler[] }>>;
 
@@ -24,6 +24,8 @@ export interface CodexHookEntry {
 export interface CodexHookBlocker extends CodexHookEntry {
   /** In plain words: why Codex would ask about it. */
   reason: string;
+  /** For another plugin's hook: its `<plugin>@<marketplace>`. */
+  plugin?: string;
 }
 
 const snakeEvent = (event: string): string => event.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
@@ -146,13 +148,23 @@ function codexHookState(codexDir: string): Record<string, { enabled?: boolean; t
   }
 }
 
+/** Where Codex's hooks and their trust live, and lobstah's choice for other plugins' hooks. */
+export interface CodexHookOpts {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  listed?: CodexHookList;
+  /** `[soak].codexPluginHooks`; only `trust` supplies trust for other plugins' hooks. */
+  pluginHooks?: CodexPluginHooks;
+}
+
 /**
  * The hooks that would hold a Codex trap in `cwd` at "Hooks need review"
- * before its first prompt: the user's `$CODEX_HOME/hooks.json` and the
- * checkout's project hooks, less those Codex already trusts at their current
- * hash and those lobstah supplies for the session. A disabled hook never asks.
+ * before its first prompt: the user's `$CODEX_HOME/hooks.json`, the
+ * checkout's project hooks and other plugins' hooks, less those Codex already
+ * trusts at their current hash and those lobstah supplies for the session. A
+ * disabled hook never asks.
  */
-export function codexTrapHookBlockers(cwd: string, opts: { env?: NodeJS.ProcessEnv; home?: string; listed?: CodexHookList } = {}): CodexHookBlocker[] {
+export function codexTrapHookBlockers(cwd: string, opts: CodexHookOpts = {}): CodexHookBlocker[] {
   const env = opts.env ?? process.env;
   const codexDir = env.CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
   const state = codexHookState(codexDir);
@@ -168,34 +180,122 @@ export function codexTrapHookBlockers(cwd: string, opts: { env?: NodeJS.ProcessE
     const why = entry?.trusted_hash ? 'changed since it was trusted' : 'never trusted';
     out.push({ ...e, reason: project.unverified && e.key.startsWith(`${project.file}:`) ? `${why}; lobstah supplies no trust because ${project.unverified}` : why });
   }
-  out.push(...codexPluginHookBlockers(opts.listed, state));
+  out.push(...codexPluginHookBlockers(opts.listed, state, opts.pluginHooks === 'trust' ? codexPluginHookTrust({ env, home: opts.home, listed: opts.listed }) : undefined));
   return out;
 }
 
 /**
  * Another plugin's hooks that would hold a Codex trap at hook review: only
  * Codex knows their trust (since 0.166, a hash of the plugin's contents too),
- * so this reads its `hooks/list` answer. Lobstah never supplies trust for
- * them. Plugin hooks apply in every folder, unlike project hooks.
+ * so this reads its `hooks/list` answer. With `trust` (the opt-in
+ * `codexPluginHooks = "trust"`), a hook lobstah supplies trust for doesn't
+ * hold the trap. Plugin hooks apply in every folder, unlike project hooks.
  */
 export function codexPluginHookBlockers(
   listed: CodexHookList | undefined,
   state: Record<string, { enabled?: boolean }> = {},
+  trust?: CodexPluginHookTrust,
 ): CodexHookBlocker[] {
+  const supplied = new Set(trust?.entries.map((e) => e.key));
   const out: CodexHookBlocker[] = [];
   for (const hook of listed?.values() ?? []) {
     const [plugin, , event] = hook.key.split(':');
     if (!plugin || !PLUGIN_ID.test(plugin) || plugin === 'lobstah@lobstah') continue;
-    if (hook.trustStatus === 'trusted' || state[hook.key]?.enabled === false) continue;
+    if (hook.trustStatus === 'trusted' || state[hook.key]?.enabled === false || supplied.has(hook.key)) continue;
+    const why = hook.trustStatus === 'modified' ? `${plugin} changed since it was trusted` : `${plugin} never trusted`;
+    const unsupplied = !trust ? undefined : trust.unsupplied.get(hook.key)
+      ?? (trust.plugins === undefined ? undefined
+        : trust.plugins.has(plugin) ? 'the installed plugin\'s hooks/hooks.json does not declare it'
+          : 'the plugin is not installed and enabled in this Codex home');
     out.push({
       key: hook.key,
       event: event ?? '',
       command: hook.command ?? '',
       hash: hook.currentHash,
-      reason: hook.trustStatus === 'modified' ? `${plugin} changed since it was trusted` : `${plugin} never trusted`,
+      reason: unsupplied ? `${why}; lobstah supplies no trust because ${unsupplied}` : why,
+      plugin,
     });
   }
   return out;
+}
+
+/** One plugin whose hooks Codex wants reviewed, and how many. */
+export interface CodexPluginReview {
+  /** `<plugin>@<marketplace>`. */
+  plugin: string;
+  hooks: number;
+}
+
+/** The plugins among `blockers`, in order, with their hook counts. */
+export function codexPluginReviews(blockers: readonly CodexHookBlocker[]): CodexPluginReview[] {
+  const counts = new Map<string, number>();
+  for (const b of blockers) if (b.plugin) counts.set(b.plugin, (counts.get(b.plugin) ?? 0) + 1);
+  return [...counts].map(([plugin, hooks]) => ({ plugin, hooks }));
+}
+
+/** `ume@ume's hooks` or `ume@ume's and ghost@acme's hooks`. */
+export function pluginHooksPhrase(reviews: readonly CodexPluginReview[]): string {
+  const names = reviews.map((r) => `${r.plugin}'s`);
+  const list = names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  return `${list} hooks`;
+}
+
+/** Another plugin's hooks lobstah trusts for a trap, and why it doesn't trust the rest. */
+export interface CodexPluginHookTrust {
+  entries: CodexHookTrustEntry[];
+  /** By `[hooks.state]` key: a hook in an installed plugin's files that lobstah won't trust. */
+  unsupplied: Map<string, string>;
+  /** The installed, enabled plugins whose hooks were read. */
+  plugins?: Set<string>;
+}
+
+/**
+ * Session trust for every other installed, enabled plugin's hooks, at their
+ * current hash, so a change to one (a plugin update) doesn't hold a Codex
+ * trap at "Hooks need review" before it can sign on. Used only with the
+ * opt-in `[soak] codexPluginHooks = "trust"`. Only command hooks in
+ * the plugin's `hooks/hooks.json`, as cached in this Codex home, count: a
+ * disabled plugin or hook, and a hook in no installed plugin's files, gets
+ * none.
+ *
+ * With `listed`, Codex's answer supplies the hash (since 0.166 it covers the
+ * plugin's contents too), and only when it agrees with the hook in the
+ * installed files: the same command and the same hook hash. A hook Codex
+ * doesn't list gets no trust. Without an answer from Codex, lobstah computes
+ * the hook hash itself, which is all Codex before 0.166 asks for.
+ */
+export function codexPluginHookTrust(opts: { env?: NodeJS.ProcessEnv; home?: string; listed?: CodexHookList } = {}): CodexPluginHookTrust {
+  const codexDir = (opts.env ?? process.env).CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
+  const state = codexHookState(codexDir);
+  const entries: CodexHookTrustEntry[] = [];
+  const unsupplied = new Map<string, string>();
+  const plugins = new Set<string>();
+  for (const plugin of enabledCodexPlugins(opts)) {
+    plugins.add(plugin.id);
+    if (plugin.id === 'lobstah@lobstah') continue;
+    let text: string | undefined;
+    try {
+      text = fs.readFileSync(path.join(plugin.root, 'hooks', 'hooks.json'), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const e of hookEntries(`${plugin.id}:hooks/hooks.json`, readHooks(text))) {
+      if (state[e.key]?.enabled === false) continue;
+      if (!opts.listed) {
+        entries.push({ key: e.key, values: { trusted_hash: e.hash } });
+        continue;
+      }
+      const reported = opts.listed.get(e.key);
+      if (!reported) continue;
+      const values = codexHookTrustValues(reported.currentHash);
+      if ((reported.command !== undefined && reported.command !== e.command) || values.trusted_hash !== e.hash) {
+        unsupplied.set(e.key, `Codex reports a different hook than ${path.join(plugin.root, 'hooks', 'hooks.json')} declares`);
+        continue;
+      }
+      entries.push({ key: e.key, values });
+    }
+  }
+  return { entries, unsupplied, plugins };
 }
 
 /** A plugin id as Codex keys a plugin hook's trust: `<plugin>@<marketplace>`. */
@@ -215,8 +315,10 @@ const COMMANDS: Record<CodexHook, string> = {
 /**
  * Codex blocks before its first prompt when any hook needs review.
  * Supply trust for only the installed plugin's exact, vetted lobstah commands,
- * and for `cwd`'s project hooks when they match the committed file (see
- * codexProjectHookTrust), as a session flag. No persisted config writes, no blanket trust bypass,
+ * for `cwd`'s project hooks when they match the committed file (see
+ * codexProjectHookTrust), and only with the opt-in `pluginHooks: 'trust'`,
+ * for other installed, enabled plugins' hooks as their files declare them
+ * (see codexPluginHookTrust), as a session flag. No persisted config writes, no blanket trust bypass,
  * and no changes to enabled=false or to any other hook's trust.
  *
  * With `listed` (see listCodexHooks), Codex supplies the hash for a vetted command: since 0.166
@@ -228,7 +330,7 @@ const COMMANDS: Record<CodexHook, string> = {
  * be interpreted as dotted override paths. Codex merges session hook state
  * with user state field by field (codex-hooks config_rules).
  */
-export function codexTrapHookArgs(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string; listed?: CodexHookList } = {}): string[] {
+export function codexTrapHookArgs(opts: CodexHookOpts & { cwd?: string } = {}): string[] {
   const entries = codexTrapHookTrust(opts).map(({ key, values }) => `${JSON.stringify(key)}=${codexHookTrustToml(values)}`);
   return entries.length ? ['-c', `hooks.state={${entries.join(',')}}`] : [];
 }
@@ -239,8 +341,8 @@ export interface CodexHookTrustEntry {
   values: CodexHookTrustValues;
 }
 
-/** The hooks a Codex trap may trust, by the rules on codexTrapHookArgs: its own vetted commands and committed project hooks. */
-export function codexTrapHookTrust(opts: { env?: NodeJS.ProcessEnv; home?: string; cwd?: string; listed?: CodexHookList } = {}): CodexHookTrustEntry[] {
+/** The hooks a Codex trap may trust, by the rules on codexTrapHookArgs: its own vetted commands, committed project hooks, and with the opt-in `trust` choice, installed plugins' hooks. */
+export function codexTrapHookTrust(opts: CodexHookOpts & { cwd?: string } = {}): CodexHookTrustEntry[] {
   const plugin = installedCodexPlugin(opts);
   if (!plugin) return [];
   const file = path.join(plugin.root, 'hooks', 'hooks.json');
@@ -277,6 +379,7 @@ export function codexTrapHookTrust(opts: { env?: NodeJS.ProcessEnv; home?: strin
       : { trusted_hash: e.hash };
     entries.push({ key: e.key, values });
   }
+  if (opts.pluginHooks === 'trust') entries.push(...codexPluginHookTrust(opts).entries);
   return entries;
 }
 
@@ -284,13 +387,18 @@ export function codexTrapHookTrust(opts: { env?: NodeJS.ProcessEnv; home?: strin
  * `lobstah doctor`: the hooks that would hold a Codex trap in each
  * configured repo at "Hooks need review" before it can sign on. Skips when
  * the Codex plugin is not installed. Read-only.
+ *
+ * Other plugins' hooks fail the row only when nothing gets a trap past the
+ * review: with `ask`, or with `trust` when lobstah can't trust them. With
+ * the default `skip`, they warn: traps start without them.
  */
 export function codexTrapHooksRow(
   repos: Record<string, { path: string }>,
-  opts: { env?: NodeJS.ProcessEnv; home?: string; listed?: CodexHookList } = {},
-): { check: string; status: 'ok' | 'fail' | 'skip'; detail: string } {
+  opts: CodexHookOpts = {},
+): { check: string; status: 'ok' | 'warn' | 'fail' | 'skip'; detail: string } {
   const check = 'codex trap hooks';
   if (!installedCodexPlugin(opts)) return { check, status: 'skip', detail: 'Codex plugin not installed' };
+  const choice = opts.pluginHooks ?? 'skip';
   const blocked: string[] = [];
   let supplied = 0;
   for (const [name, repo] of Object.entries(repos)) {
@@ -300,14 +408,38 @@ export function codexTrapHooksRow(
     if (blockers.length) blocked.push(`${name}: ${blockers.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ')}`);
   }
   const codexDir = (opts.env ?? process.env).CODEX_HOME ?? path.join(opts.home ?? os.homedir(), '.codex');
-  const plugins = codexPluginHookBlockers(opts.listed, codexHookState(codexDir));
-  if (plugins.length) blocked.unshift(`every repo: ${plugins.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ')}`);
-  if (blocked.length === 0) {
-    return { check, status: 'ok', detail: `no hook would hold a Codex trap at hook review${supplied ? ` (lobstah supplies session trust for ${supplied} committed project hook${supplied > 1 ? 's' : ''})` : ''}` };
+  const pluginTrust = choice === 'trust' ? codexPluginHookTrust(opts) : undefined;
+  const plugins = codexPluginHookBlockers(opts.listed, codexHookState(codexDir), pluginTrust);
+  const reviews = codexPluginReviews(plugins);
+  const count = (n: number, what: string) => `${n} ${what}${n > 1 ? 's' : ''}`;
+  const pluginSummary = count(plugins.length, 'hook');
+  if (plugins.length && (choice === 'trust' || blocked.length)) {
+    blocked.unshift(`every repo: ${plugins.map((b) => `${b.key} (\`${b.command}\`, ${b.reason})`).join('; ')}`);
   }
-  return {
-    check,
-    status: 'fail',
-    detail: `a Codex trap stops at "Hooks need review" and cannot sign on — ${blocked.join(' · ')}. Trust them in Codex's /hooks, or commit the project's .codex/hooks.json as checked out`,
-  };
+  if (blocked.length) {
+    return {
+      check,
+      status: 'fail',
+      detail: `a Codex trap stops at "Hooks need review" and cannot sign on — ${blocked.join(' · ')}. Trust them in Codex's /hooks, or commit the project's .codex/hooks.json as checked out`,
+    };
+  }
+  if (plugins.length && choice === 'ask') {
+    return {
+      check,
+      status: 'fail',
+      detail: `Codex wants ${pluginHooksPhrase(reviews)} reviewed (${pluginSummary}), so Codex traps can't start until you answer. Trust them once in Codex's /hooks, or set [soak] codexPluginHooks = "skip" to start traps without them`,
+    };
+  }
+  if (plugins.length) {
+    return {
+      check,
+      status: 'warn',
+      detail: `Codex wants ${pluginHooksPhrase(reviews)} reviewed (${pluginSummary}). Traps in tmux start without them; in other terminals, press Esc at "Hooks need review". To run them in traps, trust them once in Codex's /hooks`,
+    };
+  }
+  const trusted = [
+    ...(supplied ? [count(supplied, 'committed project hook')] : []),
+    ...(pluginTrust?.entries.length ? [count(pluginTrust.entries.length, 'installed plugin hook')] : []),
+  ];
+  return { check, status: 'ok', detail: `no hook would hold a Codex trap at hook review${trusted.length ? ` (lobstah supplies session trust for ${trusted.join(' and ')})` : ''}` };
 }
