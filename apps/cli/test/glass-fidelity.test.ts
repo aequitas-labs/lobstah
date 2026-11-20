@@ -451,13 +451,14 @@ describe('glass fidelity: the built page renders the legacy page’s DOM', () =>
           // PR status cells use shared tags now; behavioral coverage lives in glass-pr-view and glass-reviews.
           // PR names and stack numbers grew title markup (see the header); their styles have DOM tests of their own.
           // Trap names grew a link and a modal line (see the header); glass-page.test.ts tests them.
+          // The PRs tab grew Open and Closed sections, and Closed its own table frame; glass-prs-tab.test.ts tests them.
           // A question lob became a link (see the header); the lobs have DOM tests of their own.
           // Every button is the Button atom (components/button.ts), sized and colored there; glass-button.test.ts tests it.
           // A verb cell is colored as its icon is (components/run-status.ts VERB_TONE); glass-verb-icons.test.ts tests it.
           .filter(
             (el) =>
               !el.matches(
-                '.btn, .btn *, button, button *, .x, h1, h2, .page-head, .page-head *, .section-head, .section-head *, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *, #prs tr.rowhead td:nth-child(3) *, .prmerge, .prmerge *',
+                '.btn, .btn *, button, button *, .x, h1, h2, .page-head, .page-head *, .section-head, .section-head *, #dispatches td[class^="v-"], #tabs, #tabs *, .glass-brand, .prack, .prack *, #prs .card .top > b, .prname, .prname *, th[colspan] *, #prs h2 *, .trapname, .claimedby, .claimedby *, #lobs .lob, #lobs .lob *, #chips .chip.click, #chips .chip.click *, .worker-harness, .worker-details, .worker-details *, #prs .yourshead, #prs .yourshead + .empty, #prs .otherprs, #prs .otherprs > summary, #prs .otherprs > summary *, #prs .pr-section, #prs .pr-section > summary, #prs .pr-section > .empty, #prs details.pr-section > .wrap, #prs details.pr-section > .wrap > table, #prs details.pr-section tbody, #prs details.pr-section tr:first-child, #prs details.pr-section tr:first-child > th, #prs tr.rowhead td:nth-child(3) *, .prmerge, .prmerge *',
               ),
           )
           .filter((el) => el.tagName !== 'SCRIPT' && !hidden.some((p) => p !== el && p.contains(el as never)))
