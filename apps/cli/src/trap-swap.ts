@@ -5,6 +5,7 @@ import {
   handoffNote,
   laneDirs,
   originProgress,
+  pinTrapCatch,
   queuedDescriptor,
   readRoster,
   readSessionClaim,
@@ -49,6 +50,10 @@ export async function swapTrapCatch(id: string, lane: Lane, options: TrapSwapOpt
   const dir = path.join(laneDirs(lane).active, id);
   const earlier = originProgress(id, lane);
   const process = reg?.harnessProcess ?? roster.harnessProcess;
+  // Ending the process signs the trap off (SessionEnd), which requeues its
+  // catch. Pin the catch to this trap first, or an unaddressed catch is open
+  // to any parked trap until the handover below lands.
+  if (claimed?.by === address) pinTrapCatch(id, lane, trapId);
   if (reg?.codexServer) {
     if ((await stopCodexThread(reg.sessionId)) === 'unreachable')
       throw new Error(`Stop Codex thread ${reg.sessionId} for ${roster.name}, then retry lobstah swap ${id} --harness ${options.harness}`);

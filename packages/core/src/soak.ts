@@ -752,15 +752,23 @@ export function releaseCatch(
   return { requeued: id };
 }
 
-/** Save the park context and keep its waiting dispatch addressed to the trap across sign-off and ghost sweeps. */
-export function pinTrapCatch(id: string, lane: Lane, trapId: string, parkContext: string): boolean {
+/**
+ * Keep a claimed catch addressed to its trap across sign-off and ghost
+ * sweeps, so a requeue offers it to that trap only. A park passes the context
+ * to save with it; without one the saved context is kept.
+ */
+export function pinTrapCatch(id: string, lane: Lane, trapId: string, parkContext?: string): boolean {
   return withTrapLifecycleLock(trapId, () => {
     const address = `wt:${trapId}`;
     if (readSessionClaim(id, lane)?.by !== address) return false;
     const descriptor = readDescriptor(id, lane);
     if (descriptor.for && descriptor.for !== address) return false;
-    if (descriptor.for !== address || descriptor.parkContext !== parkContext)
-      atomicWrite(path.join(laneDirs(lane).active, id, 'descriptor.json'), JSON.stringify({ ...descriptor, for: address, parkContext }, null, 2));
+    const context = parkContext ?? descriptor.parkContext;
+    if (descriptor.for !== address || descriptor.parkContext !== context)
+      atomicWrite(
+        path.join(laneDirs(lane).active, id, 'descriptor.json'),
+        JSON.stringify({ ...descriptor, for: address, ...(context !== undefined ? { parkContext: context } : {}) }, null, 2),
+      );
     return true;
   });
 }

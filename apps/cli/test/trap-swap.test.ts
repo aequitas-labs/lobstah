@@ -145,3 +145,33 @@ it('hands an unaddressed catch over before it is claimable, so another parked tr
   expect(casts).toEqual([null]);
   expect(queuedDescriptor('plain-work', 'work')?.for).toBe(`wt:${swapping.trapId}`);
 });
+
+it('keeps an unaddressed catch for its trap when SessionEnd requeues it while the swap stops the session', async () => {
+  const sign = (name: string, sessionId: string) => {
+    const worktree = path.join(home, name);
+    fs.mkdirSync(worktree);
+    const signed = signOnTrap({ worktree, cwd: worktree, repo: 'r', harness: 'claude', sessionId, ttlMs: 60_000, harnessProcess: { pid: 999999, startedAt: 'test process' } });
+    if (!('ok' in signed)) throw new Error(`could not sign on ${name}`);
+    return signed.ok;
+  };
+  const swapping = sign('swapping', 'old');
+  enqueue({ id: 'fresh-work', repo: 'r', brief: 'Unaddressed work', sessionMode: 'fresh' });
+  expect(claimBait(swapping)?.id).toBe('fresh-work');
+  const bystander = sign('bystander', 'other');
+  let stolen: string | null | undefined;
+  await swapTrapCatch('fresh-work', 'work', {
+    cfg: loadConfig(),
+    harness: 'claude',
+    newDispatch: true,
+    endProcess: async () => {
+      // The session's SessionEnd hook stows the trap and requeues its catch.
+      stowTrap(swapping.trapId);
+      releaseCatch({ claimed: 'fresh-work' });
+      stolen = claimBait(bystander)?.id ?? null;
+      return 'ended';
+    },
+    launch: async (options) => ({ trap: options.address, action: 'cold', why: 'swap', checkout: 'kept', terminal: 'terminal', harness: 'claude', command: 'claude', unapplied: [], mode: 'auto', registration: swapping }),
+  });
+  expect(stolen).toBeNull();
+  expect(queuedDescriptor('fresh-work', 'work')?.for).toBe(`wt:${swapping.trapId}`);
+});
