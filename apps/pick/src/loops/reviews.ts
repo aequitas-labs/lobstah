@@ -43,8 +43,9 @@ import {
   carryReviewDecisionAnswers,
   unansweredReviewDecisions,
   newReviewRound,
+  fixedReviewThreads,
 } from '@lobstah/core';
-import type { ReviewItem, ReviewRound, ReviewThread, ReviewVerdict } from '@lobstah/core';
+import type { ReviewItem, ReviewRound, ReviewThread, ReviewThreadCall, ReviewVerdict } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
 import { dispatchLane } from './report.js';
 import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
@@ -397,6 +398,13 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
 /** Apply the shared GitHub budget and reject partial GraphQL responses before changing rounds. */
 function reviewQuery<T>(request: { query: string; variables: Record<string, unknown> }, token: () => string, run: GhGraphql, now: number,
   log: (m: string) => void, operation: string): T | undefined {
+  const out = reviewQueryResult<T>(request, token, run, now, log, operation);
+  return 'data' in out ? out.data : undefined;
+}
+
+/** reviewQuery, keeping why a request failed. */
+function reviewQueryResult<T>(request: { query: string; variables: Record<string, unknown> }, token: () => string, run: GhGraphql, now: number,
+  log: (m: string) => void, operation: string): { data: T } | { why: string } {
   const res = run(request, token());
   const { headers, body } = splitGitHubResponse(res.stdout);
   let answer: { data?: T & { rateLimit?: { cost?: number } }; errors?: Array<{ message: string }> } = {};
@@ -413,13 +421,53 @@ function reviewQuery<T>(request: { query: string; variables: Record<string, unkn
     const retry = Number(headers['retry-after']);
     recordGitHubRateLimit(now, Number.isFinite(retry) && retry > 0 ? now + retry * 1000 : undefined);
     log('reviews: GitHub rate limit reached; the search waits for the budget');
-    return undefined;
+    return { why: 'GitHub rate limit reached' };
   }
   if (res.status !== 0 || !answer.data || answer.errors?.length) {
     log(`reviews: ${operation} failed: ${reason}`);
-    return undefined;
+    return { why: reason };
   }
-  return answer.data;
+  return { data: answer.data };
+}
+
+const THREAD_CHECK = `query($id: ID!) { rateLimit { cost } node(id: $id) { ... on PullRequestReviewThread {
+  isResolved pullRequest { number repository { nameWithOwner } } comments(first: 1) { nodes { author { login } } } } } }`;
+const RESOLVE_THREAD = 'mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }';
+interface ThreadCheck { node?: { isResolved?: boolean; pullRequest?: { number: number; repository: { nameWithOwner: string } };
+  comments?: { nodes: Array<{ author: { login: string } | null }> } } | null }
+
+/**
+ * Resolve the identity's own threads that a finished draft found fully
+ * fixed. Each thread is read again first: it must be on this PR, opened by
+ * the identity, and still unresolved. Every attempt is kept on the round as
+ * history; a failure leaves the thread open and the draft unchanged.
+ */
+export function resolveFixedThreads(item: ReviewItem, round: ReviewRound, calls: readonly ReviewThreadCall[], identity: string,
+  github: { token: () => string; run: GhGraphql }, now: number, log: (m: string) => void): void {
+  const me = identity.toLowerCase();
+  const at = new Date(now).toISOString();
+  const done = new Set(item.rounds.flatMap(r => (r.threadResolutions ?? []).filter(entry => !entry.failed).map(entry => entry.id)));
+  for (const thread of fixedReviewThreads(round, calls, identity)) {
+    if (done.has(thread.id)) continue;
+    let failed: string | undefined;
+    if (githubBlockedUntil(now)) failed = 'GitHub rate limit reached';
+    else {
+      const check = reviewQueryResult<ThreadCheck>({ query: THREAD_CHECK, variables: { id: thread.id } }, github.token, github.run, now, log, 'thread check');
+      const node = 'data' in check ? check.data.node : undefined;
+      if (!('data' in check)) failed = check.why;
+      else if (!node?.pullRequest) failed = 'the thread is gone';
+      else if (node.pullRequest.number !== item.pr.number || node.pullRequest.repository.nameWithOwner.toLowerCase() !== `${item.pr.owner}/${item.pr.repo}`.toLowerCase())
+        failed = 'the thread is not on this PR';
+      else if (node.comments?.nodes[0]?.author?.login.toLowerCase() !== me) failed = 'someone else opened the thread';
+      else if (node.isResolved) continue;
+      else {
+        const resolved = reviewQueryResult<unknown>({ query: RESOLVE_THREAD, variables: { id: thread.id } }, github.token, github.run, now, log, 'resolve thread');
+        if (!('data' in resolved)) failed = resolved.why;
+      }
+    }
+    (round.threadResolutions ??= []).push({ ...thread, at, ...(failed ? { failed } : {}) });
+    log(`${item.key}: ${failed ? `could not resolve ${thread.url}: ${failed}` : `resolved ${thread.url}: ${thread.reason}`}`);
+  }
 }
 
 interface ReviewConnection<T> {
@@ -740,6 +788,8 @@ export function draftReviews(identity: string, log: (m: string) => void = () => 
       delete r.reason;
       // The head moved while the job ran: the draft reviews an older head.
       if (!reviewDraftCoversHead(item, r, draft)) Object.assign(r, { state: 'stale', reason: `the head moved to ${item.pr.headSha.slice(0, 7)} while the review was drafted` });
+      // Fixed at the head the draft reviewed, which is still the PR's head.
+      else if (github && r.headSha === item.pr.headSha) resolveFixedThreads(item, r, draft.threads, identity, github, now, log);
     }
     save();
     removeReviewCheckout(item, r, log);

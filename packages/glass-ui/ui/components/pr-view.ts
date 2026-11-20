@@ -11,6 +11,7 @@ import { GitHubDescription, MarkdownElements } from './markdown.js';
 import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, prBadgeTags, StatusChip } from './prs.js';
 import { ReviewActions, markReviewOpened, reviewPrState, reviewUpdating, ReviewTags } from './reviews.js';
 import { ReviewDecisions } from './review-decisions.js';
+import { ResolvedThreads } from './review-threads.js';
 import { Button } from './button.js';
 import { LinkedText } from './links.js';
 
@@ -108,6 +109,7 @@ export function PrView({ snapshot, prKey }: { snapshot: GlassSnapshot; prKey: st
     ${review?.reason && !reviewUpdating(review) && html`<p class="dim">${review.reason}</p>`}
     ${review && !reviewUpdating(review) && html`<${ReviewDecisions} key=${[review.key, review.roundId, review.headSha, review.draftedAt].join(':')} review=${review} onSaving=${setDecisionSaving} />`}
     ${review && !reviewUpdating(review) && html`<${Findings} review=${review} />`}
+    ${review && html`<${ResolvedThreads} review=${review} />`}
     <section><h4>Description</h4><div class="pr-description">${data ? (data.bodyHtml ? html`<${GitHubDescription} source=${data.bodyHtml} openImage=${openLightbox} />` : html`<span class="dim">No description.</span>`) : html`<span class="dim">${loaded.key === prKey && loaded.error ? loaded.error : 'Loading description…'}</span>`}</div></section>
     ${p && html`<section><h4>Checks <span class="dim">${p.checks.passed} passed · ${p.checks.pending} pending</span></h4>${p.failingChecks?.map((check) => html`<div class="pr-check">${StatusChip('failed', 'bad')} ${check.detailsUrl ? html`<a href=${check.detailsUrl} target="_blank" rel="noopener">${check.name}</a>` : check.name}</div>`)}${!p.failingChecks?.length && p.checks.failed > 0 && html`<div class="bad">${p.checks.failed} failed</div>`}</section>`}
     ${p && (decision || (p.review?.unresolvedThreads ?? 0) > 0) && html`<section><h4>Reviews</h4><div>${decision}${(p.review?.unresolvedThreads ?? 0) > 0 && ` · ${p.review?.unresolvedThreads ?? 0} unresolved threads`}${p.review && p.review.unresolvedThreads === 0 && ' · no unresolved threads'}</div></section>`}

@@ -600,6 +600,15 @@ describe('review requests on /requests', () => {
     expect(loadConfig().reviews.mode).toBe('notify');
   });
 
+  it('shows resolved threads from every round as history, newest first', () => {
+    const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'bbb' }, round: { id: 'round1', requestedAt: ago(60) } }).item;
+    const entry = (id: string, at: string, failed?: string) => ({ id, path: 'a.ts', line: 3, url: `https://github.com/acme/web/pull/7#${id}`, reason: 'Fixed.', at, ...(failed ? { failed } : {}) });
+    item.rounds[0]!.threadResolutions = [entry('T1', ago(50))];
+    item.rounds.push({ ...item.rounds[0]!, id: 'round2', threadResolutions: [entry('T2', ago(10), 'GitHub rate limit reached')] });
+    writeReview(item);
+    expect(glassReviews()[0]!.threadHistory).toEqual([entry('T2', ago(10), 'GitHub rate limit reached'), entry('T1', ago(50))]);
+  });
+
   it('saves per-round answers through the guarded API and returns them after reload', async () => {
     const key = 'review:acme/web#7';
     const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaa' }, round: { id: 'round1', requestedAt: ago(60) } }).item;
