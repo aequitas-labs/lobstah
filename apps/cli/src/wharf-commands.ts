@@ -245,13 +245,21 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'man:triage':
     case 'man:discuss':
     case 'man:note':
+    case 'man:say':
     case 'man:resolve': {
       const grounds = scope.grounds;
       if (cmd === 'man:discuss') {
         const existing = /^[0-9a-f-]{36}$/.test(pos[0] ?? '');
         print(await backend.request(existing ? `threads/${id()}/post` : 'threads', { grounds, text: opts.opt('--said'), via: 'chat', ...(existing ? {} : { title: pos.join(' ') }) }, key()));
       } else if (cmd === 'man:triage') print(await backend.request(`threads/${id()}/triage`, { grounds, kind: opts.opt('--as') }, key()));
-      else if (cmd === 'man:resolve') print(await backend.request(`threads/${id()}/resolve`, { grounds, outcome: opts.opt('--outcome'), note: opts.opt('--note') }, key()));
+      else if (cmd === 'man:say') {
+        const said = pos.slice(1).join(' '), attached = opts.values('--attach').map((file) => ({ name: path.basename(file), bytes: readFile(file) }));
+        if (!said && !attached.length) throw new Error('man say needs text or --attach');
+        if (attached.length > 8 || new Set(attached.map((f) => f.name)).size !== attached.length) throw new Error('at most 8 attachments, with different basenames');
+        const base = key(), files: string[] = [];
+        for (const [i, file] of attached.entries()) files.push(await backend.uploadThread(id(), file.name, file.bytes, partKey(base, `file-${i}`)));
+        print(await backend.request(`threads/${id()}/say`, { grounds, ...(said ? { text: said } : {}), files }, partKey(base, 'say')));
+      } else if (cmd === 'man:resolve') print(await backend.request(`threads/${id()}/resolve`, { grounds, outcome: opts.opt('--outcome'), note: opts.opt('--note') }, key()));
       else print(await backend.request(`threads/${id()}/note`, { grounds, ...(opts.has('--decided') ? { decided: opts.values('--decided') } : {}), ...(opts.has('--open') ? { open: opts.values('--open') } : {}), link: opts.opt('--link'), text: pos.slice(1).join(' ') || undefined }, key()));
       break;
     }

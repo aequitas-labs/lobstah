@@ -196,6 +196,10 @@ export class WharfBackend implements CoordinationBackend {
   async uploadDocument(id: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
     return this.uploadPath(`documents/${encodeURIComponent(id)}/files`, name, bytes, key);
   }
+  /** A file the helm attaches to its message in a conversation. */
+  async uploadThread(id: string, name: string, bytes: Uint8Array, key: string): Promise<string> {
+    return this.uploadPath(`threads/${encodeURIComponent(id)}/files`, name, bytes, key);
+  }
   /** A mirror boat's put: its glass snapshot, gzipped. The wharf keeps only the latest. */
   async putMirrorSnapshot(gzip: Uint8Array): Promise<{ etag: string; bytes: number; at: string }> {
     const value = record(await responseValue(await this.raw('mirror/snapshot', 'PUT', gzip, { 'Content-Type': 'application/gzip' })));

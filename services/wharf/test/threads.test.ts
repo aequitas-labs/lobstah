@@ -73,6 +73,33 @@ it('stores validated phone attachments and refuses foreign file references and m
   expect((await call('threads',{id:other,text:'No',files:[key]})).status).toBe(400);
   expect((await call(`threads/${other}/files/${key}`)).status).toBe(404);
 });
+it('lets the helm write in the conversation with an attachment, marking it unread until the person reads it', async () => {
+  await create();
+  expect((await call(`threads/${ID}/say`, {text:'Which screen?'})).status).toBe(409);
+  await call('helm/take', {session:'helm',grounds:'harbor'});
+  const png = new Uint8Array([137,80,78,71,13,10,26,10,0]);
+  const file = await SELF.fetch(`https://state.test/v1/accounts/a/threads/${ID}/files`, {method:'POST',headers:{Authorization:`Bearer ${token}`,'X-Lobstah-Helm':'helm','X-File-Name':'sketch.png','Idempotency-Key':`upload-${++sequence}`},body:png});
+  expect(file.status, await file.clone().text()).toBe(200);
+  const said = await call(`threads/${ID}/say`, {text:'Which screen?',files:[(await file.json<{id:string}>()).id]});
+  expect(said.status, await said.clone().text()).toBe(200);
+  const view = await said.json<ThreadView>();
+  expect(view.rounds[0]!.entries.at(-1)).toMatchObject({by:'helm',text:'Which screen?',attachments:[{name:'sketch.png',type:'image/png'}],seq:view.responseSeq});
+  expect(view).toMatchObject({unreadResponse:true,responseText:'Which screen?'});
+  expect((await (await call('threads')).json<ThreadSummary[]>())[0]).toMatchObject({unreadResponse:true,waitingForHelm:false});
+  expect((await call(`threads/${ID}/say`, {text:''})).status).toBe(400);
+  expect((await call(`threads/${ID}/post`, {text:'The deck'})).status).toBe(201);
+  expect((await (await call('threads')).json<ThreadSummary[]>())[0]).toMatchObject({waitingForHelm:true});
+  const events = await (await call('events')).json<{events: Array<{kind:string;thread?:{text:string}}>}>();
+  expect(events.events.filter((e) => e.kind === 'thread').at(-1)?.thread?.text).toBe('The deck');
+});
+it("names a thread started on a dispatch's page after the dispatch, not its id", async () => {
+  await call('helm/take', { session: 'helm', grounds: 'harbor' });
+  expect((await call('dispatches', { id: 'a89ad2ba', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Deflake the deck test\n\nIt fails once a day.' })).status).toBe(200);
+  const response = await call('threads', { id: ID, grounds: 'harbor', text: 'Still flaky?', about: 'a89ad2ba' });
+  expect(response.status, await response.clone().text()).toBe(201);
+  expect(await response.json()).toMatchObject({ title: 'Deflake the deck test', about: 'a89ad2ba' });
+  expect((await (await call('threads')).json<ThreadSummary[]>())[0]).toMatchObject({ about: 'a89ad2ba', title: 'Deflake the deck test' });
+});
 it('writes no rows on glass polls, list reads or detail reads, even when a discussion is due to expire', async () => {
   await create(); await call('helm/take',{session:'helm'}); await call(`threads/${ID}/triage`,{kind:'thread'});
   await sql("UPDATE helm_threads SET data=json_set(data,'$.lastPersonAt','2000-01-01T00:00:00.000Z') WHERE id=?", ID);
@@ -90,6 +117,8 @@ it('keeps a later response unread, coalesces subscriber notices and leaves cards
   await call('documents/read-card/publish',{});
   const shown = (await (await call(`threads/${ID}`)).json<ThreadView>()).responseSeq!;
   await call(`threads/${ID}/note`,{decided:['Keep Reviews']});
+  expect((await (await call(`threads/${ID}`)).json<ThreadView>()).responseSeq).toBe(shown);
+  await call(`threads/${ID}/say`,{text:'Reviews stays'});
   expect((await call(`threads/${ID}/seen`,{through:shown})).status).toBe(200);
   expect(await (await call(`threads/${ID}`)).json()).toMatchObject({responseSeq:shown+1,seenThrough:shown,unreadResponse:true});
   expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,person:'a',seq:shown+1,href:`#thread/${ID}`}]);
@@ -97,20 +126,22 @@ it('keeps a later response unread, coalesces subscriber notices and leaves cards
   expect(await (await call('threads/notices')).json()).toEqual([]);
   expect(await (await call(`threads/${ID}`)).json()).toMatchObject({unreadResponse:true,cards:[{key:'read-card',standing:true}]});
   expect(await (await call('documents/read-card')).json()).not.toHaveProperty('answer');
-  await call(`threads/${ID}/note`,{open:['Choose the middle tab']});
+  await call(`threads/${ID}/say`,{text:'Choose the middle tab'});
   expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,seq:shown+2}]);
   expect((await call(`threads/${ID}/seen`,{through:shown+3})).status).toBe(400);
   await call(`threads/${ID}/seen`,{through:shown+2});
   expect(await (await call('threads/notices')).json()).toEqual([]);
   expect(await rowsWritten(stub(),async()=>{await call('threads/notices');await call('threads');})).toBe(0);
 });
-it('retains an old resolved item while unread and drops it from the summary after reading', async () => {
+it('resolves quietly: never unread, no notice, and an old resolved item leaves the summary', async () => {
   await create(); await call('helm/take',{session:'helm'});
-  await call(`threads/${ID}/resolve`,{outcome:'answered',note:'Keep Reviews'});
-  await sql("UPDATE helm_threads SET data=json_set(data,'$.updatedAt','2000-01-01T00:00:00.000Z') WHERE id=?",ID);
+  await call(`threads/${ID}/say`,{text:'Keep Reviews as its own view'});
   expect(await (await call('threads')).json()).toMatchObject([{id:ID,unreadResponse:true}]);
-  expect(await (await call('threads/notices')).json()).toMatchObject([{thread:ID,seq:1}]);
+  await call(`threads/${ID}/resolve`,{outcome:'answered',note:'Keep Reviews'});
+  expect(await (await call('threads')).json()).toMatchObject([{id:ID,state:'resolved',unreadResponse:false,responseSeq:1}]);
   await call(`threads/${ID}/seen`,{through:1});
+  expect(await (await call('threads/notices')).json()).toEqual([]);
+  await sql("UPDATE helm_threads SET data=json_set(data,'$.updatedAt','2000-01-01T00:00:00.000Z') WHERE id=?",ID);
   expect(await (await call('threads')).json()).toEqual([]);
   expect((await call(`threads/${ID}`)).status).toBe(200);
 });

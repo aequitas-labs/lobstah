@@ -322,7 +322,7 @@ import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, decisionReferences, type FlagValue } from './usage.js';
-import { listThreads, readThread, startThread, postThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, ThreadError } from '@lobstah/core';
+import { listThreads, readThread, startThread, postThread, sayThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, ThreadError } from '@lobstah/core';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
@@ -2223,6 +2223,7 @@ async function mainCli(): Promise<void> {
     case 'man:triage':
     case 'man:discuss':
     case 'man:note':
+    case 'man:say':
     case 'man:resolve': {
       const caller = callerSession(opt('--session'));
       const threadConfig = loadConfig();
@@ -2243,7 +2244,15 @@ async function mainCli(): Promise<void> {
         if (cmd === 'man:discuss') item = existing ? postThread(id, { text: opt('--said'), via: 'chat' }) : startThread({ grounds, title: pos.join(' '), text: opt('--said'), via: 'chat' });
         else if (cmd === 'man:triage') item = triageThread(id, opt('--as'));
         else if (cmd === 'man:resolve') item = resolveThread(id, opt('--outcome'), opt('--note'));
-        else {
+        else if (cmd === 'man:say') {
+          const said = pos.slice(1).join(' ');
+          const files = values('--attach').map((file) => {
+            try { return { name: path.basename(file), data: fs.readFileSync(file) }; }
+            catch { throw new UsageError(`Cannot read ${file}`); }
+          });
+          if (!said && !files.length) throw new UsageError(`man say needs text or --attach\n\n${usageFor('man:say')!}`);
+          item = sayThread(id, { text: said || undefined, uploads: files, maxBytes: loadConfig().limits.attachmentMaxBytes });
+        } else {
           if (!has('--decided') && !has('--open') && !opt('--link')) throw new ThreadError('Choose notes or a link to record');
           item = noteThread(id, { ...(has('--decided') ? { decided: values('--decided') } : {}), ...(has('--open') ? { open: values('--open') } : {}), link: opt('--link'), text: pos.slice(1).join(' ') || undefined });
         }

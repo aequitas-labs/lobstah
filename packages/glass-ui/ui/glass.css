@@ -4250,14 +4250,128 @@ footer .glass-brand {
   max-width: 760px;
   margin: 0 auto;
 }
-.thread-round {
-  border-top: 1px solid var(--line);
-  padding: 16px 0;
+/* The conversation: one chat top to bottom, the person on the right, the helm on the left. */
+.thread-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0 4px;
 }
-.thread-round summary {
-  cursor: pointer;
+.thread-msg {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  max-width: min(560px, 88%);
+}
+.thread-msg.from-person {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+.thread-msg.from-helm {
+  align-self: flex-start;
+}
+.thread-bubble {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.from-person .thread-bubble {
+  border-color: color-mix(in srgb, var(--link) 45%, var(--line));
+  background: color-mix(in srgb, var(--link) 14%, var(--card));
+  border-bottom-right-radius: 4px;
+}
+.from-helm .thread-bubble {
+  border-bottom-left-radius: 4px;
+}
+.from-helm.unread .thread-bubble {
+  border-color: var(--link);
+}
+.thread-meta {
+  margin: 0 0 2px;
   color: var(--dim);
-  margin-bottom: 12px;
+  font-size: 11px;
+}
+.thread-new {
+  color: var(--link);
+}
+.thread-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--link);
+}
+.thread-avatar svg {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+/* Linked work: its kind's icon (components/icons.ts WORK_ICON), then its card or link. */
+.thread-work {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+}
+.thread-work-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.thread-work-body > p {
+  margin: 0;
+  line-height: 26px;
+}
+.thread-work-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--dim);
+}
+.thread-work-icon svg {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+.thread-system {
+  align-self: center;
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+}
+.thread-system .thread-links {
+  margin: 0;
+  text-align: left;
+}
+.thread-card-entry {
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: 8px;
+  background: var(--card);
+}
+.thread-card-entry > p {
+  flex: 1 0 100%;
+  margin: 0;
+}
+.thread-answer {
+  color: var(--ok);
+}
+.thread-seen {
+  height: 1px;
 }
 .thread-notes {
   margin-bottom: 16px;
@@ -4266,7 +4380,7 @@ footer .glass-brand {
   border-radius: 8px;
 }
 .thread-outcome {
-  padding: 8px 12px;
+  padding: 12px 0 4px;
 }
 .thread-view .dcompose {
   margin-top: 16px;
@@ -4320,19 +4434,53 @@ footer .glass-brand {
   cursor: pointer;
   margin-bottom: 12px;
 }
-.thread-checklist {
+/* The helm's notes: decided lines with a check, open lines with a question mark. */
+.thread-notes-box {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.thread-notes-head {
+  margin: 0 0 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.thread-notes-box ul {
   list-style: none;
   padding: 0;
-  margin: 12px 0;
+  margin: 0;
 }
-.thread-checklist li {
+.thread-notes-box li {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  margin: 4px 0;
+  margin: 3px 0;
 }
-.thread-checklist input {
-  flex: 0 0 auto;
+/* Message the helm opens over the dispatch page it was chosen on. */
+.dialog-scrim:has(.message-dialog) {
+  z-index: calc(var(--layer-modal) + 1);
+}
+.thread-about {
+  margin: 12px 0;
+}
+.thread-dispatch .gactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.thread-note-mark {
+  flex: 0 0 1ch;
+  font-weight: 600;
+}
+.thread-notes-box .decided .thread-note-mark {
+  color: var(--ok);
+}
+.thread-notes-box .open .thread-note-mark {
+  color: var(--warn);
 }
 .thread-links {
   margin: 12px 0;

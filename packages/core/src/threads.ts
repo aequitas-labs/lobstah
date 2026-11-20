@@ -7,7 +7,9 @@ import { answerFileType, ANSWER_FILES_MAX, readDecision, readDecisionAnswer, rea
 import type { DecisionUpload } from './decisions.js';
 import type { Attachment } from './types.js';
 import { postNotice } from './notices.js';
-import { THREAD_CARD_READY, THREAD_NOTES_UPDATED, responseState, recordThreadResponse, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
+import { storedDescriptor } from './queue.js';
+import { laneOf } from './worktrees.js';
+import { THREAD_CARD_READY, THREAD_NOTES_UPDATED, responseState, dispatchThreadTitle, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
 import type { HelmThread, ThreadEntry, ThreadRelay, ThreadSummary, ThreadVia, ThreadView } from './thread-model.js';
 
 export const threadsRoot = () => path.join(lobstahHome(), 'threads');
@@ -87,15 +89,21 @@ function uploads(id: string, grounds: string, files: readonly DecisionUpload[], 
     return { name, path: destination, bytes: file.data.length, type: file.type };
   });
 }
+function aboutTitle(about: string | undefined): string | undefined {
+  if (!about) return undefined;
+  const id = about.replace(/^(work|chore):/, ''), lane = laneOf(id);
+  try { return lane ? dispatchThreadTitle(storedDescriptor(id, lane)?.brief) : undefined; }
+  catch { return undefined; }
+}
 export function startThread(input: { grounds: string; text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; about?: string; via?: ThreadVia; title?: string; relay?: ThreadRelay; now?: Date }): HelmThread {
   const text = message(input.text, input.uploads ?? []), id = randomUUID(), at = (input.now ?? new Date()).toISOString();
   groundDir(input.grounds);
   if (input.about !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input.about)) throw new ThreadError('Choose a valid dispatch');
-  const title = input.title ? threadWords(input.title, 'a title', 200) : (text.split('\n')[0] || input.uploads?.[0]?.name || 'Attachment').slice(0, 200);
+  const title = input.title ? threadWords(input.title, 'a title', 200) : (aboutTitle(input.about) ?? (text.split('\n')[0] || input.uploads?.[0]?.name || 'Attachment').slice(0, 200));
   const attachments = uploads(id, input.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024);
   const item: HelmThread = { id, grounds: input.grounds, title, text, attachments,
     kind: input.via === 'chat' ? 'thread' : 'untriaged', state: 'open', notes: { decided: [], open: [] },
-    rounds: [{ at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments }] }],
+    rounds: [{ at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }],
     createdAt: at, updatedAt: at, lastPersonAt: at, ...(input.about ? { about: input.about } : {}), ...(input.relay ? { relay: input.relay } : {}) };
   save(item);
   if (input.via !== 'chat') remindThreads(input.grounds, 900_000, Date.parse(at));
@@ -109,12 +117,28 @@ export function postThread(id: string, input: { text: unknown; uploads?: Decisio
     if (item.rounds.length >= THREAD_MESSAGES_MAX) throw new ThreadError('This conversation needs a report or plan before more messages', 409);
     const attachments = uploads(id, item.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024);
     const relay = item.relay && input.source ? { relay: { ...item.relay, sources: [...item.relay.sources, input.source].slice(-THREAD_MESSAGES_MAX) } } : {};
-    return { ...item, ...relay, rounds: [...item.rounds, { at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments }] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
+    return { ...item, ...relay, rounds: [...item.rounds, { at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
   });
   if (input.via !== 'chat') remindThreads(item.grounds, 900_000, Date.parse(item.lastPersonAt));
   return item;
 }
-export const triageThread = (id: string, kind: unknown, now = new Date()) => update(id, (item) => { const at = nextAt(item, now); return recordThreadResponse(classifyThread(item, kind, at), at, kind === 'thread' ? 'Discussion started' : 'Bait received'); });
+/** The helm's own words in the conversation, after whatever the person said last. */
+export function sayThread(id: string, input: { text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; now?: Date }): HelmThread {
+  const text = message(input.text, input.uploads ?? []);
+  return update(id, (item) => {
+    open(item);
+    const at = nextAt(item, input.now ?? new Date());
+    sayInThread(item, text, [], at); // refuse a full round before writing any file
+    return sayInThread(item, text, uploads(id, item.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024), at);
+  });
+}
+/**
+ * Triage, notes and resolving update a glass thread quietly. A thread relayed
+ * from Slack still records them as responses: the mirror sends each new
+ * response back to the Slack thread, and the person there sees nothing else.
+ */
+const relayResponse = (item: HelmThread, at: string, text: string): HelmThread => item.relay ? recordThreadResponse(item, at, text) : item;
+export const triageThread = (id: string, kind: unknown, now = new Date()) => update(id, (item) => { const at = nextAt(item, now); return relayResponse(classifyThread(item, kind, at), at, kind === 'thread' ? 'Discussion started' : 'Bait received'); });
 export function noteThread(id: string, notes: { decided?: string[]; open?: string[]; link?: string; text?: string }, now = new Date()): HelmThread {
   return update(id, (item) => {
     open(item);
@@ -127,17 +151,18 @@ export function noteThread(id: string, notes: { decided?: string[]; open?: strin
     if (notes.link) {
       const split = notes.link.indexOf(':'), kind = notes.link.slice(0, split), ref = notes.link.slice(split + 1);
       if (!['dispatched', 'report', 'planned'].includes(kind) || !ref || ref.length > 1000 || (kind === 'planned' && !ref.startsWith('https://'))) throw new ThreadError('Choose a dispatch, report or HTTPS plan link');
-      entry = { link: kind as 'dispatched' | 'report' | 'planned', ref, text: threadWords(notes.text ?? ref, 'a link note', 1000) };
+      entry = { link: kind as 'dispatched' | 'report' | 'planned', ref, text: threadWords(notes.text ?? ref, 'a link note', 1000), at };
     }
-    const rounds = item.rounds.map((round, i) => entry && i === item.rounds.length - 1 ? { ...round, entries: [...round.entries, entry] } : round);
-    return recordThreadResponse({ ...item, rounds, notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at }, at, entry && 'text' in entry ? entry.text : THREAD_NOTES_UPDATED);
+    const noted = notes.decided !== undefined || notes.open !== undefined;
+    const { rounds } = entry ? appendThreadEntry(item, entry) : item;
+    return relayResponse({ ...item, rounds, ...(noted ? { notesAt: at } : {}), notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at }, at, entry && 'text' in entry ? entry.text : THREAD_NOTES_UPDATED);
   });
 }
 export function linkThreadCard(id: string, key: string, now = new Date()): HelmThread {
   return update(id, (item) => {
     open(item);
     if (item.rounds.some((round) => round.entries.some((entry) => 'card' in entry && entry.card === key))) return item;
-    const rounds = item.rounds.map((round, i) => i === item.rounds.length - 1 ? { ...round, entries: [...round.entries, { card: key }] } : round);
+    const { rounds } = appendThreadEntry(item, { card: key });
     const at = nextAt(item, now);
     return recordThreadResponse({ ...item, rounds, updatedAt: at, lastHelmAt: at }, at, THREAD_CARD_READY);
   });
@@ -145,7 +170,7 @@ export function linkThreadCard(id: string, key: string, now = new Date()): HelmT
 export function resolveThread(id: string, outcome: unknown, note: unknown, now = new Date()): HelmThread {
   return update(id, (item) => {
     const at = nextAt(item, now), result = threadOutcome(outcome, note, at);
-    return recordThreadResponse({ ...item, state: 'resolved', outcome: result, updatedAt: at, lastHelmAt: at }, at, result.note);
+    return relayResponse({ ...item, state: 'resolved', outcome: result, updatedAt: at, lastHelmAt: at }, at, result.note);
   });
 }
 export function reopenThread(id: string, now = new Date()): HelmThread {
@@ -171,7 +196,7 @@ function newestPersonAt(item: HelmThread): string {
 export function threadSummaries(grounds?: string, now = Date.now()): ThreadSummary[] {
   return listThreads(grounds).filter((item) => item.state === 'open' || responseState(item).unreadResponse || now - Date.parse(item.updatedAt) < 86400_000).map((item) => ({
     ...responseState(item), id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, state: item.state, updatedAt: item.updatedAt,
-    roundCount: item.rounds.length, ...(item.notes.open[0] ? { openLine: item.notes.open[0] } : {}),
+    roundCount: item.rounds.length, ...(item.about ? { about: item.about } : {}), ...(item.notes.open[0] ? { openLine: item.notes.open[0] } : {}),
     cards: threadView(item).cards.filter((card) => card.standing).map((card) => card.key),
     waitingForHelm: item.state === 'open' && (!item.lastHelmAt || newestPersonAt(item) > item.lastHelmAt), ...(item.outcome ? { outcome: item.outcome } : {}) }));
 }
@@ -182,7 +207,7 @@ export function remindThreads(grounds?: string, remindMs = 900_000, now = Date.n
     if (item.notifiedAt && now - Date.parse(item.notifiedAt) < remindMs) continue;
     update(item.id, (latest) => {
       if (latest.notifiedAt && now - Date.parse(latest.notifiedAt) < remindMs) return latest;
-      postNotice({ kind: 'thread', refId: item.id, grounds: item.grounds, text: `${item.title}: ${item.rounds.at(-1)?.entries.flatMap((entry) => 'text' in entry ? [entry.text] : []).join(' ') ?? ''}`, dedupeKey: `thread-${item.id}-${item.lastPersonAt}-${Math.floor(now / Math.max(1, remindMs))}` });
+      postNotice({ kind: 'thread', refId: item.id, grounds: item.grounds, text: `${item.title}: ${personWords(item.rounds.at(-1))}`, dedupeKey: `thread-${item.id}-${item.lastPersonAt}-${Math.floor(now / Math.max(1, remindMs))}` });
       return { ...latest, notifiedAt: new Date(now).toISOString() };
     });
   }

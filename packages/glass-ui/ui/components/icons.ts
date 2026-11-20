@@ -65,6 +65,23 @@ export const ITEM_ICON = {
   newTrap: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
 } satisfies Record<string, Children>;
 
+/**
+ * The kinds of work a conversation links to, each with its view's icon: a
+ * card is a decision on the deck. A plan has no view of its own, so it gets a
+ * map.
+ */
+export const WORK_ICON = {
+  dispatch: DispatchIcon,
+  pr: TAB_ICON.prs,
+  card: TAB_ICON.deck,
+  todo: TAB_ICON.todos,
+  report: TAB_ICON.reports,
+  plan: svg(
+    '<polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>',
+  ),
+} satisfies Record<string, Children>;
+export type WorkKind = keyof typeof WORK_ICON;
+
 /** Only the missing dispatch states; the six existing report icons stay unchanged. */
 export const DISPATCH_STATE_ICON = {
   queued: html`<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12v10H2zM2 8h3l1.5 2h3L11 8h3"/></svg>`,

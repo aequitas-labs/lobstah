@@ -3,7 +3,14 @@ import { backend } from './backend.js';
 import { getState, setState } from './store.js';
 import { receive, setDraft } from './actions.js';
 
+/** Message the helm: a dispatch with an unresolved thread opens that thread, ready to type in. */
 export function openMessage(about?: string, grounds?: string): void {
+  const existing = about ? getState().snapshot?.threads?.find((t) => t.about === about && t.state !== 'resolved') : undefined;
+  if (existing) {
+    setState({ focusComposer: existing.id });
+    openThread(existing.id);
+    return;
+  }
   setState({ messageSheet: { about, grounds } });
 }
 export function closeMessage(): void {

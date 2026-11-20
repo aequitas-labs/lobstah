@@ -77,7 +77,7 @@ describe('a Slack message relayed to this boat', () => {
     expect(wharf.answers.get('c1')).toEqual({ status: 201, body: { ok: true, thread: item!.id, state: 'queued' } });
     expect(item).toMatchObject({ grounds: 'home', kind: 'untriaged', state: 'open', title: 'Investigate the flaky checkout',
       relay: { wharf: 'lobstah', request: REQUEST, by: 'person-1', told: 'queued' } });
-    expect(item!.rounds[0]!.entries).toEqual([{ by: 'person', via: 'slack', text: 'Investigate the flaky checkout', attachments: [] }]);
+    expect(item!.rounds[0]!.entries).toEqual([{ by: 'person', via: 'slack', text: 'Investigate the flaky checkout', attachments: [], at: expect.any(String) }]);
     // It shows on the Threads page like any other conversation, waiting for the helm.
     expect(threadSummaries('home')).toMatchObject([{ id: item!.id, waitingForHelm: true }]);
     expect(listNotices().find((n) => n.kind === 'thread')).toMatchObject({ refId: item!.id, grounds: 'home' });
@@ -112,7 +112,8 @@ describe('a Slack message relayed to this boat', () => {
     await m.read();
     expect(wharf.updates.map((u) => u.id)).toEqual([REQUEST, REQUEST, REQUEST]);
     expect(replies(wharf)).toEqual(['Discussion started', 'Decided\n• Retry the payment call\n\nStill open\n• Which region fails?', 'Fixed on main.']);
-    expect(threadSummaries('home')[0]).toMatchObject({ waitingForHelm: false, unreadResponse: true });
+    // A resolved conversation never counts as unread in the glass.
+    expect(threadSummaries('home')[0]).toMatchObject({ waitingForHelm: false, unreadResponse: false });
   });
 
   it('says where a dispatched thread went', async () => {
@@ -148,7 +149,7 @@ describe('a Slack message relayed to this boat', () => {
     const [item] = threads();
     expect(item).toMatchObject({ id, state: 'open' });
     expect(item!.outcome).toBeUndefined();
-    expect(item!.rounds.at(-1)!.entries).toEqual([{ by: 'person', via: 'slack', text: 'Still failing on the release branch', attachments: [] }]);
+    expect(item!.rounds.at(-1)!.entries).toEqual([{ by: 'person', via: 'slack', text: 'Still failing on the release branch', attachments: [], at: expect.any(String) }]);
     expect(threadSummaries('home')[0]).toMatchObject({ id, waitingForHelm: true });
     // Reopening is no helm response: nothing more goes back until the helm answers.
     await m.read();

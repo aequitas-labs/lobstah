@@ -2,7 +2,8 @@ import { beforeEach, afterEach, describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureLayout, startThread, postThread, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, readDecisionAnswer, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
+import { ensureLayout, startThread, postThread, sayThread, markThreadResponsesSeen, threadSubscriberNotices, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, readDecisionAnswer, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
+import { enqueue, claimNext } from '../src/queue.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
 const at = new Date('2026-11-19T10:00:00Z');
@@ -114,6 +115,8 @@ describe('unread helm responses', () => {
     expect(threadSummaries()[0]?.unreadResponse).toBe(true);
     expect(readDecisionAnswer(meta.key)).toBeUndefined();
     noteThread(item.id,{open:['One more choice']},at);
+    expect(threadSubscriberNotices()).toEqual([]);
+    sayThread(item.id,{text:'One more choice to make',now:at});
     expect(threadSubscriberNotices()[0]?.seq).toBe(seq+1);
     markThreadResponsesSeen(item.id, seq);
     expect(threadSummaries()[0]?.unreadResponse).toBe(true);
@@ -124,15 +127,86 @@ describe('unread helm responses', () => {
     expect(threadSubscriberNotices('another-person')).toHaveLength(1);
     expect(() => markThreadResponsesSeen(item.id, seq+2)).toThrow('shown');
   });
-  it('keeps a resolved conversation beyond a day until its response is read', async () => {
-    const {markThreadResponsesSeen, threadSubscriberNotices} = await import('../src/threads.js');
+  it('resolves quietly: a resolved conversation is never unread, sends no notice and leaves the list after a day', async () => {
+    const {threadSubscriberNotices} = await import('../src/threads.js');
     const old = new Date(Date.now()-3*86400_000);
     const item = startThread({grounds:'home',text:'An old exchange',via:'chat',now:old});
+    triageThread(item.id,'thread',old);
+    noteThread(item.id,{decided:['Keep Reviews']},old);
+    expect(readThread(item.id)?.responseSeq ?? 0).toBe(0);
     resolveThread(item.id,'answered','The notes have the answer',old);
-    expect(threadSummaries()).toHaveLength(1);
-    expect(threadSubscriberNotices()).toHaveLength(1);
-    markThreadResponsesSeen(item.id,1);
+    expect(readThread(item.id)?.responseSeq ?? 0).toBe(0);
+    expect(threadSubscriberNotices()).toEqual([]);
     expect(threadSummaries()).toEqual([]);
     expect(readThread(item.id)?.outcome?.note).toBe('The notes have the answer');
   });
+  it('stops counting an unread helm message once the helm resolves its conversation', () => {
+    const item = start();
+    sayThread(item.id,{text:'Done: Reviews stays',now:at});
+    expect(threadSummaries()[0]?.unreadResponse).toBe(true);
+    resolveThread(item.id,'answered','Reviews stays',at);
+    expect(threadSummaries(undefined, at.getTime())[0]).toMatchObject({state:'resolved',unreadResponse:false});
+    expect(threadView(readThread(item.id)!).unreadResponse).toBe(false);
+  });
 });
+
+describe('chat with the helm', () => {
+  const later = (minutes: number) => new Date(at.getTime() + minutes * 60_000);
+  it('keeps the person and the helm in one timeline, in order, each with its time', () => {
+    const item = start();
+    triageThread(item.id, 'thread', later(1));
+    sayThread(item.id, { text: 'Which part of the deck?', now: later(2) });
+    noteThread(item.id, { decided: ['Rethink the deck'], open: ['Which part'] }, later(3));
+    postThread(item.id, { text: 'The decisions row', now: later(4) });
+    sayThread(item.id, { text: 'I will sketch two options', uploads: [{ name: 'sketch.png', data: png }], now: later(5) });
+    const thread = readThread(item.id)!;
+    expect(thread.rounds.map((round) => round.entries.map((entry) => 'by' in entry ? `${entry.by}:${entry.text}` : 'event' in entry ? `event:${entry.kind}` : 'other'))).toEqual([
+      ['person:Can we rethink the deck?', 'event:thread', 'helm:Which part of the deck?'],
+      ['person:The decisions row', 'helm:I will sketch two options'],
+    ]);
+    const times = thread.rounds.flatMap((round) => round.entries.map((entry) => ('at' in entry ? entry.at : undefined)));
+    expect(times).toEqual([at, later(1), later(2), later(4), later(5)].map((d) => d.toISOString()));
+    expect(thread.notesAt).toBe(later(3).toISOString());
+    const said = thread.rounds[1]!.entries[1]!;
+    expect(said).toMatchObject({ by: 'helm', attachments: [{ name: 'sketch.png' }], seq: thread.responseSeq });
+    expect(fs.readFileSync(resolveThreadFile(item.id, 'sketch.png')!)).toEqual(png);
+  });
+  it('marks the conversation unread for the person and stops waiting for the helm', () => {
+    const item = start();
+    expect(threadSummaries('home')[0]).toMatchObject({ waitingForHelm: true, unreadResponse: false });
+    const said = sayThread(item.id, { text: 'On it', now: later(1) });
+    expect(threadSummaries('home')[0]).toMatchObject({ waitingForHelm: false, unreadResponse: true, responseText: 'On it', responseSeq: said.responseSeq });
+    expect(threadSubscriberNotices()).toMatchObject([{ thread: item.id, seq: said.responseSeq, text: 'On it' }]);
+    markThreadResponsesSeen(item.id, said.responseSeq);
+    expect(threadSummaries('home')[0]?.unreadResponse).toBe(false);
+  });
+  it("wakes the helm with the person's next message, not with its own words", () => {
+    const item = start();
+    sayThread(item.id, { text: 'Helm words', now: later(1) });
+    const before = listNotices().length;
+    remindThreads('home', 900_000, later(2).getTime());
+    expect(listNotices()).toHaveLength(before);
+    postThread(item.id, { text: 'Person reply', now: later(3) });
+    const wake = listNotices().filter((notice) => notice.kind === 'thread').at(-1)!;
+    expect(wake.text).toContain('Person reply');
+    expect(wake.text).not.toContain('Helm words');
+  });
+  it('refuses empty or closed messages', () => {
+    const item = start();
+    expect(() => sayThread(item.id, { text: '  ' })).toThrow('Enter message');
+    resolveThread(item.id, 'answered', 'Done', later(1));
+    expect(() => sayThread(item.id, { text: 'Late' })).toThrow('Reopen');
+  });
+});
+
+describe('threads about a dispatch', () => {
+  it("takes the dispatch's title, never its id, and carries the dispatch in its summary", () => {
+    enqueue({ id: 'a89ad2ba-1111-4222-8333-444455556666', repo: 'web', brief: '# Deflake the deck test\n\nIt fails once a day.' });
+    claimNext('work');
+    const item = startThread({ grounds: 'home', text: 'Is this still flaky?', about: 'a89ad2ba-1111-4222-8333-444455556666', now: at });
+    expect(item.title).toBe('Deflake the deck test');
+    expect(threadSummaries('home')[0]).toMatchObject({ about: 'a89ad2ba-1111-4222-8333-444455556666', title: 'Deflake the deck test' });
+    expect(startThread({ grounds: 'home', text: 'Unknown dispatch', about: 'gone-dispatch', now: at }).title).toBe('Unknown dispatch');
+  });
+});
+
