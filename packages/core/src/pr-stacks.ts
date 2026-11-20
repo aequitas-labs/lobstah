@@ -6,7 +6,7 @@ import type { Config } from './config.js';
 import { cutPrTitle, parsePrRef, prBadge, prStandingKinds } from './pr.js';
 import type { PrEvidence } from './pr.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
-import { listNotices, noticesDir, postNotice } from './notices.js';
+import { listNotices, postNotice, removeNotice, rewriteNotice } from './notices.js';
 import { readPrs, withPrLock } from './prs.js';
 import { storedDescriptor } from './queue.js';
 
@@ -269,17 +269,14 @@ export function syncStackReadiness(cfg = loadConfig(), now = Date.now()): void {
       // Update the existing item without moving its delivery cursor. Only a
       // ready transition gets a new seq; supersede, never append history items.
       const notice = wake || !current ? postNotice(fields)! : { ...current, ...fields };
-      if (current && !wake) {
-        const file = path.join(noticesDir(), `${notice.seq}.json`), tmp = uniqueTempPath(file);
-        fs.writeFileSync(tmp, JSON.stringify(notice)); atomicRenameSync(tmp, file);
-      }
+      if (current && !wake) rewriteNotice(notice);
       kept.add(notice.seq);
       if (s.allReady) next.notified = true;
       for (const alias of aliases) if (alias !== s.id) delete state[alias];
       state[s.id] = next;
     }
     // Old shapes and stacks that no longer exist are not standing notices.
-    for (const n of notices) if (!kept.has(n.seq)) fs.rmSync(path.join(noticesDir(), `${n.seq}.json`), { force: true });
+    for (const n of notices) if (!kept.has(n.seq)) removeNotice(n.seq);
     // A temporarily incomplete chain still invalidates its old ready epoch
     // on a changed head or a genuinely unready surviving member.
     for (const [id, old] of Object.entries(state)) {

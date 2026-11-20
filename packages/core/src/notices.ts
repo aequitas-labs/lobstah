@@ -214,6 +214,7 @@ export function pruneNotices(now = Date.now(), keepMs = NOTICE_KEEP_MS): number 
     try {
       if ((JSON.parse(fs.readFileSync(file, 'utf8')) as Notice).kind === 'stack-ready') continue;
       fs.rmSync(file, { force: true });
+      forgetNoticeListing(name.slice(0, -'.json'.length));
       removed++;
     } catch {
       // Unreadable or already gone: leave it for the next pass.
@@ -290,7 +291,22 @@ export function postNotice(n: {
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(notice, null, 2));
   atomicRenameSync(tmp, file);
+  forgetNoticeListing(seq);
   return notice;
+}
+
+/** Rewrite a standing notice under its own seq, so its delivery position does not move. */
+export function rewriteNotice(notice: Notice): void {
+  const file = path.join(noticesDir(), `${notice.seq}.json`);
+  const tmp = uniqueTempPath(file);
+  fs.writeFileSync(tmp, JSON.stringify(notice));
+  atomicRenameSync(tmp, file);
+  forgetNoticeListing(notice.seq);
+}
+
+export function removeNotice(seq: string): void {
+  fs.rmSync(path.join(noticesDir(), `${seq}.json`), { force: true });
+  forgetNoticeListing(seq);
 }
 
 /**
@@ -303,6 +319,16 @@ export function postNotice(n: {
  */
 const noticeCache: { dir?: string; stamp?: string; names: string[]; files: Map<string, { stamp: string; notice: Notice }> } = { names: [], files: new Map() };
 const dirStamp = (st: fs.Stats) => `${st.mtimeMs}:${st.ctimeMs}:${st.size}`;
+
+/**
+ * This process just wrote or removed a notice. The directory stamp can miss
+ * that: two writes can land inside one timestamp tick, and Windows reports a
+ * directory's size as 0. Re-list and re-read on the next call.
+ */
+function forgetNoticeListing(seq: string): void {
+  noticeCache.stamp = undefined;
+  noticeCache.files.delete(`${seq}.json`);
+}
 
 export function listNotices(limit = 20): Notice[] {
   const dir = noticesDir();
