@@ -41,9 +41,12 @@ export function chainRows(list: GlassDispatch[], chain: boolean | undefined): Gl
     g.push(x);
     groups.set(k, g);
   }
-  return [...groups.values()]
-    .sort((a, b) => b[0]!.sort - a[0]!.sort)
-    .flatMap((g) => g.sort((a, b) => (a.id === root(a) ? -1 : b.id === root(b) ? 1 : a.sort - b.sort)));
+  return (
+    [...groups.values()]
+      // Newest last real update first; equal times fall back to the id, so chains never swap between polls.
+      .sort((a, b) => b[0]!.sort - a[0]!.sort || a[0]!.id.localeCompare(b[0]!.id))
+      .flatMap((g) => g.sort((a, b) => (a.id === root(a) ? -1 : b.id === root(b) ? 1 : a.sort - b.sort || a.id.localeCompare(b.id))))
+  );
 }
 
 function row(x: GlassDispatch, chain: boolean | undefined) {

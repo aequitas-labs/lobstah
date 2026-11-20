@@ -280,7 +280,7 @@ export interface GlassDispatchSummary {
   draftPr?: string;
   updated?: string;
   transcript?: string;
-  /** Newest first: queue/active/done mtime. */
+  /** Newest first: its last real update in epoch ms (a status entry, a send, its claim or queueing), never a heartbeat. */
   sort: number;
   /** The evidence badge (prBadge) and when the PR was observed. */
   prBadge?: PrBadge & { observedAt: string };
