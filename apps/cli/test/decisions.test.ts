@@ -93,6 +93,12 @@ describe('man ask', () => {
     expect(readDecisionAnswer(key)).toBeUndefined();
   });
 
+  it.each(['helm:fleet:abcd1234', `work:${A}`, `chore:${A}`])('accepts a bare report key: %s', (bare) => {
+    const result = lobstah('man', 'ask', '--title', 'Ship this?', '--report', bare);
+    expect(result.status, result.stderr).toBe(0);
+    expect(readDecision(keyOf(result.stdout)!)?.references).toEqual([{ kind: 'report', key: `report:${bare}` }]);
+  });
+
   it.each(['../../private', 'pr:acme/web#0', 'https://evil.test/pr'])('rejects malformed PR references before storing a card: %s', (key) => {
     const before = listDecisions();
     const result = lobstah('man', 'ask', '--title', 'Ship this?', '--pr', key);

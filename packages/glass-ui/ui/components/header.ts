@@ -21,7 +21,7 @@ import { ITEM_ICON, TAB_ICON } from './icons.js';
 
 const TAB_LABEL: Record<GlassTab, string> = {
   deck: 'On deck',
-  helm: 'Helm',
+  helm: 'Threads',
   dispatches: 'Dispatches',
   traps: 'Traps',
   boats: 'Boats',
@@ -125,7 +125,7 @@ function controls(d: GlassSnapshot | undefined, tab: GlassTab, st: GlassPrefs) {
 /** What a tab's count says to a screen reader: the same words on the tab bar and the phone bar. */
 function badgeLabel(t: GlassTab, n: number): string {
   if (t === 'deck') return `${n} new decision${n === 1 ? '' : 's'}`;
-  if (t === 'helm') return `${n} unread helm response${n === 1 ? '' : 's'}`;
+  if (t === 'helm') return `${n} unread thread response${n === 1 ? '' : 's'}`;
   if (t === 'prs') return `${n} of your PRs need${n === 1 ? 's' : ''} you`;
   return `${n} unread review${n === 1 ? '' : 's'}`;
 }
@@ -134,7 +134,7 @@ function badgeLabel(t: GlassTab, n: number): string {
  * Always in the bar, in the phone bar's order. The other tabs join them where
  * the screen fits every tab on one line (glass.css), else sit behind More.
  */
-const PINNED: readonly GlassTab[] = ['deck', 'reviews', 'helm'];
+const PINNED: readonly GlassTab[] = ['deck', 'reviews', 'helm', 'prs'];
 /** glass.css's breakpoint: from this width every tab is inline and More is hidden. */
 const ALL_TABS_FIT = '(min-width: 1200px)';
 

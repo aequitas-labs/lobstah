@@ -59,16 +59,16 @@ describe('the phone header', () => {
 });
 
 describe('the bottom bar', () => {
-  it('holds On deck, Reviews and Helm with their labels, then Search and Menu as named icons', async () => {
+  it('holds On deck, Reviews and Threads with their labels, then Search and Menu as named icons', async () => {
     const g = await page();
-    expect([...bar(g).querySelectorAll('.bbitem .bblabel')].map(text)).toEqual(['On deck', 'Reviews', 'Helm']);
+    expect([...bar(g).querySelectorAll('.bbitem .bblabel')].map(text)).toEqual(['On deck', 'Reviews', 'Threads']);
     expect([...bar(g).querySelectorAll('.bbitem.bbiconly')].map((b) => [b.getAttribute('aria-label'), text(b)])).toEqual([
       ['Search', ''],
       ['Menu', ''],
     ]);
     expect(item(g, 'On deck').getAttribute('href')).toBe('#deck');
     expect(item(g, 'On deck').getAttribute('aria-current')).toBe('page');
-    expect(item(g, 'Helm').getAttribute('href')).toBe('#helm');
+    expect(item(g, 'Threads').getAttribute('href')).toBe('#helm');
   });
 
   it("counts the person's own PRs that need them in Menu", async () => {

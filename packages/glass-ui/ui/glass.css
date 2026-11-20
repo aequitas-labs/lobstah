@@ -90,8 +90,13 @@
   /* A report's sheet: over the tabs and their modal, under the decision modal and the image overlay. */
   --layer-sheet: 12;
   --layer-alert: calc(var(--layer-modal) - 1);
+  /* A conversation's sheet: over the tabs and the phone bar, under the modal its cards open and a report's sheet. */
+  --layer-thread-sheet: var(--layer-alert);
   /* the phone's bottom bar: its row's height, above the safe-area inset */
   --bottombar-height: 44px;
+  /* the new-decision alert's fixed height and bottom offset, so the message button can stack above it */
+  --dalert-height: 44px;
+  --dalert-bottom: var(--space-4);
   /* an unread decision: a red-ish tint mixed from the palette, so it follows the theme */
   --unread-bg: color-mix(in srgb, var(--bad) 16%, var(--card));
 }
@@ -248,7 +253,7 @@ h2 {
   color: var(--fg);
 }
 @media (max-width: 1199px) {
-  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='helm']) {
+  .tabs a:not([data-tab='deck'], [data-tab='reviews'], [data-tab='helm'], [data-tab='prs']) {
     display: none;
   }
   .nav-toggle {
@@ -2103,7 +2108,10 @@ a.lob {
 .dalert-live {
   position: fixed;
   right: var(--space-4);
-  bottom: var(--space-4);
+  bottom: var(--dalert-bottom);
+  box-sizing: border-box;
+  height: var(--dalert-height);
+  white-space: nowrap;
 }
 .glass-toast {
   position: relative;
@@ -2155,8 +2163,8 @@ a.lob {
 }
 /* On a phone the bottom bar is pinned: the alert and the lobsters run just above it, never behind it. After their own rules, so this wins. */
 @media (max-width: 699px) {
-  .dalert-live {
-    bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + var(--space-4));
+  :root {
+    --dalert-bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + var(--space-4));
   }
   .lob {
     bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + 6px);
@@ -2657,7 +2665,7 @@ a.lob {
  * never widens the page; long tokens (paths, hashes, URLs) wrap.
  */
 /*
- * A report's sheet over the glass (components/report-view.ts ReportSheet): a
+ * A report's sheet over the glass (components/sheet.ts Sheet): a
  * bar with Back and the title, then the report, scrolling on its own so the
  * tab underneath keeps its place.
  */
@@ -4203,7 +4211,7 @@ footer .glass-brand {
 }
 
 /* One message entry, above the phone navigation and outside its hit targets. */
-.fish-fab {
+.message-fab {
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -4213,9 +4221,26 @@ footer .glass-brand {
   height: 52px;
   box-shadow: 0 4px 18px #0008;
 }
-.fish-fab svg {
+/* The accent orange, so the one way to message the helm stands out. */
+.message-fab,
+.message-fab:hover {
+  background: var(--lobstah);
+  border-color: var(--lobstah);
+  color: var(--on-fill);
+}
+.message-fab:hover {
+  background: color-mix(in srgb, var(--lobstah) 85%, var(--on-fill));
+}
+.message-fab svg {
   width: 28px;
   height: 28px;
+}
+/* A conversation opens in the report's sheet (components/sheet.ts), with the report's gutter. */
+.tsheet {
+  z-index: var(--layer-thread-sheet);
+}
+.thread-sheet-body {
+  padding: var(--space-3) var(--space-4) 48px;
 }
 .thread-view {
   max-width: 760px;
@@ -4246,14 +4271,65 @@ footer .glass-brand {
   max-width: 100%;
 }
 @media (max-width: 699px) {
-  .fish-fab {
+  .message-fab {
     right: 16px;
     bottom: calc(76px + env(safe-area-inset-bottom, 0px));
   }
 }
 
-@media (max-width: 699px) {
-  .fish-fab.above-alert {
-    bottom: calc(144px + env(safe-area-inset-bottom, 0px));
-  }
+/* With the new-decision alert showing, the button sits above it with a gap, at every width. */
+.message-fab.above-alert {
+  bottom: calc(var(--dalert-bottom) + var(--dalert-height) + var(--space-3));
+}
+
+/* Conversation summaries share the decision row and its unread treatment. */
+.drow .dpreview {
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+.thread-card .dopen {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+}
+.thread-card .dtitle {
+  grid-column: 1;
+  grid-row: 1;
+}
+.thread-card .thread-state {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+}
+.thread-card .dpreview,
+.thread-card .dmeta {
+  grid-column: 1 / -1;
+}
+.thread-resolved {
+  margin-top: 24px;
+}
+.thread-resolved > summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.thread-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.thread-checklist li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 4px 0;
+}
+.thread-checklist input {
+  flex: 0 0 auto;
+}
+.thread-links {
+  margin: 12px 0;
 }
