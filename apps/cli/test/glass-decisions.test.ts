@@ -142,6 +142,32 @@ describe('glass: the decisions list', () => {
     expect(answers(g)).toHaveLength(0);
   });
 
+  it("tags a --pr card with its PR, linking to that PR's own card", async () => {
+    const d = fleet();
+    const pr = everyAttentionFleet().prs[0]!;
+    d.prs = [pr];
+    d.decisions[0]!.references = [{ kind: 'report', key: 'missing-report' }, { kind: 'pr', key: pr.key }];
+    const g = await page(d, { post: ok });
+    await g.go('#decision/' + encodeURIComponent(KEY));
+    const tags = g.$$('.dmodal .dtop .dprtag');
+    expect(tags.map(text)).toEqual([pr.key.replace(/^pr:/, '')]);
+    expect(tags[0]!.getAttribute('href')).toBe('#pr/' + encodeURIComponent(pr.key));
+    // The card keeps every answer control.
+    expect([...g.$$('.dmodal .doptions .dopt .dlabel')].map(text)).toEqual(['v1', 'v2']);
+    expect(g.$('.dmodal textarea')).toBeTruthy();
+    await click(g, tags[0]);
+    expect(g.$('.dmodal')).toBeNull();
+    expect(g.window.location.hash).toBe('#pr/' + encodeURIComponent(pr.key));
+    expect(g.$('.detail-frame')).toBeTruthy();
+    expect(answers(g)).toHaveLength(0);
+  });
+
+  it('shows no PR tag on a card asked without --pr', async () => {
+    const g = await page(fleet());
+    await g.go('#decision/' + encodeURIComponent(KEY));
+    expect(g.$('.dmodal .dprtag')).toBeNull();
+  });
+
   it('keeps the answer controls when a reference is unavailable', async () => {
     const d = fleet();
     d.decisions[0]!.references = [{ kind: 'report', key: 'missing-report' }, { kind: 'pr', key: 'pr:acme/web#9999' }];

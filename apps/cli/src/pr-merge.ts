@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
+  answerPrLinkedCards,
   enqueue,
   loadConfig,
   parsePrRef,
@@ -17,6 +18,8 @@ import {
   type PrMergeRequest,
   type PrRecord,
   type StackMergeRequest,
+  type MergeWhenGreenOrigin,
+  type DecisionAnswer,
 } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
@@ -77,12 +80,23 @@ export interface PrMergeOptions {
   releaseHold?: boolean;
   /** The local helm CLI explicitly authorized this PR, regardless of its author. */
   authorized?: boolean;
+  /** Where it was set, for the answer to a linked card. Defaults from `by`: `glass` and `wharf` are PR cards, anything else the CLI. */
+  from?: MergeWhenGreenOrigin;
+  /** Told the cards this request answered, so the glass can show them answered at once. */
+  onAnswered?: (answers: DecisionAnswer[]) => void;
+}
+
+/** Where a request by this authorizer was set: a glass PR card, else the helm's CLI. */
+function mergeOrigin(by: string): MergeWhenGreenOrigin {
+  return by === 'glass' || by === 'wharf' ? by : 'cli';
 }
 
 /**
  * Record permission to merge an open PR. Glass requests require ownership;
  * the helm CLI supplies explicit authorization. Completed requests retain
- * their provenance and merge SHA until cancelled.
+ * their provenance and merge SHA until cancelled. A decision card still open
+ * about this PR is answered with where, by whom and when it was set, so the
+ * card and the PR never ask the same thing twice.
  */
 export function requestPrMerge(
   key: string,
@@ -90,7 +104,7 @@ export function requestPrMerge(
   opts: PrMergeOptions = {},
 ): PrMergeRequest {
   const cfg = opts.cfg ?? loadConfig();
-  return withPrLock(key, () => {
+  const request = withPrLock(key, () => {
     const pr = readPr(key);
     if (!pr) throw new PrMergeRefused(404, 'lobstah has no record of that PR. Watch it first.');
     if (pr.state !== 'OPEN') throw new PrMergeRefused(409, `That PR is ${pr.state.toLowerCase()}.`);
@@ -112,6 +126,10 @@ export function requestPrMerge(
     if (ref && !readWatch(ref.key)) addPrWatch(ref);
     return request;
   });
+  const from = opts.from ?? mergeOrigin(by);
+  const answers = answerPrLinkedCards(key, { from, ...(from === 'cli' ? { who: by } : {}), at: request.at });
+  if (answers.length) opts.onAnswered?.(answers);
+  return request;
 }
 
 /** Withdraw a PR's merge request. True when there was one. */

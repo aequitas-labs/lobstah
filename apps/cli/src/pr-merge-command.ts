@@ -49,7 +49,7 @@ export function mergeWhenGreenCommand(
     (deps.observe ?? ((pr) => upsertPr(prEvidence(pr, ghPrViewDirect(pr), new Date().toISOString()))))(ref);
   }
   const request = requestPrMerge(ref.key, by, {
-    authorized: true, method, note: opt('--note'), hold: opt('--hold'), releaseHold: has('--release-hold'),
+    authorized: true, from: 'cli', method, note: opt('--note'), hold: opt('--hold'), releaseHold: has('--release-hold'),
   });
   return `${ref.key}: merge when green (${request.method}), authorized by ${request.by} at ${request.at}${request.hold ? `; held: ${request.hold}` : ''}.`;
 }

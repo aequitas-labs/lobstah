@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { parse } from 'smol-toml';
 import {
   addWatch,
+  answerPrLinkedCards,
   COMPILED_BINARY,
   configPath,
   derivePrEvents,
@@ -361,7 +362,9 @@ export const FIRST_SIGHT_NOTICE_MS = 24 * 60 * 60 * 1000;
  * keep it once-only. A PR with no record yet (observed before records
  * existed) falls back to the dispatch's previous evidence for that state.
  * A PR seen for the first time already MERGED or CLOSED gets at most one
- * notice, and none when it ended more than 24 hours ago.
+ * notice, and none when it ended more than 24 hours ago. An open PR with
+ * GitHub auto-merge on answers the decision cards still open about it
+ * (pr-linked-card-answers.ts).
  */
 export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: string; now?: Date; discovered?: boolean } = {}): PrRecord {
   const now = opts.now ?? new Date();
@@ -386,6 +389,10 @@ export function observePr(ref: PrRef, view: GhPrView, opts: { dispatchId?: strin
   const legacyBefore = ev?.pr && parsePrRef(ev.pr.url)?.key === ref.key ? ev.pr : undefined;
   const { before, after } = upsertPr(pr, lane ? id : undefined);
   if (id && lane && !other) mergeEvidence(id, lane, { pr });
+  // GitHub auto-merge is merge when green set on GitHub: a card still asking about it is answered.
+  if (pr.state === 'OPEN' && pr.autoMerge) {
+    answerPrLinkedCards(ref.key, { from: 'github', ...(pr.autoMerge.enabledBy ? { who: pr.autoMerge.enabledBy } : {}), at: pr.autoMerge.enabledAt ?? pr.observedAt });
+  }
   const was = before?.state ?? legacyBefore?.state;
   const terminal = pr.state === 'MERGED' || pr.state === 'CLOSED';
   // A merged or closed PR has nothing to repair: repairs still queued for it are cancelled.

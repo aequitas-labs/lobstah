@@ -511,6 +511,15 @@ permission, when, the note, any hold, and the current status. Cancel merge
 withdraws permission. A hold is a non-CI precondition; checks passing does
 not release it.
 
+A decision card asked with `--pr <pr-key>` closes when merge when green is set
+on that PR while the card is open. This happens from the PR card (including
+the one shown inside the decision card), `lobstah pr merge-when-green`, or
+GitHub auto-merge seen by the PR watch. lobstah answers the card with its
+"Merge when green" option when it has one, and says where, by whom and when
+it was set, for example "Merge when green, set from GitHub auto-merge by
+@dana at 2026-11-20T18:31:00Z." The answer wakes the helm like any other
+answer. For a stack, this applies to the PR named in `--pr`.
+
 Each PR-watch tick, the daemon merges a green, clean PR with no hold and no
 open PR below it. GitHub's merge endpoint checks the recorded head SHA and
 branch protection. The daemon never force-merges, bypasses protection, or
@@ -794,7 +803,9 @@ the same rule.
   up to 16 existing report and PR cards in argument order. They appear above
   the answer controls. Opening a report or PR retains the decision's draft;
   reading its context never answers the decision. Missing references remain
-  visible while the answer controls stay usable.
+  visible while the answer controls stay usable. Each `--pr` also puts a tag
+  with the PR's `owner/repo#N` beside the card's title, which opens that PR's
+  card in the glass.
 - **Checklists.** Task items (`- [ ] step` or `- [x] step`), including nested
   items, are tickable in decision details and filed reports. Ticks are saved
   with the document and shared between desktop and phone; ticking never

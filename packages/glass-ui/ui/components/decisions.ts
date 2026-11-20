@@ -34,7 +34,7 @@ import { fileUrl } from '../backend.js';
 import { touchOnly } from '../send-key.js';
 import { Button } from './button.js';
 import { Toast } from './toast.js';
-import { DecisionEmbeds } from './decision-embeds.js';
+import { DecisionEmbeds, DecisionPrTags } from './decision-embeds.js';
 
 /**
  * Decisions: the deck lists every open decision the helm framed (`man ask`)
@@ -382,6 +382,7 @@ export function DecisionModal({
           ${c.kind === 'question' && html`<span class=${'badge ' + (c.verb === 'blocked' ? 'bad' : 'warn')}>${c.verb}</span>`}
           <b class="dtitle">${titleOf(c)}</b>
           <span class="dmeta dim">${source(c)}${source(c).length ? ' · ' : ''}${Age(c.at)} ago</span>
+          ${c.kind === 'decision' && html`<${DecisionPrTags} card=${c} />`}
         </div>
         ${
           proposal

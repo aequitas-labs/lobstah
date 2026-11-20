@@ -132,8 +132,12 @@ export interface DecisionMeta {
   stateHash: string;
 }
 
-/** Where a decision was answered: the local glass, a terminal, or a person's verified answer relayed by the wharf. */
-export type AnswerSource = 'glass' | 'cli' | 'wharf';
+/**
+ * Where a decision was answered: the local glass, a terminal, a person's
+ * verified answer relayed by the wharf, or lobstah itself, for a PR-linked
+ * card, when the PR watch saw GitHub auto-merge turned on (pr-linked-cards.ts).
+ */
+export type AnswerSource = 'glass' | 'cli' | 'wharf' | 'github';
 
 export interface DecisionAnswer {
   key: string;
