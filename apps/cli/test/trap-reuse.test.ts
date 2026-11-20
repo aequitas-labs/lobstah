@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { recordHelmPass, appendStatus, claimBait, daemonSkip, enqueue, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, listReservations, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
+import { recordHelmPass, appendStatus, claimBait, daemonSkip, enqueue, listNotices, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, listReservations, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { charter, TRAP_REUSE_RULE, TRAPS_DEFAULT_RULE } from '../src/charter.js';
 import { trapForRepo } from '../src/throw.js';
@@ -167,6 +167,8 @@ describe('reuse-first CLI and summaries', () => {
     const scheduler = createTrapDispatchScheduler({ adapter: (app) => ({ app, launch }), timeoutSecs: 0.03, pollMs: 1 });
     tick(() => {}, { trapStarts: scheduler, spawnRunner: () => { throw new Error('trap work must never spawn headless'); } });
     await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
+    // The start runs on after the tick; let it settle in this test's home, never after afterEach unsets it.
+    await vi.waitFor(() => expect(listNotices(100).some((n) => n.kind === 'trap-start-failed' && n.text.includes('dispatch plain'))).toBe(true));
   });
 
   it('runs --headless work on a headless worker, never a trap', () => {
