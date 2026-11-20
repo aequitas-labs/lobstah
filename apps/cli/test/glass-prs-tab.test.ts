@@ -172,6 +172,62 @@ describe('Merge when green', () => {
     });
   }
 
+  /** A card the helm asked with `man ask --pr pr:acme/web#50`, open on the deck. */
+  const CARD = 'decision:5050abcd';
+  const withCard = (d: GlassFullSnapshot, prs = ['pr:acme/web#50']): GlassFullSnapshot => {
+    d.attention = [...(d.attention ?? []), { kind: 'decision', key: CARD, stateHash: 'c1', verb: 'decision', ageSecs: 60, at: d.now, standingSince: d.now, note: 'Merge #50 when green?', repo: 'web' }];
+    d.decisions = [...(d.decisions ?? []), { key: CARD, title: 'Merge #50 when green?', detail: '', options: ['Merge when green', 'Hold'], attachments: [],
+      references: prs.map((key) => ({ kind: 'pr' as const, key })), askedBy: 'helm', askedAt: d.now, stateHash: 'c1' }];
+    return d;
+  };
+  const waiting = (g: GlassDom, scope = '#prs') => g.$$(scope + ' .prmerge-card') as HTMLElement[];
+
+  for (const view of ['cards', 'table'] as const) {
+    it(`defers to an open linked card, and links to it, as ${view}`, async () => {
+      const g = await page(withCard(mergeFleet()), { hash: '#prs', post: boat, prefs: { view } });
+      expect(button(g, 'Merge when green')).toBeUndefined();
+      expect(waiting(g).map(text)).toEqual(['Waiting on your card · open it']);
+      const link = waiting(g)[0]!.querySelector('a')!;
+      expect(link.getAttribute('href')).toBe('#decision/' + encodeURIComponent(CARD));
+      link.click();
+      await g.settle();
+      expect(text(g.$('.dmodal .dtitle'))).toBe('Merge #50 when green?');
+      expect(g.posts().filter((p) => JSON.parse(p.body).kind === 'pr-merge')).toHaveLength(0);
+    });
+  }
+
+  it('keeps the button on a PR no open card is about', async () => {
+    const g = await page(withCard(mergeFleet(), ['pr:acme/web#41']), { hash: '#prs', post: boat, prefs: { view: 'cards' } });
+    expect(button(g, 'Merge when green')).toBeDefined();
+    expect(waiting(g)).toHaveLength(0);
+  });
+
+  it('defers in the PR view too, and shows the button again once the card is withdrawn or answered', async () => {
+    const g = await page(withCard(mergeFleet()), { hash: '#pr/' + encodeURIComponent('pr:acme/web#50'), post: boat });
+    const merge = () => g.$$('.detail-frame button').some((b) => text(b) === 'Merge when green');
+    expect(waiting(g, '.detail-frame').map(text)).toEqual(['Waiting on your card · open it']);
+    expect(merge()).toBe(false);
+    // Withdrawn: the card leaves the snapshot.
+    g.serve(mergeFleet());
+    await g.poll();
+    expect(waiting(g, '.detail-frame')).toHaveLength(0);
+    expect(merge()).toBe(true);
+    // Answered and handed to the helm: no longer open either.
+    const answered = withCard(mergeFleet());
+    answered.decisions!.at(-1)!.handoff = { state: 'answered', answeredAt: answered.now };
+    g.serve(answered);
+    await g.poll();
+    expect(waiting(g, '.detail-frame')).toHaveLength(0);
+    expect(merge()).toBe(true);
+  });
+
+  it('shows no merge control inside the card it defers to', async () => {
+    const g = await page(withCard(mergeFleet()), { hash: '#decision/' + encodeURIComponent(CARD), post: boat });
+    expect(text(g.$('.dmodal .decision-embeds'))).toContain('A lone PR');
+    expect(waiting(g, '.dmodal')).toHaveLength(0);
+    expect(g.$$('.dmodal .decision-embeds button').some((b) => text(b) === 'Merge when green')).toBe(false);
+  });
+
   it('shows why the boat refused', async () => {
     const g = await page(mergeFleet(), {
       hash: '#prs',
