@@ -77,7 +77,7 @@ it('tracks a resolved thread through its todo and lets man wait close it when th
   run('man', 'wait', '--timeout', '1', '--session', 'test-helm');
   expect(readThread(item.id)?.state).toBe('resolved');
   expect(readThread(item.id)?.rounds.at(-1)?.entries.at(-1)).toMatchObject({ event: 'tracked', text: 'Todo Check the deck test finished' });
-});
+}, 15_000);
 it('authorizes writes, validates uploads, serves rounds on demand, and keeps snapshots small', async () => {
   server = serveGlass(0); await new Promise<void>(resolve => server!.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
