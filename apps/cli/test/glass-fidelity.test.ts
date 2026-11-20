@@ -35,9 +35,9 @@ import { FIXTURES, NOW } from './fixtures/glass-snapshots.js';
  *   left a closed modal's markup behind the hidden overlay;
  * - reports are not in the compared snapshots: the old page had no reports
  *   (glass-page.test.ts covers the reports block and the report modals);
- * - the Reports and Reviews tabs (their nav links and pages) are removed before comparing,
+ * - the Reports, Reviews and Watches tabs (their nav links and pages) are removed before comparing,
  *   and `title` attributes (hover text for clamped card text) are dropped:
- *   glass-reports.test.ts and glass-reviews.test.ts cover them;
+ *   glass-reports.test.ts, glass-reviews.test.ts and glass-watches.test.ts cover them;
  * - the card overflow rules (badge truncation, two-line meta, the card's own
  *   overflow) changed on purpose, so the computed-style check compares the
  *   table views only; glass-reports.test.ts checks the card rules.
@@ -86,7 +86,7 @@ function withoutNewTabs(g: GlassDom): void {
   // Provider-limited workers add a filter state the frozen page did not have.
   for (const option of g.$$('#f-verb option')) if (option.textContent === 'limited') option.remove();
   for (const el of g.$$(
-    '.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #doverlay, .dalert-live, .glass-toasts, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar',
+    '.nav-toggle, #tabs a[data-tab="settings"], #page-settings, #tabs a[data-tab="grants"], #page-grants, #tabs a[data-tab="todos"], #page-todos, #tabs a[data-tab="reports"], #page-reports, #tabs a[data-tab="reviews"], #page-reviews, #tabs a[data-tab="stats"], #page-stats, #tabs a[data-tab="watches"], #page-watches, #doverlay, .dalert-live, .glass-toasts, #tabs .dbadge, .phone-helm, .phone-strip, .bottombar',
   ))
     el.remove();
   // The phone's header parts are new (glass-phone-nav.test.ts tests them); the filter row now names its tab for them.
