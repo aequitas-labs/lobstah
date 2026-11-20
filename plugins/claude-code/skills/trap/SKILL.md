@@ -120,6 +120,8 @@ naming a dispatch id. Then:
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.
 - For ume: push with the ume skill's non-blocking form when this harness
   cannot run the await as a tracked background task.
+  A review you asked for is only waiting while an await runs: report
+  `paused`, never `done`.
 - Don't block on long-running processes: run servers and watchers in the
   background with a timeout.
 - After sign-on without an assignment, or after reporting done, failed,

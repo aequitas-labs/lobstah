@@ -115,6 +115,8 @@ naming a dispatch id. Then:
   `--human-gate "<check name>"`, once per check; PR repairs then skip it.
 - For ume: use the ume skill's non-blocking push; Codex cannot run the await
   as a tracked background task. End the turn while it runs.
+  A review you asked for is only waiting while an await runs: report
+  `paused`, never `done`.
 - Don't block on long-running processes: run servers and watchers in the
   background with a timeout. `lobstah soak --wait` is the exception.
 - After sign-on without an assignment, or after reporting done, failed,

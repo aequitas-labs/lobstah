@@ -131,6 +131,12 @@ import {
   noticeFilterForGrounds,
   dispatchProgress,
   trapWorkingStop,
+  unwatchedReview,
+  unwatchedReviewReason,
+  reviewsStillOpen,
+  reviewStillOpenRefusal,
+  readUmeApprovals,
+  umeArtifactsLinked,
   resumeTrapTurn,
   dispatchQueueReason,
   consumeRelievedNotice,
@@ -1633,7 +1639,9 @@ async function mainCli(): Promise<void> {
       const note = rest.join(' ') || undefined;
       const askedWaiting = { waitingOn: opt('--waiting-on'), link: opt('--link'), until: opt('--until') };
       // A trap doesn't park on its own PR's CI or review: that pause is recorded as done --pr, which frees the trap.
-      const prDone = trapPrWaitAsDone(id, lane, asked, askedWaiting, values('--pr'));
+      // A pause on a ume review named only in the note stays a pause: it is not the PR's review.
+      const umeReviewPause = !askedWaiting.link && umeArtifactsLinked(note).length > 0;
+      const prDone = umeReviewPause ? undefined : trapPrWaitAsDone(id, lane, asked, askedWaiting, values('--pr'));
       const verb = prDone ? 'done' : asked;
       const reportedPrs = prDone ? prDone.prs : values('--pr');
       const prUrl = reportedPrs[0];
@@ -1662,6 +1670,11 @@ async function mainCli(): Promise<void> {
             `not reported done: ${unread.length} unread message(s) for ${id} arrived while you worked. ` +
               'They are printed above and now marked read. Act on them, then report done again.',
           );
+        }
+        // A ume review the trap asked for is still waiting until it is approved.
+        if (asked === 'done' && !has('--review-done')) {
+          const open = reviewsStillOpen(note, readStatusLog(id, lane).at(-1), readUmeApprovals());
+          if (open.length > 0) throw new Error(reviewStillOpenRefusal(id, open));
         }
         const review = listReviews().find(item => {
           const round = latestRound(item);
@@ -3166,6 +3179,13 @@ async function mainCli(): Promise<void> {
           if (stop) {
             if (stop.reason) console.log(JSON.stringify({ decision: 'block', reason: stop.reason }));
             break; // Second Stop passes; never turn this into a park-renewal loop.
+          }
+          // A review the trap asked for waits only while its await runs. Codex
+          // has no tracked background task; its ume Stop hook waits instead.
+          const review = trapReg.harness === 'claude' ? unwatchedReview(trapReg, undefined, () => trapReg.harnessProcess?.pid ?? harnessAncestorPid()) : undefined;
+          if (review) {
+            console.log(JSON.stringify({ decision: 'block', reason: unwatchedReviewReason(review) }));
+            break;
           }
         }
         // An unconfirmed sign-on title: remind once per turn (a continued turn

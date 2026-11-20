@@ -151,6 +151,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--intent': { value: '<sentence>' },
       '--allow': { value: '<pattern>', repeatable: true },
       '--run': { value: '<script>' },
+      '--review-done': {},
     },
     positionals: '<uuid> <verb> [note...]',
   },
@@ -407,8 +408,7 @@ Daemon disk cleanup uses [limits].retentionDays and [limits].releaseOnMerge.`,
   cancel: `Request cancellation. Claimed work winds down at the claimant's next check;
 unclaimed queue items finalize immediately with an audit record. With a
 claimed helm this requires --session <helm-id>.`,
-  report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note. \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out).
---waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No; --allow <pattern> with an --intent <sentence> label propose allowing that kind of action. needs-decision --run <script> proposes a script to the helm for a run card.`,
+  report: `Status write path: working | needs-decision | blocked | paused | done | failed. After \`--\` all is note. \`--pr <url>\` on any verb but failed records the PR and, like \`paused --waiting-on pr|review\`, registers its watch (--no-watch opts out). --waiting-on, --link, --until: what a pause waits on, and when it ends. --human-gate <check>: repairs skip a check only a person passes. done refuses while a linked ume artifact is still in review; --review-done says it is finished. A trap's done records its HEAD (--session). done|failed --report <file.md> files a findings page; --attach adds its images, --attach-dir a folder of them under the page. needs-decision --ask <command> or --ask-path <file>: a refused call, carded as Allow once, Allow always, No; --allow <pattern> with an --intent <sentence> label propose allowing that kind of action. needs-decision --run <script> proposes a script to the helm for a run card.`,
   goals: `Today's daily goals, or a past YYYY-MM-DD. The day starts at 04:00 local ([helm].timezone overrides the system zone).
 ${GOAL_WORDING_RULE}
 set replaces today's lines; add appends one; rm removes the displayed line number. Edits are allowed all day.
