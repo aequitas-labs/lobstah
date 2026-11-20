@@ -141,6 +141,20 @@ describe('dispatch triggers', () => {
     expect(listTodos(G).find((t) => t.text === 'latest verb')!.firing).toBeDefined();
   });
 
+  it('refuses a trigger on a finished dispatch, naming its newest follow-up', () => {
+    const origin = dispatch('d-origin');
+    appendStatus(origin, 'work', 'done', 'shipped');
+    expect(() => resolveTodoTrigger(parseTodoTrigger(`dispatch:${origin} done`))).toThrow(
+      `dispatch ${origin} is already done: \`lobstah send ${origin} "<instruction>"\` starts a follow-up and prints its id; wait on that id`,
+    );
+    enqueue({ id: 'd-first', repo: 'r', brief: 'b', followUp: origin, queuedAt: '2026-11-20T10:00:00.000Z' });
+    enqueue({ id: 'd-second', repo: 'r', brief: 'b', followUp: 'd-first', queuedAt: '2026-11-20T11:00:00.000Z' });
+    expect(() => resolveTodoTrigger(parseTodoTrigger(`dispatch:${origin} done`))).toThrow(
+      `dispatch ${origin} is already done: wait on its follow-up instead, --when "dispatch:d-second done"`,
+    );
+    expect(resolveTodoTrigger(parseTodoTrigger('dispatch:d-second done'))).toMatchObject({ id: 'd-second' });
+  });
+
   it('fires lost when the dispatch is culled', () => {
     const id = dispatch('d1');
     addTodo(G, 'x', Date.now(), { triggers: any({ kind: 'dispatch', id, verb: 'done' }) });

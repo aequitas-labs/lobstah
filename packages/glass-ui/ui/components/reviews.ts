@@ -491,6 +491,7 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
       ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
     ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
+      const heading = count === undefined ? title : `${title} (${count})`;
       const contents = groups.map(
         ({ stack, reviews }) =>
           html`<section class="rv-group">${
@@ -521,12 +522,12 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
           }</section>`,
       );
       return id === 'needs'
-        ? html`<section class="rv-section" data-review-section=${id}><h2>${title} (${count})</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
+        ? html`<section class="rv-section" data-review-section=${id}><h2>${heading}</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
         : html`<details class="rv-section" data-review-section=${id} open=${inp.expanded?.[id] === true} onToggle=${(event: Event) => {
             const expanded = (event.currentTarget as HTMLDetailsElement).open;
             if ((getState().prefs.reviewSections?.[id] === true) !== expanded)
               setPrefs({ reviewSections: { ...getState().prefs.reviewSections, [id]: expanded } });
-          }}><summary>${title} (${count})</summary>${contents}</details>`;
+          }}><summary>${heading}</summary>${contents}</details>`;
     }),
   ];
 }
@@ -546,32 +547,28 @@ export function reviewGroups(reviews: readonly GlassReview[]): Array<{ stack?: G
   return groups;
 }
 
-/** Actionable reviews stay counted after opening; automatic work and waiting rounds do not. */
-export function reviewNeedsViewer(review: GlassReview): boolean {
-  if (
-    review.mutedAt ||
-    review.requestRemoved ||
-    reviewUpdating(review) ||
-    ['MERGED', 'CLOSED'].includes(review.prState ?? '') ||
-    ['merged', 'closed'].includes(review.state)
-  )
-    return false;
-  if (review.reReview) return true;
-  return review.state === 'drafted' || review.state === 'failed' || (review.state === 'requested' && !!(review.stands || review.needsYou));
+/** Where a review sits on the Reviews tab: it needs the viewer, it waits on the author's response, or it is done. */
+export type ReviewSectionId = 'needs' | 'waiting' | 'done';
+
+/** One section of the Reviews tab and the number its heading shows. */
+export interface ReviewSection {
+  id: ReviewSectionId;
+  title: string;
+  groups: ReturnType<typeof reviewGroups>;
+  /**
+   * Needs your review and Waiting on response count every row they hold,
+   * whatever has been seen, acknowledged or muted. Done shows no number, so it
+   * has none.
+   */
+  count?: number;
 }
 
 /** A whole stack follows its most urgent PR, so its review order stays intact. */
-export function reviewSections(reviews: readonly GlassReview[]): Array<{
-  id: 'needs' | 'waiting' | 'done';
-  title: string;
-  groups: ReturnType<typeof reviewGroups>;
-  count: number;
-}> {
-  const sections = [
-    { id: 'needs' as const, title: 'Needs your review', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
-    { id: 'waiting' as const, title: 'Waiting on response', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
-    { id: 'done' as const, title: 'Done', groups: [] as ReturnType<typeof reviewGroups>, count: 0 },
-  ];
+export function reviewSections(reviews: readonly GlassReview[]): ReviewSection[] {
+  const needs: ReviewSection = { id: 'needs', title: 'Needs your review', groups: [] };
+  const waiting: ReviewSection = { id: 'waiting', title: 'Waiting on response', groups: [] };
+  const done: ReviewSection = { id: 'done', title: 'Done', groups: [] };
+  const sections = [needs, waiting, done];
   const urgency = (review: GlassReview): number => {
     if (review.requestRemoved) return 2;
     if (['MERGED', 'CLOSED'].includes(review.prState ?? '') || ['merged', 'closed'].includes(review.state)) return 2;
@@ -589,7 +586,9 @@ export function reviewSections(reviews: readonly GlassReview[]): Array<{
     const previous = section.groups.at(-1);
     if (!('stack' in group && group.stack) && previous && !previous.stack) previous.reviews.push(...group.reviews);
     else section.groups.push(group);
-    section.count += group.reviews.filter(reviewNeedsViewer).length;
   }
+  const rows = (section: ReviewSection): number => section.groups.reduce((total, group) => total + group.reviews.length, 0);
+  needs.count = rows(needs);
+  waiting.count = rows(waiting);
   return sections;
 }

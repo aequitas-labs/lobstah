@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
 import { serveGlass } from '../src/glass.js';
 import type { AddressInfo } from 'node:net';
+import { removeTempDir } from '../../../test/temp-dir.js';
 
 const att = [
   { id: 'aaaa1111', lane: 'work', verb: 'needs-decision', note: 'which color?' },
@@ -9,6 +13,17 @@ const att = [
 ];
 
 describe('lobItems (the crawling lobs on the spyglass page)', () => {
+  // The glass server reads fleet state: keep it in a temporary home, never ~/.lobstah.
+  let home: string;
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-glass-lobs-'));
+    process.env.LOBSTAH_HOME = home;
+  });
+  afterEach(() => {
+    delete process.env.LOBSTAH_HOME;
+    removeTempDir(home);
+  });
+
   it('walks one lob per attention item when lobs are on', () => {
     const items = lobItems(att, { lobs: true, preview: false,  });
     expect(items.map((i) => i.key)).toEqual(['question:work:aaaa1111', 'question:chore:bbbb2222']);

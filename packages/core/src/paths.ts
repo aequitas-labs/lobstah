@@ -34,7 +34,11 @@ export function readDirIfPresent(dir: string): string[] {
 }
 
 export function lobstahHome(): string {
-  return process.env.LOBSTAH_HOME ?? path.join(os.homedir(), '.lobstah');
+  const home = process.env.LOBSTAH_HOME;
+  if (home !== undefined) return home;
+  // The test suite sets this: a test that falls through to the real home fails instead of writing there.
+  if (process.env.LOBSTAH_TEST_NO_REAL_HOME === '1') throw new Error('a test reached the real lobstah home: set LOBSTAH_HOME to a temporary directory');
+  return path.join(os.homedir(), '.lobstah');
 }
 
 export function laneRoot(lane: Lane): string {

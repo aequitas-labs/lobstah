@@ -10,7 +10,7 @@ import {
 } from '@lobstah/core';
 import { attentionNow, captureWaitBaseline, freshWakeEvents } from '@lobstah/supervisor';
 import { armWatcher } from '../src/watchers.js';
-import { openCardsAtStop } from '../src/open-cards.js';
+import { cardsDueAtStop } from '../src/open-cards.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -130,7 +130,7 @@ it('several cards on one question stay open without adding Stop blockers or dupl
   const helm = takeHelm({ sessionId: session, grounds: { name: 'home', repos: ['r'] }, ttlMs: 60_000 });
   if (!('ok' in helm)) throw new Error('Expected a fresh helm');
   attentionNow();
-  expect(openCardsAtStop(helm.ok, loadConfig(), false, Date.now() + 86400_000)).toBe('');
+  expect(cardsDueAtStop(helm.ok, loadConfig(), Date.now() + 86400_000)).toBe(false);
   const report = buildTendReport();
   expect(report.openCards?.map(c => c.key).sort()).toEqual([first.key, second.key].sort());
   expect(renderTend(report).match(/waiting on human · card/g)).toHaveLength(1);

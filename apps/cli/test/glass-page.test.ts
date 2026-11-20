@@ -1035,8 +1035,8 @@ describe('glass page: PRs', () => {
     expect(rows[1]![5]).toBe('CLEAN · blocked by #41 Merge when green');
     expect(rows[1]![6]).toBe('watching · 60s ago');
     expect(text(g.$('#prs'))).not.toContain('a-long-opaque-cursor');
-    // Non-PR watches follow the owned PRs, with shortened cursors.
-    expect(g.$$('#prs h2').map(text)).toEqual(['Other watches']);
+    // Non-PR watches follow the owned PRs, under Open, with shortened cursors.
+    expect(g.$$('#prs h2').map(text)).toEqual(['Open', 'Other watches']);
     expect(text(g.$$('#prs table')[1]!)).toContain('ci-nightly');
   });
 

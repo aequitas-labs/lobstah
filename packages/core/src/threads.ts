@@ -9,8 +9,8 @@ import type { Attachment } from './types.js';
 import { postNotice } from './notices.js';
 import { storedDescriptor } from './queue.js';
 import { laneOf } from './worktrees.js';
-import { responseState, dispatchThreadTitle, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
-import type { HelmThread, ThreadEntry, ThreadSummary, ThreadView } from './thread-model.js';
+import { THREAD_CARD_READY, THREAD_NOTES_UPDATED, responseState, dispatchThreadTitle, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
+import type { HelmThread, ThreadEntry, ThreadRelay, ThreadSummary, ThreadVia, ThreadView } from './thread-model.js';
 
 export const threadsRoot = () => path.join(lobstahHome(), 'threads');
 const groundDir = (grounds: string) => {
@@ -95,7 +95,7 @@ function aboutTitle(about: string | undefined): string | undefined {
   try { return lane ? dispatchThreadTitle(storedDescriptor(id, lane)?.brief) : undefined; }
   catch { return undefined; }
 }
-export function startThread(input: { grounds: string; text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; about?: string; via?: 'glass' | 'chat'; title?: string; now?: Date }): HelmThread {
+export function startThread(input: { grounds: string; text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; about?: string; via?: ThreadVia; title?: string; relay?: ThreadRelay; now?: Date }): HelmThread {
   const text = message(input.text, input.uploads ?? []), id = randomUUID(), at = (input.now ?? new Date()).toISOString();
   groundDir(input.grounds);
   if (input.about !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input.about)) throw new ThreadError('Choose a valid dispatch');
@@ -104,19 +104,20 @@ export function startThread(input: { grounds: string; text: unknown; uploads?: D
   const item: HelmThread = { id, grounds: input.grounds, title, text, attachments,
     kind: input.via === 'chat' ? 'thread' : 'untriaged', state: 'open', notes: { decided: [], open: [] },
     rounds: [{ at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }],
-    createdAt: at, updatedAt: at, lastPersonAt: at, ...(input.about ? { about: input.about } : {}) };
+    createdAt: at, updatedAt: at, lastPersonAt: at, ...(input.about ? { about: input.about } : {}), ...(input.relay ? { relay: input.relay } : {}) };
   save(item);
   if (input.via !== 'chat') remindThreads(input.grounds, 900_000, Date.parse(at));
   return item;
 }
-export function postThread(id: string, input: { text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; via?: 'glass' | 'chat'; now?: Date }): HelmThread {
+export function postThread(id: string, input: { text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; via?: ThreadVia; source?: string; now?: Date }): HelmThread {
   const text = message(input.text, input.uploads ?? []);
   const item = update(id, (item) => {
     open(item);
     const at = nextAt(item, input.now ?? new Date());
     if (item.rounds.length >= THREAD_MESSAGES_MAX) throw new ThreadError('This conversation needs a report or plan before more messages', 409);
     const attachments = uploads(id, item.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024);
-    return { ...item, rounds: [...item.rounds, { at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
+    const relay = item.relay && input.source ? { relay: { ...item.relay, sources: [...item.relay.sources, input.source].slice(-THREAD_MESSAGES_MAX) } } : {};
+    return { ...item, ...relay, rounds: [...item.rounds, { at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
   });
   if (input.via !== 'chat') remindThreads(item.grounds, 900_000, Date.parse(item.lastPersonAt));
   return item;
@@ -131,7 +132,13 @@ export function sayThread(id: string, input: { text: unknown; uploads?: Decision
     return sayInThread(item, text, uploads(id, item.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024), at);
   });
 }
-export const triageThread = (id: string, kind: unknown, now = new Date()) => update(id, (item) => classifyThread(item, kind, nextAt(item, now)));
+/**
+ * Triage, notes and resolving update a glass thread quietly. A thread relayed
+ * from Slack still records them as responses: the mirror sends each new
+ * response back to the Slack thread, and the person there sees nothing else.
+ */
+const relayResponse = (item: HelmThread, at: string, text: string): HelmThread => item.relay ? recordThreadResponse(item, at, text) : item;
+export const triageThread = (id: string, kind: unknown, now = new Date()) => update(id, (item) => { const at = nextAt(item, now); return relayResponse(classifyThread(item, kind, at), at, kind === 'thread' ? 'Discussion started' : 'Bait received'); });
 export function noteThread(id: string, notes: { decided?: string[]; open?: string[]; link?: string; text?: string }, now = new Date()): HelmThread {
   return update(id, (item) => {
     open(item);
@@ -148,7 +155,7 @@ export function noteThread(id: string, notes: { decided?: string[]; open?: strin
     }
     const noted = notes.decided !== undefined || notes.open !== undefined;
     const { rounds } = entry ? appendThreadEntry(item, entry) : item;
-    return { ...item, rounds, ...(noted ? { notesAt: at } : {}), notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at };
+    return relayResponse({ ...item, rounds, ...(noted ? { notesAt: at } : {}), notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at }, at, entry && 'text' in entry ? entry.text : THREAD_NOTES_UPDATED);
   });
 }
 export function linkThreadCard(id: string, key: string, now = new Date()): HelmThread {
@@ -157,13 +164,13 @@ export function linkThreadCard(id: string, key: string, now = new Date()): HelmT
     if (item.rounds.some((round) => round.entries.some((entry) => 'card' in entry && entry.card === key))) return item;
     const { rounds } = appendThreadEntry(item, { card: key });
     const at = nextAt(item, now);
-    return recordThreadResponse({ ...item, rounds, updatedAt: at, lastHelmAt: at }, at, 'A card is ready for you');
+    return recordThreadResponse({ ...item, rounds, updatedAt: at, lastHelmAt: at }, at, THREAD_CARD_READY);
   });
 }
 export function resolveThread(id: string, outcome: unknown, note: unknown, now = new Date()): HelmThread {
   return update(id, (item) => {
     const at = nextAt(item, now), result = threadOutcome(outcome, note, at);
-    return { ...item, state: 'resolved', outcome: result, updatedAt: at, lastHelmAt: at };
+    return relayResponse({ ...item, state: 'resolved', outcome: result, updatedAt: at, lastHelmAt: at }, at, result.note);
   });
 }
 export function reopenThread(id: string, now = new Date()): HelmThread {
@@ -218,6 +225,15 @@ export function resolveThreadFile(id: string, name: string): string | undefined 
   const file = path.join(groundDir(item.grounds), id, name);
   try { return attachment.path === file && fs.lstatSync(file).isFile() ? file : undefined; }
   catch { return undefined; }
+}
+
+/** The conversation a wharf's Slack request opened on this boat, if any. */
+export function relayedThread(wharf: string, request: string): HelmThread | undefined {
+  return listThreads().find((item) => item.relay?.wharf === wharf && item.relay.request === request);
+}
+/** Record what the wharf has heard of a relayed conversation. It changes nothing a person or the helm sees. */
+export function markThreadRelay(id: string, change: Pick<ThreadRelay, 'told' | 'sentSeq'>): HelmThread {
+  return update(id, (item) => (item.relay ? { ...item, relay: { ...item.relay, ...change } } : item));
 }
 
 /** A through cursor never acknowledges a response newer than the one displayed. */

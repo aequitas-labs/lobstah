@@ -142,6 +142,32 @@ describe('glass: the decisions list', () => {
     expect(answers(g)).toHaveLength(0);
   });
 
+  it("tags a --pr card with its PR, linking to that PR's own card", async () => {
+    const d = fleet();
+    const pr = everyAttentionFleet().prs[0]!;
+    d.prs = [pr];
+    d.decisions[0]!.references = [{ kind: 'report', key: 'missing-report' }, { kind: 'pr', key: pr.key }];
+    const g = await page(d, { post: ok });
+    await g.go('#decision/' + encodeURIComponent(KEY));
+    const tags = g.$$('.dmodal .dtop .dprtag');
+    expect(tags.map(text)).toEqual([pr.key.replace(/^pr:/, '')]);
+    expect(tags[0]!.getAttribute('href')).toBe('#pr/' + encodeURIComponent(pr.key));
+    // The card keeps every answer control.
+    expect([...g.$$('.dmodal .doptions .dopt .dlabel')].map(text)).toEqual(['v1', 'v2']);
+    expect(g.$('.dmodal textarea')).toBeTruthy();
+    await click(g, tags[0]);
+    expect(g.$('.dmodal')).toBeNull();
+    expect(g.window.location.hash).toBe('#pr/' + encodeURIComponent(pr.key));
+    expect(g.$('.detail-frame')).toBeTruthy();
+    expect(answers(g)).toHaveLength(0);
+  });
+
+  it('shows no PR tag on a card asked without --pr', async () => {
+    const g = await page(fleet());
+    await g.go('#decision/' + encodeURIComponent(KEY));
+    expect(g.$('.dmodal .dprtag')).toBeNull();
+  });
+
   it('keeps the answer controls when a reference is unavailable', async () => {
     const d = fleet();
     d.decisions[0]!.references = [{ kind: 'report', key: 'missing-report' }, { kind: 'pr', key: 'pr:acme/web#9999' }];
@@ -1055,5 +1081,121 @@ describe('copying code from a card', () => {
     d.decisions = [];
     const g = await open(d, { hash: '#reports' });
     expect(g.$$('.copybtn, .copyinline')).toHaveLength(0);
+  });
+});
+
+describe('glass: an answered card handed to the helm', () => {
+  /** The fleet after the person answered KEY: no longer attention, but handed to the helm. */
+  function handedOff(handoff: NonNullable<GlassSnapshot['decisions'][number]['handoff']>): GlassSnapshot {
+    const d = fleet();
+    d.attention = d.attention.filter((a) => a.key !== KEY);
+    d.decisions[0]!.handoff = handoff;
+    return d;
+  }
+
+  it('spins like a run card until the helm acks, with no words beside it, outside the open count, the badge and the alert', async () => {
+    const g = await page(handedOff({ state: 'answered', answeredAt: ago(30_000) }));
+    const r = row(g, KEY)!;
+    expect(r.className).toContain('answered');
+    const status = r.querySelector('.dsent')!;
+    expect(status.querySelector('.runicon')!.className).toContain('run-running');
+    expect(status.querySelector('.runicon')!.getAttribute('aria-label')).toBe('Helm is on it');
+    // The icon alone: no visible words beside it.
+    expect(text(status)).toBe('');
+    // Only the raw question still waits on the person.
+    expect(text(g.$('#deck .decisions h2 .section-count'))).toBe('· 1');
+    expect(text(g.$('#tabs a[data-tab="deck"] .dbadge'))).toBe('1');
+    expect(text(g.$('.dalert .dalert-open'))).toBe('1 1 new decision');
+
+    await show(g, KEY);
+    const c = card(g, KEY)!;
+    expect(c.querySelector('textarea')).toBeNull();
+    expect(c.querySelector('.doptions')).toBeNull();
+    const dock = c.querySelector('.ddock .runstate')!;
+    expect(dock.querySelector('.runicon')!.className).toContain('run-running');
+    expect(text(dock)).toBe('');
+    expect(text(c.querySelector('.dpos'))).toBe('1 open');
+  });
+
+  it('shows the check once acked, without the ack note, then leaves when the snapshot drops it', async () => {
+    const d = handedOff({ state: 'acked', answeredAt: ago(60_000), ackedAt: ago(10_000) });
+    const g = await page(d);
+    const status = row(g, KEY)!.querySelector('.dsent')!;
+    expect(status.querySelector('.runicon')!.className).toContain('run-succeeded');
+    expect(status.querySelector('.runicon')!.getAttribute('aria-label')).toBe('Helm has it');
+    expect(text(status)).toBe('');
+
+    d.decisions = [];
+    g.serve(d);
+    await g.poll();
+    expect(row(g, KEY)).toBeUndefined();
+  });
+
+  /** KEY handed off between two open cards: the question (older) and LATER (newer). */
+  const LATER = 'decision:0f0f0f0f';
+  function between(handoff: Parameters<typeof handedOff>[0]): GlassSnapshot {
+    const d = handedOff(handoff);
+    d.decisions.push({ ...d.decisions[0]!, key: LATER, title: 'Ship the tray now?', options: ['Yes', 'No'], askedAt: ago(60_000), stateHash: 'h3', handoff: undefined });
+    d.attention.push({ ...fleet().attention.find((a) => a.key === KEY)!, key: LATER, stateHash: 'h3', at: ago(60_000), standingSince: ago(60_000) });
+    return d;
+  }
+  /** Where the modal stands: its card, position and which of prev / next it offers. */
+  const at = (g: GlassDom) => {
+    const m = g.$('.dmodal')!;
+    return { key: m.getAttribute('data-decision'), pos: text(m.querySelector('.dpos')), prev: !(m.querySelector('.dprev') as HTMLButtonElement).disabled, next: !(m.querySelector('.dnext') as HTMLButtonElement).disabled };
+  };
+
+  it.each([
+    ['a spinning', { state: 'answered', answeredAt: ago(30_000) }],
+    ['an acked', { state: 'acked', answeredAt: ago(60_000), ackedAt: ago(10_000) }],
+  ] as const)('steps to the open cards on either side of %s card, by button and by arrow key', async (_name, handoff) => {
+    const g = await page(between(handoff));
+    await show(g, KEY);
+    expect(at(g)).toEqual({ key: KEY, pos: '2 open', prev: true, next: true });
+    await click(g, g.$('.dmodal .dprev'));
+    expect(at(g)).toEqual({ key: Q, pos: '1 of 2', prev: false, next: true });
+    await click(g, g.$('.dmodal .dnext'));
+    expect(at(g)).toEqual({ key: LATER, pos: '2 of 2', prev: true, next: false });
+
+    await show(g, KEY);
+    await key(g, 'ArrowRight');
+    expect(at(g).key).toBe(LATER);
+    await show(g, KEY);
+    await key(g, 'ArrowLeft');
+    expect(at(g).key).toBe(Q);
+    expect(answers(g)).toHaveLength(0);
+  });
+
+  it('steps on from a card answered here once the snapshot hands it to the helm', async () => {
+    const d = between({ state: 'answered', answeredAt: ago(0) });
+    const fresh = fleet();
+    d.attention.push(fresh.attention.find((a) => a.key === KEY)!);
+    d.decisions[0]!.handoff = undefined;
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
+    await click(g, card(g, KEY)!.querySelector('.dsend'));
+    expect(answers(g)).toHaveLength(1);
+    // The modal moved on to the next open card; return to the answered one.
+    g.serve(between({ state: 'answered', answeredAt: ago(0) }));
+    await g.poll();
+    await show(g, KEY);
+    expect(at(g)).toMatchObject({ key: KEY, prev: true, next: true });
+    await click(g, g.$('.dmodal .dnext'));
+    expect(at(g).key).toBe(LATER);
+    await click(g, g.$('.dmodal .dprev'));
+    expect(at(g).key).toBe(Q);
+  });
+
+  it('a card answered on this page keeps its row and turns into the spinner on the next snapshot', async () => {
+    const d = fleet();
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
+    await click(g, card(g, KEY)!.querySelector('.dsend'));
+    expect(text(row(g, KEY)!.querySelector('.dsent'))).toBe('sent');
+    g.serve(handedOff({ state: 'answered', answeredAt: ago(0) }));
+    await g.poll();
+    expect(row(g, KEY)!.querySelector('.dsent .run-running')).toBeTruthy();
   });
 });

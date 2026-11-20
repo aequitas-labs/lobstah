@@ -76,8 +76,10 @@ describe('displayState: the queue bucket at the call site', () => {
     // reconcile itself is unchanged: no signal is still unknown.
     expect(reconcile({ log: [] })).toBe('unknown');
   });
-  it('a queued descriptor with a log (requeued bait) keeps its reconciled state', () => {
-    expect(displayState({ log: [{ at, verb: 'working' }], queued: true })).toBe('working');
+  it('requeued bait left at working is queued; other verbs keep their reconciled state', () => {
+    expect(displayState({ log: [{ at, verb: 'working', note: 'claimed by wt:abc' }], queued: true })).toBe('queued');
+    expect(displayState({ log: [{ at, verb: 'working' }], queued: true, lastEventAt: Date.now() })).toBe('queued');
+    expect(displayState({ log: [{ at, verb: 'needs-decision' }], queued: true })).toBe('needs-decision');
     expect(displayState({ log: [{ at, verb: 'failed' }], queued: true })).toBe('failed');
   });
 });

@@ -1,8 +1,23 @@
-import { expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { TrapRegistration } from '@lobstah/core';
 import { compactTrapSession } from '../src/trap-compact.js';
 import { sendSessionPrompt } from '../src/usage-limit-watch.js';
 import type { TmuxRunner } from '../src/tmux-terminal.js';
+import { removeTempDir } from '../../../test/temp-dir.js';
+
+// A swap reads dispatch state: keep it in a temporary home, never ~/.lobstah.
+let home: string;
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-trap-compact-'));
+  process.env.LOBSTAH_HOME = home;
+});
+afterEach(() => {
+  delete process.env.LOBSTAH_HOME;
+  removeTempDir(home);
+});
 
 const trap = (harness: string): TrapRegistration => ({
   trapId: 'seat', sessionId: 'same-session', repo: 'r', harness, worktree: '/repo', cwd: '/repo',

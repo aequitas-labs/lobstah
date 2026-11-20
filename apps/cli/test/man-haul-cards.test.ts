@@ -21,7 +21,7 @@ import {
   withdrawDecision,
 } from '@lobstah/core';
 import type { AskOptions, DecisionMeta } from '@lobstah/core';
-import { openCardsAtStop } from '../src/open-cards.js';
+import { cardsDueAtStop, openCardsAtStop } from '../src/open-cards.js';
 import { HELM_STOP_REMINDER } from '../src/charter.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -139,7 +139,10 @@ it('lists an unbound run and a paused dispatch card, excluding answered, settled
   expect(reason).toContain(`http://127.0.0.1:4949/#decision/decision%3A${run.key.slice('decision:'.length)}`);
   expect(listedCards).not.toMatch(/Already answered|Finished run|Withdrawn card|Other grounds card/);
   expect(reason.split('\n').at(-1)).toBe(HELM_STOP_REMINDER);
-  expect(stop()).not.toContain('open-cards[');
+  // The unacked answer blocks again; the list still names every open card.
+  const again = stop();
+  expect(again).toContain(`run,${run.key},Publish the package,`);
+  expect(again).toContain(`card,${regular.key},Choose the release,`);
 });
 
 it('lists a run card even when no dispatch is in flight, then lets the next quiet Stop end', () => {
@@ -148,17 +151,31 @@ it('lists a run card even when no dispatch is in flight, then lets the next quie
   expect(stop()).toBe('');
 });
 
-it('paces each card across Stop processes, and peeking does not consume its next reminder', () => {
+it('paces card-only blocks across Stop processes, and peeking does not consume its next reminder', () => {
   const now = Date.now();
   const card = askCard('Read this card', { now: new Date(now - 120_000) });
   const helm = helmOf(sessionId)!;
   const config = loadConfig();
-  expect(openCardsAtStop(helm, config, false, now)).toContain('2m');
+  expect(cardsDueAtStop(helm, config, now)).toBe(true);
   expect(openCardsAtStop(helm, config, true, now)).toContain(card.title);
-  expect(openCardsAtStop(helm, config, false, now + 59_999)).toBe('');
-  expect(openCardsAtStop(helm, config, false, now + 60_000)).toContain(card.title);
+  expect(cardsDueAtStop(helm, config, now + 59_999)).toBe(false);
+  expect(cardsDueAtStop(helm, config, now + 60_000)).toBe(true);
   expect(openCardsAtStop(helm, config, true, now + 60_000)).toContain(card.title);
-  expect(openCardsAtStop(helm, config, false, now + 60_001)).toBe('');
+  expect(cardsDueAtStop(helm, config, now + 60_001)).toBe(false);
+});
+
+it('lists every open card at each emitted Stop, even ones listed moments ago', () => {
+  const now = Date.now();
+  const first = askCard('First card', { now: new Date(now - 120_000) });
+  const helm = helmOf(sessionId)!;
+  const config = loadConfig();
+  openCardsAtStop(helm, config, true, now);
+  const second = askCard('Second card', { now: new Date(now - 60_000) });
+  expect(cardsDueAtStop(helm, config, now + 1000)).toBe(true);
+  const listed = openCardsAtStop(helm, config, true, now + 1000);
+  expect(listed).toContain(first.title);
+  expect(listed).toContain(second.title);
+  expect(openCardsAtStop(helm, config, false, now + 2000)).toContain(first.title);
 });
 
 it('wakes a parked helm when an open run card appears', async () => {
@@ -184,7 +201,7 @@ it('wakes a parked helm when an open run card appears', async () => {
     await ended;
     expect(child.exitCode).toBe(0);
     expect(JSON.parse(output).reason).toContain(`run,${run.key},Check the queued release,`);
-    expect(openCardsAtStop(helmOf(sessionId)!, loadConfig(), false)).toBe('');
+    expect(cardsDueAtStop(helmOf(sessionId)!, loadConfig())).toBe(false);
   } finally {
     if (child.exitCode === null) {
       child.kill();

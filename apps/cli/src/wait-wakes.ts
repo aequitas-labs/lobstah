@@ -1,4 +1,4 @@
-import { QUIET_NOTICE_KINDS, quietWait } from '@lobstah/core';
+import { QUIET_NOTICE_KINDS, quietWait, readRequest } from '@lobstah/core';
 import type { Notice, ReplyEvent, TodoDueEvent, WatchAttention } from '@lobstah/core';
 import type { NotifyEvent } from '@lobstah/supervisor';
 import type { Digest } from './digest.js';
@@ -30,4 +30,32 @@ export function digestWakeKeys(d: Digest): string[] {
     ...d.landed.map(e => statusKey(e.id, e.verb, e.at)),
     ...d.arisen.filter(e => e.at !== undefined).map(e => statusKey(e.id, e.verb, e.at!)),
   ];
+}
+
+/** One wake's events by kind and id, for the index line. */
+function wakeLabels(batch: Parameters<typeof helmWakeKeys>[0]): string[] {
+  const short = (id: string | undefined) => (id ? ` ${id.slice(0, 8)}` : '');
+  return [
+    ...(batch.todos ?? []).map((t) => `todo ${t.id}`),
+    ...(batch.events ?? []).map((e) => `${e.entry.verb}${short(e.id)}`),
+    ...(batch.watches ?? []).map((w) => `watch ${w.watch.key}`),
+    ...(batch.notices ?? []).map((n) => {
+      if (n.kind !== 'decision-answer') return `${n.kind}${short(n.refId)}`;
+      // An answer is named by its card, the key `man ack` takes.
+      const key = n.refId ? String(readRequest(n.refId)?.payload.key ?? '') : '';
+      return `answer${short(key.replace(/^decision:/, '') || n.refId)}`;
+    }),
+    ...(batch.replies ?? []).map((r) => `reply${short(r.id)}`),
+  ];
+}
+
+/**
+ * The first line of every man wait wake, such as `wake[3]: answer 7f277cd6,
+ * reply a89ad2ba, todo 1510`: how many events it carries, and each one's kind
+ * and id, so a reader who stops early still sees them all.
+ */
+export function wakeIndex(batch: Parameters<typeof helmWakeKeys>[0]): string {
+  const labels = wakeLabels(batch);
+  // A toon array header, never an `event:` key: readers grep those.
+  return `wake[${labels.length}]: ${labels.join(', ')}`;
 }

@@ -1,4 +1,4 @@
-import { trapAvailability } from '@lobstah/core';
+import { trapAvailability, withProcessTable } from '@lobstah/core';
 import { questionParkNote } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
 import { requestHelmPass, resolveGrounds } from '@lobstah/core';
@@ -7,6 +7,7 @@ import { configuredTrapViews, recentRuns, runCardSettled } from '@lobstah/core';
 import * as fs from 'node:fs';
 import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/core';
 import { reviewTools } from './review-tools.js';
+import { takeSlackRequest } from './slack-threads.js';
 import { readPrDetails } from './pr-details.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
@@ -97,6 +98,7 @@ import {
 } from '@lobstah/core';
 import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { ackWalkingItem } from './attention-ack.js';
+import { compareByLastUpdate, dispatchUpdateTimes, lastRealUpdateMs } from './dispatch-order.js';
 import type { WalkingAck } from './attention-ack.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
@@ -169,6 +171,7 @@ export function requestBodyCap(): number {
 /** Per-kind body limits, checked once the kind is known. A kind not listed has only the shared cap. */
 export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['trap-request', 4096],
+  ['helm-request', 80 * 1024],
   ['todo-schedule', 1024],
   ['helm-pass-request', 1024],
   ['decision-viewed', 1024],
@@ -327,6 +330,7 @@ interface DispatchOnDisk {
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
   d: Descriptor;
+  /** Its record's mtime: the order's fallback when no real update is known (dispatch-order.ts). */
   sort: number;
 }
 
@@ -422,7 +426,8 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     transcript: claim
       ? transcriptPath(claim.harness, claim.worktree, claim.sessionId)
       : transcriptPath(evidence.harness, evidence.sessionId ? dispatchWorktree(id, r.lane).path : undefined, evidence.sessionId),
-    sort: r.sort,
+    // The last real update, never the directory's mtime: activity and liveness writes bump that every tick.
+    sort: lastRealUpdateMs(dispatchUpdateTimes(id, r.lane, r.bucket, log), r.sort),
   };
 }
 
@@ -431,7 +436,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
   const staleSecs = wedgeSecs();
   return dispatchesOnDisk()
     .map((r) => dispatchRow(r, hold, staleSecs))
-    .sort((a, b) => b.sort - a.sort);
+    .sort(compareByLastUpdate);
 }
 
 /**
@@ -648,6 +653,10 @@ function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
  * request), so starting cards may carry their start command and ticket.
  */
 export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
+  // Every trap's session lookup in this build shares one process table.
+  return withProcessTable(() => buildSnapshot(options));
+}
+function buildSnapshot(options: { local?: boolean }): GlassFullSnapshot {
   reconcilePermissionCards();
   const cfg = loadConfig();
   refreshMissingDispatchPrs();
@@ -1296,8 +1305,12 @@ export function serveGlass(
             if (typeof key !== 'string' || !/^pr:[^\s]{1,300}$/.test(key)) return reply(400, { ok: false, reason: 'A PR key is required.' });
             if (payload?.cancel === true) return reply(200, { ok: true, key, cancelled: cancelPrMerge(key) });
             try {
-              const request = requestPrMerge(key, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass');
-              return reply(200, { ok: true, key, method: request.method });
+              // The decision cards it answered, so the page shows them answered without waiting for a poll.
+              let answered: string[] = [];
+              const request = requestPrMerge(key, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass', {
+                onAnswered: (answers) => { answered = answers.map((answer) => answer.key); },
+              });
+              return reply(200, { ok: true, key, method: request.method, ...(answered.length ? { answered } : {}) });
             } catch (error) {
               if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
               return reply(500, { ok: false, reason: 'The merge request could not be stored.' });
@@ -1373,6 +1386,12 @@ export function serveGlass(
               () => reply(500, { ok: false, reason: 'The run request failed.' }),
             );
             return;
+          }
+          case 'helm-request': {
+            // Only the mirror relays a Slack message from its wharf; this glass's own page never makes one.
+            if (source !== 'wharf') return reply(403, { ok: false, reason: 'Only the wharf relays helm requests.' });
+            const taken = takeSlackRequest(loadConfig(), body.payload);
+            return reply(taken.status, taken.body);
           }
           case 'trap-request': {
             const error = trapRequestError(body.payload, Object.keys(loadConfig().repos));
@@ -1712,6 +1731,9 @@ export function serveGlass(
     res.end(JSON.stringify({ error: 'The glass could not answer this request.' }));
   };
   const server = http.createServer((req, res) => {
+    // A change made through this glass shows on the next poll, not after the reuse window.
+    // A page's presence heartbeat is a POST that changes nothing a poll shows.
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.url?.split('?')[0] !== '/api/presence') res.once('finish', () => thread?.invalidate());
     try {
       handle(req, res);
     } catch (e) {

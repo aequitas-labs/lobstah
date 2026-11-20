@@ -76,7 +76,7 @@ export function parsePrRef(s: string): PrRef | undefined {
 
 /** The `gh pr view --json` fields the check reads. */
 export const PR_VIEW_FIELDS =
-  'title,author,state,isDraft,isCrossRepository,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,createdAt,mergedAt,closedAt,updatedAt,reviews';
+  'title,author,state,isDraft,isCrossRepository,headRefOid,baseRefName,baseRefOid,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup,createdAt,mergedAt,closedAt,updatedAt,reviews,autoMergeRequest';
 
 /** The same view without check results: the fallback when only statusCheckRollup is forbidden. */
 export const PR_VIEW_FIELDS_NO_CHECKS = PR_VIEW_FIELDS.split(',')
@@ -129,6 +129,8 @@ export interface GhPrView {
   mergeStateStatus?: string;
   reviewDecision?: string | null;
   statusCheckRollup?: GhRollupItem[] | null;
+  /** GitHub auto-merge, when it is on; null when it is off. Absent when the view did not ask for it. */
+  autoMergeRequest?: GhAutoMergeRequest | null;
   mergedAt?: string | null;
   closedAt?: string | null;
   updatedAt?: string;
@@ -280,6 +282,33 @@ export interface PrEvidence {
   /** Present for a merged or closed PR when the forge supplies it. */
   mergedAt?: string;
   closedAt?: string;
+  /** GitHub auto-merge as last observed; absent when it is off or was not read. */
+  autoMerge?: PrAutoMerge;
+}
+
+/** GitHub's auto-merge on a PR, as `gh pr view --json autoMergeRequest` and the batch query return it. */
+export interface GhAutoMergeRequest {
+  enabledAt?: string;
+  enabledBy?: { login?: string } | null;
+  mergeMethod?: string;
+}
+
+/** GitHub auto-merge on a PR, as lobstah records it: when it was turned on, by whom, and how it merges. */
+export interface PrAutoMerge {
+  enabledAt?: string;
+  /** The GitHub login that turned it on. */
+  enabledBy?: string;
+  /** GitHub's method name: MERGE, SQUASH or REBASE. */
+  method?: string;
+}
+
+/** A view's auto-merge as a record field: undefined when it is off, so a later observation clears it. */
+function prAutoMerge(request: GhAutoMergeRequest): PrAutoMerge {
+  return {
+    ...(request.enabledAt ? { enabledAt: request.enabledAt } : {}),
+    ...(request.enabledBy?.login ? { enabledBy: request.enabledBy.login } : {}),
+    ...(request.mergeMethod ? { method: request.mergeMethod } : {}),
+  };
 }
 
 /** How long a PR's title runs beside its number on one line. */
@@ -414,6 +443,8 @@ export function prEvidence(ref: PrRef, view: GhPrView, observedAt: string): PrEv
     ...(view.updatedAt ? { updatedAt: view.updatedAt } : {}),
     ...(view.mergedAt ? { mergedAt: view.mergedAt } : {}),
     ...(view.closedAt ? { closedAt: view.closedAt } : {}),
+    // Read but off: an explicit undefined, so the record drops an auto-merge since turned off.
+    ...(view.autoMergeRequest !== undefined ? { autoMerge: view.autoMergeRequest ? prAutoMerge(view.autoMergeRequest) : undefined } : {}),
   };
 }
 

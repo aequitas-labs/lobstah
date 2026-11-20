@@ -70,7 +70,13 @@ export interface AttentionMessage {
   attention: unknown[];
 }
 
-export type ClientSocketMessage = ResumeMessage | CommandMessage | CallMessage | AttentionMessage;
+/** A mirror boat's local grounds, sent on each connect and when they change: the wharf routes those grounds' Slack requests to this boat. */
+export interface GroundsMessage {
+  t: 'grounds';
+  grounds: string[];
+}
+
+export type ClientSocketMessage = ResumeMessage | CommandMessage | CallMessage | AttentionMessage | GroundsMessage;
 
 /** New events, in order; `cursor` is the newest one's. */
 export interface EventMessage {
@@ -223,6 +229,12 @@ export function parseClientMessage(text: string): ClientSocketMessage | { invali
   if (m.t === 'attention') {
     if (!Array.isArray(m.attention)) return { invalid: 'attention must be a list' };
     return { t: 'attention', attention: m.attention };
+  }
+  if (m.t === 'grounds') {
+    if (!Array.isArray(m.grounds) || m.grounds.length > 32 || m.grounds.some((g) => typeof g !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(g))) {
+      return { invalid: 'grounds must be at most 32 grounds names' };
+    }
+    return { t: 'grounds', grounds: [...new Set(m.grounds as string[])].sort() };
   }
   if (m.t === 'call') {
     if (typeof m.id !== 'string' || !COMMAND_ID.test(m.id)) return { invalid: 'call id must match the Idempotency-Key alphabet' };

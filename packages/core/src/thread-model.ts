@@ -7,12 +7,21 @@ export type ThreadOutcomeKind = 'dispatched' | 'planned' | 'answered' | 'dropped
 export interface ThreadOutcome { kind: ThreadOutcomeKind; ref?: string; note: string; at: string }
 /** Entries keep the order they happened in; `at` is absent only on entries written before helm messages. */
 export type ThreadEntry =
-  | { by: 'person'; via: 'glass' | 'chat'; text: string; attachments: Attachment[]; at?: string }
+  | { by: 'person'; via: ThreadVia; text: string; attachments: Attachment[]; at?: string }
   | { by: 'helm'; text: string; attachments: Attachment[]; at: string; seq: number }
   | { card: string }
   | { link: 'dispatched' | 'report' | 'planned'; ref: string; text: string; at?: string }
   | { event: 'triaged'; kind: 'bait' | 'thread'; at: string };
 export interface ThreadRound { at: string; entries: ThreadEntry[] }
+/** Where a person's message came in: the glass, a chat the helm recorded, or Slack through a wharf. */
+export type ThreadVia = 'glass' | 'chat' | 'slack';
+/**
+ * A conversation a person started in Slack, relayed by a wharf this boat
+ * mirrors to. `request` is the wharf's id for it; `sources` are the Slack
+ * messages already added. `told` is what the wharf last heard: the helm has
+ * it, or it waits for one. `sentSeq` is the last helm response sent back.
+ */
+export interface ThreadRelay { wharf: string; request: string; by: string; sources: string[]; told?: 'queued' | 'delivered'; sentSeq?: number }
 export interface HelmThread {
   responseSeq?: number;
   responseAt?: string;
@@ -37,6 +46,7 @@ export interface HelmThread {
   lastHelmAt?: string;
   notifiedAt?: string;
   outcome?: ThreadOutcome;
+  relay?: ThreadRelay;
 }
 /** Polls carry summaries, never the conversation or attachment bytes. */
 export interface ThreadSummary {
@@ -138,6 +148,9 @@ export interface ThreadSubscriberNotice {
   href: string;
 }
 export const THREAD_PERSON = 'owner';
+/** The responses the notes and card verbs record, as Slack replies tell them apart. */
+export const THREAD_NOTES_UPDATED = 'Notes updated';
+export const THREAD_CARD_READY = 'A card is ready for you';
 /** Only an open thread asks for the person: one the helm has resolved never counts as unread. */
 export function responseState(item: HelmThread, person = THREAD_PERSON) {
   const responseSeq = item.responseSeq ?? 0, seenThrough = item.readers?.[person]?.seenThrough ?? 0;
