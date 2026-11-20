@@ -10,7 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { applyHeavyHooks } from '@lobstah/core';
-import type { GrantIntent, RunCard } from '@lobstah/core';
+import type { Config, GrantIntent, RunCard } from '@lobstah/core';
+import { selectRepoTrap } from '@lobstah/core';
 import {
   IdleWait,
   reviewAttention,
@@ -224,6 +225,8 @@ import {
   releaseHeldQuestions,
   askDecision,
   withdrawDecision,
+  ackDecision,
+  decisionHandoff,
   prepareRunCard,
   findRunProposal,
   proposeRunScript,
@@ -265,7 +268,7 @@ import { backgroundCuller, runCullWorker } from './background-cull.js';
 import { MANUAL } from './manual.js';
 import { decisionEventFields, decisionLine } from './decisions.js';
 import { readHelmPassRequest, requestHelmPass } from '@lobstah/core';
-import { openCardsAtStop, waitingCardsAtStop } from './open-cards.js';
+import { cardsDueAtStop, openCardsAtStop, waitingCardsAtStop } from './open-cards.js';
 import { answerKey } from './decision-answer.js';
 import { runDoctor } from './doctor.js';
 import { serveGlass } from './glass.js';
@@ -304,7 +307,7 @@ import { createRunCleanup } from './run-cleanup.js';
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
-import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
+import { digestWakeKeys, helmWakeKeys, wakeIndex } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
 import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, onCodexServer, startMode, throwBatch, throwTrap } from './throw.js';
 import { repoTrapRows, trapSummary } from './trap-list.js';
@@ -337,7 +340,7 @@ const HELP = `lobstah — supervision framework for coding agents
 work (humans and agents):
   dispatch (--repo <key> | --pool <name>) (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
-           [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any] [--chore] [--id <uuid>]
+           [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any | --headless] [--chore] [--id <uuid>]
            [--pr <url|number>] [--fresh | --continue]
                                   queue a supervised dispatch; prints the id.
                                   --pr works on that open PR: the runner
@@ -353,6 +356,9 @@ work (humans and agents):
                                   resolves to its trap). --trap-any queues at once;
                                   the daemon reuses free traps, then starts
                                   stowed or new traps within the repo's cap.
+                                  The helm's unaddressed work defaults to
+                                  --trap-any. --headless runs a one-off on a
+                                  headless worker; no trap takes it.
                                   --pool runs it in a
                                   warm worktree of [pools.<name>]: reset to a
                                   fresh branch, new session
@@ -371,13 +377,14 @@ work (humans and agents):
   tmux [repo]                     open a new Terminal view of the tmux trap session
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--compact] [--] [<message>]
+  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--for-decision <key>] [--compact] [--] [<message>]
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
                                   (arrives at its next park; undeliverable
                                   messages bounce to the helm). The worker's
                                   next note wakes man wait as a reply;
-                                  --no-reply expects none
+                                  --no-reply expects none; --for-decision acks
+                                  that card's answer once the send is made
   inbox <uuid>                    read and acknowledge pending messages
                                   (workers: check at natural checkpoints)
   attach <uuid> [--print] [--force]
@@ -499,6 +506,10 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   (--withdraw <key>). Asks stand side by side;
                                   --replace <key> replaces one. The answer
                                   wakes man wait as a decision-answer event.
+  man ack decision:<key> ["<what I did>"]
+                                  ack a card's answer once you take it up.
+                                  Until then the card spins in the glass and
+                                  blocks your turn end; man report never acks.
   man answer <key> [--option <label>] [--text <text>] [--attach <file> ...]
                                   answer a decision from the terminal.
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
@@ -677,7 +688,7 @@ function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
     if (n.kind === 'thread' && n.refId) {
       const item = readThread(n.refId);
-      if (item?.state === 'open') console.log(toonKV({ event: 'thread', id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, text: n.text }));
+      if (item?.state === 'open') console.log(toonKV({ event: 'thread', id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, ...(item.relay ? { via: 'slack' } : {}), text: n.text }));
       continue;
     }
     // A decision answer is an event with its request's payload.
@@ -780,6 +791,21 @@ function inheritedAttachments(id: string | undefined): Descriptor['attachments']
     if (descriptor) return descriptor.attachments;
   }
   return undefined;
+}
+
+/** What `dispatch` prints for non-helm work with no --for, --trap-any or --pool, so a headless run is never a surprise. */
+const UNADDRESSED_DELIVERY = 'unaddressed: a headless worker or any free trap may take it; --trap-any keeps it in traps';
+
+/**
+ * What happens next to trap-bound work, from the daemon's own selection: a
+ * free trap takes it, a stowed or new trap starts for it, or it waits at the
+ * repo's traps cap (and says why).
+ */
+function trapAnyOutlook(cfg: Config, repo: string, harness: string | undefined): { trap: string } {
+  const choice = selectRepoTrap(cfg, repo, harness);
+  if (choice.action === 'reuse') return { trap: `${trapLabel(choice.registration)} is free and takes it` };
+  if (choice.action === 'wait') return { trap: `waits for a trap: ${choice.why}` };
+  return { trap: `the daemon starts a trap for it: ${choice.why}` };
 }
 
 interface ChainMember {
@@ -1249,6 +1275,7 @@ async function mainCli(): Promise<void> {
       }
       if (opt('--assist')) throw new UsageError('--assist requires --for trap:<profile>');
       if (has('--trap-any') && (opt('--for') !== undefined || opt('--pool') !== undefined)) throw new UsageError('--trap-any cannot be combined with --for or --pool');
+      if (has('--headless') && (opt('--for') !== undefined || has('--trap-any') || opt('--pool') !== undefined)) throw new UsageError('--headless cannot be combined with --for, --trap-any or --pool');
       const poolName = opt('--pool');
       const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;
       if (poolName !== undefined) {
@@ -1280,10 +1307,14 @@ async function mainCli(): Promise<void> {
       if (prTarget !== undefined) d.pr = resolvePrTarget(repo, prTarget);
       const lane: Lane = has('--chore') ? 'chore' : 'work';
       const caller = callerSession(opt('--session'));
-      if (has('--trap-any')) {
+      const callerHelm = caller?.id ? helmOf(caller.id) : undefined;
+      if (has('--headless')) d.headless = true;
+      // The helm's unaddressed work goes to traps; headless is for one-offs it asks for.
+      const helmDefault = callerHelm !== undefined && !d.headless && d.for === undefined && poolName === undefined && callerHelm.repos.includes(repo) && loadConfig().repos[repo] !== undefined;
+      if (has('--trap-any') || helmDefault) {
         gateHelm(caller);
         const cfg = loadConfig();
-        const helm = caller?.id ? helmOf(caller.id) : undefined;
+        const helm = callerHelm;
         if (helm && !helm.repos.includes(repo)) throw new Error(`repo ${repo} is outside grounds ${helm.grounds}`);
         if (d.harness && d.harness !== 'claude' && d.harness !== 'codex') throw new UsageError('--harness takes claude or codex');
         if (!cfg.repos[repo]) throw new Error(`no repo "${repo}" is configured`);
@@ -1294,7 +1325,8 @@ async function mainCli(): Promise<void> {
         for (const url of briefPrMentions(d.brief, repo))
           warnings.push(`the brief names ${url}, but this dispatch will open its own draft PR; to push to that PR instead, dispatch with --pr ${url}`);
       }
-      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), ...(d.headless ? { for: 'headless one-off (--headless)' } : !d.for && !d.trapAny && !d.pool ? { for: UNADDRESSED_DELIVERY } : {}), queued: d.queuedAt }));
+      if (d.trapAny) console.log(toonKV(trapAnyOutlook(loadConfig(), repo, d.harness)));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -1450,6 +1482,15 @@ async function mainCli(): Promise<void> {
       const sender = callerSession(opt('--session'));
       const sid = sender?.id;
       gateHelm(sender);
+      // --for-decision: this send is what the helm did with a card's answer, so it acks that card once delivered.
+      const forDecision = opt('--for-decision');
+      if (forDecision !== undefined && decisionHandoff(forDecision)?.state !== 'answered')
+        throw new UsageError(`${forDecision} has no answer awaiting your ack — \`lobstah man tend\` lists answered cards`);
+      const ackSent = (to: string) => {
+        if (forDecision === undefined) return;
+        const ack = ackDecision(forDecision, { note: `Sent to ${to.slice(0, 8)}: ${(rest.join(' ') || 'files').split('\n')[0]}`, by: 'send' });
+        console.log(toonKV({ acked: forDecision, at: ack.ackedAt }));
+      };
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
       const text = rest.join(' ') || (has('--compact') ? 'Compact your context before continuing the dispatch.' : '');
       const prOnlyForFollowUp = '--pr applies only when send starts a follow-up of a finished dispatch; to work on a PR, dispatch with --pr';
@@ -1485,6 +1526,7 @@ async function mainCli(): Promise<void> {
               warning: `the trap signed off ${Math.round((Date.now() - Date.parse(off.at)) / 1000)}s ago — the message is held and delivers if its worktree re-soaks within ${leftSecs}s; otherwise it bounces back to the helm.`,
             }),
           );
+          ackSent(trapId);
           break;
         }
         if (!reg) throw new Error(`${unknownTrapMessage(target)} — \`lobstah man tend\` lists live traps`);
@@ -1501,6 +1543,7 @@ async function mainCli(): Promise<void> {
             }),
           );
         }
+        ackSent(trapId);
         break;
       }
       const chain = dispatchChain(target);
@@ -1521,10 +1564,13 @@ async function mainCli(): Promise<void> {
           attachments,
         );
         console.log(`delivered: inbox of ${member.id}${member.bucket === 'queue' ? ' (queued)' : ''}`);
+        // A send to a finished dispatch joins the follow-up already started from it; name that id to wait on.
+        if (member.id !== target) console.log(`joined: follow-up ${member.id} of ${target}`);
         if (member.bucket === 'queue') console.log(toonKV({ delivery: member.descriptor.for ?? member.descriptor.pool ?? 'unaddressed', queueReason: dispatchQueueReason(member.descriptor, member.lane) }));
         const expects = !has('--no-reply');
         if (expects) expectReply({ dispatchId: member.id, lane: member.lane, from, text });
         console.log(toonKV({ id: member.id, from, queued: name, ...(expects ? { reply: 'expected' } : {}) }));
+        ackSent(member.id);
         break;
       }
       const origin = chain.at(-1)!;
@@ -1577,6 +1623,7 @@ async function mainCli(): Promise<void> {
       else if (headless) console.log(`delivery: unaddressed${followUp.pool ? ` (pool ${followUp.pool})` : ''}; a matching trap or headless worker may take it`);
       else console.log(`delivery: ${trapAddressText(address!, 'label')} (sticky; follows the previous trap claim)`);
       for (const warning of warnings) console.log(toonKV({ warning }));
+      ackSent(origin.id);
       break;
     }
     case 'report': {
@@ -2235,6 +2282,12 @@ async function mainCli(): Promise<void> {
       if (withdraw !== undefined) {
         if (pos.length > 0 || opt('--title') !== undefined) throw new UsageError(`--withdraw takes only a decision key\n\n${usageFor('man:ask')!}`);
         try {
+          // An answered card awaiting the helm has nothing left to withdraw: withdrawing it acks the answer.
+          if (decisionHandoff(withdraw)?.state === 'answered') {
+            const ack = ackDecision(withdraw, { note: 'Withdrawn', by: 'withdraw' });
+            console.log(toonKV({ key: withdraw, withdrawn: true, acked: ack.ackedAt }));
+            break;
+          }
           const gone = withdrawDecision(withdraw);
           console.log(toonKV({ key: gone.key, withdrawn: true, title: gone.title }));
         } catch (err) {
@@ -2311,6 +2364,21 @@ async function mainCli(): Promise<void> {
           `lobstah man ask --withdraw ${meta.key}   (when it no longer needs the human)`,
         ]),
       );
+      break;
+    }
+    case 'man:ack': {
+      const key = pos[0];
+      if (!key || !key.startsWith('decision:') || pos.length > 2) throw new UsageError(`man ack requires one decision key and an optional note\n\n${usageFor('man:ack')!}`);
+      // Taking up a person's answer is the helm's: the claimed helm alone acks.
+      gateHelm(callerSession(opt('--session')), opt('--grounds'));
+      let ack: ReturnType<typeof ackDecision>;
+      try {
+        ack = ackDecision(key, { note: pos[1] });
+      } catch (err) {
+        if (err instanceof DecisionError) throw new UsageError(err.message);
+        throw err;
+      }
+      console.log(toonKV({ key, acked: true, at: ack.ackedAt, ...(ack.note ? { note: ack.note } : {}) }));
       break;
     }
     case 'man:answer': {
@@ -2928,7 +2996,8 @@ async function mainCli(): Promise<void> {
           remindThreads(threadGrounds, remindMs);
         };
         threadMaintenance();
-        runDueManWatches();
+        // A peek looks without changing anything: polling watches advances their cursors (and costs GitHub calls).
+        if (consume) runDueManWatches();
         // The grounds `todo add` would use. With several and none named, the todos stand for their helms.
         const todoGroundsName = groundsScope?.name ?? (groundsList(cfgWait).length === 1 ? resolveGrounds(cfgWait).name : undefined);
         const dueTodos = () => (todoGroundsName !== undefined ? takeTodoDue(todoGroundsName, consume) : []);
@@ -2942,6 +3011,7 @@ async function mainCli(): Promise<void> {
         // A send's answer: a working or paused note delivered once.
         const standingReplies = takeReplies(consume, matchGrounds);
         if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0 || standingTodos.length > 0) {
+          console.log(wakeIndex({ events: standing, watches: standingWatches, notices: standingNotices, replies: standingReplies, todos: standingTodos }));
           if (standingTodos.length > 0) emitDueTodos(standingTodos);
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
@@ -2989,6 +3059,7 @@ async function mainCli(): Promise<void> {
           // cleared here, and that verb is the wake.
           const replies = takeReplies(true, matchGrounds);
           if (fresh.length > 0 || replies.length > 0) {
+            console.log(wakeIndex({ events: fresh, replies }));
             if (fresh.length > 0) emit(fresh);
             if (replies.length > 0) emitReplies(replies, sid);
             delivered(helmWakeKeys({ events: fresh, replies }), ...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
@@ -2997,12 +3068,14 @@ async function mainCli(): Promise<void> {
           runDueManWatches(); // no pick running? this loop is the poller
           const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
           if (watched.length > 0) {
+            console.log(wakeIndex({ watches: watched }));
             emitWatchAttention(watched, sid);
             delivered(helmWakeKeys({ watches: watched }), ...watched.flatMap((a) => a.events.map((e) => e.at)));
             return;
           }
           const freshTodos = dueTodos();
           if (freshTodos.length > 0) {
+            console.log(wakeIndex({ todos: freshTodos }));
             emitDueTodos(freshTodos);
             delivered(helmWakeKeys({ todos: freshTodos }));
             return;
@@ -3010,6 +3083,7 @@ async function mainCli(): Promise<void> {
           threadMaintenance();
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
           if (freshNotices.length > 0) {
+            console.log(wakeIndex({ notices: freshNotices }));
             emitNotices(freshNotices, sid);
             delivered(helmWakeKeys({ notices: freshNotices }), ...freshNotices.map((n) => n.at));
             return;
@@ -3126,16 +3200,21 @@ async function mainCli(): Promise<void> {
           await soakPark(trapReg.trapId, opt('--timeout'));
           break;
         }
-        /** Peek before blocking; record card reminders only when Stop emits them. */
-        const cardsAtStop = (consume: boolean): string => {
+        /** Every open card at an emitted Stop; recording the listing paces the next card-only block. */
+        const cardsAtStop = (): string => {
           const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
-          return helmNow ? openCardsAtStop(helmNow, loadConfig(), consume) : '';
+          return helmNow ? openCardsAtStop(helmNow, loadConfig(), true) : '';
+        };
+        /** Peek: whether cards alone block this Stop. */
+        const cardsDue = (): boolean => {
+          const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
+          return helmNow ? cardsDueAtStop(helmNow, loadConfig()) : false;
         };
         const emit = (reason: string) => {
           const helmNow = hook?.session_id ? helmOf(hook.session_id) : undefined;
           const rule = helmChatRule(helmNow?.grounds);
           stopBlocked = true;
-          console.log(JSON.stringify({ decision: 'block', reason: [reason, cardsAtStop(true), helmNow ? waitingCardsAtStop(helmNow, loadConfig()) : '', rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
+          console.log(JSON.stringify({ decision: 'block', reason: [reason, cardsAtStop(), helmNow ? waitingCardsAtStop(helmNow, loadConfig()) : '', rule, helmNow ? HELM_STOP_REMINDER : ''].filter(Boolean).join('\n') }));
         };
         // A displaced helm learns at its next park: deliver the stand-down
         // notice once, then stop treating the session as an orchestrator.
@@ -3215,7 +3294,7 @@ async function mainCli(): Promise<void> {
           }
           const d = dueDigest();
           if (d) blockDigest(d);
-          else if (cardsAtStop(false)) emit('');
+          else if (cardsDue()) emit('');
           break; // otherwise conversational turns end free
         }
         const remindMs = (cfgHaul.remindSecs ?? 900) * 1000;
@@ -3246,7 +3325,7 @@ async function mainCli(): Promise<void> {
           // watcher; with no watcher it rides on the arm block below. Due sent
           // lines are listed with any block, paced like a question.
           const progress = progressLines();
-          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0 || !!cardsAtStop(false);
+          const blocking = evs.length > 0 || watched.length > 0 || notices.length > 0 || replies.length > 0 || progress.length > 0 || cardsDue();
           const unanswered = blocking ? dueUnanswered(true, remindMs, Date.now(), matchHelm) : [];
           if (blocking) {
             new IdleWait(hook.session_id, cfgHaul.wait).woke(helmWakeKeys({ events: evs, watches: watched, notices, replies }));
@@ -3293,7 +3372,7 @@ async function mainCli(): Promise<void> {
         let replies = takeReplies(true, matchHelm);
         let unanswered = dueUnanswered(true, remindMs, Date.now(), matchHelm);
         const quiet = () =>
-          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0 && !cardsAtStop(false);
+          evs.length === 0 && watched.length === 0 && fleetNotices.length === 0 && replies.length === 0 && unanswered.length === 0 && progressLines().length === 0 && !cardsDue();
         if (quiet()) {
           const baseline = captureWaitBaseline();
           while (!idle.expired()) {

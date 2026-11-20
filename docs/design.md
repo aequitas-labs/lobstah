@@ -729,7 +729,11 @@ from `buildGlassSnapshot()` and every component reads it, so a renamed field
 fails typecheck on both sides. `/data` carries dispatch summaries and the
 last day's history (at least the newest few of each kind), with an ETag that
 leaves out heartbeats and ages; those ride in the `x-lobstah-beats` header
-of every answer, a 304 too. A dispatch modal fetches the rest from
+of every answer, a 304 too. The snapshot thread shares each build across
+every page, the pet and the wharf mirror: a body answers polls for 2 s,
+and while the content hash stays the same the window doubles up to 10 s,
+so an idle fleet costs one build every ten seconds. A write through the
+glass clears the shared body, so its result shows on the next poll. A dispatch modal fetches the rest from
 `/data/dispatch/<id>`, and `/data/older?kind=dispatches|notices|prs&offset=<n>`
 pages in older history. The client typechecks under its own
 `apps/cli/glass/tsconfig.json` (DOM lib). `preact` and `htm` are dev

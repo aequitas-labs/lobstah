@@ -2960,15 +2960,19 @@ a.lob {
   color: var(--dim);
   white-space: nowrap;
 }
-/* Review sections use the shared spacing scale from headings through card actions. */
-.rv-section {
+/* Review and PR sections use the shared spacing scale from headings through card actions. */
+.rv-section,
+.pr-section {
   margin-block: calc(2 * var(--space-4));
 }
 .rv-section > h2,
-.rv-section > summary {
+.rv-section > summary,
+.pr-section > h2,
+.pr-section > summary {
   margin-bottom: var(--space-4);
 }
-.rv-section > summary {
+.rv-section > summary,
+.pr-section > summary {
   cursor: pointer;
 }
 .rv-group + .rv-group {

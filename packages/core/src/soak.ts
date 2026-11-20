@@ -725,9 +725,14 @@ export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.cl
 /**
  * Release a claim: terminal catches finalize, cancelled catches fail, and
  * only unfinished catches go back to the queue. Used by `stow` and the ghost sweep — the two
- * paths where a claimant stops answering for its claim.
+ * paths where a claimant stops answering for its claim. `readdress` changes
+ * the descriptor before it is published, so no other trap can claim it under
+ * its old address.
  */
-export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued?: string; finalized?: string } {
+export function releaseCatch(
+  reg: Pick<TrapRegistration, 'claimed'>,
+  readdress?: (descriptor: Descriptor) => Descriptor,
+): { requeued?: string; finalized?: string } {
   const id = reg.claimed;
   if (!id) return {};
   const lane = laneOf(id);
@@ -743,19 +748,27 @@ export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued
     complete(id, lane);
     return { finalized: id };
   }
-  requeue(id, lane);
+  requeue(id, lane, readdress);
   return { requeued: id };
 }
 
-/** Save the park context and keep its waiting dispatch addressed to the trap across sign-off and ghost sweeps. */
-export function pinTrapCatch(id: string, lane: Lane, trapId: string, parkContext: string): boolean {
+/**
+ * Keep a claimed catch addressed to its trap across sign-off and ghost
+ * sweeps, so a requeue offers it to that trap only. A park passes the context
+ * to save with it; without one the saved context is kept.
+ */
+export function pinTrapCatch(id: string, lane: Lane, trapId: string, parkContext?: string): boolean {
   return withTrapLifecycleLock(trapId, () => {
     const address = `wt:${trapId}`;
     if (readSessionClaim(id, lane)?.by !== address) return false;
     const descriptor = readDescriptor(id, lane);
     if (descriptor.for && descriptor.for !== address) return false;
-    if (descriptor.for !== address || descriptor.parkContext !== parkContext)
-      atomicWrite(path.join(laneDirs(lane).active, id, 'descriptor.json'), JSON.stringify({ ...descriptor, for: address, parkContext }, null, 2));
+    const context = parkContext ?? descriptor.parkContext;
+    if (descriptor.for !== address || descriptor.parkContext !== context)
+      atomicWrite(
+        path.join(laneDirs(lane).active, id, 'descriptor.json'),
+        JSON.stringify({ ...descriptor, for: address, ...(context !== undefined ? { parkContext: context } : {}) }, null, 2),
+      );
     return true;
   });
 }
@@ -825,7 +838,7 @@ function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descrip
     ['work', addressed],
     // Pool work wants a fresh headless session in a pool worktree: never a trap's.
     ['chore', (d: Descriptor) => d.trapAny === true && d.for === undefined && reg.repo !== undefined && d.repo === reg.repo && (!d.harness || d.harness === reg.harness)],
-    ['work', (d: Descriptor) => d.for === undefined && d.pool === undefined && reg.repo !== undefined && d.repo === reg.repo && (!d.trapAny || !d.harness || d.harness === reg.harness)],
+    ['work', (d: Descriptor) => d.for === undefined && d.pool === undefined && !d.headless && reg.repo !== undefined && d.repo === reg.repo && (!d.trapAny || !d.harness || d.harness === reg.harness)],
   ] as Array<[Lane, (d: Descriptor) => boolean]>) {
     const id = claimNext(lane, (d) => !pass(d));
     if (!id) continue;
@@ -875,6 +888,7 @@ export function daemonSkip(traps: TrapRegistration[], deferMs: number, now = Dat
   return (d) => {
     if (d.target || d.for !== undefined || d.trapAny) return true; // sticky / trap-only — never the daemon's
     if (d.pool !== undefined) return false; // pool work is never a trap's
+    if (d.headless) return false; // an explicit headless one-off is never a trap's
     return traps.some((r) => r.repo === d.repo && trapReady(r, deferMs, now));
   };
 }

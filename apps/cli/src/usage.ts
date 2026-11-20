@@ -62,6 +62,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--repo': { value: '<key>' },
       '--pool': { value: '<name>' },
       '--trap-any': {},
+      '--headless': {},
       '--fresh': {},
       '--continue': {},
       '--brief': { value: '<file>' },
@@ -89,7 +90,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
   heavy: { flags: { '--bg': {}, '--json': {} }, positionals: '[-- <command>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--compact': {}, '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
+  send: { flags: { '--compact': {}, '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' }, '--for-decision': { value: '<key>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -333,6 +334,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:note': { flags: { '--decided': { value: '<line>', repeatable: true }, '--open': { value: '<line>', repeatable: true }, '--link': { value: '<kind:ref>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> [<note>]' },
   'man:say': { flags: { '--attach': { value: '<file>', repeatable: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> <text>' },
   'man:resolve': { flags: { '--outcome': { value: '<kind:ref>', required: true }, '--note': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
+  'man:ack': { flags: { '--session': { value: '<id>' } }, positionals: 'decision:<key> ["<what I did>"]' },
   'man:answer': {
     flags: { '--option': { value: '<label>' }, '--text': { value: '<text>' }, '--attach': { value: '<file>', repeatable: true } },
     positionals: '<key>',
@@ -356,8 +358,7 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 export const PROSE: Record<string, string> = {
   setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
 enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
-  dispatch: `Queue work; prints id. --for is sticky; --trap-any waits for a free suitable trap, then starts a stowed/new trap within the repo cap. Never headless. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait.
-Local repo work: --fresh starts without prior conversation, with the brief and git progress; --continue keeps the session. Default: continue for --for and follow-ups, fresh for unaddressed work.`,
+  dispatch: `Queue work; prints id. Traps by default: the helm's unaddressed work is --trap-any, which waits for a free trap or starts one within the repo cap. --for is sticky. --headless: a headless one-off. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait. Local repo work: --fresh starts without prior conversation, with the brief and git progress; --continue keeps the session. Default: continue for --for and follow-ups, fresh for unaddressed work.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster record. Alias: buoy.`,
@@ -422,7 +423,7 @@ which the glass's Stats tab draws. --per-trap adds each trap's total under
 its persistent name. TOON by default; --json for the same fields. This command
 sends nothing; see \`lobstah telemetry\` for the separate daily sharing.`,
   todo: `The helm's own todo list, kept per grounds so it survives restarts and compaction. add "<text>" records one; done and drop close it; ls (or bare) lists open ones (--all adds closed). recheck requests a todo and goals pass now. Open todos show in man tend, man report, the glass and every session start; a done one stays checked until 04:00. A trap gets none.
-add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed, pr:<o>/<r>#<n> merged|closed|green (registers a watch if none; merged also fires on closure without merging), trap:<name> free. add --thread <id> ties it to a helm thread: the thread keeps tracking until the todo closes, and an overdue or stale todo hands the thread back to the person.
+add --at <time> or --in <duration> gives one a time; snooze <id> --until <time|duration> sets or moves it. Quiet until then. At its time man wait and the Stop hook wake the helm once with todo-due; overdue until done, snooze or drop. add --every "daily 09:00"|"weekdays 09:00"|"weekly fri 09:00" repeats it: done moves it to the next occurrence, skip passes one, drop ends it. Missed runs fire once. add --when <trigger> wakes on any, --when-all on all, with --at or --in as a deadline: card:<key>, dispatch:<id> done|blocked|needs-decision|failed (refused once the dispatch is done or failed: wait on the follow-up id that send prints), pr:<o>/<r>#<n> merged|closed|green (registers a watch if none; merged also fires on closure without merging), trap:<name> free. add --thread <id> ties it to a helm thread: the thread keeps tracking until the todo closes, and an overdue or stale todo hands the thread back to the person.
 24-hour, in [helm].timezone: "fri 09:00", "tomorrow 09:00", "09:00", "thu", "2026-11-06 09:00", "2026-11-06T14:00Z". A day runs 04:00 to 04:00.
 Todos are for the helm or the user, for the next few days. A repeating todo can run longer. For anything longer, or work someone else could pick up, use your issue tracker.`,
   reports: `Every filed report, newest first: key, title, author (trap name, headless,
@@ -536,6 +537,8 @@ by its stored name. A path out of the page's directory is refused. --title overr
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:ask': `A card for the human in the glass, until answered or withdrawn (--replace <key> swaps one); the answer wakes man wait. --detail images show inline (https, or --attach paths).
 --run <script>: a run card, which the glass runs once confirmed, --input values on stdin. Helm only.`,
+  'man:ack': `Ack a card's answer: you took it up, and the note says what you did. Until then the answered
+card spins in the glass and blocks your turn end. The glass shows the ack, then clears the card. Helm only.`,
   'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
 Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:threads': `List conversations on these grounds, or read one with its notes, rounds and cards.`,

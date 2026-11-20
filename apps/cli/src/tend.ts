@@ -53,6 +53,8 @@ import {
   storageGrounds,
   groundsList,
   standingDecisions,
+  awaitingAckDecisions,
+  readDecisionAnswer,
   readEvidence,
   readPr,
   readPrs,
@@ -661,6 +663,21 @@ export interface TendReport {
   todoNote?: string;
   /** Every unanswered helm card and run card, oldest first: never paced, never acked away. */
   openCards?: TendOpenCard[];
+  /** Answered cards the helm has not acked, oldest answer first: they block the helm's turn end until `man ack`. */
+  answeredCards?: TendAnsweredCard[];
+}
+
+/** One answered card awaiting the helm's ack, in tend's "Answered cards" section. */
+export interface TendAnsweredCard {
+  /** `decision:<rid>`. */
+  key: string;
+  title: string;
+  grounds?: string;
+  dispatch?: string;
+  /** What the person answered: the option, the text, and how many files. */
+  answer: string;
+  answeredAt: string;
+  ageSecs: number;
 }
 
 /** One unanswered card in tend's "Open cards" section. */
@@ -725,6 +742,38 @@ export function openCardRows(cfg: Config, now: number = Date.now()): TendOpenCar
       };
     })
     .sort((a, b) => a.askedAt.localeCompare(b.askedAt));
+}
+
+/** Every answered card awaiting the helm's ack on this machine, oldest answer first. */
+export function answeredCardRows(cfg: Config, now: number = Date.now()): TendAnsweredCard[] {
+  return awaitingAckDecisions().flatMap((card): TendAnsweredCard[] => {
+    const answer = readDecisionAnswer(card.key);
+    if (!answer) return [];
+    const grounds = cardGrounds(card, cfg);
+    const files = answer.attachments.length;
+    return [{
+      key: card.key,
+      title: card.title.replace(/\s+/g, ' '),
+      ...(grounds ? { grounds: displayGrounds(grounds, cfg) } : {}),
+      ...(card.dispatch ? { dispatch: card.dispatch } : {}),
+      answer: [answer.option && `"${answer.option}"`, answer.text, files > 0 && `${files} file${files === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
+      answeredAt: answer.answeredAt,
+      ageSecs: Math.max(0, Math.round((now - Date.parse(answer.answeredAt)) / 1000)),
+    }];
+  });
+}
+
+/** The answered cards, each with its answer and the ack that clears it. */
+export function renderAnsweredCards(cards: readonly TendAnsweredCard[]): string {
+  if (!cards.length) return '';
+  return [
+    toonTable(
+      'answered-cards',
+      cards.map((card) => ({ key: card.key, title: card.title, answer: card.answer, age: ageLabel(card.ageSecs * 1000) })),
+      ['key', 'title', 'answer', 'age'],
+    ),
+    'next: act on each answer, then `lobstah man ack <key> "<what you did>"`. An answered card blocks your turn end until acked; `man report` never acks it.',
+  ].join('\n');
 }
 
 /** One human-wait line per dispatch, even when several cards cover its question. */
@@ -1189,8 +1238,10 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   }
   const todoNote = [todoOverdueLine(todos), todoStaleLine(todos)].filter(Boolean).join('\n') || undefined;
   let openCards: TendOpenCard[] = [];
+  let answeredCards: TendAnsweredCard[] = [];
   try {
     openCards = openCardRows(cfg, now);
+    answeredCards = answeredCardRows(cfg, now);
   } catch {
     // an unreadable card never fails tend
   }
@@ -1267,6 +1318,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     ...(todos.length > 0 ? { todos } : {}),
     ...(todoNote ? { todoNote } : {}),
     ...(openCards.length > 0 ? { openCards } : {}),
+    ...(answeredCards.length > 0 ? { answeredCards } : {}),
   };
 }
 
@@ -1460,6 +1512,10 @@ export function renderTend(r: TendReport): string {
   if (r.openCards?.length) {
     lines.push('');
     lines.push(renderOpenCards(r.openCards));
+  }
+  if (r.answeredCards?.length) {
+    lines.push('');
+    lines.push(renderAnsweredCards(r.answeredCards));
   }
   if (r.todos?.length) {
     lines.push('');

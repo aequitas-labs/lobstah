@@ -5,6 +5,7 @@ import type {
   PermissionsProposal,
   GlassBeats,
   GlassDecision,
+  GlassHandoff,
   GlassRunCard,
   GlassDispatch,
   GlassDispatchSummary,
@@ -105,6 +106,8 @@ export interface GlassPrefs {
   trapGroup?: TrapGrouping;
   /** This viewer's remembered Reviews disclosure state. */
   reviewSections?: { waiting?: boolean; done?: boolean };
+  /** This viewer's remembered PRs disclosure state. */
+  prSections?: { closed?: boolean };
 }
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
@@ -303,6 +306,8 @@ export type DecisionCard =
       at: string;
       /** When the human first viewed it in the decision modal; absent = unread. */
       viewedAt?: string;
+      /** Answered and handed to the helm: it spins until the helm acks, then shows the ack until it clears. */
+      handoff?: GlassHandoff;
     }
   | {
       kind: 'question';
@@ -333,27 +338,7 @@ export function decisionCards(
     if (a.kind === 'decision') {
       const d = byKey.get(a.key);
       if (!d) continue;
-      const repo = linkedRepo(d, repos) ?? a.repo;
-      cards.push({
-        kind: 'decision',
-        key: d.key,
-        title: d.title,
-        ...(d.thread ? { thread: d.thread } : {}),
-        ...(d.readOnly ? { readOnly: true } : {}),
-        detail: d.detail,
-        options: d.options,
-        ...(d.permission ? { permission: true } : {}),
-        ...(d.appStart ? { appStart: d.appStart } : {}),
-        ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
-        ...(d.run ? { run: d.run } : {}),
-        ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
-        ...(d.references?.length ? { references: d.references } : {}),
-        attachments: d.attachments,
-        ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
-        ...(repo ? { repo } : {}),
-        at: d.askedAt,
-        ...((d.viewedAt ?? a.viewedAt) ? { viewedAt: d.viewedAt ?? a.viewedAt } : {}),
-      });
+      cards.push(decisionCard(d, linkedRepo(d, repos) ?? a.repo, d.viewedAt ?? a.viewedAt));
     } else if (a.kind === 'question') {
       const repo = linkedRepo({ ...a, dispatch: a.id }, repos);
       cards.push({
@@ -369,8 +354,39 @@ export function decisionCards(
       });
     }
   }
+  // An answered card is no longer attention, but stays on the deck while the helm takes it up.
+  for (const d of decisions) {
+    if (d.handoff && !cards.some((c) => c.key === d.key)) cards.push(decisionCard(d, linkedRepo(d, repos), d.viewedAt));
+  }
   return cards.sort((a, b) => b.at.localeCompare(a.at) || a.key.localeCompare(b.key));
 }
+
+function decisionCard(d: GlassDecision, repo: string | undefined, viewedAt: string | undefined): DecisionCard {
+  return {
+    kind: 'decision',
+    key: d.key,
+    title: d.title,
+    ...(d.thread ? { thread: d.thread } : {}),
+    ...(d.readOnly ? { readOnly: true } : {}),
+    detail: d.detail,
+    options: d.options,
+    ...(d.permission ? { permission: true } : {}),
+    ...(d.appStart ? { appStart: d.appStart } : {}),
+    ...(d.permissionsProposal ? { permissionsProposal: d.permissionsProposal } : {}),
+    ...(d.run ? { run: d.run } : {}),
+    ...(d.optionNotes ? { optionNotes: d.optionNotes } : {}),
+    ...(d.references?.length ? { references: d.references } : {}),
+    attachments: d.attachments,
+    ...(d.dispatch ? { dispatch: d.dispatch, lane: d.lane ?? 'work' } : {}),
+    ...(repo ? { repo } : {}),
+    at: d.askedAt,
+    ...(viewedAt ? { viewedAt } : {}),
+    ...(d.handoff ? { handoff: d.handoff } : {}),
+  };
+}
+
+/** Whether a card waits on the person: answered cards handed to the helm do not. */
+export const isOpenDecision = (c: DecisionCard): boolean => !(c.kind === 'decision' && c.handoff);
 
 /** What an answered card says it sent: the option, the text's first line, the files. */
 export function answerSummary(a: { option?: string; text?: string; files?: number }): string {
@@ -620,6 +636,7 @@ export interface PrsInputs {
   prs: GlassPr[];
   watches: Watch[];
   prAttention: DeckAttention[];
+  expanded?: GlassPrefs['prSections'];
 }
 
 /** Attention belonging to PRs/stacks actually visible in this section. */
@@ -729,6 +746,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       list: traps.map((t) => seat(trapView(d, t))),
     },
     prs: {
+      expanded: st.prSections,
       view: st.view,
       stacks,
       prs: prs.filter((p) => hasQuery(p.number, p.title, p.url, p.state, p.baseRefName, p.headRefName)),
@@ -827,7 +845,7 @@ export function watchState(w: { lastCheckedAt?: string; lastError?: string } | u
 
 /** The decisions the modal steps through: open ones (not answered from this page), oldest first. */
 export function openDecisionOrder(cards: readonly DecisionCard[], sent: (key: string) => boolean): DecisionCard[] {
-  return cards.filter((c) => !sent(c.key)).sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
+  return cards.filter((c) => isOpenDecision(c) && !sent(c.key)).sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
 }
 
 /**

@@ -1,5 +1,5 @@
-import { MIRROR_ATTENTION_MAX_BYTES, MIRROR_ATTENTION_MAX_ITEMS, MIRROR_CALL_MS, mirrorReadAllowed, mirrorWriteAllowed } from '../../../packages/core/src/backend-model.js';
-import type { WharfAttentionList, WharfMirrorCall, WharfMirrorCallInput, WharfMirrorSnapshot } from '../../../packages/core/src/backend-model.js';
+import { MIRROR_ATTENTION_MAX_BYTES, MIRROR_ATTENTION_MAX_ITEMS, MIRROR_CALL_MS, MIRROR_WHARF_KINDS, mirrorReadAllowed, mirrorWriteAllowed } from '../../../packages/core/src/backend-model.js';
+import type { MirrorWriteKind, WharfAttentionList, WharfMirrorCall, WharfMirrorCallInput, WharfMirrorSnapshot } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
 
@@ -15,8 +15,9 @@ export const mirrorSchema = `
   CREATE INDEX IF NOT EXISTS mirror_call_boat ON mirror_calls(boat);
   CREATE TABLE IF NOT EXISTS mirror_files (id TEXT PRIMARY KEY, boat TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL, expires INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS mirror_attention (boat TEXT PRIMARY KEY, etag TEXT NOT NULL, at TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS mirror_grounds (boat TEXT NOT NULL, grounds TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(boat,grounds));
 `;
-export const mirrorTables = ['mirror_snapshots', 'mirror_calls', 'mirror_files', 'mirror_attention'];
+export const mirrorTables = ['mirror_snapshots', 'mirror_calls', 'mirror_files', 'mirror_attention', 'mirror_grounds'];
 
 /**
  * A boat's walking list as it puts it, checked and serialized once: a JSON
@@ -136,6 +137,7 @@ export class MirrorState {
     this.sql.exec('DELETE FROM mirror_calls WHERE boat=?', boat);
     this.sql.exec('DELETE FROM mirror_files WHERE boat=?', boat);
     this.sql.exec('DELETE FROM mirror_attention WHERE boat=?', boat);
+    this.sql.exec('DELETE FROM mirror_grounds WHERE boat=?', boat);
     return { keys };
   }
   /** The boat's put, after its bytes are in R2: the new ETag and size, and when. */
@@ -159,6 +161,36 @@ export class MirrorState {
     this.sql.exec('INSERT OR REPLACE INTO mirror_attention VALUES (?,?,?,?)', boat, etag, at, json);
     return { status: 200, value: { etag, at, changed: true }, changed: true };
   }
+  /** A mirror boat's local grounds, as it says on its socket: they replace what it said before. */
+  putGrounds(actor: Actor, grounds: string[], now: number): void {
+    const boat = this.boat(actor), at = new Date(now).toISOString();
+    this.sql.exec('DELETE FROM mirror_grounds WHERE boat=?', boat);
+    for (const name of grounds) this.sql.exec('INSERT INTO mirror_grounds VALUES (?,?,?)', boat, identifier(name), at);
+  }
+  /** Every grounds an unrevoked mirror boat runs locally. */
+  allGrounds(): string[] {
+    return this.sql.exec<{ grounds: string }>(`SELECT DISTINCT g.grounds FROM mirror_grounds g JOIN boats b ON b.id=g.boat
+      JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY g.grounds`).toArray().map((r) => r.grounds);
+  }
+  /**
+   * The mirror boats that run a grounds locally, the most recent report
+   * first. Two boats may each have a grounds of the same name; `online`
+   * picks one whose socket is open before one whose socket is not.
+   */
+  boatsFor(grounds: string, online: (boat: string) => boolean): Array<{ id: string; name: string }> {
+    const rows = this.sql.exec<{ id: string; name: string }>(`SELECT b.id,b.name FROM mirror_grounds g JOIN boats b ON b.id=g.boat
+      JOIN boat_permissions p ON p.boat=b.id WHERE g.grounds=? AND b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY g.at DESC`, grounds).toArray();
+    return [...rows.filter((r) => online(r.id)), ...rows.filter((r) => !online(r.id))];
+  }
+  /** A write the wharf itself relays to one mirror boat; the caller pushes it once the transaction commits. */
+  queueWrite(boat: string, write: { kind: MirrorWriteKind; payload: unknown }, by: string, now: number): WharfMirrorCall {
+    requireThat(this.mirrorBoat(boat), 404, 'mirror boat not found');
+    const stored: WharfMirrorCall = { id: crypto.randomUUID(), boat, write, at: new Date(now).toISOString(), expiresAt: new Date(now + MIRROR_CALL_MS).toISOString(), state: 'queued', by };
+    this.save(stored);
+    return stored;
+  }
+  /** The mirror boat a credential is, for a route only a mirror boat may call. */
+  mirrorBoatOf(actor: Actor): string { return this.boat(actor); }
   /** Before a put: the boat may mirror. */
   authorizeSnapshot(actor: Actor): void { this.boat(actor); }
   /** Before an answer is stored: the call is this boat's, taken, and not expired. */
@@ -271,7 +303,7 @@ export class MirrorState {
     }
     const write = object(b.write);
     requireThat(Object.keys(write).every((k) => k === 'kind' || k === 'payload'), 400, 'unexpected field');
-    requireThat(mirrorWriteAllowed(write.kind), 403, 'the hosted glass may not send that');
+    requireThat(mirrorWriteAllowed(write.kind) && !MIRROR_WHARF_KINDS.includes(write.kind), 403, 'the hosted glass may not send that');
     requireThat(JSON.stringify(write.payload ?? null).length <= 60_000, 413, 'payload too large');
     return { id, boat, write: { kind: write.kind, payload: write.payload ?? null }, ...(files ? { files } : {}) };
   }

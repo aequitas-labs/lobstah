@@ -211,12 +211,15 @@ export interface DisplayInput extends ReconcileInput {
  * with an empty status log is `queued`: nobody has claimed it yet. An active
  * dispatch with a trap claim and an empty status log is `working`: the trap
  * holds it. A claim writes its own `working` entry, so this case only covers
- * claims written before that entry existed. Everything else keeps the
+ * claims written before that entry existed. Requeued work whose last entry
+ * is `working` is `queued`: its claimant left. Everything else keeps the
  * reconciled state, so the reconciler's contract (no signal is `unknown`)
  * stays intact.
  */
 export function displayState(input: DisplayInput): DisplayState {
   if (input.queued && input.log.length === 0) return 'queued';
+  // Requeued bait whose last entry is `working` (often only its claim receipt) has no worker now.
+  if (input.queued && input.log.at(-1)?.verb === 'working') return 'queued';
   if (!input.queued && input.claimedAt !== undefined && input.log.length === 0) return 'working';
   return reconcile(input);
 }

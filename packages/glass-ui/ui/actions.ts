@@ -13,6 +13,7 @@ import {
   detailHash,
   detailFromHash,
   openDecisionOrder,
+  isOpenDecision,
   unreadDecisions,
 } from '../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, ModalType } from '../src/glass-diff.js';
@@ -44,7 +45,7 @@ export function receive(snapshot: GlassSnapshot): void {
   const initialLink = !getState().snapshot && decisionModal?.key;
   // A card that left the snapshot (answered, withdrawn) takes its draft with it.
   const cards = decisionCards(snapshot.attention || [], snapshot.decisions || []);
-  void setDecisionBadge(cards.length);
+  void setDecisionBadge(cards.filter(isOpenDecision).length);
   const live = new Set(cards.map((c) => c.key));
   const kept = Object.fromEntries(
     Object.entries(drafts).filter(([key]) => live.has(key) || key.startsWith('message:') || key.startsWith('thread:')),
@@ -98,6 +99,23 @@ function currentCards() {
   return view ? filteredDecisionCards(view, state.prefs) : [];
 }
 
+/** An answered card handed to the helm: the modal shows it, though it is not among the open ones. */
+export function handedOffCard(key: string): ReturnType<typeof decisionCards>[number] | undefined {
+  return currentCards().find((c) => c.key === key && !isOpenDecision(c));
+}
+
+/**
+ * The card the modal shows for `key`: an open one in `order`, a finished run
+ * card the snapshot dropped, or an answered card handed to the helm. The
+ * modal and previous / next both read it, so every card shown can step.
+ */
+export function decisionOnScreen(
+  key: string,
+  order: ReturnType<typeof decisionCards>,
+): ReturnType<typeof decisionCards>[number] | undefined {
+  return order.find((c) => c.key === key) ?? getState().runs?.[key]?.card ?? handedOffCard(key);
+}
+
 /** The open decisions the modal steps through, oldest first. */
 export function modalOrder(): ReturnType<typeof decisionCards> {
   const state = getState();
@@ -144,7 +162,8 @@ export function routeDecision(open: { key: string | null } | null): void {
     focusDecision: open?.key ?? null,
     ...(open && history.state?.glassDecision ? { route: history.state.glassDecision.route } : {}),
   });
-  if (open?.key && getState().snapshot && !modalOrder().some((card) => card.key === open.key)) void loadClosedDecision(open.key);
+  if (open?.key && getState().snapshot && !modalOrder().some((card) => card.key === open.key) && !handedOffCard(open.key))
+    void loadClosedDecision(open.key);
   if (closing && decisionScroll !== undefined) {
     const y = decisionScroll;
     decisionScroll = undefined;
@@ -188,14 +207,16 @@ async function loadClosedDecision(key: string): Promise<void> {
   }
 }
 
-/** Previous (-1) or next (+1) in the modal's order. It never wraps and never sends anything. */
-/** Previous or next from the decision on screen, including a finished run card the snapshot no longer lists. */
+/**
+ * Previous (-1) or next (+1) from the decision on screen, in the modal's
+ * order, including a card that is not among the open ones (decisionOnScreen).
+ * It never wraps and never sends anything.
+ */
 export function stepDecision(dir: -1 | 1): void {
-  const state = getState();
-  const open = state.decisionModal;
+  const open = getState().decisionModal;
   if (!open?.key) return;
   const order = modalOrder();
-  const shown = order.find((c) => c.key === open.key) ?? state.runs?.[open.key]?.card;
+  const shown = decisionOnScreen(open.key, order);
   if (!shown) return;
   const near = decisionNeighbours(order, shown);
   const next = dir < 0 ? near.prev : near.next;
@@ -789,12 +810,13 @@ export const ackPrAttention = (items: Array<{ key: string; stateHash: string }>)
 
 /**
  * Ask the boat to merge one of your PRs once it's green, or cancel that.
- * The snapshot shows the request from the next poll; this marks it at once.
+ * The snapshot shows the request from the next poll; this marks it at once,
+ * and marks answered the decision cards about this PR that the boat closed.
  */
 export async function requestPrMerge(key: string, cancel = false): Promise<void> {
   const token = getState().snapshot?.focusToken;
   if (!token) throw new Error('Reload the glass before merging.');
-  const response = await backend().request<{ ok: boolean; reason?: string; method?: 'merge' | 'squash' | 'rebase' }>(
+  const response = await backend().request<{ ok: boolean; reason?: string; method?: 'merge' | 'squash' | 'rebase'; answered?: string[] }>(
     'pr-merge',
     { key, ...(cancel ? { cancel: true } : {}) },
     token,
@@ -802,6 +824,14 @@ export async function requestPrMerge(key: string, cancel = false): Promise<void>
   const result = response.body;
   if (!response.ok || !result.ok)
     throw new Error(result.reason ?? (cancel ? 'Could not cancel the merge.' : 'Could not ask for the merge.'));
+  // The boat answered the open decision cards asked about this PR: they read as answered now, before the next poll,
+  // and a modal showing one of them moves on, as after any answer.
+  if (result.answered?.length) {
+    const previous = modalOrder();
+    for (const card of result.answered) setDraft(card, { sending: false, sent: 'Merge when green' });
+    const open = getState().decisionModal?.key;
+    if (open && result.answered.includes(open)) navigateDecision(nextOpen(previous, currentCards(), getState().drafts, open).key, true);
+  }
   const snapshot = getState().snapshot;
   if (snapshot) {
     const at = new Date().toISOString();

@@ -55,8 +55,29 @@ export function trapIdForName(name: string): string | undefined {
   }
 }
 
+/**
+ * Trap id to name, rebuilt only when a name is added or removed. A name's
+ * file is rewritten in place only to change its provenance, never its trap.
+ */
+let nameIndex: { dir: string; stamp: string; byId: Map<string, string> } | undefined;
 export function trapNameForId(trapId: string): string | undefined {
-  return knownTrapNames().find((name) => trapIdForName(name) === trapId);
+  const dir = namesDir();
+  let stamp: string;
+  try {
+    const st = fs.statSync(dir);
+    stamp = `${st.mtimeMs}:${st.ctimeMs}:${st.size}`;
+  } catch {
+    return undefined;
+  }
+  if (nameIndex?.dir !== dir || nameIndex.stamp !== stamp) {
+    const byId = new Map<string, string>();
+    for (const name of knownTrapNames()) {
+      const id = trapIdForName(name);
+      if (id !== undefined && !byId.has(id)) byId.set(id, name);
+    }
+    nameIndex = { dir, stamp, byId };
+  }
+  return nameIndex.byId.get(trapId);
 }
 
 /** One scan of the reservations; only recorded automatic names are safe to share. */

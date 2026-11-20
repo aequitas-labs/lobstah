@@ -86,6 +86,7 @@ describe('send wakes a finished dispatch', () => {
     expect(descriptor.model).toBeUndefined();
     const second = lobstah('send', A, 'one more');
     expect(second.stdout).toContain(`delivered: inbox of ${next} (queued)`);
+    expect(second.stdout).toContain(`joined: follow-up ${next} of ${A}`);
     expect(unhandled(next, 'work')[0]?.text).toContain('one more');
     expect(unhandled(next, 'work')).toHaveLength(1);
     expect(storedDescriptor(next, 'work')).toBeDefined();

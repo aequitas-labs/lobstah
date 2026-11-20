@@ -48,7 +48,7 @@ export function SlackLinkSection(): ReturnType<typeof html> {
     });
   return html`<h2 id="slack-heading">Slack</h2>${error && html`<div class="bad" role="alert">${error}</div>`}${status?.configured && html`<fieldset disabled=${busy}><legend>Grounds for Slack</legend>${status.grounds.map((grounds) => html`<label key=${grounds}><input type="checkbox" checked=${selectedGrounds.includes(grounds)} onChange=${(event: Event) => {
     setSelectedGrounds((event.currentTarget as HTMLInputElement).checked ? [...selectedGrounds, grounds] : selectedGrounds.filter((name) => name !== grounds));
-  }} />${grounds}</label>`)}${!status.grounds.length && html`<div class="dim">No grounds are available yet. Wait for a boat to publish its cards.</div>`}</fieldset>`}${
+  }} />${grounds}</label>`)}${!status.grounds.length && html`<div class="dim">No grounds yet. Connect a boat to this wharf with <code>lobstah wharf login</code>, then reload this page.</div>`}</fieldset>`}${
     !status
       ? html`<div class="dim">checking Slack</div>`
       : !status.configured

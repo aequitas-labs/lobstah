@@ -511,6 +511,15 @@ permission, when, the note, any hold, and the current status. Cancel merge
 withdraws permission. A hold is a non-CI precondition; checks passing does
 not release it.
 
+A decision card asked with `--pr <pr-key>` closes when merge when green is set
+on that PR while the card is open. This happens from the PR card (including
+the one shown inside the decision card), `lobstah pr merge-when-green`, or
+GitHub auto-merge seen by the PR watch. lobstah answers the card with its
+"Merge when green" option when it has one, and says where, by whom and when
+it was set, for example "Merge when green, set from GitHub auto-merge by
+@dana at 2026-11-20T18:31:00Z." The answer wakes the helm like any other
+answer. For a stack, this applies to the PR named in `--pr`.
+
 Each PR-watch tick, the daemon merges a green, clean PR with no hold and no
 open PR below it. GitHub's merge endpoint checks the recorded head SHA and
 branch protection. The daemon never force-merges, bypasses protection, or
@@ -709,7 +718,9 @@ the helm files to keep.
   withdrawn), `dispatch:<id> done|blocked|needs-decision|failed`,
   `pr:<owner>/<repo>#<n> merged|closed|green` and `trap:<name> free`. A `merged`
   wait also fires if the PR closes without merging, and the event names that
-  outcome. A trigger
+  outcome. A `dispatch:` trigger on a dispatch that is already done or failed
+  is refused, since a follow-up runs under its own id; the refusal names the
+  newest follow-up to wait on. A trigger
   lobstah can't observe is refused and not stored. A PR trigger with no watch
   registers one owned by the helm and says so; that watch also wakes the helm on
   failing checks and requested changes. Each daemon tick reads only the local
@@ -792,7 +803,9 @@ the same rule.
   up to 16 existing report and PR cards in argument order. They appear above
   the answer controls. Opening a report or PR retains the decision's draft;
   reading its context never answers the decision. Missing references remain
-  visible while the answer controls stay usable.
+  visible while the answer controls stay usable. Each `--pr` also puts a tag
+  with the PR's `owner/repo#N` beside the card's title, which opens that PR's
+  card in the glass.
 - **Checklists.** Task items (`- [ ] step` or `- [x] step`), including nested
   items, are tickable in decision details and filed reports. Ticks are saved
   with the document and shared between desktop and phone; ticking never
@@ -803,7 +816,8 @@ the same rule.
   it with `lobstah man ask --withdraw <key>`, which retains a read-only archive. A
   newer `man ask` on the same dispatch keeps the older decisions: each shows
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
-  standing decision; a key that is not standing is refused. A card stays visible
+  standing decision, or acks an answered one (see **The ack**); any other key
+  is refused. A card stays visible
   if its worker reports `paused`, `working`, `done`, or `failed`, and can still
   be answered after the dispatch finishes.
 - **Attention.** A standing decision is attention of kind `decision`, in
@@ -822,7 +836,8 @@ the same rule.
   `[limits].attachmentMaxBytes`, at most 8). Click an option, write an
   answer, attach files, or any mix; one **Send** submits it. With no options,
   the text box is the whole answer. After sending, the card shows
-  `answered · <what was chosen>` and leaves on the next refresh. A raw
+  `answered · <what was chosen>`. It leaves on the next refresh, unless the
+  answer awaits the helm's ack (see **The ack**). A raw
   `question` the helm has not framed shows as a plain card with the
   worker's note and the same text box. PR kinds stay in the PRs section.
   `#decision/<key>` opens the deck at that card. Pasting with Cmd-V or
@@ -851,7 +866,30 @@ the same rule.
   `decision-answer` event: the request `id`, `key`, `dispatch`, `title`,
   `option`, `text`, `attachments` (the stored paths), `from`, and `at`. The
   helm acts on it, usually with `lobstah send <dispatch> "<instruction>"`.
-  Answering does not message the worker.
+  Answering does not message the worker. When the answer awaits the helm's
+  ack, the event's `next` field says so.
+- **The ack.** An answered card stays `answered` until the helm acks it:
+  `lobstah man ack decision:<key> ["<what I did>"]` moves it to `acked` and
+  stores `ack.json` beside `answer.json`. The claimed helm alone acks, and
+  only once. Until then, the glass shows the run card's spinner on the card
+  and nothing more. The Stop hook lists the card under `answered-cards` with
+  its answer and blocks every helm turn end on it; it is not paced like an
+  open card. `man tend` lists it too, and `man report` never acks it. Once
+  acked, the card shows the run card's check for two minutes, then leaves the
+  glass, as a finished run card does. The note stays in `ack.json` and the
+  CLI; the glass doesn't show it. Three other moves also ack the card:
+  `man ask --replace <key>` (note `Replaced by <new key>`), `man ask --withdraw
+  <key>` (note `Withdrawn`), and `lobstah send <target> --for-decision <key>
+  "<instruction>"` once the message is delivered (note `Sent to <id>: <first
+  line>`).
+- **Which answers await the ack.** Only a plain helm card answered while a
+  live helm holds its grounds (or its repo, or any grounds for a card with
+  neither). With no helm, an answer behaves as before: the card leaves at
+  once, and nothing blocks. Run cards, permission cards, permission
+  proposals and app-start cards keep their own lifecycle. A card framing a
+  worker's question (see **Attention** and the Stop block below) delivers
+  its answer to that worker's inbox, so it needs no ack: the worker acts on
+  it, and its next report wakes the helm.
 - **From the terminal.** `lobstah man answer <key> [--option <label>]
   [--text <text>] [--attach <file>]...` answers the same way, with the same
   checks.
@@ -863,7 +901,8 @@ the same rule.
   stays in the glass until the decision is answered or withdrawn.
 - **Cull.** `lobstah cull` removes a decision once its answer is older than
   the retention window, with the `decision-answer` request and its files. A
-  standing decision is never culled.
+  standing decision is never culled. Culling an answered card that was never
+  acked clears it too.
 
 ### Run cards
 
@@ -910,12 +949,16 @@ A catch is reported once the helm's `man wait` watcher delivers its event or
 `man report` prints it. The glass's `unreported` badge means no helm received
 that catch. A `man wait` timeout and `man wait --peek` only peek at the delta;
 a digest lost with a dead background task re-surfaces on the next timeout.
+A peek also leaves watches alone: it reports their pending events without
+polling them, and the next real `man wait` (or the daemon) polls what is due.
 The Stop-hook's standing-attention reminder does not mark a catch reported.
 
 Every carrier shares the cursor (per grounds, for a helm):
 
 - **The wait loop.** A delivered `man wait` event (exit 0) advances the helm's
-  cursor through the event time. A timeout (exit 3) prints the delta when
+  cursor through the event time. A wake's first line indexes its events by
+  kind and id, such as `wake[3]: answer 7f277cd6, reply a89ad2ba, todo
+  1510`, so a reader who stops early still sees what arrived. A timeout (exit 3) prints the delta when
   something changed without advancing the cursor — see the loop idiom below.
 - **The blocking park.** A helm session's Stop-hook park delivers the digest as a wake
   at `[helm].reportSecs` cadence — including the landed-then-idle case, where
@@ -1015,9 +1058,10 @@ before the worker reads it; `man tend` then shows the dispatch as
 A newer `needs-decision` from the worker stands again. Set `remindSecs = 0`
 for pure at-most-once.
 
-The helm's Stop block lists standing items that need action, open cards at
-their reminder cadence, and one-line trap state changes since the previous
-block. A paused dispatch is reported once, then again every `remindSecs` while
+The helm's Stop block lists standing items that need action, every open card
+on the grounds, and one-line trap state changes since the previous block. A
+card missing from `open-cards` was answered or withdrawn. Cards alone block a
+Stop only when one is new or changed, or was last listed `remindSecs` ago. A paused dispatch is reported once, then again every `remindSecs` while
 it remains paused. A question covered by an unanswered card, through its
 dispatch id or the question’s `--link` to the card, wakes the helm once.
 After that, tend and Stop show `waiting on human · card <key>` without
@@ -1857,6 +1901,12 @@ conversation. The message joins the current round after what the person said
 last, marks the conversation unread in the glass, and stops its reminder. The
 person's next message wakes `man wait` as before. Use a card when you need an
 answer; use `man say` for everything else you would tell the person.
+
+A Slack message for a grounds this machine helms arrives the same way, through
+the wharf this machine mirrors to (`[glass].mirror`). Its event says `via:
+slack`. What the person adds in that Slack thread joins the conversation, and
+reopens it if it was resolved. Each helm response (triage, notes, a card,
+the outcome) goes back to the Slack thread.
 
 Record a chat that remains open with `man discuss "<title>" --said "<exchange>"`,
 or append it with `man discuss <id> --said "<exchange>"`. Tell the person it was

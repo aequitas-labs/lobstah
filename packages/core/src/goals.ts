@@ -8,8 +8,19 @@ export interface DailyGoals { grounds: string; date: string; lines: string[]; re
 /** The one wording rule for a goal: charter, man skills, goals help and the first-message prompt. */
 export const GOAL_WORDING_RULE = "A goal is one line with a verb and a done state you'd recognise at a glance: merged, released, live, replying. PR numbers, commits and migration lists stay in the helm's tracking and the cards, not in the goal.";
 
+/** Building a formatter costs far more than using one, and goalDate runs once per todo on every glass poll. */
+const goalFormats = new Map<string, Intl.DateTimeFormat>();
+function goalFormat(timezone?: string): Intl.DateTimeFormat {
+  const key = timezone ?? '';
+  let format = goalFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' });
+    goalFormats.set(key, format);
+  }
+  return format;
+}
 export function goalDate(date = new Date(), timezone?: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(date);
+  const parts = goalFormat(timezone).formatToParts(date);
   const part = (key: string) => parts.find((p) => p.type === key)!.value;
   const day = `${part('year')}-${part('month')}-${part('day')}`;
   return Number(part('hour')) < 4 ? previousGoalDate(day) : day;

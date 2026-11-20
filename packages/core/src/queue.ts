@@ -120,19 +120,43 @@ export function claimNext(lane: Lane, skip?: (d: Descriptor) => boolean): string
  * bait whose claimant vanished. State files (status, events, evidence) stay
  * put; the next claimant continues the same record.
  */
-export function requeue(id: string, lane: Lane): void {
+export function requeue(id: string, lane: Lane, readdress?: (descriptor: Descriptor) => Descriptor): void {
   const dirs = laneDirs(lane);
   const activeDir = path.join(dirs.active, id);
   // Queue age is time waiting for THIS claim, not the earlier worker's run.
-  // Stamp before publishing the queue entry: rewriting it after the rename
-  // could race a new claimant and resurrect an already claimed dispatch.
+  // Stamp, and apply any new address, before publishing the queue entry:
+  // rewriting it after the rename could race a new claimant and resurrect an
+  // already claimed dispatch.
   const file = path.join(activeDir, 'descriptor.json');
-  const d = { ...readDescriptor(id, lane), queuedAt: new Date().toISOString() };
+  const current = readDescriptor(id, lane);
+  const d = { ...(readdress ? readdress(current) : current), queuedAt: new Date().toISOString() };
   const tmp = uniqueTempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(d, null, 2));
   atomicRenameSync(tmp, file);
   fs.renameSync(file, path.join(dirs.queue, `${id}.json`));
   fs.rmSync(activeDir, { recursive: true, force: true });
+}
+
+/**
+ * Rewrite a still-queued descriptor without exposing a half-changed entry. The
+ * entry leaves the queue by rename first, so a trap's claim either wins
+ * before (this returns false and changes nothing) or finds no entry until the
+ * rewritten one is back. Returns whether the entry was rewritten.
+ */
+export function rewriteQueued(id: string, lane: Lane, rewrite: (descriptor: Descriptor) => Descriptor): boolean {
+  const file = path.join(laneDirs(lane).queue, `${id}.json`);
+  const held = uniqueTempPath(file);
+  try {
+    fs.renameSync(file, held);
+  } catch {
+    return false;
+  }
+  try {
+    fs.writeFileSync(held, JSON.stringify(rewrite(JSON.parse(fs.readFileSync(held, 'utf8')) as Descriptor), null, 2));
+  } finally {
+    atomicRenameSync(held, file);
+  }
+  return true;
 }
 
 export function readDescriptor(id: string, lane: Lane): Descriptor {

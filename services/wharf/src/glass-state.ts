@@ -1,7 +1,8 @@
 import { threadSchema } from './threads.js';
+import { THREAD_ID } from '../../../packages/core/src/thread-model.js';
 import type { ThreadSummary } from '../../../packages/core/src/thread-model.js';
 import { WHARF_REVIEW_REQUEST_KINDS, validDecisionReferences } from '../../../packages/core/src/backend-model.js';
-import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
+import type { MirrorHelmRequestPayload, WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfMirrorRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
 import { LEASE_MS, identifier, object, repoIdentity, requireThat, text, tmuxPane } from './protocol.js';
 import { cardSchema, cardTables } from './cards.js';
 import { slackSchema, slackTables } from './slack-outbox.js';
@@ -11,6 +12,8 @@ import type { SlackMessageIn } from './slack-ingress.js';
 
 /** A person's request for work waits this long for the helm: a sleeping boat can still take it. */
 export const WORK_REQUEST_MS = 7 * 86400_000;
+/** A mirror request its boat did not take stays open this long, so its receipt still reaches Slack, then ends. */
+const MIRROR_ENDED_MS = 10 * 60_000;
 
 export const glassSchema = `
   ${threadSchema}
@@ -88,7 +91,7 @@ export class GlassState {
   expire(now: number) {
     for (const row of this.sql.exec<{ id: string; data: string }>("SELECT * FROM human_requests WHERE json_extract(data,'$.state') IN ('queued','received','authorized') AND json_extract(data,'$.expiresAt')<=?", new Date(now).toISOString()).toArray()) {
       const r = JSON.parse(row.data) as WharfHumanRequest; r.state = 'expired'; this.put('human_requests', row.id, r);
-      if (!r.kind.startsWith('review-')) this.hooks.event('human-request-expired', r.dispatch, r.id);
+      if (!r.kind.startsWith('review-') && !r.mirror) this.hooks.event('human-request-expired', r.dispatch, r.id);
     }
   }
   /**
@@ -98,7 +101,7 @@ export class GlassState {
    * reply under anything else (a card's message) is not a request and does
    * nothing. The helm is woken; nothing runs until it acts.
    */
-  slackMessage(m: SlackMessageIn, person: string, now: number, grounds: string): { request?: string; ignored?: string } {
+  slackMessage(m: SlackMessageIn, person: string, now: number, grounds: string, mirror?: { boat: string; name: string; online: boolean }): { request?: string; ignored?: string; relay?: { boat: string; payload: MirrorHelmRequestPayload } } {
     const top = m.threadTs ?? m.ts;
     const id = `slack-${m.channel}-${top.replace('.', '-')}`;
     const r = this.get<WharfHumanRequest>('human_requests', id);
@@ -107,14 +110,56 @@ export class GlassState {
       if (r) return { request: id };
       const request: WharfHumanRequest = { id, kind: 'work', grounds, by: person, at, expiresAt: new Date(now + WORK_REQUEST_MS).toISOString(), state: 'queued',
         text: m.text, origin: { team: m.team, user: m.user, channel: m.channel, ts: m.ts } };
+      if (mirror) {
+        // A mirror grounds is helmed on its boat: the wharf's helm is not woken, and the request goes to the boat, or ends at once when the boat is away.
+        request.mirror = { boat: mirror.boat, name: mirror.name, state: mirror.online ? 'sent' : 'offline' };
+        // The receipt must still be posted: it says the boat is offline, and the request ends soon after.
+        if (!mirror.online) Object.assign(request, { expiresAt: new Date(now + MIRROR_ENDED_MS).toISOString(), outcome: 'boat offline' });
+        this.put('human_requests', id, request);
+        return mirror.online ? { request: id, relay: { boat: mirror.boat, payload: { request: id, grounds, text: m.text, by: person, at } } } : { request: id };
+      }
       this.put('human_requests', id, request); this.hooks.event('human-request', undefined, id);
       return { request: id };
     }
     if (!r || r.kind !== 'work' || !['queued', 'received'].includes(r.state) || Date.parse(r.expiresAt) <= now) return { ignored: 'not an open request thread' };
+    if (r.mirror && (r.mirror.state === 'offline' || r.mirror.state === 'refused')) return { ignored: 'the boat did not take this request' };
     if (r.followUps?.some((f) => f.source === m.ts)) return { request: id };
-    r.followUps = [...(r.followUps ?? []), { text: m.text, at, source: m.ts }].slice(-20);
-    this.put('human_requests', id, r); this.hooks.event('human-request-update', undefined, id);
+    const followUp = { text: m.text, at, source: m.ts };
+    r.followUps = [...(r.followUps ?? []), followUp].slice(-20);
+    this.put('human_requests', id, r);
+    if (r.mirror) return { request: id, relay: { boat: r.mirror.boat, payload: { request: id, grounds: r.grounds!, text: r.text ?? '', by: r.by, at: r.at, followUp } } };
+    this.hooks.event('human-request-update', undefined, id);
     return { request: id };
+  }
+  /**
+   * A mirror boat says where its request stands: its local helm has it
+   * queued or delivered, it could not take it, or the helm replied. Only the
+   * boat the request went to may say so, and only while it is open.
+   */
+  mirrorRequest(id: string, boat: string, body: unknown, now: number): WharfHumanRequest {
+    const b = object(body);
+    requireThat(Object.keys(b).every((k) => k === 'state' || k === 'reply' || k === 'reason' || k === 'thread'), 400, 'unexpected field');
+    const r = this.get<WharfHumanRequest>('human_requests', identifier(id));
+    requireThat(r && r.kind === 'work' && r.mirror, 404, 'request not found');
+    requireThat(r.mirror.boat === boat, 403, 'addressed boat required');
+    requireThat(['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'request is no longer open');
+    if (b.state !== undefined) {
+      requireThat(['queued', 'delivered', 'refused'].includes(String(b.state)), 400, 'invalid request state');
+      // A request the helm already has never goes back to waiting.
+      if (!(b.state === 'queued' && r.mirror.state === 'delivered')) r.mirror.state = b.state as WharfMirrorRequest['state'];
+      if (b.state === 'refused') { r.expiresAt = new Date(now + MIRROR_ENDED_MS).toISOString(); r.outcome = b.reason === undefined ? 'refused by the boat' : text(b.reason, 500); }
+      else if (b.state === 'delivered') r.state = 'received';
+    }
+    if (b.thread !== undefined) {
+      requireThat(typeof b.thread === 'string' && THREAD_ID.test(b.thread), 400, 'invalid thread');
+      r.mirror.thread = b.thread;
+    }
+    if (b.reply !== undefined) {
+      r.response = text(b.reply, 2000).trim(); requireThat(r.response, 400, 'reply needs text');
+      r.state = 'received'; r.mirror.state = 'delivered';
+    }
+    this.put('human_requests', r.id, r);
+    return r;
   }
   /** The Slack message a work request came from, for its receipt to reply in that thread. */
   requestOrigin(id: string): WharfHumanRequest['origin'] {
@@ -124,6 +169,7 @@ export class GlassState {
   fulfillWork(id: string, dispatch: string, now: number, grounds: string | undefined) {
     const r = this.get<WharfHumanRequest>('human_requests', identifier(id));
     requireThat(r && r.kind === 'work' && ['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'no open work request to dispatch');
+    requireThat(!r.mirror, 409, 'this request went to its boat’s own helm');
     requireThat(r.grounds && r.grounds === grounds, 400, 'Dispatch the request on its selected grounds');
     r.state = 'fulfilled'; r.dispatch = dispatch; r.outcome = `dispatched as ${dispatch}`;
     this.put('human_requests', r.id, r);
@@ -175,7 +221,7 @@ export class GlassState {
   publishedDocuments(): WharfDocument[] { return this.list<WharfDocument>('documents').filter((d) => d.published); }
   /** Human requests as the glass shows them, with whether one waits for a helm. */
   requestViews(now: number): WharfHumanRequest[] {
-    return this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) }));
+    return this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !r.mirror && !this.hooks.helmLive(now) }));
   }
   worker(id: string, body: Record<string, unknown>) {
     const info: Record<string, unknown> = {};
@@ -221,7 +267,7 @@ export class GlassState {
     const ok = (value: unknown = {}) => ({ status: 200, value });
     if (c.path === 'workers' && c.method === 'GET') return ok(this.workers());
     if (c.path === 'glass' && c.method === 'GET') return ok({ threadGrounds: this.hooks.threadGrounds(), messageLimits: this.hooks.messageLimits(), threads: this.hooks.threads(now), boats: this.boats(), workers: this.workers(), documents: this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn),
-      requests: this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })), helmLive: this.hooks.helmLive(now) });
+      requests: this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !r.mirror && !this.hooks.helmLive(now) })), helmLive: this.hooks.helmLive(now) });
     if (parts[0] === 'dispatches' && parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
       return ok(this.ackDispatch(identifier(parts[1]), b.at, this.acker(actor), now));
     }
@@ -303,7 +349,8 @@ export class GlassState {
         requireThat(actor.kind === 'boat', 403, 'boat scope required');
         return ok(this.list<WharfHumanRequest>('human_requests').filter((r) => r.kind.startsWith('review-') && r.state === 'authorized' && r.boat === actor.id && Date.parse(r.expiresAt) > now));
       }
-      if (parts.length === 1 && c.method === 'GET') return ok(this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })));
+      // A mirror grounds' requests are its boat's helm's, never the wharf helm's.
+      if (parts.length === 1 && c.method === 'GET') return ok(this.list<WharfHumanRequest>('human_requests').filter((r) => !r.mirror).map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })));
       if (parts.length === 1 && c.method === 'POST') {
         this.person(actor); const id = identifier(b.id); requireThat(!this.get('human_requests', id), 409, 'request already exists');
         requireThat(['message', 'trap-request', ...WHARF_REVIEW_REQUEST_KINDS].includes(String(b.kind)), 400, 'invalid human request kind');
@@ -320,6 +367,7 @@ export class GlassState {
         this.put('human_requests', id, r); this.hooks.event('human-request', r.dispatch, id); return ok({ ...r, waitingForHelm: !this.hooks.helmLive(now) });
       }
       const r = this.get<WharfHumanRequest>('human_requests', identifier(parts[1])); requireThat(r, 404, 'request not found');
+      requireThat(!r.mirror || c.method === 'GET', 409, 'this request went to its boat’s own helm');
       if (parts.length === 3 && parts[2] === 'start' && c.method === 'POST') {
         requireThat(actor.kind === 'boat' && r.boat === actor.id, 403, 'addressed boat required');
         requireThat((r.kind === 'trap-request' || r.kind.startsWith('review-')) && r.state === 'authorized' && Date.parse(r.expiresAt) > now, 409, 'start request is not authorized or expired');

@@ -159,18 +159,24 @@ export function requestCard(r: WharfHumanRequest): ProjectedCard {
  */
 export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
   const waiting = r.state === 'queued' && r.waitingForHelm;
+  const boat = r.mirror;
   const stands = r.state === 'fulfilled' ? `Dispatched as ${r.dispatch}`
+    : boat?.state === 'offline' ? `${boat.name} is offline. Send this again when it’s back.`
+    : boat?.state === 'refused' ? `${boat.name} couldn’t take this request. Send it again, or check the glass.`
     : r.state === 'expired' ? 'Expired before the helm took it'
     : r.response ? `The helm replied: ${r.response}\nReply in this thread, or in the glass`
     : r.state === 'received' ? 'Received · the helm has it'
+    : boat?.state === 'queued' ? 'Queued — the helm will pick this up when it’s back'
+    : boat ? `Sent to ${boat.name}`
     : waiting ? 'Received · waiting for the helm' : 'Received · queued for the helm';
   const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   return {
     family: 'request', key: r.id, sourceAt: r.at, ...(r.grounds ? { grounds: r.grounds } : {}),
-    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.response ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}`,
+    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.response ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}:${boat?.state ?? ''}:${boat?.thread ?? ''}`,
     title: firstLine(r.text ?? '', 150) || 'Work request', summary: [stands, notes].filter(Boolean).join('\n'),
-    ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : {}),
+    // A mirror request opened a helm thread on its boat: the glass opens that thread.
+    ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : boat?.thread ? { item: { kind: 'thread', id: boat.thread } } : {}),
     quiet: !r.response || ended,
     ...(ended ? { terminal: { state: r.state as 'fulfilled' | 'expired', at: r.state === 'expired' ? r.expiresAt : '', ...(r.outcome ? { outcome: r.outcome } : {}) } } : {}),
   };

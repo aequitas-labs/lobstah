@@ -135,7 +135,8 @@ export function renderCard(card: GlassCard, glassOrigin: string, controls: CardC
   const room = SLACK_BUDGET.section - asked.length - (asked && card.summary ? 2 : 0);
   const summary = card.summary && room > EXCERPT.length + 40 ? fitted(slackEscape(card.summary), room) : '';
   const section = [summary, asked].filter(Boolean).join('\n\n');
-  const open = `${glassOrigin}/#card/${card.id}`;
+  // A card about a helm thread opens that thread, where its whole conversation is.
+  const open = card.item?.kind === 'thread' ? `${glassOrigin}/#thread/${card.item.id}` : `${glassOrigin}/#card/${card.id}`;
   const live = card.terminal ? [] : controls;
   const seen = live.find((c) => c.action.kind === 'seen');
   const pressed = live.filter((c) => c.action.kind !== 'seen');

@@ -14,6 +14,8 @@ export * from './todo-time.js';
 export * from './todo-fire.js';
 export * from './todo-triggers.js';
 export * from './decisions.js';
+export * from './pr-linked-cards.js';
+export * from './pr-linked-card-answers.js';
 export * from './thread-model.js';
 export * from './threads.js';
 export * from './thread-tracking.js';
