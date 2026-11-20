@@ -180,6 +180,7 @@ h2 {
 }
 .controls select,
 .newtrap-form select,
+.watch-controls select,
 .controls input[type='search'] {
   background: var(--card);
   border: 1px solid var(--line);
@@ -1006,6 +1007,41 @@ tr.rowhead:hover {
 .srclogo:focus-visible .srctip,
 .srclogo.tip .srctip {
   display: block;
+}
+/* Watches (components/watches.ts): the order control and filters, source headings and a card's details. */
+.watch-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.watch-caption {
+  margin: var(--space-2) 0;
+  font-size: 12px;
+}
+.watch-source + .watch-source {
+  margin-top: var(--space-3);
+}
+.watch-source-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  margin: var(--space-2) 0;
+}
+.watch-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--space-2);
+  margin: 0;
+  font-size: 12px;
+}
+.watch-details dt {
+  color: var(--dim);
+}
+.watch-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 /* A review source's own notice: its logo, name and why it is not up to date. */
 .rv-source-notice {

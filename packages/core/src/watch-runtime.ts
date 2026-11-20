@@ -412,6 +412,8 @@ export class WatchRuntime {
       current.failures = prepared.failures;
       current.status = prepared.status;
       current.lease = undefined;
+      // A deferred batch observed nothing; only a completed, failure-free observation counts as a success.
+      if (!batch.failure && !batch.deferred) current.lastSuccessAt = new Date(execution.now).toISOString();
       return { snapshot: current, result: current };
     });
   }

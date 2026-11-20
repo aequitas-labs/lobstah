@@ -446,6 +446,7 @@ export const watchPresentationSchemaV2: PluginJsonSchema = {
     },
     items: { type: 'array', maxItems: 1000, items: item },
     surfaces: { type: 'array', uniqueItems: true, items: { enum: [...WATCH_SURFACES] } },
+    glyph,
     actions: {
       type: 'array',
       items: { ...action, properties: { ...(action.properties as Record<string, WatchValue>), arguments: object } },

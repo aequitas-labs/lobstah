@@ -38,6 +38,7 @@ export function createReviewWatchType(options: ReviewWatchSourceOptions = {}): R
         version: 2,
         source: GITHUB_SOURCE,
         surfaces: ['reviews'],
+        glyph: 'pull-request',
         items,
         title: `Review requests for ${snapshot.reference.identity}`,
         summary: `${records.length} recorded review requests`,

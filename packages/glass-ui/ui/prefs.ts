@@ -18,6 +18,7 @@ export function loadPrefs(): GlassPrefs {
     chain: false,
     noticeKind: '',
     trapGroup: 'repo',
+    watchOrder: 'source',
   };
   try {
     Object.assign(st, JSON.parse(localStorage.getItem('spyglass') || '{}'));
@@ -26,6 +27,13 @@ export function loadPrefs(): GlassPrefs {
   if (st.view !== 'table' && st.view !== 'cards') st.view = 'table';
   st.lobs = st.lobs !== false;
   if (st.trapGroup !== 'repo' && st.trapGroup !== 'harness' && st.trapGroup !== 'status') st.trapGroup = 'repo';
+  if (st.watchOrder !== 'source' && st.watchOrder !== 'timestamp') st.watchOrder = 'source';
+  if (st.watchOwner !== undefined && !['helm', 'dispatch', 'trap'].includes(st.watchOwner)) delete st.watchOwner;
+  if (
+    st.watchHealth !== undefined &&
+    !['healthy', 'not-checked', 'checking', 'retrying', 'held', 'stale', 'offline'].includes(st.watchHealth)
+  )
+    delete st.watchHealth;
   if (st.reviewSource !== undefined && (typeof st.reviewSource !== 'string' || !/^[a-z][a-z0-9.-]*$/.test(st.reviewSource)))
     delete st.reviewSource;
   return st;

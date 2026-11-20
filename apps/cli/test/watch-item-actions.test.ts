@@ -189,6 +189,13 @@ describe('the GitHub review source', () => {
     const snapshot = buildGlassSnapshot();
     expect(snapshot.reviews?.map((review) => review.key)).toEqual(['review:acme/web#7']);
     expect(snapshot.reviewItems?.map((entry) => [entry.source.name, entry.item.id, entry.item.lifecycle.phase])).toEqual([['GitHub', 'review:acme/web#7', 'active']]);
+    // Watches lists the source's own watch, owned by the home helm, from the same journal.
+    expect(snapshot.watchInventory?.find((row) => row.key === 'review-requests:maya')).toMatchObject({
+      source: { id: 'github', name: 'GitHub' },
+      owner: { kind: 'helm', name: 'home helm' },
+      glyph: 'pull-request',
+      derived: false,
+    });
     // The daemon's plain registry observes the watch too; without the projection it keeps the last items.
     new WatchRuntime(builtinWatchRegistry()).checkSync('review-requests:maya', { everySecs: 0 });
     expect(new WatchJournal().read('review-requests:maya')?.presentation.items?.map((item) => item.id)).toEqual(['review:acme/web#7']);

@@ -20,6 +20,7 @@ import { Notices } from './notices.js';
 import { PRs } from './prs.js';
 import { Reports } from './reports.js';
 import { Reviews } from './reviews.js';
+import { Watches } from './watches.js';
 import { Stats } from './stats.js';
 import { activeSessionGrants, SessionGrants } from './session-grants.js';
 import { Settings } from './settings.js';
@@ -97,6 +98,14 @@ export function App({ state }: { state: GlassState }) {
         html`<${SectionHead} title="Notices" count=${inp.notices.list.length} page />`,
         html`<${Notices} inp=${inp.notices} more=${more('notices')} />`,
       ];
+    if (t === 'watches') {
+      // Active counts real watches; derived views of local records are listed but not counted.
+      const active = (inp.watches.rows ?? []).filter((row) => !row.derived).length;
+      return [
+        html`<${SectionHead} title="Watches" page action=${inp.watches.rows && html`<span class="gchip dim watch-count">${active} active</span>`} />`,
+        html`<${Watches} inp=${inp.watches} />`,
+      ];
+    }
     if (t === 'stats')
       return [
         html`<${SectionHead} title="Stats" page />`,

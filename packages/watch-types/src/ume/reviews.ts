@@ -198,7 +198,17 @@ export class UmeReviewWatchType extends BaseWatchType<UmeReviewReference, UmeRev
           ...(request.episodes.length > 1 ? { detail: `${request.episodes.length} pending requests` } : {}),
         },
         ...(request.unavailable
-          ? [{ code: 'unavailable', label: 'unavailable', category: 'health' as const, meaning: 'failed' as const, detail: request.unavailable }]
+          ? [
+              {
+                code: 'unavailable',
+                label: 'unavailable',
+                category: 'health' as const,
+                meaning: 'failed' as const,
+                detail: request.unavailable,
+                // The source's health explanation lives with its watch.
+                target: { hash: '#watches' },
+              },
+            ]
           : []),
         ...(stale ? [stale] : []),
       ];
@@ -228,8 +238,8 @@ export class UmeReviewWatchType extends BaseWatchType<UmeReviewReference, UmeRev
           ...(reference ? [{ kind: 'revision' as const, value: reference }] : []),
         ],
         ...(episode ? { requestedAt: episode.since } : {}),
-        // An unavailable artifact loses its way out; the stale and unavailable chips say why.
-        ...(request.unavailable ? {} : { target: { href: request.url } }),
+        // An unavailable artifact loses its way out and points at its source's health instead.
+        target: request.unavailable ? { hash: '#watches' } : { href: request.url },
         actions: request.unavailable
           ? []
           : [{ id: 'open', label: 'Open in ume', placement: 'open', enabled: true, acknowledges: true, binding: { link: { href: request.url } } }],
@@ -240,6 +250,7 @@ export class UmeReviewWatchType extends BaseWatchType<UmeReviewReference, UmeRev
       version: 2,
       source: UME_SOURCE,
       surfaces: ['reviews'],
+      glyph: 'document',
       items,
       title: `Incoming reviews · ${state.projectName ?? project}`,
       summary: `${items.length} reviews requested`,

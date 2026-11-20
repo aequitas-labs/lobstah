@@ -105,7 +105,8 @@ import { answerPermissionsProposal, previewPermissionsProposal } from './permiss
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, redraftReviewRound } from '@lobstah/pick';
 import { muteReview, unmuteReview } from '@lobstah/core';
-import { refreshItemSources, watchSurfaceItems, watchSurfaceSources } from '@lobstah/core';
+import { refreshItemSources, watchInventory, watchSurfaceItems, watchSurfaceSources } from '@lobstah/core';
+import { watchPollSecs } from './watch-observation.js';
 import type { GlassReview } from '@lobstah/core';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { parseWatchItemAction, runWatchItemAction } from './watch-item-actions.js';
@@ -820,6 +821,12 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     reviews: queryCliWatch<GlassReview[]>('glass.reviews', {}, []),
     reviewItems: watchSurfaceItems('reviews'),
     reviewSources: watchSurfaceSources('reviews'),
+    watchInventory: watchInventory({
+      everySecs: watchPollSecs(),
+      daemonHeartbeat: executor?.heartbeat,
+      ownerName: (owner) =>
+        owner.kind === 'helm' ? `${displayGrounds(owner.grounds, cfg)} helm` : owner.kind === 'trap' ? names(owner.id) : `dispatch ${owner.id.slice(0, 4)}`,
+    }),
     reviewSetup: reviewSetupView(),
     sessionGrants: listGrants().grants.filter(g => g.mode === 'session').map(({ callIds: _ids, ...g }) => g),
     standingGrants: listGrants().grants.filter(g => g.mode !== 'session').map(({ callIds: _ids, ...g }) => g),

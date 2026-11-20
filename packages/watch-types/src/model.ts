@@ -1,5 +1,5 @@
 import type { WatchAttentionDisplay } from './presentation.js';
-import type { WatchItem, WatchPresentationVersion, WatchSourceBrand, WatchSurface } from './items.js';
+import type { WatchGlyph, WatchItem, WatchPresentationVersion, WatchSourceBrand, WatchSurface } from './items.js';
 /** JSON is the durable and cross-process boundary for every watch type. */
 export type WatchValue = null | boolean | number | string | WatchValue[] | { [key: string]: WatchValue };
 
@@ -175,6 +175,8 @@ export interface WatchPresentation {
   items?: WatchItem[];
   /** Version 2: the surfaces this source contributes to, even while it has no items (its health shows there). */
   surfaces?: WatchSurface[];
+  /** Version 2: the watch's own kind glyph on its Watches card (a PR, a document, a bell). */
+  glyph?: WatchGlyph;
   /** Local condition sources can omit a redundant watch row while retaining their card projection. */
   listing?: 'watch' | 'conditions';
   /** Source-owned relationships can suppress another standing condition without a hidden card. */
@@ -234,7 +236,10 @@ export interface WatchSnapshot<Reference = WatchValue, State = WatchValue, Curso
   actionReceipts?: WatchActionReceipt[];
   presentation: WatchPresentation;
   createdAt: string;
+  /** When the last check attempt began; stamped before observation, so it is not proof of success. */
   checkedAt?: string;
+  /** When an observation last completed without a failure. */
+  lastSuccessAt?: string;
   failure?: WatchFailure;
   failures: number;
   lease?: { token: string; until: number };

@@ -623,7 +623,7 @@ dispatch with its full brief, status log, inbox, and evidence, each trap
 with its lifecycle notices, message history, and catches, the notices
 tail, the merge view, and watches — with filters, a table/cards toggle,
 and the helm identified by name. Its tabs are On deck, Dispatches, Traps,
-PRs, Reviews, Reports, Grants, Todos, Notices, Stats, and Settings, a read-only view of the
+PRs, Reviews, Reports, Grants, Todos, Notices, Watches, Stats, and Settings, a read-only view of the
 effective config with its secrets masked. The Stats tab shows catches per day as a
 53-week heatmap, with today, this week, the total, and the top traps; it
 reads `stats.json` from `GET /data/stats` and sends nothing. The Reports tab lists every report, unacked first,
@@ -637,6 +637,16 @@ review to edit or send it there. Review and draft lobs, and the pet's review
 and draft bubbles, open this view too. Opening a draft leaves it pending;
 only an explicit action acknowledges it. The actions use the page-token-guarded
 `/requests` endpoint. Legacy `#review-…` links still scroll the Reviews tab.
+Each review card shows its source's logo (GitHub, ume or a plugin) before its
+details; hover, focus or tap the logo to see the source's name.
+The Watches tab, under More on a desktop and Menu on a phone, lists every
+active watch, held and closing ones included: its source, owner, last check,
+next check, health and latest error with its remedy. **Source** groups the
+watches under each source's full name and count; **Timestamp** lists them
+by latest check, newest first. The glass remembers the choice. The next check
+is the scheduler's estimate (due now, in 33s, checking, held, or daemon
+offline). Tap a card for its exact times, source version and watch ID. The tab
+is read-only: release or remove a watch with `lobstah watch`.
 Dispatch and trap cards open detail views with their current work first.
 A dispatch shows its PR and report cards, its Markdown brief and newest-first
 activity; a trap shows its current dispatch and recent catches as the same

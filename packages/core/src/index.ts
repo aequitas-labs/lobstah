@@ -147,3 +147,4 @@ export * from './review-glass.js';
 export * from './review-attention.js';
 export * from './review-items.js';
 export * from './watch-surfaces.js';
+export * from './watch-inventory.js';

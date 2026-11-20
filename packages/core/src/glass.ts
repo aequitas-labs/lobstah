@@ -658,6 +658,8 @@ export interface GlassSnapshot {
    * empty list stays empty) and falls back to `reviews` only when it is absent.
    */
   reviewItems?: import('./watch-surfaces.js').WatchSurfaceItem[];
+  /** Every non-retired watch with its schedule and health, for the Watches page; absent from older boats. */
+  watchInventory?: import('./watch-inventory.js').WatchInventoryRow[];
   /** Every review source and its health, so a stale or held source says so beside its own items. */
   reviewSources?: import('./watch-surfaces.js').WatchSurfaceSource[];
   sessionGrants?: import('./grants.js').Grant[];

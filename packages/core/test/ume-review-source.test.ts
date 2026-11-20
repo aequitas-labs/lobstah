@@ -213,7 +213,8 @@ describe('incoming ume reviews', () => {
     sync();
     check();
     expect(items()[0]).toMatchObject({ attention: 'error', actions: [], statuses: [{ code: 'approval-requested' }, { code: 'unavailable' }] });
-    expect(items()[0]!.target).toBeUndefined();
+    expect(items()[0]!.target).toEqual({ hash: '#watches' });
+    expect(items()[0]!.statuses[1]!.target).toEqual({ hash: '#watches' });
   });
 
   it('holds a project that is no longer configured and keeps its items for the page', () => {

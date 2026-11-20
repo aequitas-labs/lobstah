@@ -17,6 +17,8 @@ import type {
   GlassReview,
   WatchSurfaceItem,
   WatchSurfaceSource,
+  WatchInventoryRow,
+  WatchHealthState,
   GlassSnapshot,
   GlassStack,
   GlassTrap,
@@ -110,7 +112,15 @@ export interface GlassPrefs {
   reviewSections?: { waiting?: boolean; done?: boolean };
   /** The Reviews source filter: a source ID, or absent for every source. */
   reviewSource?: string;
+  /** How Watches lists watches: grouped by source, or one list by latest check. */
+  watchOrder?: WatchOrder;
+  /** Watches filters: an owner kind and a health state; absent shows all. */
+  watchOwner?: 'helm' | 'dispatch' | 'trap';
+  watchHealth?: WatchHealthState;
 }
+
+/** Watches order: Source groups by source, then latest check; Timestamp is one list by latest check. */
+export type WatchOrder = 'source' | 'timestamp';
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
 export interface ModalRef {
@@ -216,6 +226,7 @@ export const GLASS_TABS = [
   'grants',
   'todos',
   'notices',
+  'watches',
   'stats',
   'settings',
 ] as const;
@@ -674,6 +685,16 @@ export interface SectionInputs {
     expanded?: GlassPrefs['reviewSections'];
   };
   notices: { list: Notice[] };
+  watches: {
+    view: GlassPrefs['view'] | undefined;
+    order: WatchOrder;
+    owner?: GlassPrefs['watchOwner'];
+    health?: GlassPrefs['watchHealth'];
+    /** Rows after the filters, latest check first; absent when the boat sends no inventory. */
+    rows?: WatchInventoryRow[];
+    /** Every watch before the filters, for the count. */
+    total: number;
+  };
   foot: { version: string; repoUrl: string };
   modal: {
     modal: ModalRef | null;
@@ -796,6 +817,23 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       list: (d.notices || []).filter(
         (n) => matchesRepo(n.repo, st, true) && (!st.noticeKind || n.kind === st.noticeKind) && hasQuery(n.kind, n.text, n.repo),
       ),
+    },
+    watches: {
+      view: st.view,
+      order: st.watchOrder === 'timestamp' ? 'timestamp' : 'source',
+      ...(st.watchOwner ? { owner: st.watchOwner } : {}),
+      ...(st.watchHealth ? { health: st.watchHealth } : {}),
+      ...(d.watchInventory
+        ? {
+            rows: d.watchInventory.filter(
+              (row) =>
+                (!st.watchOwner || row.owner.kind === st.watchOwner) &&
+                (!st.watchHealth || row.health === st.watchHealth) &&
+                hasQuery(row.title, row.key, row.source.name, row.owner.name, row.owner.id, row.error?.message),
+            ),
+          }
+        : {}),
+      total: d.watchInventory?.length ?? 0,
     },
     foot: { version: d.version, repoUrl: d.repoUrl },
     // The settings modal re-renders when a preference it shows changes.
