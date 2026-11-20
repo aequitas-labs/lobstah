@@ -68,6 +68,24 @@ export function dispatchCard(x: GlassDispatchSummary) {
   />`;
 }
 
+/**
+ * The dispatch a conversation is about, at the top of the conversation: the
+ * same card with its last note, its PRs and a link to the dispatch.
+ */
+export function dispatchHeadCard(x: GlassDispatchSummary, prs: ReadonlyArray<{ url: string; number: number }>) {
+  const note = x.note?.split('\n').find((line) => line.trim());
+  return html`<${Card}
+    title=${x.title || x.id.slice(0, 8)}
+    titleAttr=${`${x.id.slice(0, 8)} · ${x.title}`}
+    state=${verbState(x.verb, x.verbAt, x.waiting?.on)}
+    context=${dispatchContext(x.repo, x.for || x.claimedBy, x.verbAt)}
+    now=${note}
+    nowTitle=${x.note}
+    cls="thread-dispatch"
+    actions=${html`${prs.map((pr) => html`<a href=${pr.url} target="_blank" rel="noopener">PR #${pr.number}</a>`)}<a href=${`#dispatch/${encodeURIComponent(x.id)}`}>Open dispatch</a>`}
+  />`;
+}
+
 export function Dispatches({ inp, more }: { inp: SectionInputs['dispatches']; more?: OlderControl }) {
   const list = inp.list;
   const older = more && html`<${ShowOlder} kind="dispatches" more=${more} />`;

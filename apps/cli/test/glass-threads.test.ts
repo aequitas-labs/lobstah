@@ -78,7 +78,7 @@ it('uses the shared message sheet with dispatch context', async () => {
   const g = await page(d, { hash: '#dispatch/' + id, post: () => ({ status: 503, body: { ok: false, reason: 'Retry' } }) });
   const control = g.$$('button').find(el => el.textContent === 'Message the helm') as HTMLElement;
   expect(control).toBeDefined(); control.click(); await g.settle();
-  expect(g.$('[role="dialog"]')?.textContent).toContain('About ' + id.slice(0, 8));
+  expect(g.$('[role="dialog"] p.dim')?.textContent).toMatch(/^About Brief for /);
   await type(g, 'Consider this change'); await click(g, '.dsend');
   expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'thread-start', payload: { about: id, text: 'Consider this change' } });
 });
@@ -234,3 +234,48 @@ it('reads as a chat: the person on the right, the helm beside its wheel, system 
   expect(notes.compareDocumentPosition(timeline) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(timeline.compareDocumentPosition(composer) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
+
+it('opens Message the helm on a dispatch page with the cursor in the message, over the dispatch', async () => {
+  const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [];
+  const id = d.dispatches[0]!.id;
+  const g = await page(d, { hash: '#dispatch/' + id });
+  (g.$$('button').find((el) => el.textContent === 'Message the helm') as HTMLElement).click();
+  await g.settle(); await new Promise((r) => setTimeout(r, 5)); await g.settle();
+  expect(g.$('.dialog-scrim .message-dialog')).not.toBeNull();
+  expect(g.window.document.activeElement).toBe(g.$('.message-dialog textarea[aria-label="Your message"]'));
+  expect(g.window.location.hash).toBe('#dispatch/' + id);
+});
+
+it("opens the dispatch's unresolved thread instead of a new message, ready to type in", async () => {
+  const d = everyAttentionFleet(); d.focusToken = 'tok';
+  const id = d.dispatches[0]!.id;
+  d.threads = [{ ...summary(), about: id, title: d.dispatches[0]!.title, cards: [] }];
+  const g = await page(d, { hash: '#dispatch/' + id });
+  (g.$$('button').find((el) => el.textContent === 'Message the helm') as HTMLElement).click();
+  await g.settle(); await new Promise((r) => setTimeout(r, 5)); await g.settle();
+  expect(g.window.location.hash).toBe(`#thread/${ID}`);
+  expect(g.$('.message-dialog')).toBeNull();
+  expect(g.window.document.activeElement).toBe(g.$('.tsheet textarea[aria-label="Add to this thread"]'));
+});
+
+it('heads a thread about a dispatch with its card: title, repo, trap, state, last note, PRs and a link', async () => {
+  const d = everyAttentionFleet(); d.focusToken = 'tok';
+  const dispatch = d.dispatches[0]!, pr = d.prs[0]!;
+  dispatch.title = 'Deflake the deck test'; dispatch.note = 'Reproduced the race\nsecond line'; dispatch.repo = 'web'; dispatch.for = 'wt:tiny-seal';
+  dispatch.prList = [{ url: pr.url, number: pr.number }];
+  d.threads = [{ ...summary(), about: dispatch.id, title: 'Deflake the deck test' }];
+  const detail = { ...view(), about: dispatch.id, title: 'Deflake the deck test' };
+  const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const card = g.$('.thread-view .thread-about .thread-dispatch')!;
+  expect(card).not.toBeNull();
+  expect(card.compareDocumentPosition(g.$('.thread-timeline')!) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(card.querySelector('.gtitle')?.textContent).toBe('Deflake the deck test');
+  expect(card.querySelector('.gcontext')?.textContent).toContain('web');
+  expect(card.querySelector('.gcontext')?.textContent).toContain('tiny-seal');
+  expect(card.querySelector('.gtop')?.textContent).not.toBe('');
+  expect(card.querySelector('.gnow')?.textContent).toBe('Reproduced the race');
+  expect(card.querySelector(`a[href="${pr.url}"]`)?.textContent).toBe(`PR #${pr.number}`);
+  expect(card.querySelector(`a[href="#dispatch/${dispatch.id}"]`)?.textContent).toBe('Open dispatch');
+  expect(g.$('.tsheet .rbartitle')?.textContent).toBe('Deflake the deck test');
+});
+

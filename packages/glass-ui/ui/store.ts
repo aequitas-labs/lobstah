@@ -25,6 +25,8 @@ export interface RunView {
 
 export interface GlassState {
   messageSheet?: { grounds?: string; about?: string };
+  /** The conversation whose composer takes focus once it shows: Message the helm on a dispatch with a thread already. */
+  focusComposer?: string;
 
   /** A closed decision opened by its deep link, outside the live queue. */
   archivedDecision?: import('@lobstah/core').GlassDecision;

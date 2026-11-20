@@ -53,6 +53,8 @@ export interface ThreadSummary {
   state: 'open' | 'resolved';
   updatedAt: string;
   roundCount: number;
+  /** The dispatch a message from its page is about. */
+  about?: string;
   openLine?: string;
   cards: string[];
   waitingForHelm: boolean;
@@ -75,6 +77,12 @@ export const THREAD_ROUND_ENTRIES_MAX = 100;
 
 export class ThreadError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
+}
+
+/** A thread about a dispatch is named for the dispatch, never its id. */
+export function dispatchThreadTitle(brief: string | undefined): string | undefined {
+  const line = (brief?.split(/\r?\n/).find((l) => l.trim()) ?? '').trim().replace(/^#{1,6}\s+/, '').trim();
+  return line ? line.slice(0, 200) : undefined;
 }
 
 export function threadWords(value: unknown, label = 'message', max = THREAD_TEXT_MAX): string {

@@ -1,6 +1,6 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { html } from '../html.js';
-import { getState } from '../store.js';
+import { getState, setState } from '../store.js';
 import { can } from '../backend.js';
 import { closeMessage, openMessage, sendMessage } from '../thread-actions.js';
 import { Dialog } from './dialog.js';
@@ -17,8 +17,14 @@ export function MessageButton() {
 }
 export function ThreadComposer({ id }: { id: string }) {
   const key = `thread:${id}`,
-    state = getState();
-  return html`<${Composer} allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Add to this thread" onSend=${() => sendMessage(key, { id })} done="Message sent" />`;
+    state = getState(),
+    focus = state.focusComposer === id;
+  useEffect(() => {
+    if (!focus) return;
+    const timer = setTimeout(() => setState({ focusComposer: undefined }), 0);
+    return () => clearTimeout(timer);
+  }, [focus]);
+  return html`<${Composer} autoFocus=${focus} allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Add to this thread" onSend=${() => sendMessage(key, { id })} done="Message sent" />`;
 }
 export function MessageSheet() {
   const state = getState(),
@@ -29,9 +35,9 @@ export function MessageSheet() {
   const [selected, choose] = useState(context?.grounds ?? grounds[0] ?? 'home');
   if (!context) return null;
   const key = `message:${selected}:${context.about ?? ''}`;
-  return html`<${Dialog} title="Message the helm" icon=${HelmIcon} onClose=${closeMessage}>
+  return html`<${Dialog} title="Message the helm" icon=${HelmIcon} cls="message-dialog" onClose=${closeMessage}>
     ${!context.about && grounds.length > 1 && html`<label>Helm <select aria-label="Helm" value=${selected} onChange=${(e: Event) => choose((e.currentTarget as HTMLSelectElement).value)}>${grounds.map((g) => html`<option key=${g}>${g}</option>`)}</select></label>`}
-    ${context.about && html`<p class="dim">About ${context.about.slice(0, 8)}</p>`}
-    <${Composer} allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Your message" onSend=${() => sendMessage(key, context.about ? { about: context.about } : { grounds: selected })} done="Message sent" />
+    ${context.about && html`<p class="dim">About ${state.snapshot?.dispatches.find((d) => d.id === context.about)?.title || 'this dispatch'}</p>`}
+    <${Composer} autoFocus allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Your message" onSend=${() => sendMessage(key, context.about ? { about: context.about } : { grounds: selected })} done="Message sent" />
   <//>`;
 }

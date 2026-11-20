@@ -7,7 +7,9 @@ import { answerFileType, ANSWER_FILES_MAX, readDecision, readDecisionAnswer, rea
 import type { DecisionUpload } from './decisions.js';
 import type { Attachment } from './types.js';
 import { postNotice } from './notices.js';
-import { responseState, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
+import { storedDescriptor } from './queue.js';
+import { laneOf } from './worktrees.js';
+import { responseState, dispatchThreadTitle, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, THREAD_PERSON, classifyThread, THREAD_GROUNDS, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from './thread-model.js';
 import type { HelmThread, ThreadEntry, ThreadSummary, ThreadView } from './thread-model.js';
 
 export const threadsRoot = () => path.join(lobstahHome(), 'threads');
@@ -87,11 +89,17 @@ function uploads(id: string, grounds: string, files: readonly DecisionUpload[], 
     return { name, path: destination, bytes: file.data.length, type: file.type };
   });
 }
+function aboutTitle(about: string | undefined): string | undefined {
+  if (!about) return undefined;
+  const id = about.replace(/^(work|chore):/, ''), lane = laneOf(id);
+  try { return lane ? dispatchThreadTitle(storedDescriptor(id, lane)?.brief) : undefined; }
+  catch { return undefined; }
+}
 export function startThread(input: { grounds: string; text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; about?: string; via?: 'glass' | 'chat'; title?: string; now?: Date }): HelmThread {
   const text = message(input.text, input.uploads ?? []), id = randomUUID(), at = (input.now ?? new Date()).toISOString();
   groundDir(input.grounds);
   if (input.about !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input.about)) throw new ThreadError('Choose a valid dispatch');
-  const title = input.title ? threadWords(input.title, 'a title', 200) : (text.split('\n')[0] || input.uploads?.[0]?.name || 'Attachment').slice(0, 200);
+  const title = input.title ? threadWords(input.title, 'a title', 200) : (aboutTitle(input.about) ?? (text.split('\n')[0] || input.uploads?.[0]?.name || 'Attachment').slice(0, 200));
   const attachments = uploads(id, input.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024);
   const item: HelmThread = { id, grounds: input.grounds, title, text, attachments,
     kind: input.via === 'chat' ? 'thread' : 'untriaged', state: 'open', notes: { decided: [], open: [] },
@@ -181,7 +189,7 @@ function newestPersonAt(item: HelmThread): string {
 export function threadSummaries(grounds?: string, now = Date.now()): ThreadSummary[] {
   return listThreads(grounds).filter((item) => item.state === 'open' || responseState(item).unreadResponse || now - Date.parse(item.updatedAt) < 86400_000).map((item) => ({
     ...responseState(item), id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, state: item.state, updatedAt: item.updatedAt,
-    roundCount: item.rounds.length, ...(item.notes.open[0] ? { openLine: item.notes.open[0] } : {}),
+    roundCount: item.rounds.length, ...(item.about ? { about: item.about } : {}), ...(item.notes.open[0] ? { openLine: item.notes.open[0] } : {}),
     cards: threadView(item).cards.filter((card) => card.standing).map((card) => card.key),
     waitingForHelm: item.state === 'open' && (!item.lastHelmAt || newestPersonAt(item) > item.lastHelmAt), ...(item.outcome ? { outcome: item.outcome } : {}) }));
 }

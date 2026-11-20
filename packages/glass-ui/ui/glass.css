@@ -4447,6 +4447,18 @@ footer .glass-brand {
   align-items: baseline;
   margin: 3px 0;
 }
+/* Message the helm opens over the dispatch page it was chosen on. */
+.dialog-scrim:has(.message-dialog) {
+  z-index: calc(var(--layer-modal) + 1);
+}
+.thread-about {
+  margin: 12px 0;
+}
+.thread-dispatch .gactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
 .thread-note-mark {
   flex: 0 0 1ch;
   font-weight: 600;

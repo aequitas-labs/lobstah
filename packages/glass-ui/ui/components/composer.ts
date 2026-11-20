@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'preact/hooks';
 import { html } from '../html.js';
 import { addFiles, pasteImages, removeFile, setDraft } from '../actions.js';
 import { getState } from '../store.js';
@@ -24,6 +25,7 @@ export function Composer({
   hideError = false,
   done = 'Answer sent',
   allowFiles = can('answer-files'),
+  autoFocus = false,
 }: {
   draftKey: string;
   draft?: DecisionDraft;
@@ -35,7 +37,15 @@ export function Composer({
   hideError?: boolean;
   done?: string;
   allowFiles?: boolean;
+  /** Put the cursor in the text box once it shows, after any dialog takes focus for itself. */
+  autoFocus?: boolean;
 }) {
+  const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    const timer = setTimeout(() => area.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [autoFocus]);
   const text = draft?.text ?? '',
     files = draft?.files ?? [],
     sending = !!draft?.sending,
@@ -43,6 +53,7 @@ export function Composer({
   const error = hideError ? undefined : draft?.error;
   return [
     html`<div class="dcompose"><div class="danswer-wrap">${textKey && html`<kbd class="dkey dkey-text" aria-hidden="true">${textKey}</kbd>`}<textarea
+      ref=${area}
       class="danswer"
       rows="2"
       aria-keyshortcuts=${textKey}

@@ -13,7 +13,7 @@ import { LinkedText } from './links.js';
 import { Age, ImageThumb } from './common.js';
 import { DecisionRow } from './decision-row.js';
 import { VerbIcon } from './run-status.js';
-import { dispatchCard } from './dispatches.js';
+import { dispatchCard, dispatchHeadCard } from './dispatches.js';
 import { ReportEmbed } from './decision-embeds.js';
 import { prCard } from './prs.js';
 import { HelmIcon } from './icons.js';
@@ -122,7 +122,8 @@ function ThreadLink({ kind, reference: ref, text }: { kind: string; reference: s
     ? html`<div class="thread-links cards">${prCard(pr)}</div>`
     : html`<p><a href=${safeHref(ref)} target="_blank" rel="noopener">${LinkedText(text)}</a></p>`;
 }
-function ThreadDispatch({ id, text }: { id: string; text: string }) {
+/** The dispatch a conversation started on: its card heads the conversation, loaded when the snapshot no longer lists it. */
+function useDispatch(id: string) {
   const key = id.replace(/^(work|chore):/, '');
   const cached = viewOf(getState())?.dispatches.find((d) => d.id === key);
   const [loaded, setLoaded] = useState<typeof cached>();
@@ -139,7 +140,21 @@ function ThreadDispatch({ id, text }: { id: string; text: string }) {
       live = false;
     };
   }, [id, !!cached]);
-  const dispatch = cached ?? loaded;
+  return cached ?? loaded;
+}
+function AboutDispatch({ id }: { id: string }) {
+  const dispatch = useDispatch(id);
+  if (!dispatch) return html`<p class="thread-about"><a href=${`#dispatch/${encodeURIComponent(id)}`}>Open dispatch</a></p>`;
+  const snapshot = viewOf(getState());
+  const prs = dispatch.prList?.length
+    ? dispatch.prList
+    : dispatch.prHead
+      ? [dispatch.prHead]
+      : (snapshot?.prs ?? []).filter((pr) => pr.dispatchIds.includes(dispatch.id));
+  return html`<div class="thread-about cards">${dispatchHeadCard(dispatch, prs)}</div>`;
+}
+function ThreadDispatch({ id, text }: { id: string; text: string }) {
+  const dispatch = useDispatch(id);
   return dispatch
     ? html`<div class="thread-links cards">${dispatchCard(dispatch)}</div>`
     : html`<p><a href=${`#dispatch/${encodeURIComponent(id)}`}>${LinkedText(text)}</a></p>`;
@@ -193,7 +208,7 @@ export function ThreadSheet({ id }: { id: string }) {
 }
 function Conversation({ view }: { view: ThreadView }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
-    ${Notes(view)}
+    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
     <div class="thread-timeline">${view.rounds.map((round, i) => html`<${Round} key=${round.at} round=${round} view=${view} number=${i + 1} />`)}</div>
     ${outcome(view)}<${SeenMark} view=${view} />

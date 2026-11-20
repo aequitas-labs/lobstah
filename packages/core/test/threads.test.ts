@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ensureLayout, startThread, postThread, sayThread, markThreadResponsesSeen, threadSubscriberNotices, readThread, listThreads, triageThread, noteThread, resolveThread, reopenThread, threadView, threadSummaries, remindThreads, expireIdleThreads, resolveThreadFile, askDecision, answerDecision, readDecisionAnswer, listRequests, listNotices, THREAD_IDLE_MS } from '../src/index.js';
+import { enqueue, claimNext } from '../src/queue.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 let home: string;
 const at = new Date('2026-11-19T10:00:00Z');
@@ -185,3 +186,15 @@ describe('chat with the helm', () => {
     expect(() => sayThread(item.id, { text: 'Late' })).toThrow('Reopen');
   });
 });
+
+describe('threads about a dispatch', () => {
+  it("takes the dispatch's title, never its id, and carries the dispatch in its summary", () => {
+    enqueue({ id: 'a89ad2ba-1111-4222-8333-444455556666', repo: 'web', brief: '# Deflake the deck test\n\nIt fails once a day.' });
+    claimNext('work');
+    const item = startThread({ grounds: 'home', text: 'Is this still flaky?', about: 'a89ad2ba-1111-4222-8333-444455556666', now: at });
+    expect(item.title).toBe('Deflake the deck test');
+    expect(threadSummaries('home')[0]).toMatchObject({ about: 'a89ad2ba-1111-4222-8333-444455556666', title: 'Deflake the deck test' });
+    expect(startThread({ grounds: 'home', text: 'Unknown dispatch', about: 'gone-dispatch', now: at }).title).toBe('Unknown dispatch');
+  });
+});
+

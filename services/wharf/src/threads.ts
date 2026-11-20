@@ -1,5 +1,5 @@
 import type { HelmThread, ThreadSummary, ThreadView } from '../../../packages/core/src/thread-model.js';
-import { responseState, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, classifyThread, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from '../../../packages/core/src/thread-model.js';
+import { responseState, dispatchThreadTitle, recordThreadResponse, sayInThread, appendThreadEntry, personWords, acknowledgeThreadResponse, pendingThreadNotice, classifyThread, THREAD_ID, THREAD_IDLE_MS, THREAD_MESSAGES_MAX, ThreadError, threadOutcome, threadWords } from '../../../packages/core/src/thread-model.js';
 import { messageFileType } from '../../../packages/core/src/message-files.js';
 import type { ThreadAttachment as Attachment } from '../../../packages/core/src/thread-model.js';
 import type { WharfDocument } from '../../../packages/core/src/backend-model.js';
@@ -43,10 +43,16 @@ export class Threads {
     });
     return { ...item, ...responseState(item, this.hooks.person()), cards };
   }
+  /** A dispatch's title from its brief, for a thread started on its page. */
+  private dispatchTitle(id: string | undefined): string | undefined {
+    if (!id) return undefined;
+    const row = this.sql.exec<{data: string}>('SELECT data FROM dispatches WHERE id=?', id.replace(/^(work|chore):/, '')).toArray()[0];
+    try { return row ? dispatchThreadTitle((JSON.parse(row.data) as { brief?: string }).brief) : undefined; } catch { return undefined; }
+  }
   private personAt(item: HelmThread): string { return this.view(item).cards.reduce((at, c) => c.answer && c.answer.answeredAt > at ? c.answer.answeredAt : at, item.lastPersonAt); }
   summaries(now: number): ThreadSummary[] {
     return this.list().filter(t => t.state === 'open' || responseState(t, this.hooks.person()).unreadResponse || now - Date.parse(t.updatedAt) < 86400_000).map(t => ({ ...responseState(t, this.hooks.person()), id: t.id, grounds: t.grounds, title: t.title, kind: t.kind, state: t.state, updatedAt: t.updatedAt, roundCount: t.rounds.length,
-      cards: this.view(t).cards.filter(c => c.standing).map(c => c.key), waitingForHelm: t.state === 'open' && (!t.lastHelmAt || this.personAt(t) > t.lastHelmAt), ...(t.notes.open[0] ? { openLine: t.notes.open[0] } : {}), ...(t.outcome ? { outcome: t.outcome } : {}) }));
+      ...(t.about ? { about: t.about } : {}), cards: this.view(t).cards.filter(c => c.standing).map(c => c.key), waitingForHelm: t.state === 'open' && (!t.lastHelmAt || this.personAt(t) > t.lastHelmAt), ...(t.notes.open[0] ? { openLine: t.notes.open[0] } : {}), ...(t.outcome ? { outcome: t.outcome } : {}) }));
   }
   checkCard(id: unknown, grounds?: string): HelmThread {
     const item = this.need(id); this.open(item); requireThat(!grounds || grounds === item.grounds, 400, 'Choose a conversation on these grounds'); return item;
@@ -102,9 +108,10 @@ export class Threads {
       const id = b.id === undefined ? crypto.randomUUID() : String(b.id); requireThat(THREAD_ID.test(id) && !this.read(id), 409, 'Choose a new conversation');
       const attachments = this.files(id, b.files ?? []), words = (b.text === undefined || b.text === '') && attachments.length ? '' : threadWords(b.text);
       const at = new Date(now).toISOString(), grounds = identifier(b.grounds ?? 'home');
-      const item: HelmThread = { id, grounds, kind: b.via === 'chat' ? 'thread' : 'untriaged', title: b.title === undefined ? (words.split('\n')[0] || attachments[0]!.name).slice(0, 200) : threadWords(b.title, 'a title', 200), text: words, attachments,
+      const about = b.about === undefined ? undefined : identifier(b.about);
+      const item: HelmThread = { id, grounds, kind: b.via === 'chat' ? 'thread' : 'untriaged', title: b.title === undefined ? (this.dispatchTitle(about) ?? (words.split('\n')[0] || attachments[0]!.name).slice(0, 200)) : threadWords(b.title, 'a title', 200), text: words, attachments,
         state: 'open', notes: { decided: [], open: [] }, rounds: [{ at, entries: [{ by: 'person', via: b.via === 'chat' ? 'chat' : 'glass', text: words, attachments, at }] }], createdAt: at, updatedAt: at, lastPersonAt: at,
-        ...(b.about === undefined ? {} : { about: identifier(b.about) }) };
+        ...(about === undefined ? {} : { about }) };
       this.put(item); if (b.via !== 'chat') this.notify(item, now); return ok(this.view(item), 201);
     }
     const item = this.need(parts[1]), at = this.at(item, now);

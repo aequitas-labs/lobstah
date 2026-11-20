@@ -92,6 +92,14 @@ it('lets the helm write in the conversation with an attachment, marking it unrea
   const events = await (await call('events')).json<{events: Array<{kind:string;thread?:{text:string}}>}>();
   expect(events.events.filter((e) => e.kind === 'thread').at(-1)?.thread?.text).toBe('The deck');
 });
+it("names a thread started on a dispatch's page after the dispatch, not its id", async () => {
+  await call('helm/take', { session: 'helm', grounds: 'harbor' });
+  expect((await call('dispatches', { id: 'a89ad2ba', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Deflake the deck test\n\nIt fails once a day.' })).status).toBe(200);
+  const response = await call('threads', { id: ID, grounds: 'harbor', text: 'Still flaky?', about: 'a89ad2ba' });
+  expect(response.status, await response.clone().text()).toBe(201);
+  expect(await response.json()).toMatchObject({ title: 'Deflake the deck test', about: 'a89ad2ba' });
+  expect((await (await call('threads')).json<ThreadSummary[]>())[0]).toMatchObject({ about: 'a89ad2ba', title: 'Deflake the deck test' });
+});
 it('writes no rows on glass polls, list reads or detail reads, even when a discussion is due to expire', async () => {
   await create(); await call('helm/take',{session:'helm'}); await call(`threads/${ID}/triage`,{kind:'thread'});
   await sql("UPDATE helm_threads SET data=json_set(data,'$.lastPersonAt','2000-01-01T00:00:00.000Z') WHERE id=?", ID);
