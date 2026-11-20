@@ -98,6 +98,7 @@ import {
 } from '@lobstah/core';
 import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
 import { ackWalkingItem } from './attention-ack.js';
+import { compareByLastUpdate, dispatchUpdateTimes, lastRealUpdateMs } from './dispatch-order.js';
 import type { WalkingAck } from './attention-ack.js';
 import { reportAck, viewReport } from './report-file.js';
 import { glassDecisions } from './decisions.js';
@@ -329,6 +330,7 @@ interface DispatchOnDisk {
   lane: Lane;
   bucket: 'queued' | 'active' | 'done';
   d: Descriptor;
+  /** Its record's mtime: the order's fallback when no real update is known (dispatch-order.ts). */
   sort: number;
 }
 
@@ -424,7 +426,8 @@ function dispatchRow(r: DispatchOnDisk, hold: ReturnType<typeof readHold>, stale
     transcript: claim
       ? transcriptPath(claim.harness, claim.worktree, claim.sessionId)
       : transcriptPath(evidence.harness, evidence.sessionId ? dispatchWorktree(id, r.lane).path : undefined, evidence.sessionId),
-    sort: r.sort,
+    // The last real update, never the directory's mtime: activity and liveness writes bump that every tick.
+    sort: lastRealUpdateMs(dispatchUpdateTimes(id, r.lane, r.bucket, log), r.sort),
   };
 }
 
@@ -433,7 +436,7 @@ function dispatchRows(): Array<Omit<GlassDispatch, 'prBadge' | 'prGate'>> {
   const staleSecs = wedgeSecs();
   return dispatchesOnDisk()
     .map((r) => dispatchRow(r, hold, staleSecs))
-    .sort((a, b) => b.sort - a.sort);
+    .sort(compareByLastUpdate);
 }
 
 /**
