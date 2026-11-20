@@ -32,7 +32,7 @@ export interface ClaimReceipt {
   dispatch: DispatchInput; epoch?: number; token?: string; leaseUntil?: string;
 }
 export interface BackendMessage { id: string; text: string; received: boolean }
-export interface BackendEvent { cursor: string; kind: string; dispatchId?: string; at: string; note?: string; boatName?: string }
+export interface BackendEvent { thread?: { id: string; grounds: string; kind: import('./thread-model.js').ThreadKind; title: string; text: string }; threadId?: string; cursor: string; kind: string; dispatchId?: string; at: string; note?: string; boatName?: string }
 export interface EventBatch { events: BackendEvent[]; cursor: string }
 /** Hosted glass records contain IDs and uploaded file metadata, never local paths. */
 export interface WharfFile { id: string; name: string; size: number }
@@ -60,6 +60,7 @@ export interface WharfDocumentInput {
   /** kind review only. */
   review?: WharfReviewMeta;
   references?: DecisionReference[];
+  thread?: string;
 }
 export interface WharfDocument extends WharfDocumentInput {
   at: string; author: string; published: boolean; withdrawn?: boolean;

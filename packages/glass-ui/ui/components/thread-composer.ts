@@ -18,7 +18,7 @@ export function FishButton() {
 export function ThreadComposer({ id }: { id: string }) {
   const key = `thread:${id}`,
     state = getState();
-  return html`<${Composer} draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Your message" onSend=${() => sendMessage(key, { id })} done="Message sent" />`;
+  return html`<${Composer} allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Your message" onSend=${() => sendMessage(key, { id })} done="Message sent" />`;
 }
 export function MessageSheet() {
   const state = getState(),
@@ -32,6 +32,6 @@ export function MessageSheet() {
   return html`<${Dialog} title="Message the helm" icon=${DispatchIcon} onClose=${closeMessage}>
     ${!context.about && grounds.length > 1 && html`<label>Helm <select aria-label="Helm" value=${selected} onChange=${(e: Event) => choose((e.currentTarget as HTMLSelectElement).value)}>${grounds.map((g) => html`<option key=${g}>${g}</option>`)}</select></label>`}
     ${context.about && html`<p class="dim">About ${context.about.slice(0, 8)}</p>`}
-    <${Composer} draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Your message" onSend=${() => sendMessage(key, context.about ? { about: context.about } : { grounds: selected })} done="Message sent" />
+    <${Composer} allowFiles draftKey=${key} draft=${state.drafts[key]} accept=${state.snapshot?.answerLimits?.extensions.join(',') ?? ''} label="Your message" onSend=${() => sendMessage(key, context.about ? { about: context.about } : { grounds: selected })} done="Message sent" />
   <//>`;
 }

@@ -1,3 +1,5 @@
+import { threadSchema } from './threads.js';
+import type { ThreadSummary } from '../../../packages/core/src/thread-model.js';
 import { WHARF_REVIEW_REQUEST_KINDS, validDecisionReferences } from '../../../packages/core/src/backend-model.js';
 import type { WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
 import { LEASE_MS, identifier, object, repoIdentity, requireThat, text, tmuxPane } from './protocol.js';
@@ -11,6 +13,7 @@ import type { SlackMessageIn } from './slack-ingress.js';
 export const WORK_REQUEST_MS = 7 * 86400_000;
 
 export const glassSchema = `
+  ${threadSchema}
   CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS human_requests (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS worker_details (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -19,9 +22,9 @@ export const glassSchema = `
   ${slackRoutingSchema}
   ${slackSchema}
 `;
-export const glassTables = ['documents', 'human_requests', 'worker_details', 'dispatch_acks', 'slack_ground_requests', ...cardTables, ...slackTables];
+export const glassTables = ['helm_threads', 'documents', 'human_requests', 'worker_details', 'dispatch_acks', 'slack_ground_requests', ...cardTables, ...slackTables];
 type Result = { status: number; value: unknown };
-type Hooks = { helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
+type Hooks = { threadGrounds: () => string[]; messageLimits: () => unknown; threads: (now: number) => ThreadSummary[]; threadCheck: (id: unknown, grounds?: string) => import('../../../packages/core/src/thread-model.js').HelmThread; threadLink: (id: string, key: string, now: number) => void; helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
 export class GlassState {
   constructor(private sql: SqlStorage, private hooks: Hooks) {}
@@ -217,7 +220,7 @@ export class GlassState {
     const parts = c.path.split('/'), b = c.method === 'GET' ? {} : object(c.body);
     const ok = (value: unknown = {}) => ({ status: 200, value });
     if (c.path === 'workers' && c.method === 'GET') return ok(this.workers());
-    if (c.path === 'glass' && c.method === 'GET') return ok({ boats: this.boats(), workers: this.workers(), documents: this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn),
+    if (c.path === 'glass' && c.method === 'GET') return ok({ threadGrounds: this.hooks.threadGrounds(), messageLimits: this.hooks.messageLimits(), threads: this.hooks.threads(now), boats: this.boats(), workers: this.workers(), documents: this.list<WharfDocument>('documents').filter((d) => d.published && !d.withdrawn),
       requests: this.list<WharfHumanRequest>('human_requests').map((r) => ({ ...r, waitingForHelm: r.state === 'queued' && !this.hooks.helmLive(now) })), helmLive: this.hooks.helmLive(now) });
     if (parts[0] === 'dispatches' && parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
       return ok(this.ackDispatch(identifier(parts[1]), b.at, this.acker(actor), now));
@@ -239,6 +242,10 @@ export class GlassState {
           d.references = b.references.map(({ kind, key }) => ({ kind, key }));
         }
         if (b.grounds !== undefined) d.grounds = identifier(b.grounds);
+        if (b.thread !== undefined) {
+          requireThat(d.kind === 'decision', 400, 'Only decisions belong to a conversation');
+          const item = this.hooks.threadCheck(b.thread, d.grounds); d.thread = item.id; d.grounds = item.grounds;
+        }
         if (d.kind === 'review') d.review = this.reviewMeta(b.review);
         if (b.dispatch !== undefined) {
           d.dispatch = identifier(b.dispatch);
@@ -268,7 +275,7 @@ export class GlassState {
           previous.withdrawn = true; this.put('documents', previous.id, previous);
         }
         // A review raises no event: every event wakes a helm's wait, and a review is the person's queue, not the fleet's.
-        d.published = true; this.put('documents', d.id, d); if (d.kind !== 'review') this.hooks.event(d.kind, d.dispatch, d.id); return ok(d);
+        d.published = true; this.put('documents', d.id, d); if (d.thread) this.hooks.threadLink(d.thread, d.id, now); if (d.kind !== 'review') this.hooks.event(d.kind, d.dispatch, d.id); return ok(d);
       }
       if (parts.length === 3 && parts[2] === 'withdraw' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(d.kind === 'decision' && !d.answer && !d.withdrawn, 409, 'no standing decision to withdraw');

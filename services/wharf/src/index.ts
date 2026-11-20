@@ -50,7 +50,7 @@ export default {
       const route = segments.slice(3).join('/');
       if (route === 'boats' && request.method === 'POST') throw new ApiError(404, 'boats enroll through approved login only');
       // Uploads, a mirror boat's snapshot and its answers carry raw bytes, read where they are stored.
-      const upload = /^(dispatches|documents)\/[A-Za-z0-9_-]+\/files$/.test(route) && request.method === 'POST' || mirrorRawBody(route, request.method);
+      const upload = /^(dispatches|documents|threads)\/[A-Za-z0-9_-]+\/files$/.test(route) && request.method === 'POST' || mirrorRawBody(route, request.method);
       if (request.method !== 'GET' && !upload) {
         const bytes = await boundedBody(request);
         try { body = bytes.length ? JSON.parse(new TextDecoder().decode(bytes)) : {}; } catch { throw new ApiError(400, 'invalid JSON'); }

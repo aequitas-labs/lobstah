@@ -14,7 +14,7 @@ export async function accountResponse(request: Request, env: Env, c: Command): P
     return stub.fetch('https://internal/wake', { headers: { Upgrade: request.headers.get('Upgrade') ?? '', 'Sec-WebSocket-Protocol': request.headers.get('Sec-WebSocket-Protocol') ?? '', 'X-Wharf-Command': JSON.stringify(c) } });
   }
   if (c.path === 'mirror' || c.path.startsWith('mirror/')) return mirrorResponse(request, env, c);
-  const upload = /^(dispatches|documents)\/[A-Za-z0-9_-]+\/files$/.test(c.path) && c.method === 'POST';
+  const upload = /^(dispatches|documents|threads)\/[A-Za-z0-9_-]+\/files$/.test(c.path) && c.method === 'POST';
   const deleting = !c.path && c.method === 'DELETE';
   let serialized: string;
   if (upload) {
@@ -25,10 +25,10 @@ export async function accountResponse(request: Request, env: Env, c: Command): P
   const result = object(JSON.parse(serialized));
   if (typeof result.status !== 'number') throw new ApiError(503, 'invalid state response');
   if (deleting && result.status === 200) await deletePersonData(env, c.account, c.token, c.key!);
-  if (/^(dispatches|documents)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(c.path) && c.method === 'GET' && result.status === 200) {
+  if (/^(dispatches|documents|threads)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(c.path) && c.method === 'GET' && result.status === 200) {
     const file = object(result.value); const stored = await env.FILES.get(`${c.account}/${identifier(file.id)}`);
     if (!stored) throw new ApiError(404, 'file not found');
-    return new Response(stored.body, { headers: { 'Content-Type': 'application/octet-stream',
+    return new Response(stored.body, { headers: { 'Content-Type': c.path.startsWith('threads/') && typeof file.type === 'string' ? file.type : 'application/octet-stream',
       'Content-Disposition': 'attachment', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
       'Content-Security-Policy': "default-src 'none'; sandbox" } });
   }

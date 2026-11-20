@@ -1,4 +1,6 @@
-import type { Attachment } from './types.js';
+/** Portable file metadata: a local path or a wharf file id, never file bytes. */
+export interface ThreadAttachment { name: string; path: string; bytes: number; type: string }
+type Attachment = ThreadAttachment;
 
 export type ThreadKind = 'untriaged' | 'bait' | 'thread';
 export type ThreadOutcomeKind = 'dispatched' | 'planned' | 'answered' | 'dropped';

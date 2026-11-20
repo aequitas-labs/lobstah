@@ -23,6 +23,7 @@ export function Composer({
   onSend,
   hideError = false,
   done = 'Answer sent',
+  allowFiles = can('answer-files'),
 }: {
   draftKey: string;
   draft?: DecisionDraft;
@@ -33,6 +34,7 @@ export function Composer({
   onSend: () => Promise<string | undefined>;
   hideError?: boolean;
   done?: string;
+  allowFiles?: boolean;
 }) {
   const text = draft?.text ?? '',
     files = draft?.files ?? [],
@@ -53,13 +55,13 @@ export function Composer({
         grow(el);
         setDraft(key, { text: el.value, error: undefined });
       }}
-      onPaste=${can('answer-files') ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
+      onPaste=${allowFiles ? (e: ClipboardEvent) => void pasteImages(key, e) : undefined}
       onKeyDown=${onSendKey(
         () => !getState().drafts[key]?.sending,
         () => void onSend(),
       )}
     ></textarea></div><div class="dtools">${
-      can('answer-files') &&
+      allowFiles &&
       html`<label class=${buttonClass('icon', 'lg', 'dattach')} title="Attach images or files">${AttachIcon}<input
           type="file"
           multiple

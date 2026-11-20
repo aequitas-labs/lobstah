@@ -1861,3 +1861,8 @@ controls. A card from a thread shows that thread's notes above its question.
 Phone navigation is On deck, Reviews, Helm, Search and Menu; PRs remain in Menu
 with their attention count. Message the helm on a dispatch supplies that dispatch
 as context to the same composer.
+
+Wharf grounds support the same conversation commands. The wharf stores phone
+attachments as account files and emits the conversation in `man wait` over the
+existing wake socket. Thread reads and glass polls write no rows; the wharf's
+alarm repeats unanswered messages and closes idle discussions.

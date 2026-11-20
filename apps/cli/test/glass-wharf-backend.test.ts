@@ -114,8 +114,8 @@ describe('the wharf backend', () => {
   }
 
   it('fills only the tabs the wharf has, takes none of the local-only actions, and runs no daemon', () => {
-    expect(WHARF_CAPABILITIES.tabs).toEqual(['deck', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
-    expect([...WHARF_CAPABILITIES.actions]).toEqual(['message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'attention-ack']);
+    expect(WHARF_CAPABILITIES.tabs).toEqual(['deck', 'helm', 'dispatches', 'traps', 'boats', 'reviews', 'reports']);
+    expect([...WHARF_CAPABILITIES.actions]).toEqual(['thread-message', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'attention-ack']);
     expect(WHARF_CAPABILITIES.daemon).toBe(false);
   });
 
@@ -227,5 +227,34 @@ describe('the wharf backend', () => {
     const b = createWharfBackend({ onSignedOut: (s) => signedOut.push(s) });
     await expect(b.poll(null)).rejects.toThrow('/api/glass answered 401');
     expect(signedOut).toContain(401);
+  });
+});
+
+describe('native conversation writes', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('uploads message files once as bytes and saves their references in the conversation', async () => {
+    const calls: Array<{path: string; init: RequestInit}> = [];
+    let saved: Record<string, any>;
+    vi.stubGlobal('fetch', async (path: string, init: RequestInit = {}) => {
+      calls.push({path,init});
+      if (path.endsWith('/files')) return Response.json({id:'phone-file'});
+      if (path === '/api/glass/threads') {
+        const body = JSON.parse(String(init.body));
+        saved = { ...body, kind:'untriaged', title:body.text, state:'open', rounds:[{at:new Date(NOW).toISOString(),entries:[{by:'person',via:'glass',text:body.text,attachments:[{name:'phone.png',path:'phone-file',type:'image/png',bytes:3}]}]}],cards:[] };
+        return Response.json(saved,{status:201});
+      }
+      return Response.json(saved);
+    });
+    const backend = createWharfBackend();
+    const result = await backend.request('thread-start', {grounds:'harbor',text:'Look at the phone',files:[{name:'phone.png',data:'AQID'}]},'cookie');
+    expect(result).toMatchObject({ok:true,status:201,body:{item:{kind:'untriaged'}}});
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.path).toMatch(/^\/api\/glass\/threads\/[0-9a-f-]+\/files$/);
+    expect(calls[0]!.init.body).toEqual(new Uint8Array([1,2,3]));
+    expect(JSON.parse(String(calls[1]!.init.body))).toMatchObject({text:'Look at the phone',files:['phone-file']});
+    expect(calls.every(c => c.init.credentials === 'same-origin')).toBe(true);
+    const id = saved!.id;
+    expect(backend.fileUrl({kind:'thread',id},'phone.png')).toBe(`/api/glass/threads/${id}/files/phone-file`);
+    expect((await backend.thread!(id)).ok).toBe(true);
   });
 });
