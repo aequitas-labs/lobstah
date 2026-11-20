@@ -46,8 +46,9 @@ The charter is re-injected at every session start. Keep inside its fences:
 ## Working set
 
 ```
-lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
+lobstah dispatch --repo <key> --brief <file.md>   # queue work for a trap (as --trap-any); prints the id
 lobstah dispatch ... --for <trap-name>             # address it to one trap
+lobstah dispatch ... --headless                    # a one-off on a headless worker
 lobstah dispatch --pool <name> --brief <file.md>  # fresh session in a warm pool worktree
 lobstah send <id>|<trap-name> "<instruction>"      # steer live/queued work; wake
                                                   # finished work as a follow-up
@@ -81,6 +82,7 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
 
 - A goal is one line with a verb and a done state you'd recognise at a glance: merged, released, live, replying. PR numbers, commits and migration lists stay in the helm's tracking and the cards, not in the goal. Before setting goals proposed in chat or on the glass, check each one. If all pass, set them as given. If a goal has no verb or no done state, use `lobstah man ask` to show originals beside proposed rewordings, with Use rewording, Keep originals and Edit options; run `lobstah goals set` only after the person chooses. Never ask for IDs or numbers.
 - Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.
+- Dispatches go to traps by default: with no --for, `lobstah dispatch` acts as --trap-any. Use --headless only for one-offs.
   `lobstah dispatch --repo <key> --trap-any --brief <file>` selects in that order;
   at the repo's `traps` cap it waits for a suitable free trap. `man throw --new`
   shows free, stowed and ghosted candidates and needs `--reason "<why>"` when any exist.

@@ -18,8 +18,9 @@ export default defineConfig({
     exclude: ['services/wharf/**', '**/node_modules/**'],
     // No test names or clears the tab of the terminal running the suite.
     // Sign-on writes a turn-end owner file (packages/core/src/turn-owner.ts):
-    // never into the real ~/.agent-turn.
-    env: { LOBSTAH_TERMINAL_TITLE: '0', AGENT_TURN_HOME: path.join(os.tmpdir(), `lobstah-test-agent-turn-${process.pid}`) },
+    // never into the real ~/.agent-turn. LOBSTAH_TEST_NO_REAL_HOME makes a
+    // test that reaches ~/.lobstah (no LOBSTAH_HOME) fail instead of writing there.
+    env: { LOBSTAH_TERMINAL_TITLE: '0', LOBSTAH_TEST_NO_REAL_HOME: '1', AGENT_TURN_HOME: path.join(os.tmpdir(), `lobstah-test-agent-turn-${process.pid}`) },
     ...(windows && {
       maxWorkers: windowsWorkers,
       minWorkers: 1,

@@ -10,7 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { applyHeavyHooks } from '@lobstah/core';
-import type { GrantIntent, RunCard } from '@lobstah/core';
+import type { Config, GrantIntent, RunCard } from '@lobstah/core';
+import { selectRepoTrap } from '@lobstah/core';
 import {
   IdleWait,
   reviewAttention,
@@ -339,7 +340,7 @@ const HELP = `lobstah — supervision framework for coding agents
 work (humans and agents):
   dispatch (--repo <key> | --pool <name>) (--brief <file> | --brief-text <text>)   (alias: set --bait)
            [--harness claude|codex] [--model <m>] [--effort <e>]
-           [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any] [--chore] [--id <uuid>]
+           [--follow-up <uuid>] [--attach <file> ...] [--for <trap-name>|wt:<trap> | --trap-any | --headless] [--chore] [--id <uuid>]
            [--pr <url|number>] [--fresh | --continue]
                                   queue a supervised dispatch; prints the id.
                                   --pr works on that open PR: the runner
@@ -355,6 +356,9 @@ work (humans and agents):
                                   resolves to its trap). --trap-any queues at once;
                                   the daemon reuses free traps, then starts
                                   stowed or new traps within the repo's cap.
+                                  The helm's unaddressed work defaults to
+                                  --trap-any. --headless runs a one-off on a
+                                  headless worker; no trap takes it.
                                   --pool runs it in a
                                   warm worktree of [pools.<name>]: reset to a
                                   fresh branch, new session
@@ -787,6 +791,21 @@ function inheritedAttachments(id: string | undefined): Descriptor['attachments']
     if (descriptor) return descriptor.attachments;
   }
   return undefined;
+}
+
+/** What `dispatch` prints for non-helm work with no --for, --trap-any or --pool, so a headless run is never a surprise. */
+const UNADDRESSED_DELIVERY = 'unaddressed: a headless worker or any free trap may take it; --trap-any keeps it in traps';
+
+/**
+ * What happens next to trap-bound work, from the daemon's own selection: a
+ * free trap takes it, a stowed or new trap starts for it, or it waits at the
+ * repo's traps cap (and says why).
+ */
+function trapAnyOutlook(cfg: Config, repo: string, harness: string | undefined): { trap: string } {
+  const choice = selectRepoTrap(cfg, repo, harness);
+  if (choice.action === 'reuse') return { trap: `${trapLabel(choice.registration)} is free and takes it` };
+  if (choice.action === 'wait') return { trap: `waits for a trap: ${choice.why}` };
+  return { trap: `the daemon starts a trap for it: ${choice.why}` };
 }
 
 interface ChainMember {
@@ -1256,6 +1275,7 @@ async function mainCli(): Promise<void> {
       }
       if (opt('--assist')) throw new UsageError('--assist requires --for trap:<profile>');
       if (has('--trap-any') && (opt('--for') !== undefined || opt('--pool') !== undefined)) throw new UsageError('--trap-any cannot be combined with --for or --pool');
+      if (has('--headless') && (opt('--for') !== undefined || has('--trap-any') || opt('--pool') !== undefined)) throw new UsageError('--headless cannot be combined with --for, --trap-any or --pool');
       const poolName = opt('--pool');
       const pool = poolName !== undefined ? loadConfig().pools[poolName] : undefined;
       if (poolName !== undefined) {
@@ -1287,10 +1307,14 @@ async function mainCli(): Promise<void> {
       if (prTarget !== undefined) d.pr = resolvePrTarget(repo, prTarget);
       const lane: Lane = has('--chore') ? 'chore' : 'work';
       const caller = callerSession(opt('--session'));
-      if (has('--trap-any')) {
+      const callerHelm = caller?.id ? helmOf(caller.id) : undefined;
+      if (has('--headless')) d.headless = true;
+      // The helm's unaddressed work goes to traps; headless is for one-offs it asks for.
+      const helmDefault = callerHelm !== undefined && !d.headless && d.for === undefined && poolName === undefined && callerHelm.repos.includes(repo) && loadConfig().repos[repo] !== undefined;
+      if (has('--trap-any') || helmDefault) {
         gateHelm(caller);
         const cfg = loadConfig();
-        const helm = caller?.id ? helmOf(caller.id) : undefined;
+        const helm = callerHelm;
         if (helm && !helm.repos.includes(repo)) throw new Error(`repo ${repo} is outside grounds ${helm.grounds}`);
         if (d.harness && d.harness !== 'claude' && d.harness !== 'codex') throw new UsageError('--harness takes claude or codex');
         if (!cfg.repos[repo]) throw new Error(`no repo "${repo}" is configured`);
@@ -1301,7 +1325,8 @@ async function mainCli(): Promise<void> {
         for (const url of briefPrMentions(d.brief, repo))
           warnings.push(`the brief names ${url}, but this dispatch will open its own draft PR; to push to that PR instead, dispatch with --pr ${url}`);
       }
-      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), ...(d.headless ? { for: 'headless one-off (--headless)' } : !d.for && !d.trapAny && !d.pool ? { for: UNADDRESSED_DELIVERY } : {}), queued: d.queuedAt }));
+      if (d.trapAny) console.log(toonKV(trapAnyOutlook(loadConfig(), repo, d.harness)));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
