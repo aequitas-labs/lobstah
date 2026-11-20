@@ -3,14 +3,15 @@ import { ThreadNotes } from './helm.js';
 import { Composer } from './composer.js';
 import { DesktopStartAction } from './common.js';
 import { validDesktopStartLink } from '../../../core/src/desktop-start-link.js';
-import type { Attachment, RecentRun, RunResult } from '@lobstah/core';
+import type { Attachment, GlassHandoff, RecentRun, RunResult } from '@lobstah/core';
 import { useEffect, useRef } from 'preact/hooks';
-import { decisionNeighbours } from '../../src/glass-diff.js';
+import { decisionNeighbours, isOpenDecision } from '../../src/glass-diff.js';
 import type { DecisionCard } from '../../src/glass-diff.js';
 import {
   HOTKEY_MAX,
   closeDecision,
   dismissAlert,
+  handedOffCard,
   markViewed,
   openDecision,
   sendAnswer,
@@ -110,10 +111,20 @@ const titleOf = (c: DecisionCard) => (c.kind === 'decision' ? LinkedText(c.title
 /** A decision's state in plain words. */
 const STATE_WORD = { unread: 'new', read: 'seen', answered: 'sent' } as const;
 
-/** Unread, read, or answered (from this page, until the snapshot drops it). */
+/** Unread, read, or answered (from this page, or handed to the helm until it clears). */
 function stateOf(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: boolean): 'unread' | 'read' | 'answered' {
-  if (draft?.sent) return 'answered';
+  if (draft?.sent || (c.kind === 'decision' && c.handoff)) return 'answered';
   return c.viewedAt || viewedHere ? 'read' : 'unread';
+}
+
+/**
+ * An answered card's hand-off, drawn as a run card's status icon alone: a
+ * spinner while the helm takes the answer up, then a check once it acks.
+ * The words are the icon's accessible name and tooltip.
+ */
+function HandoffIcon({ handoff }: { handoff: GlassHandoff }) {
+  const acked = handoff.state === 'acked';
+  return html`<${RunStatusIcon} status=${acked ? 'succeeded' : 'running'} label=${acked ? 'Helm has it' : 'Helm is on it'} />`;
 }
 
 /** Where a decision came from: its dispatch (a link to it) and repo. */
@@ -148,9 +159,12 @@ function row(c: DecisionCard, draft: DecisionDraft | undefined, viewedHere: bool
   // The hosted glass names the card's boat; the local glass is on it.
   const boat = run ? (run.boat ?? getState().snapshot?.viewer?.machine) : undefined;
   const meta = [c.repo && RepoName(c.repo), [Age(c.at), ' ago']].filter(Boolean).flatMap((m, i) => (i ? [' · ', m] : [m]));
+  const handoff = c.kind === 'decision' ? c.handoff : undefined;
   const status = runIcon
     ? html`<span class="dsent"><${RunStatusIcon} status=${runIcon} result=${run?.latest?.result} startedAt=${run?.latest?.startedAt} /></span>`
-    : state === 'answered' && html`<span class="dsent ok">sent</span>`;
+    : handoff
+      ? html`<span class="dsent"><${HandoffIcon} handoff=${handoff} /></span>`
+      : state === 'answered' && html`<span class="dsent ok">sent</span>`;
   return html`<${DecisionRow}
     key=${c.key} state=${state} focused=${focused} attrs=${{ 'data-decision': c.key }} onOpen=${open}
     label=${`${STATE_WORD[state]}: ${c.kind === 'decision' ? c.title : c.note}`}
@@ -210,7 +224,7 @@ export function DeckDecisions({
   const body = shown.length
     ? html`<ul class="dlist">${shown.map((c) => row(c, drafts[c.key], !!viewedHere[c.key], c.key === focus))}</ul>`
     : html`<div class="empty">none</div>`;
-  const heading = html`<${SectionHead} title="Decisions" count=${cards.length} badge=${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`} />`;
+  const heading = html`<${SectionHead} title="Decisions" count=${cards.filter(isOpenDecision).length} badge=${unread > 0 && html`<span class="dbadge" aria-label=${`${unread} new`}>${unread}</span>`} />`;
   return html`<section class="decisions">${heading}${body}<${RecentRuns} runs=${recentRuns} /></section>`;
 }
 
@@ -312,7 +326,7 @@ export function DecisionModal({
   };
   // A run card stays on screen with its output after its run answers it and the snapshot drops it.
   const ran = key ? getState().runs?.[key] : undefined;
-  const c = key ? (order.find((x) => x.key === key) ?? ran?.card) : undefined;
+  const c = key ? (order.find((x) => x.key === key) ?? ran?.card ?? handedOffCard(key)) : undefined;
   // Its place among the open decisions; a finished run card the snapshot dropped still has neighbours.
   const near = c ? decisionNeighbours(order, c) : undefined;
   const shell = (label: string, body: unknown, shown = '') =>
@@ -333,6 +347,7 @@ export function DecisionModal({
   const touch = touchOnly();
   const proposal = c.kind === 'decision' && c.permissionsProposal && !c.readOnly;
   const run = c.kind === 'decision' && !proposal ? c.run : undefined;
+  const handoff = c.kind === 'decision' && !c.readOnly ? c.handoff : undefined;
   const runRow = (decline: boolean) =>
     run &&
     html`<${RunActions} cardKey=${c.key} run=${run} readOnly=${c.kind === 'decision' && c.readOnly} decline=${decline && html`<${RunDecline} c=${c} draft=${draft} />`} />`;
@@ -340,16 +355,18 @@ export function DecisionModal({
     ? null
     : c.kind === 'decision' && !c.readOnly && c.appStart && validDesktopStartLink(c.appStart.url)
       ? html`<${DesktopStartAction} url=${c.appStart.url} decision />`
-      : c.kind === 'decision' && c.readOnly
-        ? [runRow(false), !(run && ran?.busy) && html`<div class="dim">Closed decision</div>`]
-        : run && (ran?.busy || ran?.result || run.latest)
-          ? runRow(false)
-          : draft?.sent
-            ? c.kind === 'decision' && c.run && draft.option === RUN_DECLINE
-              ? html`<div class="danswered runstate"><${RunStatusIcon} status="declined" /></div>`
-              : html`<div class="danswered ok">answered · ${draft.sent}</div>`
-            : [runRow(true), answerForm(c, draft, extensions.join(','))];
-  const showLegend = !touch && (proposal || !(c.kind === 'decision' && (c.appStart || c.readOnly)));
+      : handoff
+        ? html`<div class="danswered runstate"><${HandoffIcon} handoff=${handoff} /></div>`
+        : c.kind === 'decision' && c.readOnly
+          ? [runRow(false), !(run && ran?.busy) && html`<div class="dim">Closed decision</div>`]
+          : run && (ran?.busy || ran?.result || run.latest)
+            ? runRow(false)
+            : draft?.sent
+              ? c.kind === 'decision' && c.run && draft.option === RUN_DECLINE
+                ? html`<div class="danswered runstate"><${RunStatusIcon} status="declined" /></div>`
+                : html`<div class="danswered ok">answered · ${draft.sent}</div>`
+              : [runRow(true), answerForm(c, draft, extensions.join(','))];
+  const showLegend = !touch && !handoff && (proposal || !(c.kind === 'decision' && (c.appStart || c.readOnly)));
   return shell(
     c.kind === 'decision' ? c.title : c.note,
     html`<div class="dhead">
@@ -372,7 +389,7 @@ export function DecisionModal({
             : [
                 c.kind === 'decision' &&
                   c.detail.trim() &&
-                  html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent} fileUrl=${(name: string) => fileUrl({ kind: 'decision', key: c.key }, name)} />`,
+                  html`<${Markdown} text=${c.detail} documentKey=${c.key} readOnly=${c.readOnly || !!draft?.sent || !!handoff} fileUrl=${(name: string) => fileUrl({ kind: 'decision', key: c.key }, name)} />`,
                 c.kind === 'decision' && attachments(c.key, c.attachments),
                 c.kind === 'decision' && !!c.references?.length && html`<${DecisionEmbeds} references=${c.references} />`,
                 c.kind === 'decision' && c.run && html`<${RunCardBody} cardKey=${c.key} run=${c.run} readOnly=${c.readOnly} />`,

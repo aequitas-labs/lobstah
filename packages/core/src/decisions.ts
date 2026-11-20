@@ -18,6 +18,8 @@ import { runScriptFile, type RunCard } from './run-cards.js';
 import { withDirLock } from './dir-lock.js';
 import { answeredAt, commitQuestionAnswer } from './inbox.js';
 import { questionEntry, readStatusLog } from './status.js';
+import { liveHelms } from './helm.js';
+import { storageGrounds } from './grounds-name.js';
 
 /**
  * Decisions: a question the helm puts to the human (`man ask`), answered in
@@ -33,6 +35,11 @@ import { questionEntry, readStatusLog } from './status.js';
  * it posts a `decision-answer` notice, which wakes the helm's `man wait`.
  * `answer.json` in the decision's directory marks it answered, names the
  * request, and holds the answer: the option, the text, and the files.
+ *
+ * An answer to a plain helm card, given while a helm holds the card's
+ * grounds, awaits that helm's ack (`awaitsAck` in `answer.json`): the card
+ * stays `answered` until `man ack` writes `ack.json`, then `acked`. An acked
+ * card shows its ack for ACK_CLEAR_MS, then leaves.
  *
  * `viewed.json` records when the human first saw the decision in the
  * glass's decision modal (`viewedAt`): state only, never a wake. A raw
@@ -142,6 +149,18 @@ export interface DecisionAnswer {
   by: AnswerSource;
   /** A wharf answer's receipt: the one id it applies under, once. */
   receipt?: string;
+  /** The helm must ack this answer (`man ack`): a helm held the card's grounds when it was answered. */
+  awaitsAck?: boolean;
+}
+
+/** `ack.json`: the helm took up a card's answer, and what it did. */
+export interface DecisionAck {
+  key: string;
+  ackedAt: string;
+  /** What the helm did with the answer. */
+  note?: string;
+  /** What acked it: `man ack`, a replacing or withdrawing `man ask`, or a `send --for-decision`. */
+  by: 'ack' | 'replace' | 'withdraw' | 'send';
 }
 
 /**
@@ -159,6 +178,7 @@ interface AnswerMarker {
   answeredAt: string;
   by: AnswerSource;
   receipt?: string;
+  awaitsAck?: boolean;
 }
 
 /** Whether a person answered in a glass, local or hosted: the only answers that may allow a permission card. */
@@ -199,6 +219,7 @@ const DECISION_JSON = 'decision.json';
 const DETAIL_MD = 'detail.md';
 const ANSWER_JSON = 'answer.json';
 const VIEWED_JSON = 'viewed.json';
+const ACK_JSON = 'ack.json';
 const RID_RE = /^[a-f0-9]{8}$/;
 
 export function decisionsRoot(): string {
@@ -268,6 +289,7 @@ export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
       answeredAt: marker.answeredAt,
       by: marker.by,
       ...(marker.receipt ? { receipt: marker.receipt } : {}),
+      ...(marker.awaitsAck ? { awaitsAck: true } : {}),
     };
   }
   const p = readRequest(marker.request)?.payload as DecisionAnswerPayload | undefined;
@@ -279,7 +301,94 @@ export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
     attachments: p?.attachments ?? [],
     answeredAt: marker.answeredAt,
     by: marker.by,
+    ...(marker.awaitsAck ? { awaitsAck: true } : {}),
   };
+}
+
+/** The helm's ack of a card's answer, if it has one. */
+export function readDecisionAck(key: string): DecisionAck | undefined {
+  const dir = decisionDir(key);
+  const ack = dir ? readJsonFile<DecisionAck>(path.join(dir, ACK_JSON)) : undefined;
+  return ack?.key === key && typeof ack.ackedAt === 'string' ? ack : undefined;
+}
+
+/** An acked card shows its ack this long, as a finished run card shows its result; then it leaves. */
+export const ACK_CLEAR_MS = 2 * 60_000;
+
+/** Where an answered card stands with the helm: `answered` until acked, then `acked`. */
+export interface DecisionHandoff {
+  state: 'answered' | 'acked';
+  answer: DecisionAnswer;
+  ack?: DecisionAck;
+}
+
+/** A card's hand-off to the helm, or undefined when its answer needs no ack (or it has none). */
+export function decisionHandoff(key: string): DecisionHandoff | undefined {
+  const answer = readDecisionAnswer(key);
+  if (!answer?.awaitsAck) return undefined;
+  const ack = readDecisionAck(key);
+  return ack ? { state: 'acked', answer, ack } : { state: 'answered', answer };
+}
+
+/** Answered cards the helm has not acked yet, oldest answer first. */
+export function awaitingAckDecisions(): DecisionMeta[] {
+  return listDecisions()
+    .filter((d) => decisionHandoff(d.key)?.state === 'answered')
+    .sort((a, b) => readDecisionAnswer(a.key)!.answeredAt.localeCompare(readDecisionAnswer(b.key)!.answeredAt) || a.key.localeCompare(b.key));
+}
+
+/** Answered cards the glass still shows: awaiting the helm, or acked within ACK_CLEAR_MS. Newest first. */
+export function handoffDecisions(now = Date.now()): DecisionMeta[] {
+  return listDecisions().filter((d) => {
+    const handoff = decisionHandoff(d.key);
+    if (!handoff) return false;
+    return handoff.state === 'answered' || now - (Date.parse(handoff.ack!.ackedAt) || 0) < ACK_CLEAR_MS;
+  });
+}
+
+/** The longest ack note kept, in characters. */
+export const ACK_NOTE_MAX = 500;
+
+/**
+ * Ack an answered card: the helm took up the answer. Only an answer awaiting
+ * the helm can be acked; acking twice is refused, so the first note stands.
+ */
+export function ackDecision(key: string, opts: { note?: string; by?: DecisionAck['by']; now?: Date } = {}): DecisionAck {
+  const dir = decisionDir(key);
+  const meta = dir ? readDecision(key) : undefined;
+  if (!dir || !meta) throw new DecisionError(`no decision ${key}`, 404);
+  const answer = readDecisionAnswer(key);
+  if (!answer) throw new DecisionError(`decision ${key} is not answered yet — there is nothing to ack`, 409);
+  if (!answer.awaitsAck) throw new DecisionError(`decision ${key}'s answer needs no ack`, 409);
+  const raw = opts.note?.replace(/\s+/g, ' ').trim();
+  const note = raw ? (raw.length > ACK_NOTE_MAX ? `${raw.slice(0, ACK_NOTE_MAX - 1)}…` : raw) : undefined;
+  const ack: DecisionAck = { key, ackedAt: (opts.now ?? new Date()).toISOString(), ...(note ? { note } : {}), by: opts.by ?? 'ack' };
+  try {
+    fs.writeFileSync(path.join(dir, ACK_JSON), `${JSON.stringify(ack, null, 2)}\n`, { flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    throw new DecisionError(`decision ${key} was already acked at ${readDecisionAck(key)?.ackedAt ?? 'an earlier time'}`, 409);
+  }
+  return ack;
+}
+
+/**
+ * Whether an answer to this card awaits the helm's ack. Only a plain helm
+ * card does: run, permission, proposal and app-start cards have their own
+ * lifecycle, and an answer delivered to a worker's inbox is the worker's to
+ * act on. With no live helm on the card's grounds, nobody would ack it, so
+ * it behaves as before: answered, and gone.
+ */
+function answerAwaitsAck(meta: DecisionMeta, delivered: boolean): boolean {
+  if (delivered || meta.askedBy !== 'helm' || meta.run || meta.permission || meta.permissionsProposal || meta.appStart) return false;
+  const cfg = loadConfig();
+  const live = liveHelms(cfg.helm.ttlSecs * 1000);
+  if (meta.grounds) {
+    const grounds = storageGrounds(meta.grounds, cfg);
+    return live.some((h) => storageGrounds(h.grounds, cfg) === grounds);
+  }
+  if (meta.repo) return live.some((h) => h.repos.includes(meta.repo!));
+  return live.length > 0;
 }
 
 /** When the human first viewed a decision in the glass, if they have. */
@@ -452,13 +561,15 @@ function checkOptions(raw: string[]): string[] {
 /**
  * Store a decision. Every input is checked before anything is written. Older
  * standing decisions stay, on the same dispatch too: each is its own card.
- * `replace` names one standing decision to remove; its key is returned in
- * `replaced`.
+ * `replace` names one standing decision to remove, or an answered one
+ * awaiting the helm's ack, which it acks; its key is returned in `replaced`.
  */
 export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: string[] } {
   const conversation = opts.thread ? readThread(opts.thread) : undefined;
   if (opts.thread && (conversation?.state !== 'open' || (opts.grounds && conversation.grounds !== displayGrounds(opts.grounds, loadConfig())))) throw new DecisionError('Choose an open conversation on these grounds');
-  if (opts.replace !== undefined && !standingDecisions().some((d) => d.key === opts.replace)) {
+  // An answered card awaiting the helm may be replaced too: the new card is what the helm did with the answer.
+  const replacesAnswer = opts.replace !== undefined && decisionHandoff(opts.replace)?.state === 'answered';
+  if (opts.replace !== undefined && !replacesAnswer && !standingDecisions().some((d) => d.key === opts.replace)) {
     throw new DecisionError(`no standing decision ${opts.replace} to replace — \`lobstah man tend\` lists them`);
   }
   if (opts.appStart && (!validDesktopStartLink(opts.appStart.url) || !/^[a-z][a-z0-9-]{0,63}$/.test(opts.appStart.profile))) throw new DecisionError('invalid desktop app start action');
@@ -549,7 +660,8 @@ export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: s
   }
   const replaced = opts.replace !== undefined && opts.replace !== key ? [opts.replace] : [];
   for (const old of replaced) {
-    if (readDecision(old)?.run) withdrawDecision(old);
+    if (replacesAnswer) ackDecision(old, { note: `Replaced by ${key}`, by: 'replace', ...(opts.now ? { now: opts.now } : {}) });
+    else if (readDecision(old)?.run) withdrawDecision(old);
     else fs.rmSync(decisionDir(old)!, { recursive: true, force: true });
   }
   return { meta, replaced };
@@ -633,7 +745,7 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
   // delivering it to a newer question or resuming finished work. Prior answers still win.
   if (decision?.dispatch && since && (question?.at === since || answeredAt(decision.dispatch, lane, since))) {
     const result = commitQuestionAnswer(decision.dispatch, lane, since, () => {
-      const answer = storeDecisionAnswer(input);
+      const answer = storeDecisionAnswer(input, true);
       return { value: answer, text: [answer.option, answer.text, ...answer.attachments.map((file) => `${file.name}: ${file.path}`)].filter(Boolean).join('\n\n'), from: input.by, attachments: answer.attachments };
     });
     if (!result.accepted) throw new DecisionError('This question has already been answered.', 409);
@@ -643,7 +755,7 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
 }
 
 /** Store a validated decision answer; question decisions call this while owning the shared inbox lock. */
-function storeDecisionAnswer(input: AnswerInput): DecisionAnswer {
+function storeDecisionAnswer(input: AnswerInput, delivered = false): DecisionAnswer {
   const meta = readDecision(input.key);
   if (!meta) throw new DecisionError(`no decision ${input.key}`, 404);
   const previous = readDecisionAnswer(input.key);
@@ -708,6 +820,7 @@ function storeDecisionAnswer(input: AnswerInput): DecisionAnswer {
     answeredAt,
     by: input.by,
     ...(input.receipt ? { receipt: input.receipt } : {}),
+    ...(answerAwaitsAck(meta, delivered) ? { awaitsAck: true } : {}),
   };
   // The marker is the claim: of two answers racing, the first one written stands.
   try {

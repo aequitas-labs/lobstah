@@ -1057,3 +1057,63 @@ describe('copying code from a card', () => {
     expect(g.$$('.copybtn, .copyinline')).toHaveLength(0);
   });
 });
+
+describe('glass: an answered card handed to the helm', () => {
+  /** The fleet after the person answered KEY: no longer attention, but handed to the helm. */
+  function handedOff(handoff: NonNullable<GlassSnapshot['decisions'][number]['handoff']>): GlassSnapshot {
+    const d = fleet();
+    d.attention = d.attention.filter((a) => a.key !== KEY);
+    d.decisions[0]!.handoff = handoff;
+    return d;
+  }
+
+  it('spins like a run card until the helm acks, with no words beside it, outside the open count, the badge and the alert', async () => {
+    const g = await page(handedOff({ state: 'answered', answeredAt: ago(30_000) }));
+    const r = row(g, KEY)!;
+    expect(r.className).toContain('answered');
+    const status = r.querySelector('.dsent')!;
+    expect(status.querySelector('.runicon')!.className).toContain('run-running');
+    expect(status.querySelector('.runicon')!.getAttribute('aria-label')).toBe('Helm is on it');
+    // The icon alone: no visible words beside it.
+    expect(text(status)).toBe('');
+    // Only the raw question still waits on the person.
+    expect(text(g.$('#deck .decisions h2 .section-count'))).toBe('· 1');
+    expect(text(g.$('#tabs a[data-tab="deck"] .dbadge'))).toBe('1');
+    expect(text(g.$('.dalert .dalert-open'))).toBe('1 1 new decision');
+
+    await show(g, KEY);
+    const c = card(g, KEY)!;
+    expect(c.querySelector('textarea')).toBeNull();
+    expect(c.querySelector('.doptions')).toBeNull();
+    const dock = c.querySelector('.ddock .runstate')!;
+    expect(dock.querySelector('.runicon')!.className).toContain('run-running');
+    expect(text(dock)).toBe('');
+    expect(text(c.querySelector('.dpos'))).toBe('1 open');
+  });
+
+  it('shows the check once acked, without the ack note, then leaves when the snapshot drops it', async () => {
+    const d = handedOff({ state: 'acked', answeredAt: ago(60_000), ackedAt: ago(10_000) });
+    const g = await page(d);
+    const status = row(g, KEY)!.querySelector('.dsent')!;
+    expect(status.querySelector('.runicon')!.className).toContain('run-succeeded');
+    expect(status.querySelector('.runicon')!.getAttribute('aria-label')).toBe('Helm has it');
+    expect(text(status)).toBe('');
+
+    d.decisions = [];
+    g.serve(d);
+    await g.poll();
+    expect(row(g, KEY)).toBeUndefined();
+  });
+
+  it('a card answered on this page keeps its row and turns into the spinner on the next snapshot', async () => {
+    const d = fleet();
+    const g = await page(d, { post: ok });
+    await show(g, KEY);
+    await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
+    await click(g, card(g, KEY)!.querySelector('.dsend'));
+    expect(text(row(g, KEY)!.querySelector('.dsent'))).toBe('sent');
+    g.serve(handedOff({ state: 'answered', answeredAt: ago(0) }));
+    await g.poll();
+    expect(row(g, KEY)!.querySelector('.dsent .run-running')).toBeTruthy();
+  });
+});

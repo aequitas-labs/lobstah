@@ -803,7 +803,8 @@ the same rule.
   it with `lobstah man ask --withdraw <key>`, which retains a read-only archive. A
   newer `man ask` on the same dispatch keeps the older decisions: each shows
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
-  standing decision; a key that is not standing is refused. A card stays visible
+  standing decision, or acks an answered one (see **The ack**); any other key
+  is refused. A card stays visible
   if its worker reports `paused`, `working`, `done`, or `failed`, and can still
   be answered after the dispatch finishes.
 - **Attention.** A standing decision is attention of kind `decision`, in
@@ -822,7 +823,8 @@ the same rule.
   `[limits].attachmentMaxBytes`, at most 8). Click an option, write an
   answer, attach files, or any mix; one **Send** submits it. With no options,
   the text box is the whole answer. After sending, the card shows
-  `answered · <what was chosen>` and leaves on the next refresh. A raw
+  `answered · <what was chosen>`. It leaves on the next refresh, unless the
+  answer awaits the helm's ack (see **The ack**). A raw
   `question` the helm has not framed shows as a plain card with the
   worker's note and the same text box. PR kinds stay in the PRs section.
   `#decision/<key>` opens the deck at that card. Pasting with Cmd-V or
@@ -851,7 +853,30 @@ the same rule.
   `decision-answer` event: the request `id`, `key`, `dispatch`, `title`,
   `option`, `text`, `attachments` (the stored paths), `from`, and `at`. The
   helm acts on it, usually with `lobstah send <dispatch> "<instruction>"`.
-  Answering does not message the worker.
+  Answering does not message the worker. When the answer awaits the helm's
+  ack, the event's `next` field says so.
+- **The ack.** An answered card stays `answered` until the helm acks it:
+  `lobstah man ack decision:<key> ["<what I did>"]` moves it to `acked` and
+  stores `ack.json` beside `answer.json`. The claimed helm alone acks, and
+  only once. Until then, the glass shows the run card's spinner on the card
+  and nothing more. The Stop hook lists the card under `answered-cards` with
+  its answer and blocks every helm turn end on it; it is not paced like an
+  open card. `man tend` lists it too, and `man report` never acks it. Once
+  acked, the card shows the run card's check for two minutes, then leaves the
+  glass, as a finished run card does. The note stays in `ack.json` and the
+  CLI; the glass doesn't show it. Three other moves also ack the card:
+  `man ask --replace <key>` (note `Replaced by <new key>`), `man ask --withdraw
+  <key>` (note `Withdrawn`), and `lobstah send <target> --for-decision <key>
+  "<instruction>"` once the message is delivered (note `Sent to <id>: <first
+  line>`).
+- **Which answers await the ack.** Only a plain helm card answered while a
+  live helm holds its grounds (or its repo, or any grounds for a card with
+  neither). With no helm, an answer behaves as before: the card leaves at
+  once, and nothing blocks. Run cards, permission cards, permission
+  proposals and app-start cards keep their own lifecycle. A card framing a
+  worker's question (see **Attention** and the Stop block below) delivers
+  its answer to that worker's inbox, so it needs no ack: the worker acts on
+  it, and its next report wakes the helm.
 - **From the terminal.** `lobstah man answer <key> [--option <label>]
   [--text <text>] [--attach <file>]...` answers the same way, with the same
   checks.
@@ -863,7 +888,8 @@ the same rule.
   stays in the glass until the decision is answered or withdrawn.
 - **Cull.** `lobstah cull` removes a decision once its answer is older than
   the retention window, with the `decision-answer` request and its files. A
-  standing decision is never culled.
+  standing decision is never culled. Culling an answered card that was never
+  acked clears it too.
 
 ### Run cards
 
@@ -915,7 +941,9 @@ The Stop-hook's standing-attention reminder does not mark a catch reported.
 Every carrier shares the cursor (per grounds, for a helm):
 
 - **The wait loop.** A delivered `man wait` event (exit 0) advances the helm's
-  cursor through the event time. A timeout (exit 3) prints the delta when
+  cursor through the event time. A wake's first line indexes its events by
+  kind and id, such as `wake[3]: answer 7f277cd6, reply a89ad2ba, todo
+  1510`, so a reader who stops early still sees what arrived. A timeout (exit 3) prints the delta when
   something changed without advancing the cursor — see the loop idiom below.
 - **The blocking park.** A helm session's Stop-hook park delivers the digest as a wake
   at `[helm].reportSecs` cadence — including the landed-then-idle case, where

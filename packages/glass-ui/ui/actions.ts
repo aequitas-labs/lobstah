@@ -13,6 +13,7 @@ import {
   detailHash,
   detailFromHash,
   openDecisionOrder,
+  isOpenDecision,
   unreadDecisions,
 } from '../src/glass-diff.js';
 import type { GlassPrefs, ModalRef, ModalType } from '../src/glass-diff.js';
@@ -44,7 +45,7 @@ export function receive(snapshot: GlassSnapshot): void {
   const initialLink = !getState().snapshot && decisionModal?.key;
   // A card that left the snapshot (answered, withdrawn) takes its draft with it.
   const cards = decisionCards(snapshot.attention || [], snapshot.decisions || []);
-  void setDecisionBadge(cards.length);
+  void setDecisionBadge(cards.filter(isOpenDecision).length);
   const live = new Set(cards.map((c) => c.key));
   const kept = Object.fromEntries(
     Object.entries(drafts).filter(([key]) => live.has(key) || key.startsWith('message:') || key.startsWith('thread:')),
@@ -98,6 +99,11 @@ function currentCards() {
   return view ? filteredDecisionCards(view, state.prefs) : [];
 }
 
+/** An answered card handed to the helm: the modal shows it, though it is not among the open ones. */
+export function handedOffCard(key: string): ReturnType<typeof decisionCards>[number] | undefined {
+  return currentCards().find((c) => c.key === key && !isOpenDecision(c));
+}
+
 /** The open decisions the modal steps through, oldest first. */
 export function modalOrder(): ReturnType<typeof decisionCards> {
   const state = getState();
@@ -144,7 +150,8 @@ export function routeDecision(open: { key: string | null } | null): void {
     focusDecision: open?.key ?? null,
     ...(open && history.state?.glassDecision ? { route: history.state.glassDecision.route } : {}),
   });
-  if (open?.key && getState().snapshot && !modalOrder().some((card) => card.key === open.key)) void loadClosedDecision(open.key);
+  if (open?.key && getState().snapshot && !modalOrder().some((card) => card.key === open.key) && !handedOffCard(open.key))
+    void loadClosedDecision(open.key);
   if (closing && decisionScroll !== undefined) {
     const y = decisionScroll;
     decisionScroll = undefined;

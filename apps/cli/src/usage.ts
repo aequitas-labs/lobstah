@@ -89,7 +89,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
   heavy: { flags: { '--bg': {}, '--json': {} }, positionals: '[-- <command>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--compact': {}, '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
+  send: { flags: { '--compact': {}, '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' }, '--for-decision': { value: '<key>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -331,6 +331,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:discuss': { flags: { '--said': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<title|thread-id>' },
   'man:note': { flags: { '--decided': { value: '<line>', repeatable: true }, '--open': { value: '<line>', repeatable: true }, '--link': { value: '<kind:ref>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> [<note>]' },
   'man:resolve': { flags: { '--outcome': { value: '<kind:ref>', required: true }, '--note': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
+  'man:ack': { flags: { '--session': { value: '<id>' } }, positionals: 'decision:<key> ["<what I did>"]' },
   'man:answer': {
     flags: { '--option': { value: '<label>' }, '--text': { value: '<text>' }, '--attach': { value: '<file>', repeatable: true } },
     positionals: '<key>',
@@ -534,6 +535,8 @@ by its stored name. A path out of the page's directory is refused. --title overr
 The glass shows it on the deck; \`lobstah attention ack <key>\` acks it.`,
   'man:ask': `A card for the human in the glass, until answered or withdrawn (--replace <key> swaps one); the answer wakes man wait. --detail images show inline (https, or --attach paths).
 --run <script>: a run card, which the glass runs once confirmed, --input values on stdin. Helm only.`,
+  'man:ack': `Ack a card's answer: you took it up, and the note says what you did. Until then the answered
+card spins in the glass and blocks your turn end. The glass shows the ack, then clears the card. Helm only.`,
   'man:answer': `Answer a decision (or a raw question's <lane>:<id>) as the glass does.
 Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:threads': `List conversations on these grounds, or read one with its notes, rounds and cards.`,

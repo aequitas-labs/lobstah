@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicRenameSync, displayGrounds, lobstahHome, storageGrounds, uniqueTempPath } from '@lobstah/core';
 import type { Config, HelmRegistration } from '@lobstah/core';
-import { openCardRows, renderOpenCards, renderWaitingCards } from './tend.js';
+import { answeredCardRows, openCardRows, renderAnsweredCards, renderOpenCards, renderWaitingCards } from './tend.js';
 import type { TendOpenCard } from './tend.js';
 
 /** The last Stop listing of a particular version of a card. */
@@ -40,9 +40,16 @@ function isDue(card: TendOpenCard, listed: CardListing | undefined, remindMs: nu
 /**
  * Tend's open-cards section for the helm's grounds, paced: only the cards due
  * at this Stop. Consume records delivery; a peek leaves pacing untouched.
+ * Answered cards awaiting the helm's ack follow, unpaced: each blocks every
+ * turn end until `man ack`.
  */
 export function openCardsAtStop(helm: HelmRegistration, config: Config, consume: boolean, now: number = Date.now()): string {
   const grounds = storageGrounds(helm.grounds, config);
+  const answered = renderAnsweredCards(answeredCardRows(config, now).filter((card) => card.grounds === undefined || card.grounds === displayGrounds(grounds, config)));
+  return [dueOpenCards(grounds, config, consume, now), answered].filter(Boolean).join('\n');
+}
+
+function dueOpenCards(grounds: string, config: Config, consume: boolean, now: number): string {
   const file = listingsFile(grounds);
   const listings = readListings(file);
   const cards = openCardRows(config, now).filter((card) => card.grounds === displayGrounds(grounds, config) && !card.waitingDispatches?.length);
