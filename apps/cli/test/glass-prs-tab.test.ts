@@ -104,7 +104,8 @@ for (const view of ['cards', 'table'] as const) {
       expect(text(g.$('#prs [data-pr-section="open"]'))).toContain('#42');
       expect(g.$('#prs [data-pr-section="closed"]')!.textContent).not.toContain('#42');
       const onlyClosed = await page(withClosed(fleet([51])), { hash: '#prs', prefs: { view } });
-      expect(text(onlyClosed.$('#prs [data-pr-section="open"]'))).toBe('Open No open PRs');
+      expect(text(onlyClosed.$('#prs [data-pr-section="open"] h2'))).toBe('Open');
+      expect(text(onlyClosed.$('#prs [data-pr-section="open"] .empty'))).toBe('No open PRs');
       expect(text(onlyClosed.$('#prs [data-pr-section="closed"]'))).toContain('A merged PR');
     });
 
