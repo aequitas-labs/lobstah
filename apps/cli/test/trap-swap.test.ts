@@ -2,12 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { beforeEach, afterEach, expect, it } from 'vitest';
+import { syncBuiltinESMExports } from 'node:module';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import {
   baitBrief,
   claimBait,
   enqueue,
   ensureLayout,
+  laneDirs,
   loadConfig,
   queuedDescriptor,
   readRoster,
@@ -105,4 +107,71 @@ it.each([false, true])('preserves the branch, brief, git note and inbox when swa
   expect(readRoster(signed.ok.trapId)?.profile?.harness).toBe('codex');
   expect(readSessionClaim('swap-work', 'work')?.harness).toBe('codex');
   expect(execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: worktree, encoding: 'utf8' }).trim()).toBe('task-progress');
+});
+
+it('hands an unaddressed catch over before it is claimable, so another parked trap cannot take it', async () => {
+  const sign = (name: string, sessionId: string) => {
+    const worktree = path.join(home, name);
+    fs.mkdirSync(worktree);
+    const signed = signOnTrap({ worktree, cwd: worktree, repo: 'r', harness: 'claude', sessionId, ttlMs: 60_000, harnessProcess: { pid: 999999, startedAt: 'test process' } });
+    if (!('ok' in signed)) throw new Error(`could not sign on ${name}`);
+    return signed.ok;
+  };
+  const swapping = sign('swapping', 'old');
+  enqueue({ id: 'plain-work', repo: 'r', brief: 'Unaddressed work' });
+  expect(claimBait(swapping)?.id).toBe('plain-work');
+  const bystander = sign('bystander', 'other');
+  // A parked trap casts the moment the requeue clears the active record.
+  const activeRecord = path.join(laneDirs('work').active, 'plain-work');
+  const casts: Array<string | null> = [];
+  const remove = fs.rmSync;
+  const spy = vi.spyOn(fs, 'rmSync').mockImplementation((target, options) => {
+    remove(target, options);
+    if (target === activeRecord && casts.length === 0) casts.push(claimBait(bystander)?.id ?? null);
+  });
+  syncBuiltinESMExports();
+  try {
+    await swapTrapCatch('plain-work', 'work', {
+      cfg: loadConfig(),
+      harness: 'claude',
+      newDispatch: true,
+      endProcess: async () => 'ended',
+      launch: async (options) => ({ trap: options.address, action: 'cold', why: 'swap', checkout: 'kept', terminal: 'terminal', harness: 'claude', command: 'claude', unapplied: [], mode: 'auto', registration: swapping }),
+    });
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  }
+  expect(casts).toEqual([null]);
+  expect(queuedDescriptor('plain-work', 'work')?.for).toBe(`wt:${swapping.trapId}`);
+});
+
+it('keeps an unaddressed catch for its trap when SessionEnd requeues it while the swap stops the session', async () => {
+  const sign = (name: string, sessionId: string) => {
+    const worktree = path.join(home, name);
+    fs.mkdirSync(worktree);
+    const signed = signOnTrap({ worktree, cwd: worktree, repo: 'r', harness: 'claude', sessionId, ttlMs: 60_000, harnessProcess: { pid: 999999, startedAt: 'test process' } });
+    if (!('ok' in signed)) throw new Error(`could not sign on ${name}`);
+    return signed.ok;
+  };
+  const swapping = sign('swapping', 'old');
+  enqueue({ id: 'fresh-work', repo: 'r', brief: 'Unaddressed work', sessionMode: 'fresh' });
+  expect(claimBait(swapping)?.id).toBe('fresh-work');
+  const bystander = sign('bystander', 'other');
+  let stolen: string | null | undefined;
+  await swapTrapCatch('fresh-work', 'work', {
+    cfg: loadConfig(),
+    harness: 'claude',
+    newDispatch: true,
+    endProcess: async () => {
+      // The session's SessionEnd hook stows the trap and requeues its catch.
+      stowTrap(swapping.trapId);
+      releaseCatch({ claimed: 'fresh-work' });
+      stolen = claimBait(bystander)?.id ?? null;
+      return 'ended';
+    },
+    launch: async (options) => ({ trap: options.address, action: 'cold', why: 'swap', checkout: 'kept', terminal: 'terminal', harness: 'claude', command: 'claude', unapplied: [], mode: 'auto', registration: swapping }),
+  });
+  expect(stolen).toBeNull();
+  expect(queuedDescriptor('fresh-work', 'work')?.for).toBe(`wt:${swapping.trapId}`);
 });
