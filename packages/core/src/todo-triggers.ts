@@ -6,8 +6,9 @@ import { readRoster, rosterByAddress } from './roster.js';
 import { readTrap, trapByAddress } from './soak.js';
 import { readStatusLog } from './status.js';
 import { trapAvailability } from './trap-availability.js';
+import type { Lane } from './types.js';
 import { TodoError, type TodoTrigger, type TodoTriggerSet, type TodoTriggerTarget } from './todos.js';
-import { laneOf } from './worktrees.js';
+import { latestFollowUp, laneOf } from './worktrees.js';
 
 /**
  * Todo triggers: what `--when` reads, whether lobstah can observe it, and
@@ -73,7 +74,9 @@ export function resolveTodoTrigger(target: TodoTriggerTarget): TodoTriggerTarget
     return target;
   }
   if (target.kind === 'dispatch') {
-    if (!laneOf(target.id)) throw new TodoError(`no dispatch ${target.id}`);
+    const lane = laneOf(target.id);
+    if (!lane) throw new TodoError(`no dispatch ${target.id}`);
+    refuseFinishedDispatch(target.id, lane);
     return target;
   }
   if (target.kind === 'trap') {
@@ -82,6 +85,24 @@ export function resolveTodoTrigger(target: TodoTriggerTarget): TodoTriggerTarget
     return { ...target, trapId };
   }
   return target;
+}
+
+/** The verbs after which a dispatch reports nothing more; a follow-up runs under its own id. */
+const FINISHED_VERBS: ReadonlySet<string> = new Set(['done', 'failed']);
+
+/**
+ * Refuse a trigger on a finished dispatch: it would fire at once, or never.
+ * The hint names the follow-up to wait on instead, when one was started.
+ */
+function refuseFinishedDispatch(id: string, lane: Lane): void {
+  const finished = readStatusLog(id, lane).at(-1)?.verb;
+  if (!finished || !FINISHED_VERBS.has(finished)) return;
+  const followUp = latestFollowUp(id, lane);
+  throw new TodoError(
+    followUp
+      ? `dispatch ${id} is already ${finished}: wait on its follow-up instead, --when "dispatch:${followUp} done"`
+      : `dispatch ${id} is already ${finished}: \`lobstah send ${id} "<instruction>"\` starts a follow-up and prints its id; wait on that id`,
+  );
 }
 
 /** A trigger in the form `--when` reads: `pr:o/r#1 merged`. */
