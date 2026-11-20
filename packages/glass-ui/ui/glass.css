@@ -94,6 +94,9 @@
   --layer-thread-sheet: var(--layer-alert);
   /* the phone's bottom bar: its row's height, above the safe-area inset */
   --bottombar-height: 44px;
+  /* the new-decision alert's fixed height and bottom offset, so the message button can stack above it */
+  --dalert-height: 44px;
+  --dalert-bottom: var(--space-4);
   /* an unread decision: a red-ish tint mixed from the palette, so it follows the theme */
   --unread-bg: color-mix(in srgb, var(--bad) 16%, var(--card));
 }
@@ -2105,7 +2108,10 @@ a.lob {
 .dalert-live {
   position: fixed;
   right: var(--space-4);
-  bottom: var(--space-4);
+  bottom: var(--dalert-bottom);
+  box-sizing: border-box;
+  height: var(--dalert-height);
+  white-space: nowrap;
 }
 .glass-toast {
   position: relative;
@@ -2157,8 +2163,8 @@ a.lob {
 }
 /* On a phone the bottom bar is pinned: the alert and the lobsters run just above it, never behind it. After their own rules, so this wins. */
 @media (max-width: 699px) {
-  .dalert-live {
-    bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + var(--space-4));
+  :root {
+    --dalert-bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + var(--space-4));
   }
   .lob {
     bottom: calc(var(--bottombar-height) + env(safe-area-inset-bottom) + 6px);
@@ -4271,10 +4277,9 @@ footer .glass-brand {
   }
 }
 
-@media (max-width: 699px) {
-  .message-fab.above-alert {
-    bottom: calc(144px + env(safe-area-inset-bottom, 0px));
-  }
+/* With the new-decision alert showing, the button sits above it with a gap, at every width. */
+.message-fab.above-alert {
+  bottom: calc(var(--dalert-bottom) + var(--dalert-height) + var(--space-3));
 }
 
 /* Conversation summaries share the decision row and its unread treatment. */
