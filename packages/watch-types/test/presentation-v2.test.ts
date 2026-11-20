@@ -95,6 +95,12 @@ describe('presentation v2 contract', () => {
       validateWatchPresentation(v2([item({ actions: [{ id: 'go', label: 'Go', placement: 'open', enabled: true, binding: { link: { href: 'javascript:alert(1)' } } }] })])),
     ).toThrow('invalid target');
     expect(() => validateWatchPresentation(v2([item(), item()]))).toThrow('repeats item');
+    // A configured review tool's app link is kept; code and local-data schemes are not.
+    const linked = (href: string) =>
+      v2([item({ actions: [{ id: 'go', label: 'Go', placement: 'open', enabled: true, binding: { link: { href } } }] })]);
+    expect(() => validateWatchPresentation(linked('linear://review/acme/web/pull/7'))).not.toThrow();
+    for (const href of ['javascript://%0aalert(1)', 'data:text/html,x', 'file:///etc/passwd', 'https://user:pw@example.test'])
+      expect(() => validateWatchPresentation(linked(href))).toThrow('invalid target');
     expect(() => validateWatchPresentation(v2([item({ notification: { revision: 'n1', unread: true, action: 'missing' } })]))).toThrow(
       'acknowledges through an undeclared human action',
     );

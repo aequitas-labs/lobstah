@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, observeReviewRequest, readReview, syncWatchRegistrations, WatchJournal, WatchRuntime } from '@lobstah/core';
+import { builtinWatchRegistry, ensureLayout, observeReviewRequest, readReview, syncWatchRegistrations, WatchJournal, WatchRuntime } from '@lobstah/core';
 import { CommandWatchType, validateWatchPresentation, WatchRegistry } from '@lobstah/watch-types';
 import type { WatchActionRequest, WatchItem, WatchPresentation, WatchSnapshot, WatchValue } from '@lobstah/watch-types';
 import { parseWatchItemAction, runWatchItemAction } from '../src/watch-item-actions.js';
@@ -189,6 +189,9 @@ describe('the GitHub review source', () => {
     const snapshot = buildGlassSnapshot();
     expect(snapshot.reviews?.map((review) => review.key)).toEqual(['review:acme/web#7']);
     expect(snapshot.reviewItems?.map((entry) => [entry.source.name, entry.item.id, entry.item.lifecycle.phase])).toEqual([['GitHub', 'review:acme/web#7', 'active']]);
+    // The daemon's plain registry observes the watch too; without the projection it keeps the last items.
+    new WatchRuntime(builtinWatchRegistry()).checkSync('review-requests:maya', { everySecs: 0 });
+    expect(new WatchJournal().read('review-requests:maya')?.presentation.items?.map((item) => item.id)).toEqual(['review:acme/web#7']);
   });
 
   it('mutes through the guarded item action and shows the change in the next snapshot', async () => {

@@ -32,7 +32,8 @@ export function createReviewWatchType(options: ReviewWatchSourceOptions = {}): R
     },
     present(snapshot) {
       const records = listReviews();
-      const items = options.items?.(snapshot) ?? [];
+      // A host without the projection (the plain daemon registry) keeps the last projected items.
+      const items = options.items?.(snapshot) ?? snapshot.presentation?.items ?? [];
       return {
         version: 2,
         source: GITHUB_SOURCE,
@@ -53,7 +54,8 @@ export function createReviewWatchType(options: ReviewWatchSourceOptions = {}): R
         links: [],
         actions: [
           { id: 'reconcile', label: 'Reconcile review requests', requiresAuthority: true, automatic: true },
-          ...(options.items || options.effectHandler ? reviewEffectActions : []),
+          // The source's human actions; only a host that installs the effect handler can run them.
+          ...reviewEffectActions,
         ],
         attention: [],
       };

@@ -272,11 +272,19 @@ export function genericSourceBrand(id: string, name = id): WatchSourceBrand {
   return { id, name, icon: { glyph: 'source' } };
 }
 
-/** Links navigate only over http(s), to absolute URLs; every other scheme is refused. */
+/** Schemes that run code or read local data; a link never uses them. */
+const UNSAFE_SCHEMES = new Set(['javascript:', 'data:', 'vbscript:', 'file:', 'blob:', 'about:', 'chrome:', 'filesystem:']);
+
+/**
+ * Links are absolute URLs: http(s), or an app deep link with an authority
+ * (`linear://review/...`, a configured review tool). Schemes that run code
+ * or read local data, and embedded credentials, are refused.
+ */
 export function validWatchLink(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && !parsed.username && !parsed.password;
+    if (UNSAFE_SCHEMES.has(parsed.protocol) || parsed.username || parsed.password) return false;
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' || /^[a-z][a-z0-9+.-]*:\/\/[^/\s]/i.test(url);
   } catch {
     return false;
   }
