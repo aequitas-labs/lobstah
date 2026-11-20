@@ -45,6 +45,7 @@ Role:
 - Triage incoming work. Dispatch it. Review each catch. Decide requeue or cancel.
 - Do not do the work yourself. Write a self-contained brief and dispatch it.
 - Answer a worker's question when you can decide. Send the answer. Ask the human with \`lobstah man ask\` when the choice is theirs.
+- When a card's answer arrives, act on it, then ack it with \`lobstah man ack <key> "<what you did>"\` (a \`send --for-decision <key>\` acks it too).
 - ${HELM_REMINDER}
 - ${DESK_ROUTING_RULE}
 - ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`.

@@ -1,5 +1,5 @@
 import { runSealKey } from './run-seal.js';
-import { answeredAt, cardCoversQuestion, archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, readDecision, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
+import { answeredAt, cardCoversQuestion, decisionHandoff, handoffDecisions, archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, readDecision, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
 import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, GlassRunCard, LobstahRequest, TendAttention } from '@lobstah/core';
 
 /**
@@ -69,10 +69,11 @@ export function glassRunCard(d: DecisionMeta): GlassRunCard | undefined {
   };
 }
 
-/** Standing decisions as the glass renders them, newest first. */
-export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()): GlassDecision[] {
+/** Standing decisions, then answered ones handed to the helm, as the glass renders them. */
+export function glassDecisions(decisions: DecisionMeta[] = [...standingDecisions(), ...handoffDecisions()]): GlassDecision[] {
   return decisions.map((d) => {
     const viewedAt = decisionViewedAt(d.key);
+    const handoff = decisionHandoff(d.key);
     return {
     key: d.key,
     title: d.title,
@@ -93,6 +94,17 @@ export function glassDecisions(decisions: DecisionMeta[] = standingDecisions()):
     askedAt: d.askedAt,
     stateHash: d.stateHash,
     ...(viewedAt ? { viewedAt } : {}),
+    ...(handoff
+      ? {
+          handoff: {
+            state: handoff.state,
+            answeredAt: handoff.answer.answeredAt,
+            ...(handoff.answer.option !== undefined ? { option: handoff.answer.option } : {}),
+            ...(handoff.answer.text !== undefined ? { text: handoff.answer.text } : {}),
+            ...(handoff.ack ? { ackedAt: handoff.ack.ackedAt, ...(handoff.ack.note ? { note: handoff.ack.note } : {}) } : {}),
+          },
+        }
+      : {}),
     };
   });
 }
@@ -113,8 +125,12 @@ export function decisionEventFields(r: LobstahRequest): Record<string, string> {
     attachments: (p.attachments ?? []).map((a) => a.path).join(', '),
     from: r.from,
     at: r.at,
+    ...(decisionHandoff(p.key)?.state === 'answered' ? { next: ackNext(p.key) } : {}),
   };
 }
+
+/** What a helm does with an answer that awaits its ack. */
+const ackNext = (key: string) => `act on it, then \`lobstah man ack ${key} "<what you did>"\`; until then the card spins in the glass and blocks your turn end`;
 
 /** A `man haul` line for a decision answer. */
 export function decisionLine(r: LobstahRequest): string {
@@ -130,6 +146,10 @@ export function decisionLine(r: LobstahRequest): string {
     .join(' · ');
   return (
     `- decision-answer ${p.key}${p.dispatch ? ` (${p.dispatch})` : ''} — ${p.title} · ${what} (request ${r.id}). ` +
-    (delivered ? 'The answer was delivered to the worker’s inbox.' : 'Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.')
+    (delivered
+      ? 'The answer was delivered to the worker’s inbox.'
+      : decisionHandoff(p.key)?.state === 'answered'
+        ? `Act on it (for a dispatch, usually \`lobstah send <dispatch> --for-decision ${p.key} "<instruction>"\`), then \`lobstah man ack ${p.key} "<what you did>"\` unless the send acked it.`
+        : 'Act on it; for a dispatch, usually `lobstah send <dispatch> "<instruction>"`.')
   );
 }

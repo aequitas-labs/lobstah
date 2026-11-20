@@ -87,9 +87,19 @@ export const RunKindIcon = html`<span class="runkind" role="img" aria-label="Run
   '<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6" stroke-width="1.5"/><path d="M4.6 6.3l2 1.7-2 1.7M8.4 10h3" stroke-width="1.5"/>',
 )}</span>`;
 
-/** The icon, named and titled with its words. */
-export function RunStatusIcon({ status, result, startedAt }: { status: RunStatus; result?: RunResult; startedAt?: string }) {
-  const label = runStatusLabel(status, result, startedAt);
+/** The icon, named and titled with its words; `label` names another lifecycle drawn with the same icons. */
+export function RunStatusIcon({
+  status,
+  result,
+  startedAt,
+  label: named,
+}: {
+  status: RunStatus;
+  result?: RunResult;
+  startedAt?: string;
+  label?: string;
+}) {
+  const label = named ?? runStatusLabel(status, result, startedAt);
   return html`<span class=${`runicon run-${status} ${TONE[status]}`} role="img" aria-label=${label} title=${label}>${ICON[status]}</span>`;
 }
 

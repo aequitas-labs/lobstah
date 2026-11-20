@@ -3363,6 +3363,39 @@ footer .glass-brand {
   align-items: center;
   gap: var(--space-2);
 }
+/* An answered card handed to the helm: the run card's spinner, then its check, with the words beside it (components/decisions.ts Handoff). */
+.dhandoff {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+/* In a deck row the words sit on the row's baseline, and the icon centers beside them. */
+.drow .dhandoff {
+  flex: 0 1 auto;
+  align-items: baseline;
+  max-width: 45%;
+}
+.drow .dhandoff .runicon {
+  align-self: center;
+}
+.dhandoff-text {
+  font-size: 11px;
+  color: var(--dim);
+  /* clip, not hidden: a hidden overflow loses the text's baseline in the row. */
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dhandoff-dock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.dhandoff-dock .dhandoff-text {
+  font-size: inherit;
+  white-space: normal;
+}
 /* In the card the icon stands in for the status line, so it is a size larger than in a deck row. */
 .runout .runicon svg {
   width: 20px;

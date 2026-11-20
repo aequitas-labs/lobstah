@@ -224,6 +224,8 @@ import {
   releaseHeldQuestions,
   askDecision,
   withdrawDecision,
+  ackDecision,
+  decisionHandoff,
   prepareRunCard,
   findRunProposal,
   proposeRunScript,
@@ -304,7 +306,7 @@ import { createRunCleanup } from './run-cleanup.js';
 import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
-import { digestWakeKeys, helmWakeKeys } from './wait-wakes.js';
+import { digestWakeKeys, helmWakeKeys, wakeIndex } from './wait-wakes.js';
 import { createTrapDispatchScheduler } from './trap-dispatch.js';
 import { backText, batchText, freshProfile, harnessCommand, launchShellText, launchedText, nextStartMode, onCodexServer, startMode, throwBatch, throwTrap } from './throw.js';
 import { repoTrapRows, trapSummary } from './trap-list.js';
@@ -371,13 +373,14 @@ work (humans and agents):
   tmux [repo]                     open a new Terminal view of the tmux trap session
   logs <uuid> [--follow|--full]   the normalized event stream (last 50 events
                                   by default; --full for everything)
-  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--compact] [--] [<message>]
+  send <uuid>|<trap-name>|wt:<trap> [--attach <file> ...] [--no-reply] [--pr <url|number>] [--for-decision <key>] [--compact] [--] [<message>]
                                   steer a live chain, queue for its pending
                                   member, or wake finished work as a follow-up;
                                   (arrives at its next park; undeliverable
                                   messages bounce to the helm). The worker's
                                   next note wakes man wait as a reply;
-                                  --no-reply expects none
+                                  --no-reply expects none; --for-decision acks
+                                  that card's answer once the send is made
   inbox <uuid>                    read and acknowledge pending messages
                                   (workers: check at natural checkpoints)
   attach <uuid> [--print] [--force]
@@ -499,6 +502,10 @@ lobstah man (orchestrator sessions — bare \`lobstah man\` prints the manual):
                                   (--withdraw <key>). Asks stand side by side;
                                   --replace <key> replaces one. The answer
                                   wakes man wait as a decision-answer event.
+  man ack decision:<key> ["<what I did>"]
+                                  ack a card's answer once you take it up.
+                                  Until then the card spins in the glass and
+                                  blocks your turn end; man report never acks.
   man answer <key> [--option <label>] [--text <text>] [--attach <file> ...]
                                   answer a decision from the terminal.
   man helm [--session <id>] [--grounds <name>] [--take] [--harness claude|codex]
@@ -1450,6 +1457,15 @@ async function mainCli(): Promise<void> {
       const sender = callerSession(opt('--session'));
       const sid = sender?.id;
       gateHelm(sender);
+      // --for-decision: this send is what the helm did with a card's answer, so it acks that card once delivered.
+      const forDecision = opt('--for-decision');
+      if (forDecision !== undefined && decisionHandoff(forDecision)?.state !== 'answered')
+        throw new UsageError(`${forDecision} has no answer awaiting your ack — \`lobstah man tend\` lists answered cards`);
+      const ackSent = (to: string) => {
+        if (forDecision === undefined) return;
+        const ack = ackDecision(forDecision, { note: `Sent to ${to.slice(0, 8)}: ${(rest.join(' ') || 'files').split('\n')[0]}`, by: 'send' });
+        console.log(toonKV({ acked: forDecision, at: ack.ackedAt }));
+      };
       const from = sid !== undefined && helmOf(sid) !== undefined ? 'helm' : sid !== undefined ? `session:${sid.slice(0, 8)}` : 'terminal';
       const text = rest.join(' ') || (has('--compact') ? 'Compact your context before continuing the dispatch.' : '');
       const prOnlyForFollowUp = '--pr applies only when send starts a follow-up of a finished dispatch; to work on a PR, dispatch with --pr';
@@ -1485,6 +1501,7 @@ async function mainCli(): Promise<void> {
               warning: `the trap signed off ${Math.round((Date.now() - Date.parse(off.at)) / 1000)}s ago — the message is held and delivers if its worktree re-soaks within ${leftSecs}s; otherwise it bounces back to the helm.`,
             }),
           );
+          ackSent(trapId);
           break;
         }
         if (!reg) throw new Error(`${unknownTrapMessage(target)} — \`lobstah man tend\` lists live traps`);
@@ -1501,6 +1518,7 @@ async function mainCli(): Promise<void> {
             }),
           );
         }
+        ackSent(trapId);
         break;
       }
       const chain = dispatchChain(target);
@@ -1525,6 +1543,7 @@ async function mainCli(): Promise<void> {
         const expects = !has('--no-reply');
         if (expects) expectReply({ dispatchId: member.id, lane: member.lane, from, text });
         console.log(toonKV({ id: member.id, from, queued: name, ...(expects ? { reply: 'expected' } : {}) }));
+        ackSent(member.id);
         break;
       }
       const origin = chain.at(-1)!;
@@ -1577,6 +1596,7 @@ async function mainCli(): Promise<void> {
       else if (headless) console.log(`delivery: unaddressed${followUp.pool ? ` (pool ${followUp.pool})` : ''}; a matching trap or headless worker may take it`);
       else console.log(`delivery: ${trapAddressText(address!, 'label')} (sticky; follows the previous trap claim)`);
       for (const warning of warnings) console.log(toonKV({ warning }));
+      ackSent(origin.id);
       break;
     }
     case 'report': {
@@ -2219,6 +2239,12 @@ async function mainCli(): Promise<void> {
       if (withdraw !== undefined) {
         if (pos.length > 0 || opt('--title') !== undefined) throw new UsageError(`--withdraw takes only a decision key\n\n${usageFor('man:ask')!}`);
         try {
+          // An answered card awaiting the helm has nothing left to withdraw: withdrawing it acks the answer.
+          if (decisionHandoff(withdraw)?.state === 'answered') {
+            const ack = ackDecision(withdraw, { note: 'Withdrawn', by: 'withdraw' });
+            console.log(toonKV({ key: withdraw, withdrawn: true, acked: ack.ackedAt }));
+            break;
+          }
           const gone = withdrawDecision(withdraw);
           console.log(toonKV({ key: gone.key, withdrawn: true, title: gone.title }));
         } catch (err) {
@@ -2295,6 +2321,21 @@ async function mainCli(): Promise<void> {
           `lobstah man ask --withdraw ${meta.key}   (when it no longer needs the human)`,
         ]),
       );
+      break;
+    }
+    case 'man:ack': {
+      const key = pos[0];
+      if (!key || !key.startsWith('decision:') || pos.length > 2) throw new UsageError(`man ack requires one decision key and an optional note\n\n${usageFor('man:ack')!}`);
+      // Taking up a person's answer is the helm's: the claimed helm alone acks.
+      gateHelm(callerSession(opt('--session')), opt('--grounds'));
+      let ack: ReturnType<typeof ackDecision>;
+      try {
+        ack = ackDecision(key, { note: pos[1] });
+      } catch (err) {
+        if (err instanceof DecisionError) throw new UsageError(err.message);
+        throw err;
+      }
+      console.log(toonKV({ key, acked: true, at: ack.ackedAt, ...(ack.note ? { note: ack.note } : {}) }));
       break;
     }
     case 'man:answer': {
@@ -2925,6 +2966,7 @@ async function mainCli(): Promise<void> {
         // A send's answer: a working or paused note delivered once.
         const standingReplies = takeReplies(consume, matchGrounds);
         if (standing.length > 0 || standingWatches.length > 0 || standingNotices.length > 0 || standingReplies.length > 0 || standingTodos.length > 0) {
+          console.log(wakeIndex({ events: standing, watches: standingWatches, notices: standingNotices, replies: standingReplies, todos: standingTodos }));
           if (standingTodos.length > 0) emitDueTodos(standingTodos);
           if (standing.length > 0) emit(standing);
           if (standingWatches.length > 0) emitWatchAttention(standingWatches, sid);
@@ -2972,6 +3014,7 @@ async function mainCli(): Promise<void> {
           // cleared here, and that verb is the wake.
           const replies = takeReplies(true, matchGrounds);
           if (fresh.length > 0 || replies.length > 0) {
+            console.log(wakeIndex({ events: fresh, replies }));
             if (fresh.length > 0) emit(fresh);
             if (replies.length > 0) emitReplies(replies, sid);
             delivered(helmWakeKeys({ events: fresh, replies }), ...fresh.map((e) => e.entry.at), ...replies.map((r) => r.entry.at));
@@ -2980,12 +3023,14 @@ async function mainCli(): Promise<void> {
           runDueManWatches(); // no pick running? this loop is the poller
           const watched = pendingWatchEvents(true, 'man', Date.now(), floorMs);
           if (watched.length > 0) {
+            console.log(wakeIndex({ watches: watched }));
             emitWatchAttention(watched, sid);
             delivered(helmWakeKeys({ watches: watched }), ...watched.flatMap((a) => a.events.map((e) => e.at)));
             return;
           }
           const freshTodos = dueTodos();
           if (freshTodos.length > 0) {
+            console.log(wakeIndex({ todos: freshTodos }));
             emitDueTodos(freshTodos);
             delivered(helmWakeKeys({ todos: freshTodos }));
             return;
@@ -2993,6 +3038,7 @@ async function mainCli(): Promise<void> {
           threadMaintenance();
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
           if (freshNotices.length > 0) {
+            console.log(wakeIndex({ notices: freshNotices }));
             emitNotices(freshNotices, sid);
             delivered(helmWakeKeys({ notices: freshNotices }), ...freshNotices.map((n) => n.at));
             return;

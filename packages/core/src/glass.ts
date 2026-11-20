@@ -517,6 +517,19 @@ export interface GlassDecision {
   stateHash: string;
   /** When the human first viewed it in the decision modal; absent = unread. */
   viewedAt?: string;
+  /** An answered card handed to the helm: `answered` until the helm acks it, then `acked` with its note. */
+  handoff?: GlassHandoff;
+}
+
+/** An answered card's hand-off to the helm, as the glass shows it. */
+export interface GlassHandoff {
+  state: 'answered' | 'acked';
+  answeredAt: string;
+  option?: string;
+  text?: string;
+  ackedAt?: string;
+  /** What the helm did with the answer. */
+  note?: string;
 }
 
 /** A run card as the glass shows it: the stored script in full, what runs it, and what a reader could miss in it. */
