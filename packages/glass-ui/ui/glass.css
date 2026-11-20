@@ -4327,6 +4327,35 @@ footer .glass-brand {
 .thread-avatar svg {
   width: 16px;
   height: 16px;
+  margin: 0;
+}
+/* Linked work: its kind's icon (components/icons.ts WORK_ICON), then its card or link. */
+.thread-work {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+}
+.thread-work-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.thread-work-body > p {
+  margin: 0;
+  line-height: 26px;
+}
+.thread-work-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--dim);
+}
+.thread-work-icon svg {
+  width: 16px;
+  height: 16px;
+  margin: 0;
 }
 .thread-system {
   align-self: center;

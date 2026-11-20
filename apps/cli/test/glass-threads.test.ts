@@ -279,3 +279,104 @@ it('heads a thread about a dispatch with its card: title, repo, trap, state, las
   expect(g.$('.tsheet .rbartitle')?.textContent).toBe('Deflake the deck test');
 });
 
+it('marks each linked item with the icon its kind has in the glass views', async () => {
+  const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [summary()];
+  const dispatch = d.dispatches[0]!, report = d.reports[0]!, pr = d.prs[0]!;
+  const gone = 'aaaa0000-0000-4000-8000-00000000dead';
+  const detail = view();
+  detail.rounds = [{ at: AT, entries: [
+    { link: 'dispatched', ref: dispatch.id, text: 'Dispatch link' },
+    { link: 'dispatched', ref: gone, text: 'Missing dispatch' },
+    { link: 'report', ref: report.key, text: 'Report link' },
+    { link: 'planned', ref: pr.url, text: 'PR link' },
+    { link: 'planned', ref: 'https://app.ume.so/a/plan', text: 'The plan' },
+    { card: KEY },
+  ] }];
+  const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : url === `/data/dispatch/${gone}` ? { status: 404, body: {} } : undefined });
+  const icons = g.$$('.thread-timeline .thread-work-icon');
+  const svg = (el: Element | null | undefined) => el?.querySelector('svg')?.outerHTML;
+  const tab = (name: string) => g.$$(`a[href="#${name}"]`).map(svg).find(Boolean);
+  expect(icons.map((el) => el.getAttribute('title'))).toEqual(['Dispatch', 'Dispatch', 'Report', 'PR', 'Plan', 'Card']);
+  expect(icons.map((el) => el.querySelector('.sr-only')?.textContent)).toEqual(['Dispatch: ', 'Dispatch: ', 'Report: ', 'PR: ', 'Plan: ', 'Card: ']);
+  expect(svg(icons[0])).toBe(tab('dispatches'));
+  expect(svg(icons[1])).toBe(tab('dispatches'));
+  expect(svg(icons[2])).toBe(tab('reports'));
+  expect(svg(icons[3])).toBe(tab('prs'));
+  expect(svg(icons[5])).toBe(tab('deck'));
+  expect(new Set(icons.map(svg)).size).toBe(5);
+  expect(g.$$('.thread-work-dispatch .card')).toHaveLength(1);
+  expect(g.$(`.thread-work-dispatch a[href="#dispatch/${gone}"]`)?.textContent).toBe('Missing dispatch');
+  expect(g.$('.thread-work-plan a')?.getAttribute('href')).toBe('https://app.ume.so/a/plan');
+});
+
+/**
+ * happy-dom has no layout: the sheet's scroller is 300px tall, holds 100px
+ * per entry, and clamps scrollTop as a browser does.
+ */
+function layout(w: unknown) {
+  const win = w as Window & typeof globalThis;
+  const tops = new WeakMap<Element, number>();
+  const sheet = (el: Element) => el.classList.contains('rbody');
+  const height = (el: Element) => (sheet(el) ? el.querySelectorAll('.thread-entry').length * 100 + 400 : 0);
+  const proto = win.HTMLElement.prototype;
+  Object.defineProperty(proto, 'scrollHeight', { configurable: true, get(this: Element) { return height(this); } });
+  Object.defineProperty(proto, 'clientHeight', { configurable: true, get(this: Element) { return sheet(this) ? 300 : 0; } });
+  Object.defineProperty(proto, 'scrollTop', {
+    configurable: true,
+    get(this: Element) { return Math.min(tops.get(this) ?? 0, Math.max(0, height(this) - 300)); },
+    set(this: Element, y: number) { tops.set(this, Math.max(0, Math.min(y, height(this) - 300))); },
+  });
+}
+const scroller = (g: GlassDom) => g.$('.tsheet .rbody') as HTMLElement;
+const bottom = (g: GlassDom) => scroller(g).scrollHeight - scroller(g).clientHeight;
+async function scrollTo(g: GlassDom, y: number) { scroller(g).scrollTop = y; scroller(g).dispatchEvent(new g.window.Event('scroll')); await g.settle(); }
+
+it('opens a conversation already at its newest message, with no stop at the top first', async () => {
+  const shown: number[][] = [];
+  const g = await page(fleet(), { hash: '#helm', prepare: (w) => {
+    layout(w);
+    // Where the sheet stands at each change while the conversation is in the page: before the browser could paint it.
+    new w.MutationObserver(() => {
+      const box = w.document.querySelector('.tsheet .rbody') as HTMLElement | null;
+      if (box?.querySelector('.thread-timeline')) shown.push([box.scrollTop, box.scrollHeight - box.clientHeight]);
+    }).observe(w.document, { childList: true, subtree: true, characterData: true });
+  } });
+  await click(g, `#helm [data-thread="${ID}"] .dopen`);
+  expect(shown.length).toBeGreaterThan(0);
+  expect(shown[0]![0]).toBeGreaterThan(0);
+  for (const [at, end] of shown) expect(at).toBe(end);
+  expect(scroller(g).scrollTop).toBe(bottom(g));
+});
+
+it('stays at the newest message as messages arrive, and leaves a reader who scrolled up where they are', async () => {
+  const d = fleet(); let detail = view();
+  const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined, prepare: layout });
+  const grow = async (text: string) => {
+    detail = { ...detail, updatedAt: new Date(Date.parse(detail.updatedAt) + 1000).toISOString(), rounds: [...detail.rounds, { at: AT, entries: [{ by: 'person', via: 'glass', text, attachments: [] }] }] };
+    d.threads![0] = { ...summary(), updatedAt: detail.updatedAt }; g.serve(d); await g.poll(); await g.settle();
+  };
+  const timeline = g.$('.thread-timeline'), first = bottom(g);
+  expect(scroller(g).scrollTop).toBe(first);
+  await grow('One more');
+  expect(g.$('.tsheet')?.textContent).toContain('One more');
+  expect(bottom(g)).toBeGreaterThan(first);
+  expect(scroller(g).scrollTop).toBe(bottom(g));
+  // A refresh keeps the conversation on the page rather than swapping in the loading line.
+  expect(g.$('.thread-timeline')).toBe(timeline);
+  await scrollTo(g, 100);
+  await grow('And another');
+  expect(g.$('.tsheet')?.textContent).toContain('And another');
+  expect(scroller(g).scrollTop).toBe(100);
+});
+
+it('opens the next conversation at its newest message after reading back through another', async () => {
+  const d = fleet(), other = 'abcdef02-1234-4000-8000-abcdef012345';
+  d.threads = [summary(), { ...summary(), id: other, title: 'Another' }];
+  const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: { ...view(), id: decodeURIComponent(url.slice('/threads/'.length)), title: url.includes(other) ? 'Another' : 'Navigation' } } : undefined, prepare: layout });
+  await scrollTo(g, 0);
+  await g.go(`#thread/${other}`);
+  expect(g.$('.tsheet .rbartitle')?.textContent).toBe('Another');
+  expect(scroller(g).scrollTop).toBeGreaterThan(0);
+  expect(scroller(g).scrollTop).toBe(bottom(g));
+});
+
