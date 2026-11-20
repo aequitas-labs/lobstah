@@ -1,4 +1,5 @@
 import type { WatchRegistry } from '@lobstah/watch-types';
+import { presentationView } from '@lobstah/watch-types/presentation-view';
 import { builtinWatchRegistry } from './watch-source-registry.js';
 import { journalWatchViews } from './watch-presentation.js';
 import type { JournalWatchView } from './watch-presentation.js';
@@ -34,6 +35,7 @@ export function presentedWatchViews(
         stored.push({
           ...previous,
           snapshot: { ...previous.snapshot, presentation: view.presentation },
+          view: presentationView(view.presentation, previous.snapshot.type.id),
           watch: { ...previous.watch, presentation: view.presentation },
         });
         prior.delete(view.key);
@@ -63,6 +65,7 @@ export function presentedWatchViews(
             : (`trap:${view.owner.trapId}` as const);
       stored.push({
         snapshot,
+        view: presentationView(view.presentation, source.descriptor.id),
         watch: {
           key: view.key,
           owner,

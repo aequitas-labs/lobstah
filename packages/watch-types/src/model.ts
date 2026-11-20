@@ -1,4 +1,5 @@
 import type { WatchAttentionDisplay } from './presentation.js';
+import type { WatchItem, WatchPresentationVersion, WatchSourceBrand } from './items.js';
 /** JSON is the durable and cross-process boundary for every watch type. */
 export type WatchValue = null | boolean | number | string | WatchValue[] | { [key: string]: WatchValue };
 
@@ -152,10 +153,26 @@ export interface WatchAction {
   requiresAuthority: boolean;
   /** Automatic actions are scheduler capabilities, not human card controls. */
   automatic?: boolean;
+  /** Presentation v2: the JSON schema an item effect's arguments must satisfy; absent means no arguments. */
+  arguments?: Record<string, WatchValue>;
 }
 
-/** Human and agent consumers share a provider-free presentation model. */
+/**
+ * Human and agent consumers share a provider-free presentation model.
+ * Version 1 is the original shape. Version 2 adds the source brand and the
+ * items a watch yields, with lifecycle, workflow statuses, attention and
+ * notification as separate typed axes (items.ts). The version is persisted
+ * with the cached presentation, so restoring a view never needs a running
+ * plugin. The watch-level `tone` remains the badge of the watch's own
+ * condition; items never carry a tone.
+ */
 export interface WatchPresentation {
+  /** Absent on version 1 presentations. */
+  version?: WatchPresentationVersion;
+  /** Version 2: the source's stable ID, display name and logo. */
+  source?: WatchSourceBrand;
+  /** Version 2: the review requests, artifacts or other items this watch yields. */
+  items?: WatchItem[];
   /** Local condition sources can omit a redundant watch row while retaining their card projection. */
   listing?: 'watch' | 'conditions';
   /** Source-owned relationships can suppress another standing condition without a hidden card. */

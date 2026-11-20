@@ -304,7 +304,7 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
             },
             'Plugin derived views',
           ).parse(value);
-          for (const view of views) validateWatchPresentation(view.presentation);
+          for (const view of views) validateWatchPresentation(view.presentation, this.manifest.presentationVersion);
           return views;
         },
       };
@@ -387,7 +387,7 @@ export class ProcessWatchType extends BaseWatchType<WatchValue, WatchValue, Watc
     return { state: this.stateSchema.parse(plan.state), cursor: this.cursorSchema.parse(plan.cursor), done: plan.done };
   }
   present(snapshot: WatchSnapshot): WatchPresentation {
-    return validateWatchPresentation(this.call('watch.present', { snapshot }, snapshot));
+    return validateWatchPresentation(this.call('watch.present', { snapshot }, snapshot), this.manifest.presentationVersion);
   }
   failure(error: unknown): WatchFailure {
     if (error instanceof WatchPluginError) return validateWatchFailure(error.failure);

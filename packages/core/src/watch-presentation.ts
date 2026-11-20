@@ -1,10 +1,14 @@
 import type { WatchSnapshot } from '@lobstah/watch-types';
+import { presentationView } from '@lobstah/watch-types/presentation-view';
+import type { WatchPresentationView } from '@lobstah/watch-types/presentation-view';
 import type { Watch, WatchAttention, WatchEvent } from './watch.js';
 import { WatchJournal } from './watch-journal.js';
 
 /** Stored view data is enough to render a type that this process never instantiates. */
 export interface JournalWatchView {
   snapshot: WatchSnapshot;
+  /** The cached presentation normalized from version 1 or 2, for every renderer. */
+  view: WatchPresentationView;
   watch: Watch;
   events: WatchEvent[];
   pending: WatchEvent[];
@@ -50,7 +54,7 @@ export function journalWatchViews(exclude: ReadonlySet<string> = new Set()): Jou
         ...(snapshot.failure ? { lastError: snapshot.failure.message, remedy: snapshot.failure.remedy, failingSince: snapshot.checkedAt ?? snapshot.createdAt } : {}),
         ...(snapshot.status === 'held' ? { heldAt: snapshot.checkedAt ?? snapshot.createdAt, heldReason: snapshot.failure?.message } : {}),
       };
-      return { snapshot, watch, events, pending };
+      return { snapshot, view: presentationView(snapshot.presentation, snapshot.type.id), watch, events, pending };
     });
 }
 

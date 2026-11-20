@@ -238,7 +238,7 @@ async function ensureStarted(): Promise<unknown> {
     };
     if (
       declaration?.protocolVersion !== 1 ||
-      declaration.presentationVersion !== 1 ||
+      (declaration.presentationVersion !== 1 && declaration.presentationVersion !== 2) ||
       declaration.descriptor?.id !== configuration.id ||
       declaration.descriptor.apiVersion !== 1 ||
       declaration.descriptor.version !== configuration.version

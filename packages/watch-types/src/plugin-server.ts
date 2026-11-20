@@ -10,10 +10,13 @@ import {
   pluginSchema,
 } from './plugin-model.js';
 import type { PluginJsonSchema, WatchPluginManifest, WatchPluginRequest } from './plugin-model.js';
+import type { WatchPresentationVersion } from './items.js';
 
 /** Optional action schemas supplement the shared recorded-authorization envelope. */
 export interface WatchPluginServerOptions {
   actionSchemas?: { arguments: PluginJsonSchema; result: PluginJsonSchema };
+  /** The presentation contract this adapter's `present` returns; version 1 unless it declares 2. */
+  presentationVersion?: WatchPresentationVersion;
   maxMessageBytes?: number;
 }
 
@@ -44,7 +47,7 @@ export function watchPluginManifest<Reference, State, Cursor, Options>(
   const { installation: _installation, ...descriptor } = adapter.descriptor;
   return {
     protocolVersion: 1,
-    presentationVersion: 1,
+    presentationVersion: options.presentationVersion ?? 1,
     descriptor,
     schemas: {
       reference: pluginDto(adapter.referenceSchema.json) as PluginJsonSchema,
@@ -155,7 +158,9 @@ export async function serveWatchPlugin<Reference, State, Cursor, Options>(
           adapter.reduce(adapter.restore(snapshot as unknown as WatchSnapshot), body.batch as Parameters<typeof adapter.reduce>[1]),
         );
       case 'watch.present':
-        return pluginDto(validateWatchPresentation(adapter.present(adapter.restore(snapshot as unknown as WatchSnapshot))));
+        return pluginDto(
+          validateWatchPresentation(adapter.present(adapter.restore(snapshot as unknown as WatchSnapshot)), manifest.presentationVersion),
+        );
       case 'watch.failure':
         return pluginDto(validateWatchFailure(adapter.failure(new Error(String(body.message)))));
       case 'watch.close':

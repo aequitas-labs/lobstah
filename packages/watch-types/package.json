@@ -18,6 +18,16 @@
       "browser": "./dist/presentation.js",
       "import": "./dist/presentation.js"
     },
+    "./items": {
+      "types": "./dist/items.d.ts",
+      "browser": "./dist/items.js",
+      "import": "./dist/items.js"
+    },
+    "./presentation-view": {
+      "types": "./dist/presentation-view.d.ts",
+      "browser": "./dist/presentation-view.js",
+      "import": "./dist/presentation-view.js"
+    },
     "./pr": {
       "types": "./dist/pr/index.d.ts",
       "import": "./dist/pr/index.js"

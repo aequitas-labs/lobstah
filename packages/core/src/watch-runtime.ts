@@ -1,6 +1,6 @@
 import { storeWatchTypeDescriptor } from './watch-type-descriptors.js';
 import { randomUUID } from 'node:crypto';
-import { WatchRegistry, watchJson, retainWatchConditionTimes } from '@lobstah/watch-types';
+import { WatchRegistry, watchJson, retainWatchConditionTimes, validateWatchPresentation } from '@lobstah/watch-types';
 import type {
   InstalledWatchType,
   WatchCloseReason,
@@ -71,6 +71,16 @@ function applySource(target: WatchSnapshot, source: WatchSnapshot): void {
   target.presentation = source.presentation;
 }
 
+/**
+ * Built-in and plugin presentations share one validation path: a version 2
+ * presentation is checked like a plugin's before it is cached, so an invalid
+ * item or action binding holds its source instead of reaching a renderer.
+ */
+function presentSource(adapter: Pick<InstalledWatchType, 'present'>, snapshot: WatchSnapshot): WatchPresentation {
+  const presentation = adapter.present(snapshot);
+  return presentation.version === 2 ? validateWatchPresentation(presentation, 2) : presentation;
+}
+
 /** Provider-free orchestration: identity, leases, atomic progress and durable delivery. */
 export class WatchRuntime {
   constructor(
@@ -106,7 +116,7 @@ export class WatchRuntime {
             failures: 0,
           };
       prepared.options = identified.options;
-      prepared.presentation = retainWatchConditionTimes(adapter.present(prepared), prepared.presentation, new Date().toISOString());
+      prepared.presentation = retainWatchConditionTimes(presentSource(adapter, prepared), prepared.presentation, new Date().toISOString());
       const result = this.journal.update<WatchSnapshot | undefined>(identified.key, (current) => {
         if (current?.generation !== prior?.generation || (current && prior && sourceRevision(current) !== sourceRevision(prior)))
           return { result: undefined };
@@ -383,7 +393,7 @@ export class WatchRuntime {
     if (batch.failure?.hold) prepared.status = 'held';
     prepared.lease = undefined;
     prepared.presentation = retainWatchConditionTimes(
-      execution.adapter.present(structuredClone(prepared)),
+      presentSource(execution.adapter, structuredClone(prepared)),
       observed.presentation,
       new Date(execution.now).toISOString(),
     );
@@ -417,7 +427,7 @@ export class WatchRuntime {
     if (failure.hold) prepared.status = 'held';
     try {
       prepared.presentation = retainWatchConditionTimes(
-        execution.adapter.present(prepared),
+        presentSource(execution.adapter, prepared),
         observed.presentation,
         new Date(execution.now).toISOString(),
       );

@@ -255,6 +255,37 @@ describe('watch runtime durability', () => {
     expect(service.journal.read(original.key)?.status).toBe('retired');
   });
 
+  it('holds a source whose version 2 presentation binds an undeclared action, keeping its cached view', async () => {
+    const adapter = new FixtureWatch(),
+      service = runtime(adapter);
+    service.register('fixture', 'build:v2', { check: 'unused', cursor: '0' }, owner);
+    const before = service.journal.read('build:v2')!.presentation;
+    adapter.present = (snapshot) => ({
+      ...new CommandWatchType().present(snapshot),
+      version: 2,
+      source: { id: 'fixture', name: 'Fixture', icon: { glyph: 'source' } },
+      items: [
+        {
+          id: 'item-1',
+          revision: '1',
+          title: 'Item',
+          kind: 'document',
+          glyph: { kind: 'document' },
+          lifecycle: { phase: 'active', label: 'Active' },
+          statuses: [],
+          attention: 'none',
+          metadata: [],
+          actions: [{ id: 'approve', label: 'Approve', placement: 'primary', enabled: true, binding: { effect: { action: 'approve' } } }],
+          surfaces: { list: ['reviews'] },
+        },
+      ],
+    });
+    const held = await service.check('build:v2', { now });
+    expect(held?.status).toBe('held');
+    expect(held?.failure?.message).toMatch(/undeclared human action/);
+    expect(held?.presentation).toEqual(before);
+  });
+
   it('unknown or newer adapter state is held without changing its cursor', async () => {
     const adapter = new FixtureWatch(),
       service = runtime(adapter);

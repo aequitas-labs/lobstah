@@ -3,9 +3,23 @@ import type { ValidateFunction } from 'ajv';
 import { createHash } from 'node:crypto';
 import type { WatchFailure, WatchPresentation, WatchRegistrationBinding, WatchSchema, WatchTypeDescriptor, WatchValue } from './model.js';
 import { watchJson } from './registry.js';
+import {
+  WATCH_ACTION_GLYPHS,
+  WATCH_ACTION_PLACEMENTS,
+  WATCH_ATTENTION_STATES,
+  WATCH_GLYPHS,
+  WATCH_LIFECYCLE_PHASES,
+  WATCH_METADATA_KINDS,
+  WATCH_STATUS_CATEGORIES,
+  WATCH_STATUS_MEANINGS,
+  WATCH_SURFACES,
+  validWatchTarget,
+} from './items.js';
+import type { WatchItem, WatchPresentationVersion } from './items.js';
 
 export const WATCH_PLUGIN_PROTOCOL = 1 as const;
-export const WATCH_PRESENTATION_PROTOCOL = 1 as const;
+/** The newest presentation contract this host renders; it also accepts every older one. */
+export const WATCH_PRESENTATION_PROTOCOL = 2 as const;
 export const WATCH_PLUGIN_CAPABILITIES = ['poll', 'batch', 'subscribe', 'actions', 'automation', 'dispatch', 'derived', 'notices', 'registration', 'commands', 'triggers', 'acknowledgements'] as const;
 export type WatchPluginCapability = (typeof WATCH_PLUGIN_CAPABILITIES)[number];
 export type PluginJsonSchema = Record<string, WatchValue>;
@@ -28,7 +42,8 @@ export interface WatchPluginConfiguration {
 }
 export interface WatchPluginManifest {
   protocolVersion: 1;
-  presentationVersion: 1;
+  /** The presentation contract `watch.present` returns; the process transport stays at protocol 1. */
+  presentationVersion: WatchPresentationVersion;
   descriptor: WatchTypeDescriptor;
   schemas: { reference: PluginJsonSchema; options: PluginJsonSchema; state: PluginJsonSchema; cursor: PluginJsonSchema };
   bindings: WatchRegistrationBinding[];
@@ -188,61 +203,269 @@ const attentionDisplay: PluginJsonSchema = {
   },
 };
 
-/** Version 1 accepts declarative presentation only; HTML, CSS and executable modules have no protocol fields. */
-export const watchPresentationSchema: PluginJsonSchema = {
+const action: PluginJsonSchema = {
   type: 'object',
-  required: ['title', 'summary', 'label', 'tone', 'worker', 'helm', 'rows', 'links', 'actions', 'attention'],
+  required: ['id', 'label', 'requiresAuthority'],
   additionalProperties: false,
-  properties: {
-    title: string,
-    summary: string,
-    label: string,
-    tone: { enum: ['neutral', 'ok', 'warning', 'risk'] },
-    listing: { enum: ['watch', 'conditions'] },
-    suppresses: { type: 'array', items: suppression },
-    worker: instructions,
-    helm: instructions,
-    rows: {
-      type: 'array',
-      items: { type: 'object', required: ['label', 'value'], additionalProperties: false, properties: { label: string, value: string } },
-    },
-    links: {
-      type: 'array',
-      items: { type: 'object', required: ['label', 'url'], additionalProperties: false, properties: { label: string, url: string } },
-    },
-    actions: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['id', 'label', 'requiresAuthority'],
-        additionalProperties: false,
-        properties: { id: string, label: string, requiresAuthority: { type: 'boolean' }, automatic: { type: 'boolean' } },
-      },
-    },
-    attention: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['id', 'kind', 'stateHash', 'summary', 'quiet', 'blocking'],
-        additionalProperties: false,
-        properties: {
-          id: string,
-          key: string,
-          kind: string,
-          stateHash: string,
-          since: { type: 'string', format: 'date-time' },
-          summary: string,
-          quiet: { type: 'boolean' },
-          blocking: { type: 'boolean' },
-          fields: object,
-          presentation: attentionDisplay,
-        },
+  properties: { id: string, label: string, requiresAuthority: { type: 'boolean' }, automatic: { type: 'boolean' } },
+};
+const presentationProperties: Record<string, PluginJsonSchema> = {
+  title: string,
+  summary: string,
+  label: string,
+  tone: { enum: ['neutral', 'ok', 'warning', 'risk'] },
+  listing: { enum: ['watch', 'conditions'] },
+  suppresses: { type: 'array', items: suppression },
+  worker: instructions,
+  helm: instructions,
+  rows: {
+    type: 'array',
+    items: { type: 'object', required: ['label', 'value'], additionalProperties: false, properties: { label: string, value: string } },
+  },
+  links: {
+    type: 'array',
+    items: { type: 'object', required: ['label', 'url'], additionalProperties: false, properties: { label: string, url: string } },
+  },
+  actions: { type: 'array', items: action },
+  attention: {
+    type: 'array',
+    items: {
+      type: 'object',
+      required: ['id', 'kind', 'stateHash', 'summary', 'quiet', 'blocking'],
+      additionalProperties: false,
+      properties: {
+        id: string,
+        key: string,
+        kind: string,
+        stateHash: string,
+        since: { type: 'string', format: 'date-time' },
+        summary: string,
+        quiet: { type: 'boolean' },
+        blocking: { type: 'boolean' },
+        fields: object,
+        presentation: attentionDisplay,
       },
     },
   },
 };
-export function validateWatchPresentation(value: unknown): WatchPresentation {
-  return pluginSchema<WatchPresentation>(watchPresentationSchema, 'Watch presentation').parse(value);
+const presentationRequired = ['title', 'summary', 'label', 'tone', 'worker', 'helm', 'rows', 'links', 'actions', 'attention'];
+
+/** Version 1 accepts declarative presentation only; HTML, CSS and executable modules have no protocol fields. */
+export const watchPresentationSchema: PluginJsonSchema = {
+  type: 'object',
+  required: presentationRequired,
+  additionalProperties: false,
+  properties: presentationProperties,
+};
+
+const nonEmpty = { type: 'string', minLength: 1 };
+const time = { type: 'string', format: 'date-time' };
+const glyph = { enum: [...WATCH_GLYPHS] };
+const icon: PluginJsonSchema = {
+  oneOf: [
+    { type: 'object', required: ['glyph'], additionalProperties: false, properties: { glyph } },
+    {
+      type: 'object',
+      required: ['asset', 'fallback'],
+      additionalProperties: false,
+      properties: {
+        asset: { type: 'object', required: ['light', 'dark'], additionalProperties: false, properties: { light: nonEmpty, dark: nonEmpty } },
+        fallback: glyph,
+      },
+    },
+  ],
+};
+const phase = { enum: [...WATCH_LIFECYCLE_PHASES] };
+const itemAction: PluginJsonSchema = {
+  type: 'object',
+  required: ['id', 'label', 'placement', 'enabled', 'binding'],
+  additionalProperties: false,
+  properties: {
+    id: nonEmpty,
+    label: nonEmpty,
+    glyph: { enum: [...WATCH_ACTION_GLYPHS] },
+    placement: { enum: [...WATCH_ACTION_PLACEMENTS] },
+    enabled: { type: 'boolean' },
+    reason: string,
+    title: string,
+    progress: string,
+    done: string,
+    acknowledges: { type: 'boolean' },
+    confirm: {
+      type: 'object',
+      required: ['title', 'body', 'label'],
+      additionalProperties: false,
+      properties: { title: nonEmpty, body: string, label: nonEmpty },
+    },
+    binding: {
+      oneOf: [
+        { type: 'object', required: ['link'], additionalProperties: false, properties: { link: target } },
+        {
+          type: 'object',
+          required: ['effect'],
+          additionalProperties: false,
+          properties: {
+            effect: { type: 'object', required: ['action'], additionalProperties: false, properties: { action: nonEmpty, arguments: {} } },
+          },
+        },
+      ],
+    },
+  },
+};
+const item: PluginJsonSchema = {
+  type: 'object',
+  required: ['id', 'revision', 'title', 'kind', 'glyph', 'lifecycle', 'statuses', 'attention', 'metadata', 'actions', 'surfaces'],
+  additionalProperties: false,
+  properties: {
+    id: nonEmpty,
+    revision: nonEmpty,
+    title: string,
+    subtitle: string,
+    kind: nonEmpty,
+    glyph: {
+      type: 'object',
+      required: ['kind'],
+      additionalProperties: false,
+      properties: {
+        kind: glyph,
+        variants: {
+          type: 'object',
+          additionalProperties: false,
+          properties: Object.fromEntries(WATCH_LIFECYCLE_PHASES.map((name) => [name, glyph])),
+        },
+      },
+    },
+    lifecycle: {
+      type: 'object',
+      required: ['phase', 'label'],
+      additionalProperties: false,
+      properties: { phase, label: nonEmpty, archived: { type: 'boolean' } },
+    },
+    statuses: {
+      type: 'array',
+      maxItems: 16,
+      items: {
+        type: 'object',
+        required: ['code', 'label', 'category', 'meaning'],
+        additionalProperties: false,
+        properties: {
+          code: nonEmpty,
+          label: nonEmpty,
+          category: { enum: [...WATCH_STATUS_CATEGORIES] },
+          meaning: { enum: [...WATCH_STATUS_MEANINGS] },
+          detail: string,
+          target,
+        },
+      },
+    },
+    attention: { enum: [...WATCH_ATTENTION_STATES] },
+    notification: {
+      type: 'object',
+      required: ['revision', 'unread'],
+      additionalProperties: false,
+      properties: { revision: nonEmpty, unread: { type: 'boolean' }, seen: { type: 'boolean' } },
+    },
+    resolved: { type: 'boolean' },
+    person: {
+      type: 'object',
+      required: ['id', 'role'],
+      additionalProperties: false,
+      properties: { id: nonEmpty, name: string, avatarUrl: string, role: nonEmpty },
+    },
+    metadata: {
+      type: 'array',
+      maxItems: 16,
+      items: {
+        type: 'object',
+        required: ['kind', 'value'],
+        additionalProperties: false,
+        properties: { kind: { enum: [...WATCH_METADATA_KINDS] }, value: nonEmpty, label: string },
+      },
+    },
+    requestedAt: time,
+    updatedAt: time,
+    target,
+    actions: { type: 'array', maxItems: 16, items: itemAction },
+    surfaces: {
+      type: 'object',
+      required: ['list'],
+      additionalProperties: false,
+      properties: {
+        list: { type: 'array', uniqueItems: true, items: { enum: [...WATCH_SURFACES] } },
+        home: { enum: [...WATCH_SURFACES] },
+      },
+    },
+    group: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: nonEmpty, title: string } },
+  },
+};
+
+/**
+ * Version 2 adds the source brand, typed items and effect argument schemas.
+ * Colors, opacity, CSS classes, layout variants and markup still have no
+ * fields, so a source that sends them is rejected.
+ */
+export const watchPresentationSchemaV2: PluginJsonSchema = {
+  type: 'object',
+  required: [...presentationRequired, 'version', 'source', 'items'],
+  additionalProperties: false,
+  properties: {
+    ...presentationProperties,
+    version: { const: 2 },
+    source: {
+      type: 'object',
+      required: ['id', 'name', 'icon'],
+      additionalProperties: false,
+      properties: { id: { type: 'string', pattern: '^[a-z][a-z0-9.-]*$' }, name: nonEmpty, icon },
+    },
+    items: { type: 'array', maxItems: 1000, items: item },
+    actions: {
+      type: 'array',
+      items: { ...action, properties: { ...(action.properties as Record<string, WatchValue>), arguments: object } },
+    },
+  },
+};
+
+/** Item references must resolve: unique IDs, valid targets, and effects bound to a declared human action. */
+function validateWatchItems(presentation: WatchPresentation): void {
+  const declared = new Map(presentation.actions.map((entry) => [entry.id, entry]));
+  const ids = new Set<string>();
+  const targets = (entry: WatchItem) => [
+    entry.target,
+    ...entry.statuses.map((status) => status.target),
+    ...entry.actions.map((control) => ('link' in control.binding ? control.binding.link : undefined)),
+  ];
+  for (const entry of presentation.items ?? []) {
+    if (ids.has(entry.id)) throw new WatchPluginError(`Watch presentation repeats item ${entry.id}`);
+    ids.add(entry.id);
+    for (const destination of targets(entry))
+      if (destination && !validWatchTarget(destination)) throw new WatchPluginError(`Watch item ${entry.id} has an invalid target`);
+    const controls = new Set<string>();
+    for (const control of entry.actions) {
+      if (controls.has(control.id)) throw new WatchPluginError(`Watch item ${entry.id} repeats action ${control.id}`);
+      controls.add(control.id);
+      if (!('effect' in control.binding)) continue;
+      const declaration = declared.get(control.binding.effect.action);
+      if (!declaration || declaration.automatic || !declaration.requiresAuthority)
+        throw new WatchPluginError(`Watch item ${entry.id} binds ${control.id} to an undeclared human action`);
+      pluginSchema(declaration.arguments ?? { type: 'null' }, `Watch action ${declaration.id} arguments`).parse(
+        control.binding.effect.arguments ?? null,
+      );
+    }
+  }
+}
+
+/**
+ * Built-in and plugin presentations share one validation path. Pass the
+ * version a plugin declared to refuse a mismatch; otherwise the value's own
+ * version selects the schema.
+ */
+export function validateWatchPresentation(value: unknown, version?: WatchPresentationVersion): WatchPresentation {
+  const declared =
+    version ?? (value && typeof value === 'object' && (value as { version?: unknown }).version === 2 ? 2 : 1);
+  if (declared === 1) return pluginSchema<WatchPresentation>(watchPresentationSchema, 'Watch presentation').parse(value);
+  const presentation = pluginSchema<WatchPresentation>(watchPresentationSchemaV2, 'Watch presentation v2').parse(value);
+  validateWatchItems(presentation);
+  return presentation;
 }
 
 const descriptorSchema: PluginJsonSchema = {
@@ -272,7 +495,7 @@ const manifestSchema: PluginJsonSchema = {
   additionalProperties: false,
   properties: {
     protocolVersion: { const: 1 },
-    presentationVersion: { const: 1 },
+    presentationVersion: { enum: [1, 2] },
     descriptor: descriptorSchema,
     schemas: {
       type: 'object',
