@@ -268,6 +268,8 @@ export function pruneRunHistory(days: number, now = Date.now()): { attempts: num
       if (!Number.isFinite(at)) at = fs.statSync(path.join(dir, file)).mtimeMs;
       if (now - at < RUN_PROPOSAL_TTL_MS) continue;
       fs.rmSync(path.join(dir, file), { force: true });
+      // The copy lives in `<sha256>/` under its own name; older proposals kept it as `<sha256>.sh`.
+      fs.rmSync(path.join(dir, file.replace(/\.json$/, '')), { recursive: true, force: true });
       fs.rmSync(path.join(dir, file.replace(/\.json$/, '.sh')), { force: true });
       removed.proposals += 1;
     }

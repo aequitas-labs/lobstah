@@ -14,7 +14,7 @@ import {
   type AssertionResponse,
   type RegistrationResponse,
 } from './run-passkey.js';
-import { RunRegistry, runStdin } from './run-exec.js';
+import { RunRegistry, runInterpreterRefusal, runStdin } from './run-exec.js';
 import { endPairing, pendingPairing } from './run-pairing.js';
 import { RunWindows, pageKeySigned } from './run-window.js';
 import { openRunInputs, openSealedInput, runSealKey } from './run-seal.js';
@@ -95,6 +95,13 @@ export function runnableCard(key: unknown): { meta: DecisionMeta & { run: NonNul
   return { meta: meta as DecisionMeta & { run: NonNullable<DecisionMeta['run']> } };
 }
 
+/** A refusal when the card's stored script names a `#!` interpreter this Mac can't run, before a passkey is asked for. */
+function unrunnableCard(key: string): RunReply | undefined {
+  const stored = readStoredRunScript(decisionDir(key)!);
+  const reason = stored ? runInterpreterRefusal(stored.text) : undefined;
+  return reason ? refuse(409, reason) : undefined;
+}
+
 const passkeyOrigin = (ctx: RunRequestContext): RunReply | undefined =>
   new URL(ctx.origin).hostname === RUN_RP_ID
     ? undefined
@@ -142,6 +149,8 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         const card = runnableCard(p.key);
         if ('status' in card) return card;
         if (p.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The script this page shows is not the card's: reload it.");
+        const missing = unrunnableCard(card.meta.key);
+        if (missing) return missing;
         // The challenge binds the inputs the page will send, by hash: a relayed Run must, so the wharf can't swap them.
         const inputs = typeof p.inputsSha256 === 'string' && /^[a-f0-9]{64}$/.test(p.inputsSha256) ? p.inputsSha256 : undefined;
         if (relayed && !inputs) return refuse(400, "The inputs' hash is required.");
@@ -189,6 +198,8 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         const card = runnableCard(p.key);
         if ('status' in card) return card;
         if (verified.sha256 !== card.meta.run.scriptSha256) return refuse(409, "The passkey signed a script that is not the card's.");
+        const missing = unrunnableCard(card.meta.key);
+        if (missing) return missing;
         // The inputs must be the ones the challenge bound: a relayed Run always binds them.
         if (relayed && !verified.inputs) return refuse(403, 'The inputs were not confirmed.');
         if (verified.inputs && (!p.inputs || typeof p.inputs !== 'object' || sha256Hex(runInputsText(p.inputs as RunInputValues)) !== verified.inputs))

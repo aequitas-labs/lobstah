@@ -26,8 +26,10 @@ export const RUN_TIMEOUT_DEFAULT_SECS = 5 * 60;
 export const RUN_TIMEOUT_MAX_SECS = 60 * 60;
 /** The most inputs one card declares. */
 export const RUN_INPUTS_MAX = 8;
-/** What runs the script: bash without profile or rc files. */
+/** What runs a script whose first line is not a `#!` line: bash without profile or rc files. */
 export const RUN_INTERPRETER = '/bin/bash';
+/** The arguments bash gets ahead of a script that names no interpreter. */
+const RUN_INTERPRETER_ARGS: readonly string[] = ['--noprofile', '--norc'];
 /** The option that declines a run card. */
 export const RUN_DECLINE_OPTION = 'Decline';
 
@@ -51,6 +53,7 @@ export interface RunCard {
   cwd: string;
   timeoutSecs: number;
   output: RunOutputMode;
+  /** The command that runs the script, as the card shows it: its `#!` line's, or `/bin/bash` when it has none. */
   interpreter: string;
   /** The trap whose proposal this card carries, when the helm posted one. */
   proposedBy?: string;
@@ -63,6 +66,16 @@ export const RUN_RELAY = '/usr/bin/expect';
 
 /** A refused run card or proposal. */
 export class RunCardError extends Error {}
+
+/** A script whose `#!` interpreter is not installed on this Mac. */
+export class ScriptInterpreterMissing extends RunCardError {
+  /** The program that was not found: `python3`, or an absolute path. */
+  readonly program: string;
+  constructor(message: string, program: string) {
+    super(message);
+    this.program = program;
+  }
+}
 
 const INPUT_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 
@@ -108,6 +121,77 @@ export function readRunScriptFile(file: string): Buffer {
   return data;
 }
 
+/**
+ * The program that runs a script, as its first line names it. A script that
+ * starts `#!/usr/bin/env python3` runs as `/usr/bin/env python3 <script>`,
+ * never under bash: bash would read a Python docstring as commands and run
+ * every backtick-quoted command in it.
+ */
+export interface ScriptInterpreter {
+  /** Where the interpreter came from: the script's `#!` line, or bash for a script without one. */
+  source: 'shebang' | 'default';
+  /** The interpreter's absolute path. */
+  program: string;
+  /** Its arguments ahead of the script: those on the `#!` line, split on whitespace as macOS does. */
+  args: string[];
+  /** The command the `#!` line names, as the card shows it: `/usr/bin/env python3`. */
+  label: string;
+}
+
+/** The interpreter a script's `#!` line names, or bash when it has none. Refuses a `#!` line without an absolute program. */
+export function scriptInterpreter(text: string): ScriptInterpreter {
+  if (!text.startsWith('#!')) return { source: 'default', program: RUN_INTERPRETER, args: [...RUN_INTERPRETER_ARGS], label: RUN_INTERPRETER };
+  const newline = text.indexOf('\n');
+  const words = text.slice(2, newline < 0 ? undefined : newline).trim().split(/\s+/).filter(Boolean);
+  const [program, ...args] = words;
+  if (program === undefined) throw new RunCardError('the script starts with #! but names no interpreter');
+  if (!path.isAbsolute(program)) throw new RunCardError(`the script's #! line must name an absolute path, such as /usr/bin/env ${program}: ${program}`);
+  return { source: 'shebang', program, args, label: words.join(' ') };
+}
+
+/** The program `/usr/bin/env` looks up on PATH: its first argument that is not an option or a NAME=value setting. */
+function envTarget(args: readonly string[]): string | undefined {
+  return args.find((a) => !a.startsWith('-') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(a));
+}
+
+/** Whether a file exists and this user may execute it. */
+function isExecutable(file: string): boolean {
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refuse a script whose interpreter is not on this Mac: the `#!` program
+ * must exist and be executable, and for `/usr/bin/env <name>` the name must
+ * be found on `searchPath` (the PATH the run gets).
+ */
+export function checkScriptInterpreter(interpreter: ScriptInterpreter, searchPath: string = process.env.PATH ?? ''): void {
+  if (!isExecutable(interpreter.program))
+    throw new ScriptInterpreterMissing(`the script's #! line names ${interpreter.label}, but ${interpreter.program} is not an executable file on this Mac`, interpreter.program);
+  if (path.basename(interpreter.program) !== 'env') return;
+  const target = envTarget(interpreter.args);
+  if (target === undefined) throw new RunCardError(`the script's #! line names ${interpreter.label}, which names no program for env to run`);
+  const found = target.includes('/') ? isExecutable(target) : searchPath.split(path.delimiter).some((dir) => dir && isExecutable(path.join(dir, target)));
+  if (!found) throw new ScriptInterpreterMissing(`the script's #! line names ${interpreter.label}, but ${target} is not installed on PATH`, target);
+}
+
+/** The interpreter of a script file's text, refused when it is not installed. */
+export function resolveScriptInterpreter(text: string, searchPath?: string): ScriptInterpreter {
+  const interpreter = scriptInterpreter(text);
+  checkScriptInterpreter(interpreter, searchPath);
+  return interpreter;
+}
+
+/** The argv that runs `scriptFile` under the interpreter its text names. */
+export function runScriptCommand(text: string, scriptFile: string): string[] {
+  const { program, args } = scriptInterpreter(text);
+  return [program, ...args, scriptFile];
+}
+
 /** What `man ask --run` asks for, before it is checked. */
 export interface RunCardRequest {
   scriptFile: string;
@@ -125,6 +209,7 @@ export interface RunCardRequest {
 /** Check a run card's request and read its script. Nothing is written. */
 export function prepareRunCard(req: RunCardRequest): { card: RunCard; script: Buffer } {
   const script = readRunScriptFile(req.scriptFile);
+  const interpreter = resolveScriptInterpreter(script.toString('utf8'));
   const inputs = (req.inputs ?? []).map(parseRunInput);
   if (inputs.length > RUN_INPUTS_MAX) throw new RunCardError(`a run card takes at most ${RUN_INPUTS_MAX} inputs`);
   if (new Set(inputs.map((i) => i.name)).size !== inputs.length) throw new RunCardError('input names must differ');
@@ -149,7 +234,7 @@ export function prepareRunCard(req: RunCardRequest): { card: RunCard; script: Bu
       cwd,
       timeoutSecs: req.timeout !== undefined ? parseRunTimeout(req.timeout) : RUN_TIMEOUT_DEFAULT_SECS,
       output,
-      interpreter: RUN_INTERPRETER,
+      interpreter: interpreter.label,
       ...(req.proposedBy ? { proposedBy: req.proposedBy } : {}),
       ...(req.interactive ? { interactive: true } : {}),
     },
@@ -252,14 +337,33 @@ export function runProposalsDir(dispatch: string): string {
   return path.join(lobstahHome(), 'run-proposals', dispatch);
 }
 
-/** Store a trap's proposed script under its dispatch, by hash. Proposing the same script again keeps one copy. */
+/**
+ * The name a proposal's copy keeps: the trap's own file name and extension,
+ * with any character outside letters, digits, `.`, `_`, `+` and `-` turned
+ * into `_`, so the `man ask --run <file>` the note offers copies as one word.
+ */
+export function runProposalFileName(scriptFile: string): string {
+  const name = path.basename(scriptFile).replace(/[^A-Za-z0-9._+-]/g, '_');
+  return name.startsWith('-') ? `_${name.slice(1)}` : name;
+}
+
+/**
+ * Store a trap's proposed script under its dispatch, by hash:
+ * `<dispatch>/<sha256>/<its file name>`, so a `deploy.py` stays `deploy.py`.
+ * Proposing the same script again keeps one copy. A script whose `#!`
+ * interpreter is not installed is refused.
+ */
 export function proposeRunScript(dispatch: string, scriptFile: string, trap?: string, now = new Date()): RunProposal {
   const script = readRunScriptFile(scriptFile);
+  resolveScriptInterpreter(script.toString('utf8'));
   const sha256 = sha256Hex(script);
   const dir = runProposalsDir(dispatch);
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `${sha256}.sh`);
-  if (!fs.existsSync(file)) fs.writeFileSync(file, script, { mode: 0o600 });
+  const copyDir = path.join(dir, sha256);
+  fs.mkdirSync(copyDir, { recursive: true });
+  // The same script proposed again under another name keeps the first copy.
+  const kept = fs.readdirSync(copyDir)[0];
+  const file = path.join(copyDir, kept ?? runProposalFileName(scriptFile));
+  if (kept === undefined) fs.writeFileSync(file, script, { mode: 0o600 });
   const proposal: RunProposal = { dispatch, ...(trap ? { trap } : {}), sha256, file, at: now.toISOString() };
   fs.writeFileSync(path.join(dir, `${sha256}.json`), `${JSON.stringify(proposal, null, 2)}\n`);
   return proposal;
