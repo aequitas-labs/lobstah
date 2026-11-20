@@ -1,4 +1,4 @@
-import { trapAvailability } from '@lobstah/core';
+import { trapAvailability, withProcessTable } from '@lobstah/core';
 import { questionParkNote } from '@lobstah/core';
 import { ChecklistError, readChecklist, setChecklistTick } from './checklists.js';
 import { requestHelmPass, resolveGrounds } from '@lobstah/core';
@@ -648,6 +648,10 @@ function glassTodos(): Pick<GlassFullSnapshot, 'todos' | 'todoNote'> {
  * request), so starting cards may carry their start command and ticket.
  */
 export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFullSnapshot {
+  // Every trap's session lookup in this build shares one process table.
+  return withProcessTable(() => buildSnapshot(options));
+}
+function buildSnapshot(options: { local?: boolean }): GlassFullSnapshot {
   reconcilePermissionCards();
   const cfg = loadConfig();
   refreshMissingDispatchPrs();
@@ -1712,6 +1716,9 @@ export function serveGlass(
     res.end(JSON.stringify({ error: 'The glass could not answer this request.' }));
   };
   const server = http.createServer((req, res) => {
+    // A change made through this glass shows on the next poll, not after the reuse window.
+    // A page's presence heartbeat is a POST that changes nothing a poll shows.
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.url?.split('?')[0] !== '/api/presence') res.once('finish', () => thread?.invalidate());
     try {
       handle(req, res);
     } catch (e) {

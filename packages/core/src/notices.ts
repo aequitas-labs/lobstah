@@ -186,6 +186,59 @@ function consumeNotices(filter: ((notice: Notice) => boolean) | undefined, consu
 let counter = 0;
 
 /**
+ * How long a notice is kept. Every reader that lists notices reads them all,
+ * so an unpruned directory made each CLI call and each glass poll slower as
+ * months of notices piled up. Stack-ready notices are kept: pr-stacks
+ * rewrites and removes them itself while their stack stands. Dedupe markers
+ * are kept, so a once-ever notice still never posts twice.
+ */
+export const NOTICE_KEEP_MS = 14 * 86400_000;
+const PRUNE_EVERY_MS = 3600_000;
+
+/** Remove notices older than keepMs. Returns how many were removed. */
+export function pruneNotices(now = Date.now(), keepMs = NOTICE_KEEP_MS): number {
+  const dir = noticesDir();
+  let removed = 0;
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+  } catch {
+    return 0;
+  }
+  const cutoff = now - keepMs;
+  for (const name of names) {
+    // The name starts with the post time in ms, so most notices are judged without being read.
+    const postedMs = Number(name.slice(0, 15));
+    if (!Number.isFinite(postedMs) || postedMs >= cutoff) continue;
+    const file = path.join(dir, name);
+    try {
+      if ((JSON.parse(fs.readFileSync(file, 'utf8')) as Notice).kind === 'stack-ready') continue;
+      fs.rmSync(file, { force: true });
+      removed++;
+    } catch {
+      // Unreadable or already gone: leave it for the next pass.
+    }
+  }
+  return removed;
+}
+
+/** Prune at most once an hour, across every process: a marker's mtime records the last pass. */
+function pruneNoticesWhenDue(dir: string, now = Date.now()): void {
+  const marker = path.join(dir, '.pruned');
+  try {
+    if (now - fs.statSync(marker).mtimeMs < PRUNE_EVERY_MS) return;
+  } catch {
+    // No marker yet: prune now.
+  }
+  try {
+    fs.writeFileSync(marker, '');
+  } catch {
+    return;
+  }
+  pruneNotices(now);
+}
+
+/**
  * Post a notice. A `dedupeKey` makes it once-ever: the same key never posts
  * twice (a standing condition should nag through tend's tail, not by
  * re-posting). Returns undefined when deduped. Only standing conditions that
@@ -210,6 +263,7 @@ export function postNotice(n: {
 }): Notice | undefined {
   const dir = noticesDir();
   fs.mkdirSync(dir, { recursive: true });
+  pruneNoticesWhenDue(dir);
   if (n.dedupeKey) {
     const marker = path.join(dir, `.dedupe-${n.dedupeKey.replace(/[^A-Za-z0-9_-]/g, '_')}`);
     try {
@@ -239,26 +293,62 @@ export function postNotice(n: {
   return notice;
 }
 
+/**
+ * Parsed notices, kept for the life of the process: the glass lists every
+ * notice on each poll, and re-reading thousands of files each time kept it
+ * busy. Every write is a rename into the directory or a removal from it,
+ * so an unchanged directory means unchanged notices. When it changes, a
+ * file is re-read only if its mtime or size moved (a stack notice is
+ * rewritten under the same name).
+ */
+const noticeCache: { dir?: string; stamp?: string; names: string[]; files: Map<string, { stamp: string; notice: Notice }> } = { names: [], files: new Map() };
+const dirStamp = (st: fs.Stats) => `${st.mtimeMs}:${st.ctimeMs}:${st.size}`;
+
 export function listNotices(limit = 20): Notice[] {
   const dir = noticesDir();
-  let files: string[];
+  let stamp: string;
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    stamp = dirStamp(fs.statSync(dir));
   } catch {
     return [];
   }
-  return files
-    .sort()
-    .slice(-limit)
-    .flatMap((f) => {
-      try { return [JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Notice]; }
-      catch (error) {
-        // A stack shape may have been superseded since readdir. Readers
-        // must not fail while the watch atomically updates its current item.
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-        throw error;
+  if (noticeCache.dir !== dir) {
+    noticeCache.dir = dir;
+    noticeCache.stamp = undefined;
+    noticeCache.files.clear();
+  }
+  const fresh = noticeCache.stamp !== stamp;
+  if (fresh) {
+    try {
+      noticeCache.names = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+    } catch {
+      return [];
+    }
+    const names = new Set(noticeCache.names);
+    for (const name of noticeCache.files.keys()) if (!names.has(name)) noticeCache.files.delete(name);
+    noticeCache.stamp = stamp;
+  }
+  return noticeCache.names.slice(-limit).flatMap((f) => {
+    const cached = noticeCache.files.get(f);
+    if (cached && !fresh) return [{ ...cached.notice }];
+    const file = path.join(dir, f);
+    try {
+      const st = fs.statSync(file);
+      const fileStamp = `${st.mtimeMs}:${st.size}:${st.ino}`;
+      if (cached?.stamp === fileStamp) return [{ ...cached.notice }];
+      const notice = JSON.parse(fs.readFileSync(file, 'utf8')) as Notice;
+      noticeCache.files.set(f, { stamp: fileStamp, notice });
+      return [{ ...notice }];
+    } catch (error) {
+      // A stack shape may have been superseded since readdir. Readers
+      // must not fail while the watch atomically updates its current item.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        noticeCache.files.delete(f);
+        return [];
       }
-    });
+      throw error;
+    }
+  });
 }
 
 /**

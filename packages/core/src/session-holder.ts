@@ -35,8 +35,30 @@ export interface ClaudeProcess {
 
 const claudeHomeDir = (): string => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 
+/** One `ps` for a whole scan (withProcessTable): a glass build asks once per trap, and each `ps` is a process spawn. */
+let processTable: { times?: Map<number, string> | undefined; read: boolean } | undefined;
+
+/** Run fn with one process table: every session lookup inside it shares a single `ps`. */
+export function withProcessTable<T>(fn: () => T): T {
+  const outer = processTable;
+  processTable = outer ?? { read: false };
+  try {
+    return fn();
+  } finally {
+    processTable = outer;
+  }
+}
+
 /** Every process's start time as Claude records it: `ps lstart`, in UTC, whatever the machine's zone. */
 function utcStartTimes(): Map<number, string> | undefined {
+  if (!processTable) return readStartTimes();
+  if (!processTable.read) {
+    processTable.times = readStartTimes();
+    processTable.read = true;
+  }
+  return processTable.times;
+}
+function readStartTimes(): Map<number, string> | undefined {
   try {
     const out = execFileSync('ps', ['-A', '-o', 'pid=,stat=,lstart='], { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } });
     const times = new Map<number, string>();
