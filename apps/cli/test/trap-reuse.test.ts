@@ -144,6 +144,13 @@ describe('reuse-first CLI and summaries', () => {
     expect(out.status).not.toBe(0); expect(queuedDescriptor('job', 'work')).toBeUndefined();
   });
 
+  it('says when a dispatch is unaddressed and may run headless', () => {
+    const out = run(['dispatch', '--repo', 'r', '--brief-text', 'work', '--id', 'plain', '--session', HELM]);
+    expect(out.status, out.stdout + out.stderr).toBe(0);
+    expect(out.stdout).toContain('unaddressed: a headless worker may take it; dispatch with --trap-any or --for <trap-name> to keep work in traps');
+    expect(dispatch('addressed').stdout).not.toContain('unaddressed');
+  });
+
   it('the helm charter and both man skills carry the same reuse rule', () => {
     expect(charter({ name: 'fleet', repos: ['r'] })).toContain(TRAP_REUSE_RULE);
     for (const plugin of ['codex', 'claude-code']) {

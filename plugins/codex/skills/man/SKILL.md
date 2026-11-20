@@ -46,8 +46,10 @@ The charter is re-injected at every session start. Keep inside its fences:
 ## Working set
 
 ```
-lobstah dispatch --repo <key> --brief <file.md>   # queue work; prints the id
+lobstah dispatch --repo <key> --trap-any --brief <file.md>
+                                                  # queue work for the first free trap; prints the id
 lobstah dispatch ... --for <trap-name>             # address it to one trap
+lobstah dispatch --repo <key> --brief <file.md>   # unaddressed: a headless worker may take it
 lobstah dispatch --pool <name> --brief <file.md>  # fresh session in a warm pool worktree
 lobstah send <id>|<trap-name> "<instruction>"      # steer live/queued work; wake
                                                   # finished work as a follow-up

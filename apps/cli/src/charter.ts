@@ -48,7 +48,7 @@ Role:
 - When a card's answer arrives, act on it, then ack it with \`lobstah man ack <key> "<what you did>"\` (a \`send --for-decision <key>\` acks it too).
 - ${HELM_REMINDER}
 - ${DESK_ROUTING_RULE}
-- ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`.
+- ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`. A dispatch with no --for, --trap-any or --pool may run headless.
 - ${DISPATCH_UNBLOCKED_RULE}
 - ${PARKED_TODO_RULE}
 - ${TODO_COMMITMENT_RULE}

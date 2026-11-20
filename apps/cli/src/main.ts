@@ -789,6 +789,9 @@ function inheritedAttachments(id: string | undefined): Descriptor['attachments']
   return undefined;
 }
 
+/** What `dispatch` prints for work with no --for, --trap-any or --pool, so a headless run is never a surprise. */
+const UNADDRESSED_DELIVERY = 'unaddressed: a headless worker may take it; dispatch with --trap-any or --for <trap-name> to keep work in traps';
+
 interface ChainMember {
   id: string;
   lane: Lane;
@@ -1301,7 +1304,7 @@ async function mainCli(): Promise<void> {
         for (const url of briefPrMentions(d.brief, repo))
           warnings.push(`the brief names ${url}, but this dispatch will open its own draft PR; to push to that PR instead, dispatch with --pr ${url}`);
       }
-      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), queued: d.queuedAt }));
+      console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), ...(!d.for && !d.trapAny && !d.pool ? { for: UNADDRESSED_DELIVERY } : {}), queued: d.queuedAt }));
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
