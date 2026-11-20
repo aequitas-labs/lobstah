@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.8.15 — 2026-11-20
+
+### Talking to the helm
+
+- Messages from the glass become threads on their grounds and wake the helm.
+  The helm can triage, keep notes, ask on a card in the thread and resolve it
+  with an outcome. Unanswered messages are repeated, and idle threads without
+  open cards close after seven days. (#557)
+- The glass has a Threads page with one list of compact thread cards and a
+  ship's wheel button that opens one message composer. Thread replies use the
+  card composer, with the same attachments, paste handling and saved drafts.
+  (#558, #567)
+- Wharf grounds store the same threads as local grounds, and phone attachments
+  upload to account storage. (#560)
+- Unread helm replies show under Response waiting until they are on screen.
+  Reading or dismissing a reply does not answer a linked card. (#561)
+- `lobstah man say` lets the helm reply in a thread. A thread reads as one chat:
+  your messages on the right, the helm's on the left, and its notes pinned on
+  top. Linked work shows its kind's icon and its state. (#572)
+- When the helm resolves a thread while linked work is still running, the
+  thread moves to Tracking and closes when the work finishes. If the work
+  stalls, the thread comes back to you. (#575)
+- A Slack message's Open in glass button opens the helm thread it started.
+  (#571)
+
+### Decisions
+
+- Decisions can show the report and PR cards needed to answer them. Opening one
+  and coming back keeps your unsent answer. (#554)
+- An answer to a decision card stays in front of the helm until the helm
+  acknowledges it with `lobstah man ack`. (#573)
+- A card asked about a PR shows a tag naming that PR. Merge when green on the
+  PR card closes the decision card. (#589)
+- Previous and Next work on an answered card handed to the helm. (#591)
+- A worker question already covered by an open card wakes the helm once, not on
+  every reminder. Cards stay visible while the worker moves on. (#563)
+
+### Reviews and PRs
+
+- Review buttons say Approve, Request changes and Publish comment again. A PR
+  you are no longer asked to review leaves Needs your review and stops
+  drafting. (#565)
+- When a re-review finds one of your own threads fixed, lobstah resolves it as
+  soon as the draft finishes. (#568)
+- Needs your review and Waiting on response count every review they hold. The
+  PRs page splits PRs into Open and Closed. (#579)
+
+### Dispatch and traps
+
+- The helm's dispatches go to traps by default. `--headless` asks for a
+  one-off headless worker. (#581)
+- The helm's Stop lists every open card each time, so a missing card means it
+  was answered or withdrawn. (#582)
+- A `--when "dispatch:<id> ..."` trigger on a finished dispatch is refused and
+  names the follow-up to wait on. (#583)
+- A trap's catch stays addressed to it through a fresh-session swap, so another
+  trap cannot claim it during the handover. (#584)
+- Codex traps get past another plugin's hook review without trusting those
+  hooks, and the helm is told which plugin it was. (#566)
+
+### Glass speed and order
+
+- With one page open, the glass uses about 5% of a CPU instead of 56%.
+  `man wait --peek` and `attention --json` do much less work per call. (#576)
+- In-flight dispatches are ordered by their last real update, so the list stays
+  put between polls. (#580)
+
+### Maintenance
+
+- Fixed two CI test failures. Tests that run built code fail early when the
+  build is older than the source. (#590)
+
 ## 0.8.14 — 2026-11-19
 
 ### Glass actions and views
