@@ -6,6 +6,7 @@ import {
   BackendError,
   WharfBackend,
   encodeFrame,
+  loadConfig,
   lobstahVersion,
   mirrorReadAllowed,
   mirrorWriteAllowed,
@@ -18,6 +19,8 @@ import type { BackendScope, ClientSocketMessage, Config, MirrorStatus, WharfAtte
 import { glassPort } from './glass-lifecycle.js';
 import { WharfSocket } from './wharf-socket.js';
 import { ownAttentionList, writeOtherBoats } from './wharf-attention.js';
+import { localGrounds, slackThreadSynced, slackThreadsToSync } from './slack-threads.js';
+import type { SlackThreadSync } from './slack-threads.js';
 
 /**
  * The mirror: this machine's fleet stays on its own local grounds, and the
@@ -58,7 +61,15 @@ export interface LocalGlass {
 }
 
 /** What the mirror needs of its wharf over HTTP: files a call names, and an answer too large for a frame. */
-export type MirrorWharf = Pick<WharfBackend, 'takeMirrorCall' | 'answerMirrorCall' | 'mirrorFile'> & { glass?: string };
+export type MirrorWharf = Pick<WharfBackend, 'takeMirrorCall' | 'answerMirrorCall' | 'mirrorFile'> & Partial<Pick<WharfBackend, 'updateMirrorRequest'>> & { glass?: string };
+
+/** The helm threads Slack messages from this wharf opened: what the wharf must hear again, recorded once it has. */
+export interface MirrorSlackThreads {
+  /** This boat's local grounds, which the wharf routes Slack messages for. */
+  grounds(): string[];
+  pending(): SlackThreadSync[];
+  synced(sync: SlackThreadSync): void;
+}
 
 /** The mirror's socket to its wharf. */
 export interface MirrorChannel {
@@ -79,6 +90,8 @@ export interface WharfMirrorOptions {
   writeStatus?: (status: MirrorStatus) => void;
   /** This glass's loopback port, sent with the snapshot for the hosted glass's focus probe. */
   glassPort?: number;
+  /** Helm threads opened from Slack; without it the mirror relays nothing back. */
+  slackThreads?: MirrorSlackThreads;
 }
 
 /** The mirror's state between reads of the local glass. */
@@ -93,6 +106,8 @@ export class WharfMirror {
   /** This boat's own walking list, from the last snapshot read, and the JSON last sent. */
   private attention?: Array<Record<string, unknown>>;
   private attentionSent?: string;
+  /** The local grounds as the wharf last got them on this socket. */
+  private groundsSent?: string;
   /** Calls carried out, one at a time, and the ids already handled (a resume may push one again). */
   private queue: Promise<void> = Promise.resolve();
   private readonly handled = new Set<string>();
@@ -125,6 +140,8 @@ export class WharfMirror {
   onReconnect(): void {
     this.sentEtag = undefined;
     this.attentionSent = undefined;
+    this.groundsSent = undefined;
+    this.sendGroundsIfChanged();
   }
   /** Keep connection failures visible even when reading the local glass still works. */
   onError(error: Error): void {
@@ -155,6 +172,8 @@ export class WharfMirror {
       await this.readSnapshot();
       this.sendSnapshotIfDue();
       this.sendAttentionIfChanged();
+      this.sendGroundsIfChanged();
+      await this.syncSlackThreads();
       if (this.options.channel.connected()) {
         delete this.status.error;
         this.healthyAt = this.now();
@@ -222,6 +241,34 @@ export class WharfMirror {
     if (json === this.attentionSent) return;
     if (this.options.channel.send({ t: 'attention', attention: this.attention })) this.attentionSent = json;
   }
+  /** Send this boat's local grounds when they changed since this socket last got them: the wharf routes their Slack requests here. */
+  private sendGroundsIfChanged(): void {
+    const threads = this.options.slackThreads;
+    if (!threads || !this.options.channel.connected()) return;
+    const grounds = threads.grounds();
+    const json = JSON.stringify(grounds);
+    if (json === this.groundsSent) return;
+    if (this.options.channel.send({ t: 'grounds', grounds })) this.groundsSent = json;
+  }
+  /**
+   * Tell the wharf what changed for its Slack threads: a helm signed on and
+   * has one that waited, or the helm responded. A failure is tried again on
+   * the next read.
+   */
+  private async syncSlackThreads(): Promise<void> {
+    const threads = this.options.slackThreads, update = this.options.backend.updateMirrorRequest?.bind(this.options.backend);
+    if (!threads || !update || !this.options.channel.connected()) return;
+    for (const sync of threads.pending()) {
+      try {
+        if (sync.reply) await update(sync.request, { reply: clip(sync.reply, 2000) });
+        else await update(sync.request, { state: 'delivered' });
+      } catch (error) {
+        // The wharf ended the request (expired, or another boat's): nothing more to tell it.
+        if (!(error instanceof BackendError && [403, 404, 409].includes(error.status))) throw error;
+      }
+      threads.synced(sync);
+    }
+  }
   /** Run one call against the local glass if it is one the hosted glass may make, and answer it: in a frame, or over HTTP when too large. */
   private async carryOut(call: WharfMirrorCall): Promise<void> {
     let answer: LocalGlassResponse;
@@ -268,6 +315,8 @@ export class WharfMirror {
     return this.options.glass.request(call.write.kind, payload, this.token);
   }
 }
+
+const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 /** A refusal the boat makes itself, in the local glass's shape. */
 function refusal(status: number, reason: string): LocalGlassResponse {
@@ -342,7 +391,12 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
       else if (message.t === 'error') mirror.onError(new Error(message.reason));
     },
   });
-  mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, credential), channel: socket, glass: loopbackGlass(port), glassPort: port, log });
+  const slackThreads: MirrorSlackThreads = {
+    grounds: () => localGrounds(loadConfig()),
+    pending: () => slackThreadsToSync(loadConfig(), wharf),
+    synced: slackThreadSynced,
+  };
+  mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, credential), channel: socket, glass: loopbackGlass(port), glassPort: port, log, slackThreads });
   socket.start();
   let stopped = false;
   let sleeping: ReturnType<typeof setTimeout> | undefined;

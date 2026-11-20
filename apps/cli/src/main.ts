@@ -677,7 +677,7 @@ function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
     if (n.kind === 'thread' && n.refId) {
       const item = readThread(n.refId);
-      if (item?.state === 'open') console.log(toonKV({ event: 'thread', id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, text: n.text }));
+      if (item?.state === 'open') console.log(toonKV({ event: 'thread', id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, ...(item.relay ? { via: 'slack' } : {}), text: n.text }));
       continue;
     }
     // A decision answer is an event with its request's payload.

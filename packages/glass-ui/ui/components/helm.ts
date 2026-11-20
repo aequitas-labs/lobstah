@@ -147,7 +147,7 @@ function Round({ round, view, number, current }: { round: ThreadRound; view: Thr
         return html`<article class="msg"><${Button} onClick=${() => openDecision(entry.card)}>${card?.title ?? 'Open card'}<//>${card?.standing ? html`<span class="badge warn">Card for you</span>` : card?.answer ? html`<p>${LinkedText([card.answer.option, card.answer.text].filter(Boolean).join(' · '))}</p>` : html`<p class="dim">Closed card</p>`}${card?.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
       }
       if ('link' in entry) return html`<${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} />`;
-      return html`<article class="msg"><span class="dim">You${entry.via === 'chat' ? ' · In chat' : ''}</span><div>${LinkedText(entry.text)}</div><div class="dfiles">${entry.attachments.map((a) => (/\.(png|jpe?g|webp|gif)$/i.test(a.name) ? ImageThumb(fileUrl({ kind: 'thread', id: view.id }, a.name), a.name, 'dimg') : html`<a href=${fileUrl({ kind: 'thread', id: view.id }, a.name)} download=${a.name}>${a.name}</a>`))}</div></article>`;
+      return html`<article class="msg"><span class="dim">You${entry.via === 'chat' ? ' · In chat' : entry.via === 'slack' ? ' · In Slack' : ''}</span><div>${LinkedText(entry.text)}</div><div class="dfiles">${entry.attachments.map((a) => (/\.(png|jpe?g|webp|gif)$/i.test(a.name) ? ImageThumb(fileUrl({ kind: 'thread', id: view.id }, a.name), a.name, 'dimg') : html`<a href=${fileUrl({ kind: 'thread', id: view.id }, a.name)} download=${a.name}>${a.name}</a>`))}</div></article>`;
     },
   )}</details>`;
 }
