@@ -11,6 +11,7 @@ import type { GlassReview } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass } from '../src/glass.js';
 import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
+import { reviewSections } from '../../../packages/glass-ui/ui/components/reviews.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, ago, emptyFleet } from './fixtures/glass-snapshots.js';
@@ -749,7 +750,9 @@ it.each(['needs', 'waiting', 'done'] as const)('places a complete stack only in 
   expect(g.$$('#reviews [data-review-stack]')).toHaveLength(1);
   const container = g.$(`[data-review-section="${section}"] [data-review-stack]`)!;
   expect(container).toBeTruthy();
-  expect(g.$(`[data-review-section="${section}"] > ${section === 'needs' ? 'h2' : 'summary'}`)!.textContent).toContain(`(${section === 'needs' ? 1 : 0})`);
+  expect(g.$(`[data-review-section="${section}"] > ${section === 'needs' ? 'h2' : 'summary'}`)!.textContent).toBe(
+    { needs: 'Needs your review (1)', waiting: 'Waiting on response (3)', done: 'Done' }[section],
+  );
   (container as unknown as HTMLElement).click(); await g.settle();
   expect(Array.from(container.querySelectorAll('[data-review]')).map(element => element.getAttribute('data-review'))).toEqual(stack.keys);
   expect(container.querySelector('[data-review="review:acme/web#7"]')!.textContent).toContain('Merged');
@@ -799,8 +802,8 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
   expect(g.$('[data-review-section="needs"] [data-review="review:acme/web#7"]')).toBeTruthy();
   const waiting = g.$('[data-review-section="waiting"]')!;
   const done = g.$('[data-review-section="done"]')!;
-  expect(waiting.textContent).toContain('Waiting on response (0)');
-  expect(done.textContent).toContain('Done (0)');
+  expect(waiting.querySelector('summary')!.textContent).toBe('Waiting on response (1)');
+  expect(done.querySelector('summary')!.textContent).toBe('Done');
   expect(waiting.hasAttribute('open')).toBe(false);
   expect(done.hasAttribute('open')).toBe(false);
   waiting.setAttribute('open', '');
@@ -814,6 +817,35 @@ it('keeps each stack in its most urgent section and remembers collapsed sections
   expect(reload.$('[data-review-section="done"]')!.hasAttribute('open')).toBe(false);
 });
 
+
+it('counts every review waiting on a response, whatever was seen or acknowledged, and gives Done no number', async () => {
+  const reviews = [
+    review(7, { state: 'posted', verdict: 'approve' }),
+    review(8, { state: 'posted', verdict: 'request_changes', seenAt: ago(0), acknowledgedAt: ago(0) }),
+    review(9, { state: 'posted', verdict: 'comment', mutedAt: ago(0) }),
+    review(10, { state: 'drafted', staged: true }),
+    review(11, { state: 'dismissed' }),
+    review(12, { state: 'posted', verdict: 'approve', requestRemoved: true }),
+    review(13, { state: 'merged', prState: 'MERGED' }),
+    review(14, { state: 'posted', verdict: 'approve', prState: 'CLOSED' }),
+  ];
+  const sections = reviewSections(reviews);
+  expect(sections.map(({ id, count }) => [id, count])).toEqual([['needs', 1], ['waiting', 3], ['done', undefined]]);
+  expect(sections[1]!.groups.flatMap(group => group.reviews).map(r => r.number).sort()).toEqual([7, 8, 9]);
+  expect(sections[2]!.groups.flatMap(group => group.reviews).map(r => r.number).sort()).toEqual([12, 13, 14]);
+  expect(sections[0]!.groups.flatMap(group => group.reviews).map(r => r.number).sort()).toEqual([10, 11]);
+  const g = await loadGlass(GLASS_PAGE, { ...fleet(), reviews }, { now: NOW, hash: '#reviews', prefs: { view: 'cards' } });
+  open.push(g);
+  expect(g.$('[data-review-section="needs"] > h2')!.textContent).toBe('Needs your review (1)');
+  expect(g.$('[data-review-section="waiting"] > summary')!.textContent).toBe('Waiting on response (3)');
+  expect(g.$('[data-review-section="done"] > summary')!.textContent).toBe('Done');
+  expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('1');
+});
+
+it('shows Waiting on response (0) when nothing waits, and Done stays bare when it holds reviews', () => {
+  const sections = reviewSections([review(7, { state: 'drafted' }), review(8, { state: 'merged', prState: 'MERGED' })]);
+  expect(sections.map(({ id, count }) => [id, count])).toEqual([['needs', 1], ['waiting', 0], ['done', undefined]]);
+});
 
 it('files a review whose request was removed under Done, without counting it', async () => {
   const reviews = [
