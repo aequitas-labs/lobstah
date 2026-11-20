@@ -19,6 +19,7 @@ import {
   type PrRecord,
   type StackMergeRequest,
   type MergeWhenGreenOrigin,
+  type DecisionAnswer,
 } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '@lobstah/pick';
 import { githubViewer, mayAutoWatch, prAuthorship } from './pr-ownership.js';
@@ -81,6 +82,8 @@ export interface PrMergeOptions {
   authorized?: boolean;
   /** Where it was set, for the answer to a linked card. Defaults from `by`: `glass` and `wharf` are PR cards, anything else the CLI. */
   from?: MergeWhenGreenOrigin;
+  /** Told the cards this request answered, so the glass can show them answered at once. */
+  onAnswered?: (answers: DecisionAnswer[]) => void;
 }
 
 /** Where a request by this authorizer was set: a glass PR card, else the helm's CLI. */
@@ -124,7 +127,8 @@ export function requestPrMerge(
     return request;
   });
   const from = opts.from ?? mergeOrigin(by);
-  answerPrLinkedCards(key, { from, ...(from === 'cli' ? { who: by } : {}), at: request.at });
+  const answers = answerPrLinkedCards(key, { from, ...(from === 'cli' ? { who: by } : {}), at: request.at });
+  if (answers.length) opts.onAnswered?.(answers);
   return request;
 }
 

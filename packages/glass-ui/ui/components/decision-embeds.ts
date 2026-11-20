@@ -51,7 +51,7 @@ export function DecisionEmbeds({ references }: { references: readonly DecisionRe
       return html`<${ReportEmbed} key=${i + reference.key} reference=${reference} onOpen=${leaveDecision} />`;
     const pr = view?.prs.find((pr) => pr.key === reference.key);
     return pr
-      ? prCard(pr, { onOpen: leaveDecision, inCard: true })
+      ? prCard(pr, { onOpen: leaveDecision })
       : html`<div key=${i + reference.key} class="dim" role="status">PR unavailable · <code>${reference.key}</code></div>`;
   })}</section>`;
 }

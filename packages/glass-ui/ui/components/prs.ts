@@ -1,8 +1,7 @@
-import { ackPrAttention, openDecision, requestPrMerge, requestStackMerge, setPrefs } from '../actions.js';
+import { ackPrAttention, requestPrMerge, requestStackMerge, setPrefs } from '../actions.js';
 import type { DeckAttention } from '../../src/glass-diff.js';
-import type { GlassDecision, GlassPr, GlassStack } from '@lobstah/core';
-import { cardLinksPr } from '@lobstah/core/dist/pr-linked-cards.js';
-import { decisionHash, shownPrAttention } from '../../src/glass-diff.js';
+import type { GlassPr, GlassStack } from '@lobstah/core';
+import { shownPrAttention } from '../../src/glass-diff.js';
 import type { PrsInputs } from '../../src/glass-diff.js';
 import { html } from '../html.js';
 import {
@@ -27,7 +26,7 @@ import {
 import type { OlderControl } from './common.js';
 import { LinkedText } from './links.js';
 import { can } from '../backend.js';
-import { getState, setState, viewOf } from '../store.js';
+import { getState, setState } from '../store.js';
 import type { Children } from '../html.js';
 import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
 import type { CardPerson, CardProps, CardTone } from './card.js';
@@ -138,45 +137,15 @@ const PRS_NONE_OPEN = 'No open PRs';
 const METHOD_WORDS = { merge: 'a merge commit', squash: 'one squashed commit', rebase: 'rebased commits' } as const;
 
 /**
- * The open decision card asked about this PR with `man ask --pr`, newest
- * first: not answered here or on the boat, and not withdrawn (a withdrawn
- * card leaves the snapshot). Permission and run cards never count.
- */
-export function openLinkedCard(
-  p: Pick<GlassPr, 'key'>,
-  cards: readonly GlassDecision[] = viewOf(getState())?.decisions ?? [],
-): GlassDecision | undefined {
-  const { drafts } = getState();
-  return cards.find((card) => !card.readOnly && !card.handoff && !drafts[card.key]?.sent && cardLinksPr(card, p.key));
-}
-
-/** Where the PR card points while a linked card is open: the card, which holds the merge decision. */
-function WaitingOnCard({ card }: { card: GlassDecision }) {
-  const open = (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openDecision(card.key);
-  };
-  return html`<span class="prmerge prmerge-card dim" onClick=${(e: Event) => e.stopPropagation()}>Waiting on your card · <a href=${decisionHash(card.key)} title=${card.title} onClick=${open}>open it</a></span>`;
-}
-
-/**
  * Merge when green, on a PR of yours: one click asks for it, and the button
  * then reads Cancel merge, one click to stop. It merges the way the repo is
  * set to (`[repos.<key>].mergeMethod`, else the pickup's method), never a
  * choice made here; the hover text names it. A PR repair works a failing or
  * conflicting PR back to green first (the boat's pass).
- *
- * While a decision card asked about this PR is open, the card holds the
- * merge decision: the button gives way to "Waiting on your card · open it"
- * (and to nothing inside that card, `inCard`). A request already standing
- * keeps Cancel merge.
  */
-export function MergeWhenGreen({ p, size = 'md', inCard = false }: { p: GlassPr; size?: ButtonSize; inCard?: boolean }) {
+export function MergeWhenGreen({ p, size = 'md' }: { p: GlassPr; size?: ButtonSize }) {
   // Constant for the page's life, so the hooks below always run in the same order.
   if (!can('pr-merge') || (!p.mine && !p.mergeRequest) || p.state !== 'OPEN') return null;
-  const card = p.mergeRequest ? undefined : openLinkedCard(p);
-  if (card) return inCard ? null : html`<${WaitingOnCard} card=${card} />`;
   const send = (cancel: boolean) => async (e: Event) => {
     e.stopPropagation();
     await requestPrMerge(p.key, cancel);
@@ -375,12 +344,11 @@ export function prCardPending(p: GlassPr, attention: readonly DeckAttention[], s
  * green on an open PR of yours, and the Open icon at its right. Opening the
  * card or Open acks what it shows (ackOnOpen): it has no Ack button.
  * Merge readiness, the watch and the gate are in the PR's modal. `quiet`
- * greys an acked one; `stack` is its stack when it is the only PR in it;
- * `inCard` is set when the card shows inside the decision card it defers to.
+ * greys an acked one; `stack` is its stack when it is the only PR in it.
  */
 export function prCard(
   p: GlassPr,
-  opts: { quiet?: boolean; attention?: readonly DeckAttention[]; stack?: GlassStack; onOpen?: () => void; inCard?: boolean } = {},
+  opts: { quiet?: boolean; attention?: readonly DeckAttention[]; stack?: GlassStack; onOpen?: () => void } = {},
 ) {
   const state = p.badge.state;
   const pending = prCardPending(p, opts.attention ?? [], opts.stack);
@@ -397,10 +365,7 @@ export function prCard(
     at: p.mergedAt || p.closedAt || p.updatedAt || p.firstSeenAt || p.observedAt,
     trap: dispatchTrap(p.dispatchIds),
     person: prAuthor(p),
-    actions: [
-      html`<${MergeWhenGreen} p=${p} inCard=${opts.inCard} />`,
-      html`<${CardLink} href=${reviewLink(p.url)} onOpen=${() => ackOnOpen(pending)} />`,
-    ],
+    actions: [html`<${MergeWhenGreen} p=${p} />`, html`<${CardLink} href=${reviewLink(p.url)} onOpen=${() => ackOnOpen(pending)} />`],
     quiet: opts.quiet,
     cls: opts.quiet ? 'acked' : undefined,
     onClick: () => {

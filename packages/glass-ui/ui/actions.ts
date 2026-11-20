@@ -796,12 +796,13 @@ export const ackPrAttention = (items: Array<{ key: string; stateHash: string }>)
 
 /**
  * Ask the boat to merge one of your PRs once it's green, or cancel that.
- * The snapshot shows the request from the next poll; this marks it at once.
+ * The snapshot shows the request from the next poll; this marks it at once,
+ * and marks answered the decision cards about this PR that the boat closed.
  */
 export async function requestPrMerge(key: string, cancel = false): Promise<void> {
   const token = getState().snapshot?.focusToken;
   if (!token) throw new Error('Reload the glass before merging.');
-  const response = await backend().request<{ ok: boolean; reason?: string; method?: 'merge' | 'squash' | 'rebase' }>(
+  const response = await backend().request<{ ok: boolean; reason?: string; method?: 'merge' | 'squash' | 'rebase'; answered?: string[] }>(
     'pr-merge',
     { key, ...(cancel ? { cancel: true } : {}) },
     token,
@@ -809,6 +810,14 @@ export async function requestPrMerge(key: string, cancel = false): Promise<void>
   const result = response.body;
   if (!response.ok || !result.ok)
     throw new Error(result.reason ?? (cancel ? 'Could not cancel the merge.' : 'Could not ask for the merge.'));
+  // The boat answered the open decision cards asked about this PR: they read as answered now, before the next poll,
+  // and a modal showing one of them moves on, as after any answer.
+  if (result.answered?.length) {
+    const previous = modalOrder();
+    for (const card of result.answered) setDraft(card, { sending: false, sent: 'Merge when green' });
+    const open = getState().decisionModal?.key;
+    if (open && result.answered.includes(open)) navigateDecision(nextOpen(previous, currentCards(), getState().drafts, open).key, true);
+  }
   const snapshot = getState().snapshot;
   if (snapshot) {
     const at = new Date().toISOString();

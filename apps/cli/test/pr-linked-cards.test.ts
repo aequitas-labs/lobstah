@@ -8,6 +8,7 @@ import {
   linkedPrKeys,
   listRequests,
   mergeWhenGreenAnswerText,
+  mergeWhenGreenOption,
   readDecisionAnswer,
   standingDecisions,
   upsertPr,
@@ -51,6 +52,11 @@ const ask = (prs: string[] = [KEY], title = 'Merge #7 when green?'): DecisionMet
 const answerEvents = () => listRequests({ kind: 'decision-answer' });
 
 describe('the cards linked to a PR', () => {
+  it('pick the card\'s own Merge when green option, in any case, and no other', () => {
+    expect(mergeWhenGreenOption(['Hold', 'merge when green'])).toBe('merge when green');
+    expect(mergeWhenGreenOption(['Merge now', 'Hold'])).toBeUndefined();
+  });
+
   it('are the cards asked with --pr naming it, never a permission or run card', () => {
     expect(linkedPrKeys({ references: [{ kind: 'report', key: 'r1' }, { kind: 'pr', key: KEY }, { kind: 'pr', key: 'pr:acme/web#8' }] })).toEqual([KEY, 'pr:acme/web#8']);
     expect(linkedPrKeys({ references: [{ kind: 'pr', key: KEY }], permission: true })).toEqual([]);
@@ -59,8 +65,8 @@ describe('the cards linked to a PR', () => {
 
   it('are answered in words naming where, by whom and when', () => {
     const at = '2026-11-20T18:30:00.000Z';
-    expect(mergeWhenGreenAnswerText({ from: 'glass', at })).toBe(`Merge when green, set from the PR card in the glass by you at ${at}.`);
-    expect(mergeWhenGreenAnswerText({ from: 'wharf', at })).toBe(`Merge when green, set from the PR card in the hosted glass by you at ${at}.`);
+    expect(mergeWhenGreenAnswerText({ from: 'glass', at })).toBe(`Merge when green, set from the PR card in the glass at ${at}.`);
+    expect(mergeWhenGreenAnswerText({ from: 'wharf', at })).toBe(`Merge when green, set from the PR card in the hosted glass at ${at}.`);
     expect(mergeWhenGreenAnswerText({ from: 'cli', who: 'chat', at })).toBe(`Merge when green, set from \`lobstah pr merge-when-green\` by the helm (authorized by chat) at ${at}.`);
     expect(mergeWhenGreenAnswerText({ from: 'github', who: 'dana', at })).toBe(`Merge when green, set from GitHub auto-merge by @dana at ${at}.`);
     expect(mergeWhenGreenAnswerText({ from: 'github', at })).toBe(`Merge when green, set from GitHub auto-merge by someone on GitHub at ${at}.`);
@@ -68,14 +74,16 @@ describe('the cards linked to a PR', () => {
 });
 
 describe('merge when green set without the card', () => {
-  it('from the glass PR card answers the open card and raises a decision-answer event', () => {
+  it('from the glass PR card answers the open card with its Merge when green option and raises a decision-answer event', () => {
     upsertPr(observation());
     const card = ask();
     const other = ask(['pr:acme/web#8'], 'Merge #8?');
-    const request = requestPrMerge(KEY, 'glass', { viewer: () => 'chris' });
+    const told: string[] = [];
+    const request = requestPrMerge(KEY, 'glass', { viewer: () => 'chris', onAnswered: (answers) => told.push(...answers.map((a) => a.key)) });
     const answer = readDecisionAnswer(card.key)!;
-    expect(answer).toMatchObject({ by: 'glass', text: `Merge when green, set from the PR card in the glass by you at ${request.at}.` });
-    expect(answer.option).toBeUndefined();
+    expect(answer).toMatchObject({ by: 'glass', option: 'Merge when green', text: `Merge when green, set from the PR card in the glass at ${request.at}.` });
+    // The glass is told which cards closed, so the page shows them answered at once.
+    expect(told).toEqual([card.key]);
     expect(standingDecisions().map((d) => d.key)).toEqual([other.key]);
     expect(answerEvents()).toEqual([expect.objectContaining({ id: answer.request, from: 'glass', payload: expect.objectContaining({ key: card.key, text: answer.text }) })]);
   });

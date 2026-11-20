@@ -57,9 +57,9 @@ const ORIGIN_PLACE: Record<MergeWhenGreenOrigin, string> = {
   github: 'GitHub auto-merge',
 };
 
-/** Who set it, in the answer's words. */
-function setter(set: MergeWhenGreenSet): string {
-  if (set.from === 'glass' || set.from === 'wharf') return 'you';
+/** Who set it, in the answer's words. A glass answer names no one: its `by` already says the person answered in the glass. */
+function setter(set: MergeWhenGreenSet): string | undefined {
+  if (set.from === 'glass' || set.from === 'wharf') return undefined;
   if (set.from === 'cli') return set.who ? `the helm (authorized by ${set.who})` : 'the helm';
   return set.who ? `@${set.who}` : 'someone on GitHub';
 }
@@ -69,5 +69,11 @@ function setter(set: MergeWhenGreenSet): string {
  * "Merge when green, set from GitHub auto-merge by @dana at 2026-11-20T18:30:00Z."
  */
 export function mergeWhenGreenAnswerText(set: MergeWhenGreenSet): string {
-  return `Merge when green, set from ${ORIGIN_PLACE[set.from]} by ${setter(set)} at ${set.at}.`;
+  const who = setter(set);
+  return `Merge when green, set from ${ORIGIN_PLACE[set.from]}${who ? ` by ${who}` : ''} at ${set.at}.`;
+}
+
+/** The option label a linked card's answer picks: the card's own "Merge when green", in any case, when it offers one. */
+export function mergeWhenGreenOption(options: readonly string[]): string | undefined {
+  return options.find((option) => option.trim().toLowerCase() === 'merge when green');
 }

@@ -511,15 +511,14 @@ permission, when, the note, any hold, and the current status. Cancel merge
 withdraws permission. A hold is a non-CI precondition; checks passing does
 not release it.
 
-A decision card asked with `--pr <pr-key>` holds the merge decision for that
-PR. While the card is open, the PR's card shows "Waiting on your card · open
-it" instead of its Merge when green button. If merge when green is set on the
-PR some other way while the card is open (the PR card, `lobstah pr
-merge-when-green`, or GitHub auto-merge seen by the PR watch), lobstah answers
-the card with where, by whom and when it was set, for example "Merge when
-green, set from GitHub auto-merge by @dana at 2026-11-20T18:31:00Z." The
-answer wakes the helm like any other answer. For a stack, this applies to the
-PR named in `--pr`.
+A decision card asked with `--pr <pr-key>` closes when merge when green is set
+on that PR while the card is open. This happens from the PR card (including
+the one shown inside the decision card), `lobstah pr merge-when-green`, or
+GitHub auto-merge seen by the PR watch. lobstah answers the card with its
+"Merge when green" option when it has one, and says where, by whom and when
+it was set, for example "Merge when green, set from GitHub auto-merge by
+@dana at 2026-11-20T18:31:00Z." The answer wakes the helm like any other
+answer. For a stack, this applies to the PR named in `--pr`.
 
 Each PR-watch tick, the daemon merges a green, clean PR with no hold and no
 open PR below it. GitHub's merge endpoint checks the recorded head SHA and

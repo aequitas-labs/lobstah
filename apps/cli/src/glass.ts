@@ -1305,8 +1305,12 @@ export function serveGlass(
             if (typeof key !== 'string' || !/^pr:[^\s]{1,300}$/.test(key)) return reply(400, { ok: false, reason: 'A PR key is required.' });
             if (payload?.cancel === true) return reply(200, { ok: true, key, cancelled: cancelPrMerge(key) });
             try {
-              const request = requestPrMerge(key, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass');
-              return reply(200, { ok: true, key, method: request.method });
+              // The decision cards it answered, so the page shows them answered without waiting for a poll.
+              let answered: string[] = [];
+              const request = requestPrMerge(key, req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass', {
+                onAnswered: (answers) => { answered = answers.map((answer) => answer.key); },
+              });
+              return reply(200, { ok: true, key, method: request.method, ...(answered.length ? { answered } : {}) });
             } catch (error) {
               if (error instanceof PrMergeRefused) return reply(error.status, { ok: false, reason: error.message });
               return reply(500, { ok: false, reason: 'The merge request could not be stored.' });

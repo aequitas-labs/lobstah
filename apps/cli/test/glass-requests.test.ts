@@ -482,6 +482,15 @@ describe('pr-merge: Merge when green from the glass', () => {
     expect(readPr('pr:acme/web#201')!.mergeRequest).toBeUndefined();
   });
 
+  it('answers an open --pr card about the PR, wakes the helm, and names the card in its reply', async () => {
+    const card = askDecision({ title: 'Merge #201 when green?', options: ['Merge when green', 'Hold'], references: [{ kind: 'pr', key: 'pr:acme/web#201' }], askedBy: 'helm', maxBytes: 1024 }).meta;
+    const asked = await merge({ key: 'pr:acme/web#201' });
+    expect(await asked.json()).toEqual({ ok: true, key: 'pr:acme/web#201', method: 'squash', answered: [card.key] });
+    expect(readDecisionAnswer(card.key)).toMatchObject({ by: 'glass', option: 'Merge when green' });
+    expect(readDecisionAnswer(card.key)!.text).toMatch(/^Merge when green, set from the PR card in the glass at .+Z\.$/);
+    expect(listRequests({ kind: 'decision-answer' })).toEqual([expect.objectContaining({ from: 'glass', payload: expect.objectContaining({ key: card.key }) })]);
+  });
+
   it("refuses someone else's PR, an unknown one, a bad key and a missing token", async () => {
     expect((await merge({ key: 'pr:acme/web#202' })).status).toBe(403);
     expect(readPr('pr:acme/web#202')!.mergeRequest).toBeUndefined();
