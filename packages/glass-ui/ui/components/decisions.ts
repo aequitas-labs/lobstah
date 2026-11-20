@@ -11,11 +11,11 @@ import {
   HOTKEY_MAX,
   closeDecision,
   dismissAlert,
-  handedOffCard,
   markViewed,
   openDecision,
   sendAnswer,
   setDraft,
+  decisionOnScreen,
   stepDecision,
   toggleOption,
 } from '../actions.js';
@@ -326,8 +326,8 @@ export function DecisionModal({
   };
   // A run card stays on screen with its output after its run answers it and the snapshot drops it.
   const ran = key ? getState().runs?.[key] : undefined;
-  const c = key ? (order.find((x) => x.key === key) ?? ran?.card ?? handedOffCard(key)) : undefined;
-  // Its place among the open decisions; a finished run card the snapshot dropped still has neighbours.
+  const c = key ? decisionOnScreen(key, order) : undefined;
+  // Its place among the open decisions; a card that is not among them (a finished run, a hand-off) still has neighbours.
   const near = c ? decisionNeighbours(order, c) : undefined;
   const shell = (label: string, body: unknown, shown = '') =>
     html`<div id="doverlay" class="open" onClick=${(e: Event) => e.target === e.currentTarget && closeDecision()}>
