@@ -1,7 +1,7 @@
 import { Threads } from './threads.js';
 import { messageFileType, MESSAGE_FILE_TYPES } from '../../../packages/core/src/message-files.js';
 import { DurableObject } from 'cloudflare:workers';
-import type { ReportInput, BackendEvent, DispatchInput, DispatchView, GlassCard, GlassCardAction } from '../../../packages/core/src/backend-model.js';
+import type { ReportInput, BackendEvent, DispatchInput, DispatchView, GlassCard, GlassCardAction, MirrorHelmRequestPayload, WharfMirrorCall } from '../../../packages/core/src/backend-model.js';
 import { ApiError, LEASE_MS, boatName, capability, digest, dispatchInput, hex, identifier, configuredTarget, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
 import type { Permission } from './permissions.js';
@@ -127,6 +127,7 @@ export class Account extends DurableObject<Env> {
       return;
     }
     if (message.t === 'attention') return void await this.boatAttention(socket, a, message.attention);
+    if (message.t === 'grounds') return void this.boatGrounds(socket, a, message.grounds);
     if (message.t === 'call') return void send(socket, { t: 'result', id: message.id, ...await this.socketCall(a, message) });
     send(socket, { t: 'result', id: message.id, ...await this.socketCommand(a, message) });
     await this.afterChange();
@@ -385,9 +386,13 @@ export class Account extends DurableObject<Env> {
   }
   /** Private binding only: deliver what is due now, and wait for it. */
   async deliverSlack(): Promise<void> { await this.outbox.drain(); }
-  /** Grounds observed from explicit card and dispatch ownership, offered by the signed-in link picker. */
+  /**
+   * The grounds the signed-in link picker offers: those this account's
+   * mirror boats run locally, and the wharf grounds its cards and dispatches
+   * name.
+   */
   async slackGrounds(): Promise<string[]> {
-    const names = new Set(this.cards.store.list(Date.now()).flatMap((card) => card.grounds ? [card.grounds] : []));
+    const names = new Set([...this.mirrorState.allGrounds(), ...this.cards.store.list(Date.now()).flatMap((card) => card.grounds ? [card.grounds] : [])]);
     for (const row of this.ctx.storage.sql.exec<{ grounds: string | null }>("SELECT DISTINCT json_extract(data,'$.grounds') AS grounds FROM dispatches").toArray()) if (row.grounds) names.add(row.grounds);
     return [...names].sort();
   }
@@ -405,15 +410,21 @@ export class Account extends DurableObject<Env> {
    * person. It is recorded, and its receipt queued, before Slack hears back.
    */
   async slackMessage(person: string, message: SlackMessageIn): Promise<{ request?: string; ignored?: string; question?: { threadTs: string; grounds: string[] } }> {
+    let call: string | undefined;
     const result = this.ctx.storage.transactionSync(() => {
       requireThat(!this.get('deleted'), 410, 'account deleted');
       const now = Date.now(); this.expire(now); this.capacity();
       const route = routeSlackMessage(this.ctx.storage.sql, person, message, this.outbox.grounds(person), now);
       if (!('message' in route)) return route;
-      const recorded = this.glass.slackMessage(route.message, person, now, route.grounds);
+      // A grounds a mirror boat runs locally is helmed on that boat: the request goes to its socket.
+      const online = (boat: string) => this.ctx.getWebSockets(`boat:${boat}`).length > 0;
+      const boat = this.mirrorState.boatsFor(route.grounds, online)[0];
+      const { relay, ...recorded } = this.glass.slackMessage(route.message, person, now, route.grounds, boat && { boat: boat.id, name: boat.name, online: online(boat.id) });
+      if (relay) call = this.mirrorState.queueWrite(relay.boat, { kind: 'helm-request', payload: relay.payload }, 'wharf', now).id;
       this.cards.project(now);
       return recorded;
     });
+    if (call) await this.pushCall(call);
     await this.afterChange();
     return result;
   }
@@ -1078,6 +1089,34 @@ export class Account extends DurableObject<Env> {
     const answered = JSON.parse(await this.mirrorAs({ ...base, method: 'POST', path: `mirror/calls/${id}/answer` }, frame.payload, { status: frame.header.status, contentType: frame.header.contentType }, a.hash)) as StoredResult;
     if (answered.status !== 200) send(socket, { t: 'error', reason: `answer ${id}: ${(answered.value as { error?: string }).error ?? answered.status}` });
   }
+  /** A mirror boat's local grounds, sent on its socket: their Slack requests go to it. */
+  private boatGrounds(socket: WebSocket, a: SocketAttachment, grounds: string[]) {
+    if (a.actor.kind !== 'boat' || !this.boatHolds(a, 'mirror')) return void send(socket, { t: 'error', reason: 'only a mirror boat sends its grounds' });
+    this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      this.mirrorBudget(now);
+      this.mirrorState.putGrounds(a.actor, grounds, now);
+    });
+  }
+  /**
+   * A boat answered a Slack request the wharf relayed to it: its local helm
+   * has it (`delivered`), or keeps it until a helm signs on (`queued`). An
+   * answer that refused it ends the request, and the person is told.
+   */
+  private helmRequestAnswered(call: WharfMirrorCall, status: number, body: Uint8Array, now: number) {
+    if (!('write' in call) || call.write.kind !== 'helm-request') return;
+    const request = (call.write.payload as MirrorHelmRequestPayload).request;
+    let answer: { ok?: unknown; state?: unknown; reason?: unknown } = {};
+    try { answer = JSON.parse(new TextDecoder().decode(body)); } catch { /* not JSON: refused below */ }
+    const state = status < 300 && answer.ok === true && (answer.state === 'queued' || answer.state === 'delivered') ? answer.state : 'refused';
+    try {
+      this.glass.mirrorRequest(request, call.boat, { state, ...(state === 'refused' && typeof answer.reason === 'string' ? { reason: answer.reason.slice(0, 500) } : {}) }, now);
+    } catch (e) {
+      // A request that ended meanwhile keeps how it ended.
+      if (!(e instanceof ApiError && e.status === 409)) throw e;
+    }
+    this.cards.project(now);
+  }
   /** A boat's walking list, sent on its socket: kept when it changed, and the boats granted attention get the lists. */
   private async boatAttention(socket: WebSocket, a: SocketAttachment, attention: unknown[]) {
     if (a.actor.kind !== 'boat' || !this.boatHolds(a, 'mirror')) return void send(socket, { t: 'error', reason: 'only a mirror boat sends its list' });
@@ -1104,7 +1143,7 @@ export class Account extends DurableObject<Env> {
    */
   async mirror(command: string, bytes?: Uint8Array, meta: { status?: number; contentType?: string; name?: string; boat?: string } = {}): Promise<string> {
     // A call made or answered moves when the next one expires.
-    return this.serialFile(() => this.mirrorRoute(JSON.parse(command), bytes, meta)).finally(() => this.scheduleAlarm());
+    return this.serialFile(() => this.mirrorRoute(JSON.parse(command), bytes, meta)).finally(() => this.afterChange());
   }
   /**
    * A mirror route for a socket: under its credential's stored hash, never
@@ -1112,7 +1151,7 @@ export class Account extends DurableObject<Env> {
    * every SNAPSHOT_STORE_MS, and still pushed to the glass every time.
    */
   private async mirrorAs(c: Command, bytes: Uint8Array | undefined, meta: { status?: number; contentType?: string }, credentialHash: string, throttled = false): Promise<string> {
-    return this.serialFile(() => this.mirrorRoute(c, bytes, meta, credentialHash, throttled)).finally(() => this.scheduleAlarm());
+    return this.serialFile(() => this.mirrorRoute(c, bytes, meta, credentialHash, throttled)).finally(() => this.afterChange());
   }
   private async mirrorRoute(c: Command, bytes: Uint8Array | undefined, meta: { status?: number; contentType?: string; name?: string; boat?: string }, credentialHash?: string, throttled = false): Promise<string> {
     {
@@ -1174,7 +1213,11 @@ export class Account extends DurableObject<Env> {
           requireThat(Number.isInteger(status) && status >= 200 && status <= 599, 400, 'invalid answer status');
           const contentType = text(meta.contentType ?? 'application/octet-stream', 200);
           await this.env.FILES.put(mirrorAnswerKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType } });
-          const recorded = run((actor, now) => this.mirrorState.recordAnswer(actor, id, { status, contentType, bytes: bytes?.byteLength ?? 0 }, now));
+          const recorded = run((actor, now) => {
+            const done = this.mirrorState.recordAnswer(actor, id, { status, contentType, bytes: bytes?.byteLength ?? 0 }, now);
+            this.helmRequestAnswered(done.value as WharfMirrorCall, status, bytes ?? new Uint8Array(), now);
+            return done;
+          });
           if (recorded.status === 200) {
             // The tab that asked gets the answer in its frame; one too large to push is read over HTTP.
             const body = bytes ?? new Uint8Array();
@@ -1191,6 +1234,15 @@ export class Account extends DurableObject<Env> {
           const id = crypto.randomUUID();
           await this.env.FILES.put(mirrorFileKey(c.account, id), bytes ?? new Uint8Array(), { httpMetadata: { contentType: 'application/octet-stream', contentDisposition: 'attachment' } });
           return JSON.stringify(run((actor, now) => this.mirrorState.recordFile(actor, boat, id, name, bytes?.byteLength ?? 0, now)));
+        }
+        // A boat says where a Slack request it took stands, or sends its helm's reply.
+        const update = /^mirror\/requests\/([A-Za-z0-9_-]+)$/.exec(c.path);
+        if (update && c.method === 'POST') {
+          return JSON.stringify(run((actor, now) => {
+            const r = this.glass.mirrorRequest(update[1]!, this.mirrorState.mirrorBoatOf(actor), c.body, now);
+            this.cards.project(now);
+            return { status: 200, value: r };
+          }));
         }
         const result = run((actor, now) => this.mirrorState.execute(c, actor, now, c.account));
         // A new call goes to its boat's socket at once, with all it needs.

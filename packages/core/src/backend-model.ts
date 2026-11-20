@@ -83,6 +83,23 @@ export const WHARF_REVIEW_REQUEST_KINDS = ['review-dismiss', 'review-mute', 'rev
  * private chat with the wharf's Slack app. The thread it starts continues it.
  */
 export interface WharfRequestOrigin { team: string; user: string; channel: string; ts: string }
+/**
+ * A work request for a mirror boat's grounds goes to that boat's own helm,
+ * not the wharf's. `sent`: a call waits for the boat. `queued`: the boat has
+ * it, and no helm holds its grounds yet. `delivered`: its helm has it.
+ * `offline`: the boat had no socket open, so nothing was sent. `refused`:
+ * the boat could not take it.
+ */
+export interface WharfMirrorRequest { boat: string; name: string; state: 'sent' | 'queued' | 'delivered' | 'offline' | 'refused' }
+/** What the wharf relays to a mirror boat for its local helm: a Slack request, or what the person added in its thread. */
+export interface MirrorHelmRequestPayload {
+  request: string;
+  grounds: string;
+  text: string;
+  by: string;
+  at: string;
+  followUp?: { text: string; at: string; source?: string };
+}
 export interface WharfHumanRequest {
   /**
    * `work` is a person asking the helm for new work. The helm reads it,
@@ -93,6 +110,8 @@ export interface WharfHumanRequest {
   origin?: WharfRequestOrigin;
   followUps?: Array<{ text: string; at: string; source?: string }>;
   response?: string;
+  /** kind work for a mirror boat's grounds: the boat whose helm gets it, and where it stands there. */
+  mirror?: WharfMirrorRequest;
   /** Review requests: the review document. */
   document?: string;
   at: string; expiresAt: string; state: 'queued' | 'received' | 'authorized' | 'fulfilled' | 'expired'; by: string;
@@ -292,7 +311,11 @@ export const MIRROR_WRITE_KINDS = [
   'run-line',
   // Stop and Dismiss need no passkey, as on the Mac: stopping is safe and urgent.
   'run-stop', 'run-dismiss',
+  // A Slack request for this boat's local helm. Only the wharf makes it (MIRROR_WHARF_KINDS); a person's relayed call cannot.
+  'helm-request',
 ] as const;
+/** Writes the wharf alone relays to a boat: a person's call from the hosted glass may not name them. */
+export const MIRROR_WHARF_KINDS: readonly string[] = ['helm-request'];
 export type MirrorWriteKind = (typeof MIRROR_WRITE_KINDS)[number];
 /** Whether a relayed read names a path the hosted glass may read. */
 export function mirrorReadAllowed(path: string): boolean {

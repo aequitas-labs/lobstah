@@ -90,6 +90,24 @@ If the link serves several grounds, the app first asks which one in that
 message's thread. Reply with a listed grounds name; no work is queued until
 that choice is made.
 
+The picker offers two kinds of grounds, and a request goes to a different
+helm for each:
+
+- **Wharf grounds** are helmed on the wharf (`lobstah wharf login --grounds
+  <name> --helm`). The picker lists those its cards and dispatches name. A
+  request waits on the wharf for that grounds' helm.
+- **Mirror grounds** stay on a mirror boat's own machine, helmed there by
+  `lobstah man helm`. Each mirror boat tells the wharf its local grounds when
+  its socket connects, and the picker lists them. A request goes over that
+  socket into the boat's local helm requests. If no helm holds the grounds
+  yet, the boat keeps it, the receipt says it is queued, and it goes to the
+  next helm that signs on there. The helm's reply comes back to the thread.
+  Only when the boat has no socket open does the receipt say it is offline;
+  nothing is queued then, so send it again once the boat is back.
+
+When two mirror boats run a grounds of the same name, a request goes to the
+one whose socket is open, or else to the one that reported it last.
+
 Work in `services/wharf`. R2 must be enabled on the account in the dashboard
 first. Secrets go in on standard input, never as arguments:
 
@@ -485,6 +503,13 @@ each boat's latest snapshot and calls in transit, never a second record.
   holds open until the answer comes. No call is polled:
   `GET /api/glass/mirror/calls/:id` answers 410. An expired call (ten minutes
   unanswered) is never delivered again.
+- **Grounds and Slack requests.** On each connect, and when they change,
+  the boat sends its local grounds (`{"t":"grounds","grounds":[…]}`). A Slack
+  request for one of them becomes a `helm-request` write call to that boat,
+  which only the wharf makes: a person's call may not name that kind. The
+  boat's answer says `queued` or `delivered`. Later changes, and the helm's
+  reply, arrive on `POST mirror/requests/:id` with `{ "state": "delivered" }`
+  or `{ "reply": "<text>" }`, from that boat only.
 - **Files.** A file attached to a relayed answer goes to
   `POST /api/glass/mirror/files` (`X-File-Name`, `X-Mirror-Boat`) and waits ten
   minutes for its boat's `GET mirror/files/:file`.
