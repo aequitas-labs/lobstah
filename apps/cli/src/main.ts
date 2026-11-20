@@ -1539,6 +1539,8 @@ async function mainCli(): Promise<void> {
           attachments,
         );
         console.log(`delivered: inbox of ${member.id}${member.bucket === 'queue' ? ' (queued)' : ''}`);
+        // A send to a finished dispatch joins the follow-up already started from it; name that id to wait on.
+        if (member.id !== target) console.log(`joined: follow-up ${member.id} of ${target}`);
         if (member.bucket === 'queue') console.log(toonKV({ delivery: member.descriptor.for ?? member.descriptor.pool ?? 'unaddressed', queueReason: dispatchQueueReason(member.descriptor, member.lane) }));
         const expects = !has('--no-reply');
         if (expects) expectReply({ dispatchId: member.id, lane: member.lane, from, text });

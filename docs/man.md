@@ -709,7 +709,9 @@ the helm files to keep.
   withdrawn), `dispatch:<id> done|blocked|needs-decision|failed`,
   `pr:<owner>/<repo>#<n> merged|closed|green` and `trap:<name> free`. A `merged`
   wait also fires if the PR closes without merging, and the event names that
-  outcome. A trigger
+  outcome. A `dispatch:` trigger on a dispatch that is already done or failed
+  is refused, since a follow-up runs under its own id; the refusal names the
+  newest follow-up to wait on. A trigger
   lobstah can't observe is refused and not stored. A PR trigger with no watch
   registers one owned by the helm and says so; that watch also wakes the helm on
   failing checks and requested changes. Each daemon tick reads only the local

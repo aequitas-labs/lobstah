@@ -113,6 +113,32 @@ export function followUpAncestors(id: string, lane?: Lane): string[] {
 }
 
 /**
+ * The newest follow-up started from a dispatch, directly or through its
+ * follow-ups, in any bucket of its lane. Undefined when none was started.
+ */
+export function latestFollowUp(id: string, lane?: Lane): string | undefined {
+  const own = lane ?? laneOf(id) ?? 'work';
+  const dirs = laneDirs(own);
+  const ids = [
+    ...listEntries(dirs.queue).filter((entry) => entry.endsWith('.json')).map((entry) => entry.slice(0, -'.json'.length)),
+    ...listEntries(dirs.active),
+    ...listEntries(dirs.done),
+  ];
+  return ids
+    .filter((candidate) => candidate !== id && followUpAncestors(candidate, own).includes(id))
+    .map((candidate) => ({ id: candidate, queuedAt: storedDescriptor(candidate, own)?.queuedAt ?? '' }))
+    .sort((a, b) => b.queuedAt.localeCompare(a.queuedAt) || b.id.localeCompare(a.id))[0]?.id;
+}
+
+function listEntries(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir).filter((entry) => !entry.startsWith('.'));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * The newest dispatch in the chain behind `followUp` (the origin first) whose
  * worktree still exists on disk, with that worktree.
  */
