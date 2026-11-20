@@ -24,6 +24,7 @@ import {
   sendTrapMessage,
   storedDescriptor,
   TERMINAL_VERBS,
+  toolProjectEnv,
   trapLabel,
   turnWaitCommand,
   uniqueTempPath,
@@ -92,6 +93,11 @@ export interface TurnWaitRecord {
 
 export const turnWaitsDir = (): string => path.join(lobstahHome(), 'turn-waits');
 const recordPath = (key: string): string => path.join(turnWaitsDir(), `${key.replace(/[^A-Za-z0-9._-]+/g, '-')}.json`);
+
+/** Whether the daemon's last run of this registered wait failed: it backs off and listens to nothing until a run succeeds. */
+export function turnWaitFailing(wait: Pick<TurnWait, 'key'>): boolean {
+  return (readRecord(wait.key)?.failures ?? 0) > 0;
+}
 
 export function readTurnWaitRecords(): TurnWaitRecord[] {
   return readDirIfPresent(turnWaitsDir())
@@ -319,9 +325,9 @@ function dispatchParkContextText(record: Pick<TurnWaitRecord, 'dispatch' | 'cwd'
   return [...new Set([parkContextText(record), ...otherContexts])].sort().join('\n\n');
 }
 
-/** What starts a wait: injectable for tests. */
-export type SpawnWait = (command: string, cwd: string) => ChildProcess;
-const spawnWait: SpawnWait = (command, cwd) => spawn(command, { shell: true, cwd: fs.existsSync(cwd) ? cwd : undefined, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+/** What starts a wait: injectable for tests. `env` adds to the daemon's environment. */
+export type SpawnWait = (command: string, cwd: string, env: Readonly<Record<string, string>>) => ChildProcess;
+const spawnWait: SpawnWait = (command, cwd, env) => spawn(command, { shell: true, cwd: fs.existsSync(cwd) ? cwd : undefined, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
 /** Bring back the existing trap through its normal interactive launch path, never a runner fork. */
 export type RethrowTurnWaitTrap = (trapId: string) => Promise<void>;
@@ -354,7 +360,8 @@ export function createTurnWaits(start: SpawnWait = spawnWait, options: TurnWaitO
     }
     for (const r of readTurnWaitRecords()) {
       if (children.has(r.key) || (r.nextRunAt && Date.parse(r.nextRunAt) > now)) continue;
-      const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd);
+      // The project the trap's own calls of this tool name inline, which the daemon's environment lacks.
+      const child = start(turnWaitCommand(r.wait, r.cursor), r.cwd, toolProjectEnv(r.session, r.from));
       children.set(r.key, child);
       let buffered = '';
       let printed = false;

@@ -1,7 +1,7 @@
 import { cancelledTrapTool } from './trap-cancellation.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { beatTrap, loadConfig, lobstahHome, readTrap, trapBySession, trapIdAbove } from '@lobstah/core';
+import { beatTrap, loadConfig, lobstahHome, readTrap, recordToolProjects, shellCommandText, trapBySession, trapIdAbove } from '@lobstah/core';
 import type { BeatResult } from '@lobstah/core';
 import { probeTrapPr } from './beat-pr.js';
 import type { ProbeRun } from './beat-pr.js';
@@ -41,6 +41,20 @@ function probePr(input: PostToolHookInput | undefined, opts: { now?: number; run
 }
 
 /**
+ * A trap's inline tool project, such as `UME_PROJECT=… ume …`, for the waits
+ * the daemon runs for its session. Errors are logged, never thrown.
+ */
+function recordTrapToolProjects(input: PostToolHookInput | undefined, now: number | undefined): void {
+  try {
+    const command = shellCommandText(input?.tool_input);
+    if (!command || !input?.session_id || !trapBySession(input.session_id)) return;
+    recordToolProjects(input.session_id, command, now);
+  } catch (err) {
+    logError(err);
+  }
+}
+
+/**
  * `lobstah soak beat`: the post-tool hook. Refreshes the trap's liveness,
  * writes its catch's activity, and records the catch's PR once its branch
  * has one. It never fails the tool call: every path returns normally and
@@ -65,6 +79,7 @@ export function runBeat(
       now: opts.now,
     });
     probePr(input, opts);
+    recordTrapToolProjects(input, opts.now);
     return result;
   } catch (err) {
     logError(err);

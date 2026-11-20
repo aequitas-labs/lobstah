@@ -5,7 +5,7 @@ import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 import { hasOpenCatch, type TrapRegistration } from './soak.js';
 import { laneOf } from './worktrees.js';
 import { readStatusLog } from './status.js';
-import { readTurnWaits } from './turn-owner.js';
+import { readTurnWaits, type TurnWait } from './turn-owner.js';
 import type { StatusEntry } from './types.js';
 
 /**
@@ -83,13 +83,16 @@ export function umeAwaitRunning(artifact: UmeArtifactId, commands: readonly Runn
   return commands.some((c) => isUmeAwaitFor(c.args, artifact) && (sessionRoot === undefined || runsUnder(commands, c.pid, sessionRoot)));
 }
 
+/** Whether the daemon's last run of this registered wait failed: it is backing off, not listening. */
+export type TurnWaitFailing = (wait: TurnWait) => boolean;
+
 /**
  * Whether the lobstah daemon runs the review's wait for this session: the ume
- * Stop hook registered it under the turn-end contract (docs/turn-end.md), and
- * its `--turn-line` await is running now.
+ * Stop hook registered it under the turn-end contract (docs/turn-end.md), its
+ * last run did not fail, and its `--turn-line` await is running now.
  */
-export function umeTurnWaitRunning(artifact: UmeArtifactId, commands: readonly RunningCommand[], sessionId: string): boolean {
-  if (!readTurnWaits(sessionId).some((w) => isUmeAwaitFor(w.wait, artifact))) return false;
+export function umeTurnWaitRunning(artifact: UmeArtifactId, commands: readonly RunningCommand[], sessionId: string, failing: TurnWaitFailing): boolean {
+  if (!readTurnWaits(sessionId).some((w) => isUmeAwaitFor(w.wait, artifact) && !failing(w))) return false;
   return commands.some((c) => isUmeAwaitFor(c.args, artifact) && /(?:^|\s)--turn-line\b/.test(c.args));
 }
 
@@ -135,11 +138,13 @@ const REVIEW_WAIT_VERBS: readonly StatusEntry['verb'][] = ['paused', 'needs-deci
  * artifact. It corrects once per report, and again only after an await was
  * seen and then stopped, so a worker that declines never loops at the Stop.
  * `commands` and `sessionRoot` read processes, so they run only for a linked review.
+ * `turnWaitFailing` reads the daemon's record of each registered wait.
  */
 export function unwatchedReview(
   reg: TrapRegistration,
   commands: () => readonly RunningCommand[] = runningCommands,
   sessionRoot: () => number | undefined = () => reg.harnessProcess?.pid,
+  turnWaitFailing: TurnWaitFailing = () => false,
 ): UnwatchedReview | undefined {
   if (!hasOpenCatch(reg)) return undefined;
   const dispatchId = reg.claimed!;
@@ -151,7 +156,7 @@ export function unwatchedReview(
   const report = `${log.length}:${last.at}`;
   const running = commands();
   const root = sessionRoot();
-  const artifact = artifacts.find((id) => !umeAwaitRunning(id, running, root) && !umeTurnWaitRunning(id, running, reg.sessionId));
+  const artifact = artifacts.find((id) => !umeAwaitRunning(id, running, root) && !umeTurnWaitRunning(id, running, reg.sessionId, turnWaitFailing));
   const prior = readCheck(reg.trapId);
   const samePrior = prior?.sessionId === reg.sessionId && prior.dispatchId === dispatchId && prior.report === report;
   if (!artifact) {

@@ -76,8 +76,13 @@ not move what `read` shows the agent: the agent reads it later.
   delivers the inbox message.
 - The waiting dispatch stays addressed to its owning trap. Lobstah saves
   the waiting report (including its note and link) and each tool's opaque
-  `context` with the dispatch. It does not read any tool's private state or
-  pass tool-specific environment variables.
+  `context` with the dispatch. It does not read any tool's private state.
+- A trap's own calls may name a tool's project inline, such as
+  `UME_PROJECT=vr95mce908 ume await …`. The trap's PostToolUse hook records
+  the last `<TOOL>_PROJECT` set right before that tool's command, and the
+  daemon runs that session's waits from the tool with it. Without it, a
+  wait in a worktree pinned to another project fails with
+  `no_such_artifact`.
 - If the owner is stowed or ghosted when a wake is pending, the daemon
   re-throws that same trap through its normal interactive launch path.
   It restores the original dispatch and delivers its brief, saved park

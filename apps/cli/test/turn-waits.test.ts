@@ -22,6 +22,7 @@ import {
   listNotices,
   readTurnOwner,
   readTurnWaits,
+  recordToolProjects,
   signOnTrap,
   stowTrap,
   turnHome,
@@ -29,7 +30,7 @@ import {
   unhandled,
 } from '@lobstah/core';
 import type { TrapRegistration } from '@lobstah/core';
-import { createTurnWaits, deliverTurnWaitLine, noticeUnreadPointers, readTurnWaitRecords, STALE_MS, syncTurnWaitRecords } from '../src/turn-waits.js';
+import { createTurnWaits, deliverTurnWaitLine, noticeUnreadPointers, readTurnWaitRecords, STALE_MS, syncTurnWaitRecords, turnWaitFailing } from '../src/turn-waits.js';
 import { soakPark } from '../src/trap-park.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -372,6 +373,32 @@ describe('the daemon pass', () => {
     await new Promise<void>(resolve => children.values().next().value!.once('close', () => resolve()));
     expect(unhandled('plan', 'work')[0]?.text).toContain(t.cwd);
     expect(readTurnWaitRecords()[0]?.parkContext?.instructions).toBe('set-1; restore using the tool in the trap session');
+  });
+
+  it("runs a ume wait with the UME_PROJECT the trap's own ume calls set inline", async () => {
+    working();
+    recordToolProjects(SESSION, `cd /wt && UME_PROJECT=vr95mce908 ume await --watch dbbd03aa-434`);
+    const script = path.join(dir, 'project.js');
+    fs.writeFileSync(script, "console.log(JSON.stringify({ cursor: '31', summary: 'project ' + process.env.UME_PROJECT }));");
+    register('ume.json', { ...UME, wait: `"${process.execPath}" "${script}"` });
+    const { pass, children } = createTurnWaits();
+    pass(Date.now(), () => {});
+    await new Promise<void>((resolve) => children.values().next().value!.once('close', () => resolve()));
+    expect(unhandled('plan', 'work')[0]?.text).toContain('project vr95mce908');
+  });
+
+  it('a wait whose last run failed reads as failing; one with no failed run does not', async () => {
+    working();
+    register('ume.json', { ...UME, wait: `"${process.execPath}" -e "console.error('ume: no_such_artifact'); process.exit(1)"` });
+    const { pass, children } = createTurnWaits();
+    pass(Date.now(), () => {});
+    await new Promise<void>((resolve) => children.values().next().value!.on('close', () => resolve()));
+    await new Promise((r) => setTimeout(r, 50));
+    const [wait] = readTurnWaits(SESSION);
+    expect(turnWaitFailing(wait!)).toBe(true);
+    fs.rmSync(path.join(process.env.LOBSTAH_HOME!, 'turn-waits'), { recursive: true });
+    syncTurnWaitRecords(Date.now());
+    expect(turnWaitFailing(wait!)).toBe(false);
   });
 
   it('a wait that exits with an error code backs off and records why, however long it ran', async () => {

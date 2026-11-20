@@ -258,7 +258,7 @@ import { createUsageLimitWatch } from './usage-limit-watch.js';
 import { compactDispatchSession, compactTrapSession } from './trap-compact.js';
 import { swapTrapCatch } from './trap-swap.js';
 import { dispatchUsageLimit, queuedDescriptor } from '@lobstah/core';
-import { createTurnWaits } from './turn-waits.js';
+import { createTurnWaits, turnWaitFailing } from './turn-waits.js';
 import { createCodexHookWatch } from './codex-hook-watch.js';
 import { createPrQuestionWatch, publishDispatchQuestions } from './pr-questions.js';
 import { questionPark } from '@lobstah/core';
@@ -3182,7 +3182,7 @@ async function mainCli(): Promise<void> {
           }
           // A review the trap asked for waits only while its await runs. Codex
           // has no tracked background task; its ume Stop hook waits instead.
-          const review = trapReg.harness === 'claude' ? unwatchedReview(trapReg, undefined, () => trapReg.harnessProcess?.pid ?? harnessAncestorPid()) : undefined;
+          const review = trapReg.harness === 'claude' ? unwatchedReview(trapReg, undefined, () => trapReg.harnessProcess?.pid ?? harnessAncestorPid(), turnWaitFailing) : undefined;
           if (review) {
             console.log(JSON.stringify({ decision: 'block', reason: unwatchedReviewReason(review) }));
             break;

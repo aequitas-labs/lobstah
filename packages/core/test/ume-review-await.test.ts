@@ -106,6 +106,15 @@ describe('unwatchedReview at the Stop hook', () => {
     expect(unwatchedReview(trap, table(), () => HARNESS)?.artifact).toBe(PLAN);
   });
 
+  it("does not count the daemon's turn wait while it keeps failing", () => {
+    paused();
+    const waits = path.join(turnHome, trap.sessionId, 'waits');
+    fs.mkdirSync(waits, { recursive: true });
+    fs.writeFileSync(path.join(waits, `ume-${PLAN}.json`), JSON.stringify({ from: 'ume', wait: `ume await ${PLAN} --turn-line --since {cursor}`, read: `ume feedback ${PLAN}` }));
+    const daemonWait: RunningCommand = { pid: 700, parent: 1, args: `/bin/sh -c ume await ${PLAN} --turn-line --since 7` };
+    expect(unwatchedReview(trap, table(daemonWait), () => HARNESS, () => true)?.artifact).toBe(PLAN);
+  });
+
   it('checks needs-decision too, and ignores a working report or a paused one with no ume link', () => {
     appendStatus('job', 'work', 'needs-decision', `pick one in https://app.ume.so/a/${PLAN}`, undefined, undefined, true);
     expect(unwatchedReview(trap, table(), () => HARNESS)?.artifact).toBe(PLAN);
