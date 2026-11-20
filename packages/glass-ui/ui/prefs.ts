@@ -26,7 +26,8 @@ export function loadPrefs(): GlassPrefs {
   if (st.view !== 'table' && st.view !== 'cards') st.view = 'table';
   st.lobs = st.lobs !== false;
   if (st.trapGroup !== 'repo' && st.trapGroup !== 'harness' && st.trapGroup !== 'status') st.trapGroup = 'repo';
-  if (st.reviewSource !== undefined && (typeof st.reviewSource !== 'string' || !/^[a-z][a-z0-9.-]*$/.test(st.reviewSource))) delete st.reviewSource;
+  if (st.reviewSource !== undefined && (typeof st.reviewSource !== 'string' || !/^[a-z][a-z0-9.-]*$/.test(st.reviewSource)))
+    delete st.reviewSource;
   return st;
 }
 
