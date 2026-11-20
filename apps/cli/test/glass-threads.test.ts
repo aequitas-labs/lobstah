@@ -284,6 +284,87 @@ it('heads a thread about a dispatch with its card: title, repo, trap, state, las
   expect(g.$('.tsheet .rbartitle')?.textContent).toBe('Deflake the deck test');
 });
 
+it('keeps tracking threads out of the open list, in a collapsed Tracking section', async () => {
+  const d = fleet();
+  d.threads = [
+    { ...summary(), id: 'open-thread', title: 'Still talking', cards: [] },
+    { ...summary(), id: 'tracking-thread', state: 'tracking', title: 'Fix is running', cards: [], outcome: { kind: 'dispatched', ref: 'd1', note: 'Dispatched', at: AT } },
+    { ...summary(), id: 'resolved-thread', state: 'resolved', title: 'Done', cards: [] },
+  ];
+  const g = await page(d, { hash: '#helm' });
+  expect(g.$$('#helm > section > .dlist .drow').map((row) => row.getAttribute('data-thread'))).toEqual(['open-thread']);
+  const tracking = g.$('#helm .thread-tracking')!;
+  expect(tracking.hasAttribute('open')).toBe(false);
+  expect(tracking.querySelector('summary')?.textContent).toBe('Tracking (1)');
+  expect(tracking.querySelector('[data-thread="tracking-thread"] [aria-label="Tracking"]')).not.toBeNull();
+  expect(g.$('#helm .thread-resolved:not(.thread-tracking) [data-thread="resolved-thread"]')).not.toBeNull();
+});
+
+it('shows linked work with its live state, read-only, and keeps the composer on a tracking thread', async () => {
+  const detail = { ...view(), state: 'tracking' as const, outcome: { kind: 'dispatched' as const, ref: 'd1', note: 'Dispatched the fix', at: AT } };
+  detail.tracked = [
+    { kind: 'dispatch', ref: 'd1', title: 'Fix the flaky deck test', state: 'open', status: 'working', href: '#dispatch/d1' },
+    { kind: 'pr', ref: 'pr:o/r#7', title: 'Deflake the deck test', state: 'stalled', status: 'checks failing', href: 'https://github.com/o/r/pull/7' },
+    { kind: 'todo', ref: '3', title: 'Check it tomorrow', state: 'done', status: 'done' },
+  ];
+  detail.rounds = [{ at: AT, entries: [{ by: 'person', via: 'glass', text: 'Fix it', attachments: [], at: AT }, { event: 'tracked', text: 'All linked work finished', at: AT }] }];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const panel = g.$('.thread-tracked')!;
+  expect(panel.querySelector('.thread-notes-head')?.textContent).toBe('Tracking · closes when this work finishes');
+  expect(g.$$('.thread-tracked li').map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+    'Dispatch: Fix the flaky deck test',
+    'PR: Deflake the deck test',
+    'Todo: Check it tomorrow',
+  ]);
+  // Each kind wears the icon its view has in the glass, not a word.
+  const tab = (name: string) => g.$$(`a[href="#${name}"]`).map((a) => a.querySelector('svg')?.outerHTML).find(Boolean);
+  expect(g.$$('.thread-tracked li .thread-work-icon').map((el) => [el.getAttribute('title'), el.querySelector('svg')?.outerHTML])).toEqual([
+    ['Dispatch', tab('dispatches')],
+    ['PR', tab('prs')],
+    ['Todo', tab('todos')],
+  ]);
+  // Each state is an icon in one right-hand column, named with its status words.
+  expect(g.$$('.thread-tracked .badge')).toEqual([]);
+  expect(g.$$('.thread-tracked li > :last-child').map((el) => [el.className, el.getAttribute('role'), el.getAttribute('aria-label')])).toEqual([
+    ['runicon verbicon workstate work-working warn', 'img', 'Working'],
+    ['runicon verbicon workstate work-failed bad', 'img', 'Checks failing'],
+    ['runicon verbicon workstate work-done ok', 'img', 'Done'],
+  ]);
+  expect(panel.querySelector('a[href="#dispatch/d1"]')).not.toBeNull();
+  expect(panel.querySelector('button, input, textarea')).toBeNull();
+  expect(g.$('.thread-system')?.textContent).toContain('All linked work finished');
+  expect(g.$('textarea[aria-label="Add to this thread"]')).not.toBeNull();
+});
+
+it('gives failed, done, working, paused, merged and open linked work distinct state icons', async () => {
+  const detail = { ...view(), state: 'tracking' as const };
+  detail.tracked = [
+    { kind: 'dispatch', ref: 'd1', title: 'One', state: 'stalled', status: 'failed' },
+    { kind: 'dispatch', ref: 'd2', title: 'Two', state: 'done', status: 'done' },
+    { kind: 'dispatch', ref: 'd3', title: 'Three', state: 'open', status: 'working' },
+    { kind: 'dispatch', ref: 'd4', title: 'Four', state: 'open', status: 'paused' },
+    { kind: 'pr', ref: 'pr:o/r#1', title: 'Five', state: 'done', status: 'merged' },
+    { kind: 'pr', ref: 'pr:o/r#2', title: 'Six', state: 'open', status: 'open' },
+  ];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const icons = g.$$('.thread-tracked li > .workstate');
+  expect(icons.map((el) => el.getAttribute('aria-label'))).toEqual(['Failed', 'Done', 'Working', 'Paused', 'Merged', 'Open']);
+  expect(new Set(icons.map((el) => el.querySelector('svg')?.innerHTML)).size).toBe(6);
+});
+
+it('marks a PR link with the PR icon and a linked card with the card icon, even when the snapshot lists neither', async () => {
+  const detail = { ...view(), state: 'tracking' as const };
+  detail.tracked = [{ kind: 'card', ref: KEY, title: 'Use Helm?', state: 'open', status: 'waiting for you', href: `#decision/${KEY}` }];
+  detail.rounds = [{ at: AT, entries: [{ link: 'pr', ref: 'pr:o/r#7', text: 'The fix', at: AT }] }];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const tab = (name: string) => g.$$(`a[href="#${name}"]`).map((a) => a.querySelector('svg')?.outerHTML).find(Boolean);
+  const link = g.$('.thread-timeline .thread-work-pr')!;
+  expect(link.querySelector('.thread-work-icon svg')?.outerHTML).toBe(tab('prs'));
+  expect(link.querySelector('a')?.getAttribute('href')).toBe('https://github.com/o/r/pull/7');
+  const card = g.$('.thread-tracked li .thread-work-icon')!;
+  expect([card.getAttribute('title'), card.querySelector('svg')?.outerHTML]).toEqual(['Card', tab('deck')]);
+});
+
 it('marks each linked item with the icon its kind has in the glass views', async () => {
   const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [summary()];
   const dispatch = d.dispatches[0]!, report = d.reports[0]!, pr = d.prs[0]!;

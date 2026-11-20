@@ -4472,6 +4472,35 @@ footer .glass-brand {
   flex-wrap: wrap;
   gap: 12px;
 }
+.thread-tracked {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.thread-tracked ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.thread-tracked li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: 2px 0;
+}
+.thread-tracked li > :nth-child(2) {
+  overflow-wrap: anywhere;
+}
+/* Each item's state icon, right-aligned in one column. */
+.thread-tracked li > .workstate {
+  justify-self: end;
+}
+.thread-tracking {
+  margin-top: 16px;
+}
 .thread-note-mark {
   flex: 0 0 1ch;
   font-weight: 600;

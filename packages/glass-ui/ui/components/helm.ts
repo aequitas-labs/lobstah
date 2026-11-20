@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import type { ThreadSummary, ThreadView, ThreadEntry, ThreadAttachment } from '@lobstah/core';
+import type { ThreadSummary, ThreadView, ThreadEntry, ThreadAttachment, ThreadTrackedItem } from '@lobstah/core';
 import type { ComponentChildren } from 'preact';
 import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
@@ -13,7 +13,7 @@ import { SectionHead } from './section-head.js';
 import { LinkedText } from './links.js';
 import { Age, ImageThumb } from './common.js';
 import { DecisionRow } from './decision-row.js';
-import { VerbIcon } from './run-status.js';
+import { isIconVerb, VerbIcon, WorkStateIcon, type WorkStateIconState } from './run-status.js';
 import { dispatchCard, dispatchHeadCard } from './dispatches.js';
 import { ReportEmbed } from './decision-embeds.js';
 import { prCard } from './prs.js';
@@ -128,6 +128,11 @@ function WorkIcon({ kind }: { kind: WorkKind }) {
 function Work({ kind, children }: { kind: WorkKind; children: ComponentChildren }) {
   return html`<div class=${`thread-work thread-work-${kind}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${children}</div></div>`;
 }
+/** A PR reference (`owner/repo#7`, `pr:owner/repo#7`, or already its URL) as its GitHub URL. */
+function prUrl(ref: string): string {
+  const m = /^(?:pr:)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/.exec(ref.trim());
+  return m ? `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}` : ref;
+}
 /** References keep the same cards and destinations as their own overview pages. */
 function ThreadLink({ kind, reference: ref, text }: { kind: string; reference: string; text: string }) {
   const snapshot = viewOf(getState());
@@ -137,9 +142,10 @@ function ThreadLink({ kind, reference: ref, text }: { kind: string; reference: s
   }
   if (kind === 'dispatched') return html`<${ThreadDispatch} id=${ref} text=${text} />`;
   const pr = snapshot?.prs.find((p) => p.url === ref || p.key === ref);
-  return pr
-    ? html`<${Work} kind="pr"><div class="thread-links cards">${prCard(pr)}</div><//>`
-    : html`<${Work} kind="plan"><p><a href=${safeHref(ref)} target="_blank" rel="noopener">${LinkedText(text)}</a></p><//>`;
+  if (pr) return html`<${Work} kind="pr"><div class="thread-links cards">${prCard(pr)}</div><//>`;
+  // A PR the snapshot doesn't list keeps its icon and links to GitHub.
+  const href = kind === 'pr' ? prUrl(ref) : ref;
+  return html`<${Work} kind=${kind === 'pr' ? 'pr' : 'plan'}><p><a href=${safeHref(href)} target="_blank" rel="noopener">${LinkedText(text)}</a></p><//>`;
 }
 /** The dispatch a conversation started on: its card heads the conversation, loaded when the snapshot no longer lists it. */
 function useDispatch(id: string) {
@@ -205,7 +211,7 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
   if ('link' in entry)
     return html`<div class="thread-entry thread-system"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} /></div>`;
   if ('event' in entry)
-    return html`<p class="thread-entry thread-system dim">${SYSTEM_EVENT[entry.kind] ?? 'Classified'} · ${Age(at)} ago</p>`;
+    return html`<p class="thread-entry thread-system dim">${entry.event === 'tracked' ? entry.text : (SYSTEM_EVENT[entry.kind] ?? 'Classified')} · ${Age(at)} ago</p>`;
   if (entry.by === 'helm') {
     const unread = entry.seq > (view.seenThrough ?? 0);
     return html`<article class=${'thread-entry thread-msg from-helm' + (unread ? ' unread' : '')}><span class="thread-avatar" aria-hidden="true">${HelmIcon}</span><div class="thread-bubble"><p class="thread-meta">Helm · ${Age(at)} ago${unread && html` · <span class="thread-new">New</span>`}</p>${entry.text && html`<div class="thread-text">${LinkedText(entry.text)}</div>`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
@@ -266,22 +272,66 @@ export function ThreadSheet({ id }: { id: string }) {
     <div class="thread-sheet-body" ref=${body}>${error && !view ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
   <//>`;
 }
+/** Status words that name a state other than the dispatch verb of the same name. */
+const TRACKED_STATUS: Record<string, WorkStateIconState> = {
+  merged: 'merged',
+  open: 'open',
+  draft: 'open',
+  'closed without merging': 'closed',
+  'checks failing': 'failed',
+  'not watched yet': 'unknown',
+  gone: 'unknown',
+  answered: 'done',
+  'waiting for you': 'needs-decision',
+  withdrawn: 'closed',
+  dropped: 'closed',
+  overdue: 'limited',
+  stale: 'paused',
+};
+/** Without a known status word, the item's state decides: done, stalled, or still open. */
+const TRACKED_FALLBACK: Record<ThreadTrackedItem['state'], WorkStateIconState> = { done: 'done', stalled: 'blocked', open: 'open' };
+
+/** A linked item's state icon, and its status in words for its name and tooltip. */
+export function trackedStateIcon(item: Pick<ThreadTrackedItem, 'state' | 'status'>): { state: WorkStateIconState; label: string } {
+  const state = TRACKED_STATUS[item.status] ?? (isIconVerb(item.status) ? item.status : TRACKED_FALLBACK[item.state]);
+  const words = item.status.replace(/-/g, ' ');
+  return { state, label: words.charAt(0).toUpperCase() + words.slice(1) };
+}
+/** Work the thread waits on, with its live state as an icon in one right-hand column. Read-only: each item is acted on in its own view. */
+function Tracked(view: ThreadView) {
+  const items = view.tracked ?? [];
+  return (
+    items.length > 0 &&
+    html`<section class="thread-tracked" aria-label="Linked work">
+      <p class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Linked work'}</p>
+      <ul>${items.map((item) => {
+        const icon = trackedStateIcon(item);
+        return html`<li><${WorkIcon} kind=${item.kind} />${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
+      })}</ul>
+    </section>`
+  );
+}
 function Conversation({ view }: { view: ThreadView }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
-    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}
+    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}${Tracked(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
     <${Timeline} view=${view} />
     ${outcome(view)}<${SeenMark} view=${view} />
     ${view.state === 'resolved' ? html`<${Button} action=${() => reopenConversation(view.id)} done="Conversation reopened">Reopen<//>` : html`<${ThreadComposer} id=${view.id} />`}
   </div>`;
 }
-/** Resolved conversations sit apart from the open ones; they are never unread. */
+/** Tracking and resolved conversations sit apart from the open ones; neither is ever unread. */
 export function threadSections(items: readonly ThreadSummary[]) {
   const newest = [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
-  return { open: newest.filter((t) => t.state === 'open'), resolved: newest.filter((t) => t.state === 'resolved') };
+  return {
+    open: newest.filter((t) => t.state === 'open'),
+    tracking: newest.filter((t) => t.state === 'tracking'),
+    resolved: newest.filter((t) => t.state === 'resolved'),
+  };
 }
 export function threadStatus(item: ThreadSummary) {
   if (item.state === 'resolved') return { verb: 'done' as const, label: 'Resolved' };
+  if (item.state === 'tracking') return { verb: 'working' as const, label: 'Tracking' };
   if (item.cards.length) return { verb: 'needs-decision' as const, label: 'Waiting for you' };
   if (item.waitingForHelm) return { verb: 'queued' as const, label: 'Waiting for helm' };
   return { verb: 'done' as const, label: 'Acknowledged' };
@@ -307,6 +357,7 @@ export function Threads() {
     html`<ul class="dlist">${items.map((item) => html`<${ThreadCard} key=${item.id} item=${item} />`)}</ul>`;
   return html`<section class="threads-page"><${SectionHead} title="Threads" page />
     ${sections.open.length ? list(sections.open) : html`<p class="empty">No open threads</p>`}
+    ${sections.tracking.length > 0 && html`<details class="thread-resolved thread-tracking"><summary>Tracking (${sections.tracking.length})</summary>${list(sections.tracking)}</details>`}
     ${sections.resolved.length > 0 && html`<details class="thread-resolved"><summary>Resolved (${sections.resolved.length})</summary>${list(sections.resolved)}</details>`}
   </section>`;
 }
