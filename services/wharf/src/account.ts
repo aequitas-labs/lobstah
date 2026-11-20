@@ -1,6 +1,7 @@
 import { Threads } from './threads.js';
 import { messageFileType, MESSAGE_FILE_TYPES } from '../../../packages/core/src/message-files.js';
 import { DurableObject } from 'cloudflare:workers';
+import { THREAD_ID } from '../../../packages/core/src/thread-model.js';
 import type { ReportInput, BackendEvent, DispatchInput, DispatchView, GlassCard, GlassCardAction, MirrorHelmRequestPayload, WharfMirrorCall } from '../../../packages/core/src/backend-model.js';
 import { ApiError, LEASE_MS, boatName, capability, digest, dispatchInput, hex, identifier, configuredTarget, object, reportInput, repoIdentity, requireThat, sameHash, text } from './protocol.js';
 import { boatPermissions, permits, personPermissions, requiredPermission } from './permissions.js';
@@ -1106,11 +1107,12 @@ export class Account extends DurableObject<Env> {
   private helmRequestAnswered(call: WharfMirrorCall, status: number, body: Uint8Array, now: number) {
     if (!('write' in call) || call.write.kind !== 'helm-request') return;
     const request = (call.write.payload as MirrorHelmRequestPayload).request;
-    let answer: { ok?: unknown; state?: unknown; reason?: unknown } = {};
+    let answer: { ok?: unknown; state?: unknown; reason?: unknown; thread?: unknown } = {};
     try { answer = JSON.parse(new TextDecoder().decode(body)); } catch { /* not JSON: refused below */ }
     const state = status < 300 && answer.ok === true && (answer.state === 'queued' || answer.state === 'delivered') ? answer.state : 'refused';
     try {
-      this.glass.mirrorRequest(request, call.boat, { state, ...(state === 'refused' && typeof answer.reason === 'string' ? { reason: answer.reason.slice(0, 500) } : {}) }, now);
+      this.glass.mirrorRequest(request, call.boat, { state, ...(state === 'refused' && typeof answer.reason === 'string' ? { reason: answer.reason.slice(0, 500) } : {}),
+        ...(state !== 'refused' && typeof answer.thread === 'string' && THREAD_ID.test(answer.thread) ? { thread: answer.thread } : {}) }, now);
     } catch (e) {
       // A request that ended meanwhile keeps how it ended.
       if (!(e instanceof ApiError && e.status === 409)) throw e;

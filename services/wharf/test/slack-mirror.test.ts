@@ -11,9 +11,9 @@ import type { ServerSocketMessage } from '../../../packages/core/src/wharf-socke
 
 /**
  * A Slack request for a grounds a mirror boat runs locally goes to that
- * boat's own helm: wharf → the boat's socket → its local request queue. The
- * boat says whether its helm has it or keeps it queued, and sends the helm's
- * reply back to the thread. Only a boat with no socket open is offline.
+ * boat's own helm: wharf → the boat's socket → a helm thread there. The boat
+ * says whether its helm has it or it waits, and sends the helm's replies
+ * back to the Slack thread. Only a boat with no socket open is offline.
  */
 
 let sequence = 0;
@@ -71,6 +71,10 @@ async function helmCall(b: BoatSocket, n = 1): Promise<WharfMirrorCall> {
 /** The boat's answer to a call, in a frame on its socket, as the daemon sends it. */
 const answer = (b: BoatSocket, id: string, status: number, body: unknown) =>
   b.socket.send(encodeFrame({ t: 'answer', id, status, contentType: 'application/json' }, encode(JSON.stringify(body))));
+const THREAD = '6f1c2a7e-3b4d-4c5e-8f9a-0b1c2d3e4f50';
+/** Where the receipt's Open in glass button goes. */
+const opens = () => (posted.filter((p) => p.body.text.startsWith('Request:')).at(-1)!.body.blocks as Array<{ type: string; elements?: Array<{ action_id: string; url?: string }> }>)
+  .flatMap((b) => b.elements ?? []).find((e) => e.action_id === 'open-card')?.url;
 const update = (boat: Boat, body: unknown) => call(`mirror/requests/${requestId}`, body, boat.token);
 
 beforeEach(async () => {
@@ -108,7 +112,7 @@ it('offers the grounds each mirror boat runs locally in the Slack picker, until 
   expect(await env.ACCOUNTS.getByName('a').slackGrounds()).toEqual([]);
 });
 
-it('delivers a DM to the boat’s helm request queue, says it is queued while no helm holds the grounds, and updates when a helm signs on', async () => {
+it('relays a DM to the boat’s helm, says it is queued while no helm holds the grounds, and updates when a helm signs on', async () => {
   const north = await enrol('north'), b = await boatSocket(north, ['away']);
   expect((await slack(message())).status).toBe(200);
   const relayed = await helmCall(b);
@@ -117,10 +121,13 @@ it('delivers a DM to the boat’s helm request queue, says it is queued while no
   // The wharf's own helm never sees a mirror grounds' request.
   expect(await (await call('requests')).json()).toEqual([]);
 
-  answer(b, relayed.id, 201, { ok: true, id: 'local-1', state: 'queued' });
+  answer(b, relayed.id, 201, { ok: true, thread: THREAD, state: 'queued' });
   await until(async () => (await stored())?.mirror?.state === 'queued');
   await deliver();
   expect(receipt()).toContain('Queued — the helm will pick this up when it’s back');
+  // The receipt opens the helm thread the request opened on its boat.
+  expect(await stored()).toMatchObject({ mirror: { thread: THREAD } });
+  expect(opens()).toBe(`${env.GLASS_ORIGIN}/#thread/${THREAD}`);
 
   // A helm signs on at the boat: the daemon says the helm has it now.
   expect((await update(north, { state: 'delivered' })).status).toBe(200);
@@ -136,7 +143,7 @@ it('says at once when the boat’s helm already has it, sends the helm’s reply
   const north = await enrol('north'), b = await boatSocket(north, ['away']);
   await slack(message());
   const first = await helmCall(b);
-  answer(b, first.id, 201, { ok: true, id: 'local-1', state: 'delivered' });
+  answer(b, first.id, 201, { ok: true, thread: THREAD, state: 'delivered' });
   await until(async () => (await stored())?.mirror?.state === 'delivered');
 
   expect((await update(north, { reply: 'Which branch?' })).status).toBe(200);

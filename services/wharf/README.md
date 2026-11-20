@@ -508,9 +508,11 @@ each boat's latest snapshot and calls in transit, never a second record.
   the boat sends its local grounds (`{"t":"grounds","grounds":[…]}`). A Slack
   request for one of them becomes a `helm-request` write call to that boat,
   which only the wharf makes: a person's call may not name that kind. The
-  boat's answer says `queued` or `delivered`. Later changes, and the helm's
-  reply, arrive on `POST mirror/requests/:id` with `{ "state": "delivered" }`
-  or `{ "reply": "<text>" }`, from that boat only.
+  boat's answer says `queued` or `delivered`, and names the helm thread the
+  request opened there (`thread`). The Slack message's Open in glass then
+  goes to `#thread/<id>`, which the hosted glass reads from that boat. Later
+  changes, and the helm's replies, arrive on `POST mirror/requests/:id` with
+  `{ "state": "delivered" }` or `{ "reply": "<text>" }`, from that boat only.
 - **Files.** A file attached to a relayed answer goes to
   `POST /api/glass/mirror/files` (`X-File-Name`, `X-Mirror-Boat`) and waits ten
   minutes for its boat's `GET mirror/files/:file`.

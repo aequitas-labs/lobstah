@@ -88,9 +88,9 @@ export interface WharfRequestOrigin { team: string; user: string; channel: strin
  * not the wharf's. `sent`: a call waits for the boat. `queued`: the boat has
  * it, and no helm holds its grounds yet. `delivered`: its helm has it.
  * `offline`: the boat had no socket open, so nothing was sent. `refused`:
- * the boat could not take it.
+ * the boat could not take it. `thread`: the helm thread it opened there.
  */
-export interface WharfMirrorRequest { boat: string; name: string; state: 'sent' | 'queued' | 'delivered' | 'offline' | 'refused' }
+export interface WharfMirrorRequest { boat: string; name: string; state: 'sent' | 'queued' | 'delivered' | 'offline' | 'refused'; thread?: string }
 /** What the wharf relays to a mirror boat for its local helm: a Slack request, or what the person added in its thread. */
 export interface MirrorHelmRequestPayload {
   request: string;
@@ -152,7 +152,7 @@ export interface GlassCardTerminal {
   outcome?: string;
 }
 /** The glass page a card opens to, with its full detail and files. */
-export interface GlassCardItem { kind: 'decision' | 'report' | 'review' | 'job' | 'trap'; id: string }
+export interface GlassCardItem { kind: 'decision' | 'report' | 'review' | 'job' | 'trap' | 'thread'; id: string }
 /** What a source says about one card: the boat's published form, and the wharf's own. */
 export interface GlassCardInput {
   family: GlassCardFamily;

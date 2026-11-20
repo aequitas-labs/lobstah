@@ -1,4 +1,5 @@
 import { threadSchema } from './threads.js';
+import { THREAD_ID } from '../../../packages/core/src/thread-model.js';
 import type { ThreadSummary } from '../../../packages/core/src/thread-model.js';
 import { WHARF_REVIEW_REQUEST_KINDS, validDecisionReferences } from '../../../packages/core/src/backend-model.js';
 import type { MirrorHelmRequestPayload, WharfAck, WharfDocument, WharfDocumentInput, WharfFile, WharfHumanRequest, WharfMirrorRequest, WharfReviewMeta } from '../../../packages/core/src/backend-model.js';
@@ -137,7 +138,7 @@ export class GlassState {
    */
   mirrorRequest(id: string, boat: string, body: unknown, now: number): WharfHumanRequest {
     const b = object(body);
-    requireThat(Object.keys(b).every((k) => k === 'state' || k === 'reply' || k === 'reason'), 400, 'unexpected field');
+    requireThat(Object.keys(b).every((k) => k === 'state' || k === 'reply' || k === 'reason' || k === 'thread'), 400, 'unexpected field');
     const r = this.get<WharfHumanRequest>('human_requests', identifier(id));
     requireThat(r && r.kind === 'work' && r.mirror, 404, 'request not found');
     requireThat(r.mirror.boat === boat, 403, 'addressed boat required');
@@ -148,6 +149,10 @@ export class GlassState {
       if (!(b.state === 'queued' && r.mirror.state === 'delivered')) r.mirror.state = b.state as WharfMirrorRequest['state'];
       if (b.state === 'refused') { r.expiresAt = new Date(now + MIRROR_ENDED_MS).toISOString(); r.outcome = b.reason === undefined ? 'refused by the boat' : text(b.reason, 500); }
       else if (b.state === 'delivered') r.state = 'received';
+    }
+    if (b.thread !== undefined) {
+      requireThat(typeof b.thread === 'string' && THREAD_ID.test(b.thread), 400, 'invalid thread');
+      r.mirror.thread = b.thread;
     }
     if (b.reply !== undefined) {
       r.response = text(b.reply, 2000).trim(); requireThat(r.response, 400, 'reply needs text');
