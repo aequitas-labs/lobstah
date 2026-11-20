@@ -936,6 +936,8 @@ A catch is reported once the helm's `man wait` watcher delivers its event or
 `man report` prints it. The glass's `unreported` badge means no helm received
 that catch. A `man wait` timeout and `man wait --peek` only peek at the delta;
 a digest lost with a dead background task re-surfaces on the next timeout.
+A peek also leaves watches alone: it reports their pending events without
+polling them, and the next real `man wait` (or the daemon) polls what is due.
 The Stop-hook's standing-attention reminder does not mark a catch reported.
 
 Every carrier shares the cursor (per grounds, for a helm):
