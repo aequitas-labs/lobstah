@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { ThreadSummary, ThreadView, ThreadRound, ThreadEntry, ThreadAttachment } from '@lobstah/core';
+import type { ThreadSummary, ThreadView, ThreadRound, ThreadEntry, ThreadAttachment, ThreadTrackedItem } from '@lobstah/core';
 import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
 import { getState, viewOf } from '../store.js';
@@ -184,7 +184,7 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
   if ('link' in entry)
     return html`<div class="thread-entry thread-system"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} /></div>`;
   if ('event' in entry)
-    return html`<p class="thread-entry thread-system dim">${SYSTEM_EVENT[entry.kind] ?? 'Classified'} · ${Age(at)} ago</p>`;
+    return html`<p class="thread-entry thread-system dim">${entry.event === 'tracked' ? entry.text : (SYSTEM_EVENT[entry.kind] ?? 'Classified')} · ${Age(at)} ago</p>`;
   if (entry.by === 'helm') {
     const unread = entry.seq > (view.seenThrough ?? 0);
     return html`<article class=${'thread-entry thread-msg from-helm' + (unread ? ' unread' : '')}><span class="thread-avatar" aria-hidden="true">${HelmIcon}</span><div class="thread-bubble"><p class="thread-meta">Helm · ${Age(at)} ago${unread && html` · <span class="thread-new">New</span>`}</p>${entry.text && html`<div class="thread-text">${LinkedText(entry.text)}</div>`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
@@ -206,22 +206,43 @@ export function ThreadSheet({ id }: { id: string }) {
     <div class="thread-sheet-body">${error ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
   <//>`;
 }
+const TRACKED_KIND: Record<ThreadTrackedItem['kind'], string> = { dispatch: 'Dispatch', card: 'Card', pr: 'PR', todo: 'Todo' };
+const TRACKED_TONE: Record<ThreadTrackedItem['state'], string> = { open: '', done: 'ok', stalled: 'warn' };
+/** Work the thread waits on, with its live state. Read-only: each item is acted on in its own view. */
+function Tracked(view: ThreadView) {
+  const items = view.tracked ?? [];
+  return (
+    items.length > 0 &&
+    html`<section class="thread-tracked" aria-label="Linked work">
+      <p class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Linked work'}</p>
+      <ul>${items.map(
+        (item) =>
+          html`<li><span class="dim">${TRACKED_KIND[item.kind]}</span> ${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`} <span class=${`badge ${TRACKED_TONE[item.state]}`}>${item.status}</span></li>`,
+      )}</ul>
+    </section>`
+  );
+}
 function Conversation({ view }: { view: ThreadView }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
-    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}
+    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}${Tracked(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
     <div class="thread-timeline">${view.rounds.map((round, i) => html`<${Round} key=${round.at} round=${round} view=${view} number=${i + 1} />`)}</div>
     ${outcome(view)}<${SeenMark} view=${view} />
     ${view.state === 'resolved' ? html`<${Button} action=${() => reopenConversation(view.id)} done="Conversation reopened">Reopen<//>` : html`<${ThreadComposer} id=${view.id} />`}
   </div>`;
 }
-/** Resolved conversations stay separate even while their last response is unread. */
+/** Tracking and resolved conversations stay out of the open list, even while their last response is unread. */
 export function threadSections(items: readonly ThreadSummary[]) {
   const newest = [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
-  return { open: newest.filter((t) => t.state === 'open'), resolved: newest.filter((t) => t.state === 'resolved') };
+  return {
+    open: newest.filter((t) => t.state === 'open'),
+    tracking: newest.filter((t) => t.state === 'tracking'),
+    resolved: newest.filter((t) => t.state === 'resolved'),
+  };
 }
 export function threadStatus(item: ThreadSummary) {
   if (item.state === 'resolved') return { verb: 'done' as const, label: 'Resolved' };
+  if (item.state === 'tracking') return { verb: 'working' as const, label: 'Tracking' };
   if (item.cards.length) return { verb: 'needs-decision' as const, label: 'Waiting for you' };
   if (item.waitingForHelm) return { verb: 'queued' as const, label: 'Waiting for helm' };
   return { verb: 'done' as const, label: 'Acknowledged' };
@@ -247,6 +268,7 @@ export function Threads() {
     html`<ul class="dlist">${items.map((item) => html`<${ThreadCard} key=${item.id} item=${item} />`)}</ul>`;
   return html`<section class="threads-page"><${SectionHead} title="Threads" page />
     ${sections.open.length ? list(sections.open) : html`<p class="empty">No open threads</p>`}
+    ${sections.tracking.length > 0 && html`<details class="thread-resolved thread-tracking"><summary>Tracking (${sections.tracking.length})${sections.tracking.some((t) => t.unreadResponse) ? ' · unread responses' : ''}</summary>${list(sections.tracking)}</details>`}
     ${sections.resolved.length > 0 && html`<details class="thread-resolved"><summary>Resolved (${sections.resolved.length})${sections.resolved.some((t) => t.unreadResponse) ? ' · unread responses' : ''}</summary>${list(sections.resolved)}</details>`}
   </section>`;
 }

@@ -10,8 +10,24 @@ export type ThreadEntry =
   | { by: 'person'; via: 'glass' | 'chat'; text: string; attachments: Attachment[]; at?: string }
   | { by: 'helm'; text: string; attachments: Attachment[]; at: string; seq: number }
   | { card: string }
-  | { link: 'dispatched' | 'report' | 'planned'; ref: string; text: string; at?: string }
-  | { event: 'triaged'; kind: 'bait' | 'thread'; at: string };
+  | { link: ThreadLinkKind; ref: string; text: string; at?: string }
+  | { event: 'triaged'; kind: 'bait' | 'thread'; at: string }
+  | { event: 'tracked'; text: string; at: string };
+export type ThreadLinkKind = 'dispatched' | 'report' | 'planned' | 'pr';
+export const THREAD_LINK_KINDS: readonly ThreadLinkKind[] = ['dispatched', 'report', 'planned', 'pr'];
+/** Open: still a conversation. Tracking: the helm resolved it, but linked work is still running. */
+export type ThreadState = 'open' | 'tracking' | 'resolved';
+/** Work a thread waits on while it is tracking, with its live state, read on demand. */
+export interface ThreadTrackedItem {
+  kind: 'dispatch' | 'card' | 'pr' | 'todo';
+  ref: string;
+  title: string;
+  /** done: finished; stalled: needs someone; open: still running. */
+  state: 'open' | 'done' | 'stalled';
+  /** The item's own status word, such as working, blocked, merged or overdue. */
+  status: string;
+  href?: string;
+}
 export interface ThreadRound { at: string; entries: ThreadEntry[] }
 export interface HelmThread {
   responseSeq?: number;
@@ -27,7 +43,7 @@ export interface HelmThread {
   text: string;
   attachments: Attachment[];
   about?: string;
-  state: 'open' | 'resolved';
+  state: ThreadState;
   notes: { decided: string[]; open: string[] };
   notesAt?: string;
   rounds: ThreadRound[];
@@ -50,7 +66,7 @@ export interface ThreadSummary {
   grounds: string;
   kind: ThreadKind;
   title: string;
-  state: 'open' | 'resolved';
+  state: ThreadState;
   updatedAt: string;
   roundCount: number;
   /** The dispatch a message from its page is about. */
@@ -65,6 +81,8 @@ export interface ThreadView extends HelmThread {
   unreadResponse?: boolean;
 
   cards: Array<{ key: string; title: string; options: string[]; answer?: { option?: string; text?: string; attachments: Attachment[]; answeredAt: string }; standing: boolean }>;
+  /** Linked work and its live state; read-only, present when the store can read it. */
+  tracked?: ThreadTrackedItem[];
 }
 
 export const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -106,7 +124,7 @@ export function appendThreadEntry(item: HelmThread, entry: ThreadEntry): HelmThr
 
 /** A helm message is a response: it raises unread for the person and stops the reminder. */
 export function sayInThread(item: HelmThread, text: string, attachments: Attachment[], at: string): HelmThread {
-  if (item.state !== 'open') throw new ThreadError('Reopen this conversation before adding to it', 409);
+  if (item.state === 'resolved') throw new ThreadError('Reopen this conversation before adding to it', 409);
   const seq = (item.responseSeq ?? 0) + 1;
   const said = appendThreadEntry(item, { by: 'helm', text, attachments, at, seq });
   return recordThreadResponse({ ...said, updatedAt: at, lastHelmAt: at }, at, text || attachments.map((file) => file.name).join(', '));
@@ -156,4 +174,27 @@ export function acknowledgeThreadResponse(item: HelmThread, person: string, thro
 export function pendingThreadNotice(item: HelmThread, person = THREAD_PERSON): ThreadSubscriberNotice | undefined {
   const notice = item.notice, reader = item.readers?.[person];
   return notice && notice.seq > (reader?.seenThrough ?? 0) && notice.seq > (reader?.dismissedThrough ?? 0) ? { ...notice, thread: item.id, person } : undefined;
+}
+
+/** Where a resolved thread goes: tracking while any linked work is unfinished. */
+export function settledState(tracked: readonly ThreadTrackedItem[]): 'tracking' | 'resolved' {
+  return tracked.some((item) => item.state !== 'done') ? 'tracking' : 'resolved';
+}
+const trackedLabel = (item: ThreadTrackedItem) => `${item.kind === 'pr' ? 'PR' : item.kind === 'card' ? 'Card' : item.kind === 'todo' ? 'Todo' : 'Dispatch'} ${item.title}`;
+/**
+ * A tracking thread's next state: back to the person when linked work stalls, resolved when all of it is done.
+ * Returns undefined while it should keep tracking.
+ */
+export function trackingTransition(item: HelmThread, tracked: readonly ThreadTrackedItem[], at: string): HelmThread | undefined {
+  if (item.state !== 'tracking') return undefined;
+  const stalled = tracked.find((t) => t.state === 'stalled');
+  if (stalled) {
+    const text = `${trackedLabel(stalled)} is ${stalled.status}`;
+    return recordThreadResponse({ ...appendThreadEntry(item, { event: 'tracked', text, at }), state: 'open', updatedAt: at, lastHelmAt: at, notifiedAt: undefined }, at, text);
+  }
+  if (tracked.every((t) => t.state === 'done')) {
+    const text = tracked.length === 1 ? `${trackedLabel(tracked[0]!)} finished` : 'All linked work finished';
+    return { ...appendThreadEntry(item, { event: 'tracked', text, at }), state: 'resolved', updatedAt: at };
+  }
+  return undefined;
 }
