@@ -319,6 +319,7 @@ import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, decisionReferences, type FlagValue } from './usage.js';
+import { listThreads, readThread, startThread, postThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, ThreadError } from '@lobstah/core';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
@@ -674,6 +675,11 @@ function trapRequestFields(n: Notice): Record<string, string> | undefined {
 
 function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
+    if (n.kind === 'thread' && n.refId) {
+      const item = readThread(n.refId);
+      if (item?.state === 'open') console.log(toonKV({ event: 'thread', id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, text: n.text }));
+      continue;
+    }
     // A decision answer is an event with its request's payload.
     const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
     if (answer) console.log(toonKV(decisionEventFields(answer)));
@@ -2166,6 +2172,38 @@ async function mainCli(): Promise<void> {
       console.log(toonHelp([`lobstah attention ack ${filed.key}   (when the human has read it)`]));
       break;
     }
+    case 'man:threads':
+    case 'man:triage':
+    case 'man:discuss':
+    case 'man:note':
+    case 'man:resolve': {
+      const caller = callerSession(opt('--session'));
+      const threadConfig = loadConfig();
+      const grounds = displayGrounds(resolveGrounds(threadConfig, opt('--grounds') ?? (caller?.id ? helmOf(caller.id)?.grounds : undefined)).name, threadConfig);
+      if (cmd === 'man:threads') {
+        const item = pos[0] ? readThread(pos[0], grounds) : undefined;
+        if (pos[0] && !item) throw new UsageError('Conversation not found');
+        console.log(JSON.stringify(item ? threadView(item) : threadSummaries(grounds), null, 2));
+        break;
+      }
+      gateHelm(caller, grounds);
+      const id = pos[0];
+      if (!id) throw new UsageError('Choose a conversation or title');
+      const existing = readThread(id);
+      if (existing && existing.grounds !== grounds) throw new UsageError('This conversation belongs to another grounds');
+      try {
+        let item;
+        if (cmd === 'man:discuss') item = existing ? postThread(id, { text: opt('--said'), via: 'chat' }) : startThread({ grounds, title: pos.join(' '), text: opt('--said'), via: 'chat' });
+        else if (cmd === 'man:triage') item = triageThread(id, opt('--as'));
+        else if (cmd === 'man:resolve') item = resolveThread(id, opt('--outcome'), opt('--note'));
+        else {
+          if (!has('--decided') && !has('--open') && !opt('--link')) throw new ThreadError('Choose notes or a link to record');
+          item = noteThread(id, { ...(has('--decided') ? { decided: values('--decided') } : {}), ...(has('--open') ? { open: values('--open') } : {}), link: opt('--link'), text: pos.slice(1).join(' ') || undefined });
+        }
+        console.log(JSON.stringify(threadView(item), null, 2));
+      } catch (error) { if (error instanceof ThreadError) throw new UsageError(error.message); throw error; }
+      break;
+    }
     case 'man:ask': {
       const show = opt('--show');
       if (show !== undefined) {
@@ -2219,6 +2257,7 @@ async function mainCli(): Promise<void> {
           title,
           detailFile: opt('--detail'),
           references: decisionReferences(args),
+          thread: opt('--thread'),
           options: run ? [RUN_DECLINE_OPTION] : values('--option'),
           attach: values('--attach'),
           ...(run ? { run } : {}),
@@ -2866,6 +2905,12 @@ async function mainCli(): Promise<void> {
         // standing conditions still wake (attentionNow, noticeWakes).
         const wakes = noticeWakes(callerHelm);
         const floorMs = wakeFloorMs(callerHelm);
+        const threadMaintenance = () => {
+          const threadGrounds = groundsScope ? displayGrounds(groundsScope.name, cfgWait) : undefined;
+          expireIdleThreads(threadGrounds);
+          remindThreads(threadGrounds, remindMs);
+        };
+        threadMaintenance();
         runDueManWatches();
         // The grounds `todo add` would use. With several and none named, the todos stand for their helms.
         const todoGroundsName = groundsScope?.name ?? (groundsList(cfgWait).length === 1 ? resolveGrounds(cfgWait).name : undefined);
@@ -2945,6 +2990,7 @@ async function mainCli(): Promise<void> {
             delivered(helmWakeKeys({ todos: freshTodos }));
             return;
           }
+          threadMaintenance();
           const freshNotices = unseenNotices(consume, noticeFilter, wakes).filter((n) => n.by === undefined || n.by !== sid);
           if (freshNotices.length > 0) {
             emitNotices(freshNotices, sid);

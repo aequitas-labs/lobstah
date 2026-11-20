@@ -1829,3 +1829,27 @@ app link when available; they are never cold-started in a terminal. Opening
 a card is not sign-on. Roster, status, tend and glass show the profile,
 grounds, surface, capacity, queued catches and current state. Desk catches
 share one host UI lease across grounds; the person's keyboard remains free.
+
+### Conversations with the helm
+
+Glass messages start untriaged and wake `man wait` with `event: thread`, the
+conversation id, grounds and text. `man threads [<id>] --grounds <name>` lists
+summaries or reads the notes, rounds and referenced cards. Polls carry summaries;
+rounds and listed attachments load only when opened.
+
+The helm uses `man triage <id> --as bait|thread`, then keeps `man note <id>
+--decided <line> --open <line>` current. Repeat either flag to replace that set of
+notes; an empty line clears it. `--link dispatched:<id>|report:<key>|planned:<url>`
+adds context. `man ask --thread <id>` asks on a card; its answer stays on the card
+and the answer event names the conversation. Bait always goes through the helm.
+
+Record a chat that remains open with `man discuss "<title>" --said "<exchange>"`,
+or append it with `man discuss <id> --said "<exchange>"`. Tell the person it was
+recorded. Quick answers in chat need no thread; quick glass answers go on a card
+to read. Consider a report or plan at six rounds; further messages stop at 100.
+
+`man resolve <id> --outcome dispatched:<id>|planned:<https-url>|answered|dropped
+--note "<outcome>"` closes it. The person can reopen it. Unanswered messages recur
+on the configured reminder cadence. Discussion threads with no new message for
+seven days and no standing card close as dropped; bait and standing questions
+remain open. Reads never run this maintenance; the helm wait does.

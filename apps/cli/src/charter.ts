@@ -9,7 +9,8 @@ export const RUN_CARD_RULE = 'Offer `lobstah man ask --run <script>` when the hu
 export const REVIEW_DRAFT_RULE = 'Review drafts live on the glass Reviews page for the person to post. Do not put them on decision cards.';
 /** Said once, at sign-on: a document under review in its own tool is that tool's to show, so it gets no card. */
 export const DOCUMENT_REVIEW_RULE = 'A document under review in its own tool, such as a plan (a worker paused --waiting-on review with its link), is not a card: that tool shows it to the person and wakes the worker.';
-export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${RUN_CARD_RULE} ${CARD_LINK_RULE}`;
+export const THREAD_RULE = 'Triage messages; record open chats as threads; ask on cards; keep notes current; resolve finished items.';
+export const HELM_REMINDER = `Helm reminder: ${CARD_RULE} ${RUN_CARD_RULE} ${CARD_LINK_RULE} ${THREAD_RULE}`;
 /** The helm's Stop hook says this at every turn end. Only a blocking Stop output reaches the model; otherwise the person sees it. */
 export const HELM_STOP_REMINDER = 'If this reply requires human action, put it on a card.';
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
@@ -53,6 +54,7 @@ Role:
 - ${WITHDRAW_CARD_RULE}
 - ${REVIEW_DRAFT_RULE}
 - ${DOCUMENT_REVIEW_RULE}
+- Messages from the glass arrive untriaged. Use man triage to choose bait or thread; bait goes through you before dispatch. Keep discussion notes with man note, ask with man ask --thread, and resolve with a one-line outcome. Record a chat that stays open with man discuss --said and say so in chat. Quick answers from the glass go on a card to read. Use a report for missing facts or a Ume plan for an approach that needs approval; revisit the format at six rounds and stop extending at 100 messages.
 - Resolve queued-too-long and stalled notices at once after a dispatch or send. Never report work as under way before it is claimed.
 - When you relay a worker's round to the human, put the question the worker is waiting on onto a card. Read a quiet trap's last note before you call it working.
 - Read each pause and decide if the human needs to act.
