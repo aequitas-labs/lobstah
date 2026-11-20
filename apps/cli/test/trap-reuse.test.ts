@@ -1,13 +1,16 @@
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { recordHelmPass, appendStatus, claimBait, enqueue, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, listReservations, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
+import { recordHelmPass, appendStatus, claimBait, daemonSkip, enqueue, ensureLayout, heartbeatTrap, loadConfig, queuedDescriptor, listReservations, readTrap, signOnTrap, stowTrap, sweepGhostTraps, takeHelm } from '@lobstah/core';
 import { buildTendReport, renderTend } from '../src/tend.js';
-import { charter, TRAP_REUSE_RULE } from '../src/charter.js';
+import { charter, TRAP_REUSE_RULE, TRAPS_DEFAULT_RULE } from '../src/charter.js';
 import { trapForRepo } from '../src/throw.js';
+import type { TerminalLaunch } from '../src/throw.js';
+import { createTrapDispatchScheduler } from '../src/trap-dispatch.js';
+import { tick } from '@lobstah/supervisor';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -144,18 +147,68 @@ describe('reuse-first CLI and summaries', () => {
     expect(out.status).not.toBe(0); expect(queuedDescriptor('job', 'work')).toBeUndefined();
   });
 
-  it('says when a dispatch is unaddressed and may run headless', () => {
-    const out = run(['dispatch', '--repo', 'r', '--brief-text', 'work', '--id', 'plain', '--session', HELM]);
+  const plain = (id: string, extra: string[] = []) => run(['dispatch', '--repo', 'r', '--id', id, '--brief-text', 'work', '--session', HELM, ...extra]);
+
+  it("sends the helm's unaddressed work to a free trap, as --trap-any", () => {
+    const free = trap('amber-gull');
+    const out = plain('plain');
     expect(out.status, out.stdout + out.stderr).toBe(0);
-    expect(out.stdout).toContain('unaddressed: a headless worker may take it; dispatch with --trap-any or --for <trap-name> to keep work in traps');
-    expect(dispatch('addressed').stdout).not.toContain('unaddressed');
+    expect(out.stdout).toContain('first free suitable trap');
+    expect(out.stdout).toContain('amber-gull');
+    expect(queuedDescriptor('plain', 'work')).toMatchObject({ trapAny: true });
+    expect(claimBait(free)?.id).toBe('plain');
+  });
+
+  it('throws a trap for unaddressed helm work when the repo has none live and is under its cap', async () => {
+    const out = plain('plain');
+    expect(out.status, out.stdout + out.stderr).toBe(0);
+    expect(out.stdout).toContain('the daemon starts a trap for it');
+    const launch = vi.fn(async (_launch: TerminalLaunch) => {});
+    const scheduler = createTrapDispatchScheduler({ adapter: (app) => ({ app, launch }), timeoutSecs: 0.03, pollMs: 1 });
+    tick(() => {}, { trapStarts: scheduler, spawnRunner: () => { throw new Error('trap work must never spawn headless'); } });
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
+  });
+
+  it('runs --headless work on a headless worker, never a trap', () => {
+    const free = trap('amber-gull');
+    const out = plain('one-off', ['--headless']);
+    expect(out.status, out.stdout + out.stderr).toBe(0);
+    expect(out.stdout).toContain('headless one-off (--headless)');
+    const descriptor = queuedDescriptor('one-off', 'work')!;
+    expect(descriptor).toMatchObject({ headless: true });
+    expect(descriptor.trapAny).toBeUndefined();
+    expect(claimBait(free)).toBeNull();
+    expect(daemonSkip([readTrap(free.trapId)!], 60_000)(descriptor)).toBe(false);
+    const mixed = plain('mixed', ['--headless', '--trap-any']);
+    expect(mixed.status).not.toBe(0);
+    expect(mixed.stdout + mixed.stderr).toContain('--headless cannot be combined');
+  });
+
+  it('waits for a trap at the cap, and says so', () => {
+    const a = trap('amber-gull'); const b = trap('kind-crab');
+    for (const [r, id] of [[a, 'a'], [b, 'b']] as const) {
+      enqueue({ id, repo: 'r', brief: 'b', for: `wt:${r.trapId}` }); claimBait(r);
+    }
+    const out = plain('plain');
+    expect(out.status, out.stdout + out.stderr).toBe(0);
+    expect(out.stdout).toContain('waits for a trap: all 2 r traps are busy');
+    expect(queuedDescriptor('plain', 'work')).toMatchObject({ trapAny: true });
+  });
+
+  it('keeps unaddressed work from outside the helm as before, and names --trap-any', () => {
+    const out = run(['dispatch', '--repo', 'r', '--id', 'outside', '--brief-text', 'work']);
+    expect(out.status, out.stdout + out.stderr).toBe(0);
+    expect(out.stdout).toContain('unaddressed: a headless worker or any free trap may take it; --trap-any keeps it in traps');
+    expect(queuedDescriptor('outside', 'work')?.trapAny).toBeUndefined();
   });
 
   it('the helm charter and both man skills carry the same reuse rule', () => {
     expect(charter({ name: 'fleet', repos: ['r'] })).toContain(TRAP_REUSE_RULE);
+    expect(charter({ name: 'fleet', repos: ['r'] })).toContain(TRAPS_DEFAULT_RULE);
     for (const plugin of ['codex', 'claude-code']) {
       const skill = fileURLToPath(new URL(`../../../plugins/${plugin}/skills/man/SKILL.md`, import.meta.url));
       expect(fs.readFileSync(skill, 'utf8')).toContain(TRAP_REUSE_RULE);
+      expect(fs.readFileSync(skill, 'utf8')).toContain(TRAPS_DEFAULT_RULE);
     }
   });
 });

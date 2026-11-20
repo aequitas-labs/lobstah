@@ -16,6 +16,8 @@ export const HELM_STOP_REMINDER = 'If this reply requires human action, put it o
 export const FILE_REPORT_RULE = "File your own reports, plans and step lists with `lobstah man file` so they show on the glass deck; a chat file alone doesn't reach it.";
 export const DESK_ROUTING_RULE = 'For a bounded browser, app or computer step a repo worker cannot do, dispatch --for trap:<profile> --assist <original-id>. The original worker keeps repo and PR ownership. Use man throw trap:<profile> for an absent desk; point at its app-start card instead of starting a terminal session.';
 export const TRAP_REUSE_RULE = 'Reuse a free trap, then resume a stowed one; create a new trap only when neither fits, and say why.';
+/** Where the helm's dispatches run: the charter and both man skills carry it word for word. */
+export const TRAPS_DEFAULT_RULE = 'Dispatches go to traps by default: with no --for, `lobstah dispatch` acts as --trap-any. Use --headless only for one-offs.';
 export const DISPATCH_UNBLOCKED_RULE = 'Keep work moving: when a blocker clears and the next step needs no human call, dispatch it, then report.';
 export const PARKED_TODO_RULE = 'Nothing stalls silently: work that parks or blocks gets a todo at once, and a card when a human must act.';
 export const TODO_COMMITMENT_RULE = "Todos are commitments. Judge whether each one can act now or should wait, and give one that waits a time or a trigger. When a todo fires, goes overdue or is marked stale, act on it: do it, ask on a card, snooze it when there's a reason to wait, move it to the issue tracker, or drop it.";
@@ -48,7 +50,7 @@ Role:
 - When a card's answer arrives, act on it, then ack it with \`lobstah man ack <key> "<what you did>"\` (a \`send --for-decision <key>\` acks it too).
 - ${HELM_REMINDER}
 - ${DESK_ROUTING_RULE}
-- ${TRAP_REUSE_RULE} Use \`lobstah dispatch --repo <key> --trap-any --brief <file>\`. A dispatch with no --for, --trap-any or --pool may run headless.
+- ${TRAP_REUSE_RULE} ${TRAPS_DEFAULT_RULE}
 - ${DISPATCH_UNBLOCKED_RULE}
 - ${PARKED_TODO_RULE}
 - ${TODO_COMMITMENT_RULE}

@@ -68,6 +68,8 @@ export interface Descriptor {
   pool?: string;
   /** Queue for a suitable trap for this repo. Never headless; becomes sticky at claim. */
   trapAny?: boolean;
+  /** A headless one-off: the daemon runs it at once and no trap claims it. */
+  headless?: boolean;
   /**
    * The existing PR this dispatch works on (a repair or a rebase). The
    * runner pushes no branch and opens no PR for it; the worker pushes to

@@ -62,6 +62,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--repo': { value: '<key>' },
       '--pool': { value: '<name>' },
       '--trap-any': {},
+      '--headless': {},
       '--fresh': {},
       '--continue': {},
       '--brief': { value: '<file>' },
@@ -355,8 +356,7 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 export const PROSE: Record<string, string> = {
   setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
 enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
-  dispatch: `Queue work; prints id. --for is sticky; --trap-any waits for a free suitable trap, then starts a stowed/new trap within the repo cap. Never headless. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait.
-Local repo work: --fresh starts without prior conversation, with the brief and git progress; --continue keeps the session. Default: continue for --for and follow-ups, fresh for unaddressed work.`,
+  dispatch: `Queue work; prints id. Traps by default: the helm's unaddressed work is --trap-any, which waits for a free trap or starts one within the repo cap. --for is sticky. --headless: a headless one-off. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait. Local repo work: --fresh starts without prior conversation, with the brief and git progress; --continue keeps the session. Default: continue for --for and follow-ups, fresh for unaddressed work.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster record. Alias: buoy.`,

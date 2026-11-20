@@ -825,7 +825,7 @@ function claimTrapBait(reg: TrapRegistration): { id: string; lane: Lane; descrip
     ['work', addressed],
     // Pool work wants a fresh headless session in a pool worktree: never a trap's.
     ['chore', (d: Descriptor) => d.trapAny === true && d.for === undefined && reg.repo !== undefined && d.repo === reg.repo && (!d.harness || d.harness === reg.harness)],
-    ['work', (d: Descriptor) => d.for === undefined && d.pool === undefined && reg.repo !== undefined && d.repo === reg.repo && (!d.trapAny || !d.harness || d.harness === reg.harness)],
+    ['work', (d: Descriptor) => d.for === undefined && d.pool === undefined && !d.headless && reg.repo !== undefined && d.repo === reg.repo && (!d.trapAny || !d.harness || d.harness === reg.harness)],
   ] as Array<[Lane, (d: Descriptor) => boolean]>) {
     const id = claimNext(lane, (d) => !pass(d));
     if (!id) continue;
@@ -875,6 +875,7 @@ export function daemonSkip(traps: TrapRegistration[], deferMs: number, now = Dat
   return (d) => {
     if (d.target || d.for !== undefined || d.trapAny) return true; // sticky / trap-only — never the daemon's
     if (d.pool !== undefined) return false; // pool work is never a trap's
+    if (d.headless) return false; // an explicit headless one-off is never a trap's
     return traps.some((r) => r.repo === d.repo && trapReady(r, deferMs, now));
   };
 }
