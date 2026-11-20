@@ -105,7 +105,7 @@ import { answerPermissionsProposal, previewPermissionsProposal } from './permiss
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, redraftReviewRound } from '@lobstah/pick';
 import { muteReview, unmuteReview } from '@lobstah/core';
-import { refreshItemSources, watchSurfaceItems } from '@lobstah/core';
+import { refreshItemSources, watchSurfaceItems, watchSurfaceSources } from '@lobstah/core';
 import type { GlassReview } from '@lobstah/core';
 import { createCliWatchRegistry } from './watch-automation.js';
 import { parseWatchItemAction, runWatchItemAction } from './watch-item-actions.js';
@@ -819,6 +819,7 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     // Legacy records for older glasses and the review detail view, through the installed review source.
     reviews: queryCliWatch<GlassReview[]>('glass.reviews', {}, []),
     reviewItems: watchSurfaceItems('reviews'),
+    reviewSources: watchSurfaceSources('reviews'),
     reviewSetup: reviewSetupView(),
     sessionGrants: listGrants().grants.filter(g => g.mode === 'session').map(({ callIds: _ids, ...g }) => g),
     standingGrants: listGrants().grants.filter(g => g.mode !== 'session').map(({ callIds: _ids, ...g }) => g),

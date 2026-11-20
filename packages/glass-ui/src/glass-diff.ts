@@ -16,6 +16,7 @@ import type {
   GlassReport,
   GlassReview,
   WatchSurfaceItem,
+  WatchSurfaceSource,
   GlassSnapshot,
   GlassStack,
   GlassTrap,
@@ -107,6 +108,8 @@ export interface GlassPrefs {
   trapGroup?: TrapGrouping;
   /** This viewer's remembered Reviews disclosure state. */
   reviewSections?: { waiting?: boolean; done?: boolean };
+  /** The Reviews source filter: a source ID, or absent for every source. */
+  reviewSource?: string;
 }
 
 export type ModalType = 'dispatch' | 'trap' | 'helm' | 'pr' | 'review' | 'settings';
@@ -411,14 +414,19 @@ export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
   Number(reviewNeedsAttention(b)) - Number(reviewNeedsAttention(a)) || b.requestedAt.localeCompare(a.requestedAt);
 
 /**
- * Review items in list order: unread items that wait on you first, then the
- * newest request, then the item ID so equal times keep a stable order. For
- * GitHub-only data this is the order reviewOrder gives its records.
+ * Review items in list order. GitHub-only data keeps its order: unread
+ * first, then the newest request. With several sources, unread items that
+ * wait on you come first, then the newest update or request; the item ID
+ * breaks ties so equal times keep a stable order.
  */
-export const itemOrder = (a: WatchSurfaceItem, b: WatchSurfaceItem): number =>
-  Number(!!b.item.notification?.unread) - Number(!!a.item.notification?.unread) ||
-  (b.item.requestedAt ?? b.item.updatedAt ?? '').localeCompare(a.item.requestedAt ?? a.item.updatedAt ?? '') ||
-  a.item.id.localeCompare(b.item.id);
+export const itemOrder =
+  (mixed: boolean) =>
+  (a: WatchSurfaceItem, b: WatchSurfaceItem): number => {
+    const first = (entry: WatchSurfaceItem): number => Number(!!entry.item.notification?.unread && (!mixed || !!entry.item.standing));
+    const time = (entry: WatchSurfaceItem): string =>
+      (mixed ? (entry.item.updatedAt ?? entry.item.requestedAt) : (entry.item.requestedAt ?? entry.item.updatedAt)) ?? '';
+    return first(b) - first(a) || time(b).localeCompare(time(a)) || a.item.id.localeCompare(b.item.id);
+  };
 
 /** Reports in list order: newest first, regardless of acknowledgment. */
 export const reportOrder = (a: GlassReport, b: GlassReport): number => b.filedAt.localeCompare(a.filedAt);
@@ -659,6 +667,10 @@ export interface SectionInputs {
     list: GlassReview[];
     /** Every source's review items; absent when the boat sends only the legacy records. */
     items?: WatchSurfaceItem[];
+    /** Every review source and its health, before the source filter. */
+    sources?: WatchSurfaceSource[];
+    /** The source filter in force, when one source is chosen. */
+    source?: string;
     expanded?: GlassPrefs['reviewSections'];
   };
   notices: { list: Notice[] };
@@ -702,9 +714,12 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
     .filter((r) => matchesRepo(r.repoKey, st, true) && hasQuery(r.repo, r.number, r.title, r.author, r.requestedBy, r.state))
     .sort(reviewOrder);
   // An absent collection falls back to the legacy records; an empty one stays empty.
+  const reviewSourceIds = new Set([...(d.reviewSources ?? []).map((entry) => entry.source.id), ...(d.reviewItems ?? []).map((entry) => entry.source.id)]);
+  const reviewSource = st.reviewSource && reviewSourceIds.has(st.reviewSource) ? st.reviewSource : undefined;
   const reviewItems = d.reviewItems
     ?.filter(
       ({ item, source }) =>
+        (!reviewSource || source.id === reviewSource) &&
         matchesRepo(item.repo, st, true) &&
         hasQuery(
           source.name,
@@ -715,7 +730,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
           ...item.statuses.map((status) => status.label),
         ),
     )
-    .sort(itemOrder);
+    .sort(itemOrder(reviewSourceIds.size > 1));
   const stacks = (d.stacks || []).filter(inRepo);
   const prs = (d.prs || []).filter(inRepo);
   const deckTraps = traps.map((trap) => trapView(d, trap)).filter((trap) => deckTrapAttention(trap, d) !== undefined);
@@ -775,7 +790,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       expanded: st.reviewSections,
       view: st.view,
       list: reviews,
-      ...(reviewItems ? { items: reviewItems } : {}),
+      ...(reviewItems ? { items: reviewItems, sources: d.reviewSources ?? [], ...(reviewSource ? { source: reviewSource } : {}) } : {}),
     },
     notices: {
       list: (d.notices || []).filter(

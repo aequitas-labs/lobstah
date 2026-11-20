@@ -38,6 +38,35 @@ export function watchSurfaceItems(surface: WatchSurface, views: readonly Journal
   );
 }
 
+/** A source's health on a surface: its setup and stale notices belong to it, not to the page. */
+export interface WatchSurfaceSource {
+  watch: WatchSurfaceItem['watch'];
+  source: WatchSourceBrand;
+  /** healthy; stale (its last read failed, so it shows its last good items); held (its observer is stopped). */
+  health: 'healthy' | 'stale' | 'held';
+  message?: string;
+  remedy?: string;
+}
+
+/** Every source that contributes to a surface, whether or not it has items now, with its health. */
+export function watchSurfaceSources(surface: WatchSurface, views: readonly JournalWatchView[] = journalWatchViews()): WatchSurfaceSource[] {
+  return views.flatMap(({ snapshot, view }) => {
+    if (view.version !== 2) return [];
+    const contributes = snapshot.presentation.surfaces?.includes(surface) || view.items.some((item) => item.surfaces.list.includes(surface));
+    if (!contributes) return [];
+    const failure = snapshot.failure;
+    const health = snapshot.status === 'held' ? 'held' : failure ? 'stale' : 'healthy';
+    return [
+      {
+        watch: { key: snapshot.key, generation: snapshot.generation, type: snapshot.type.id, status: snapshot.status },
+        source: view.source,
+        health,
+        ...(health !== 'healthy' && failure ? { message: failure.message, ...(failure.remedy ? { remedy: failure.remedy } : {}) } : {}),
+      },
+    ];
+  });
+}
+
 /**
  * Re-present the in-process sources that supply items, before a page reads
  * their cached projections, so a local change shows at once. Plugins are

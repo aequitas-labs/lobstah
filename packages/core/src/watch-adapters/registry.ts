@@ -9,6 +9,7 @@ import { createStackWatchType, type StackWatchSourceOptions } from '../stack-wat
 import { createPrMergeWatchType, type PrMergeWatchSourceOptions } from '../pr-merge-watch-source.js';
 import { createPrWatchType, type PrWatchSourceOptions } from '../pr-watch-source.js';
 import { createReviewWatchType, type ReviewWatchSourceOptions } from '../review-watch-source.js';
+import { createUmeReviewWatchType, type UmeReviewSourceOptions } from '../ume-review-source.js';
 
 export interface BuiltinWatchServices {
   local?: LocalWatchSources;
@@ -17,6 +18,7 @@ export interface BuiltinWatchServices {
   prMerge?: PrMergeWatchSourceOptions;
   pr?: PrWatchSourceOptions;
   review?: ReviewWatchSourceOptions;
+  umeReviews?: UmeReviewSourceOptions;
 }
 
 /** The builtin composition root is the only place that names shipped source modules. */
@@ -58,6 +60,7 @@ export function builtinWatchRegistry(options: BuiltinWatchServices = {}): WatchR
   installBuiltin(createPrMergeWatchType(options.prMerge));
   installBuiltin(new MergePolicyWatchType());
   installBuiltin(createUmeWatchType(options.ume));
+  installBuiltin(createUmeReviewWatchType(() => builtinWatchRegistry(options), options.umeReviews));
   for (const adapter of localWatchTypes(options.local)) installBuiltin(adapter);
   installBuiltin(new CommandWatchType());
   for (const id of remaining) {

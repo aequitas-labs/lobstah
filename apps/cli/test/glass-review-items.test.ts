@@ -259,3 +259,78 @@ describe('lifecycle, attention and seen stay separate', () => {
     expect(second.querySelector('.gchip.pr-open')).not.toBeNull();
   });
 });
+
+describe('Reviews with several sources', () => {
+  const umeWatch = { key: 'ume-reviews:ourrwyi8p5', generation: 'u1', type: 'ume-reviews', status: 'watching' as const };
+  const umeSource = { id: 'ume', name: 'ume', icon: { glyph: 'ume' as const } };
+  const umeItem = (artifact: string, since: string, over: Partial<WatchItem> = {}): WatchSurfaceItem => ({
+    watch: umeWatch,
+    source: umeSource,
+    item: {
+      id: `ourrwyi8p5/chris/${artifact}`,
+      revision: `2:${artifact}`,
+      title: `Plan ${artifact}`,
+      kind: 'document',
+      glyph: { kind: 'document' },
+      lifecycle: { phase: 'active', label: 'Active' },
+      statuses: [{ code: 'approval-requested', label: 'approval requested', category: 'workflow', meaning: 'pending' }],
+      attention: 'needs-you',
+      notification: { revision: `a@${since}`, unread: true, action: 'ume-review-seen' },
+      standing: true,
+      metadata: [{ kind: 'project', value: 'lobstah' }, { kind: 'time', value: since }, { kind: 'revision', value: 'plan r2' }],
+      requestedAt: since,
+      target: { href: `https://app.ume.so/a/${artifact}` },
+      actions: [{ id: 'open', label: 'Open in ume', placement: 'open', enabled: true, acknowledges: true, binding: { link: { href: `https://app.ume.so/a/${artifact}` } } }],
+      surfaces: { list: ['reviews'], home: 'reviews' },
+      ...over,
+    },
+  });
+  const github = review(7, { state: 'drafted', verdict: 'comment', notification: { kind: 'draft-ready', at: ago(60), text: 'Draft ready' }, requestedAt: ago(7200) });
+  const sources = [
+    { watch, source: GITHUB_SOURCE, health: 'healthy' as const },
+    { watch: umeWatch, source: umeSource, health: 'stale' as const, message: 'ume access to this project was lost.', remedy: 'Sign this machine in to ume again.' },
+  ];
+  const snapshot = () => ({
+    reviewSetup: { enabled: false, mode: 'notify', running: false },
+    reviews: [github],
+    reviewItems: [asItem(github), umeItem('plan-1', ago(600)), umeItem('plan-2', ago(30), { notification: { revision: 'b', unread: false, seen: true } })],
+    reviewSources: sources,
+  });
+
+  it('orders unread waiting items first, then the newest, and keeps each source logo, link and Open in ume', async () => {
+    const g = await glass(snapshot());
+    expect(g.$$('#reviews [data-review]').map((card) => card.getAttribute('data-review'))).toEqual([
+      'ourrwyi8p5/chris/plan-1',
+      'review:acme/web#7',
+      'ourrwyi8p5/chris/plan-2',
+    ]);
+    const ume = g.$('#reviews [data-review="ourrwyi8p5/chris/plan-1"]')!;
+    expect(ume.querySelector('.glead [aria-label="ume"]')).not.toBeNull();
+    expect(ume.querySelector('.gopenbtn')?.getAttribute('aria-label')).toBe('Open in ume');
+    expect(ume.querySelector('.gcontext')?.textContent).not.toContain('#');
+    expect(g.$('#tabs [data-tab="reviews"] .dbadge')?.textContent).toBe('2');
+  });
+
+  it('names the GitHub settings, keeps setup off the page-wide error, and shows each source its own stale notice', async () => {
+    const g = await glass(snapshot());
+    expect(g.$('#reviews .empty')).toBeNull();
+    expect(g.$('#reviews .rv-controls')?.textContent).toContain('GitHub reviews are off');
+    const notice = g.$('#reviews [data-review-source="ume"]')!;
+    expect(notice.textContent).toContain('ume access to this project was lost.');
+    expect(g.$('#reviews [data-review-source="github"]')).toBeNull();
+  });
+
+  it('filters to one source with the segmented control and remembers it', async () => {
+    const g = await glass(snapshot());
+    const choose = (name: string) => (g.$$('#reviews .rv-sources button').find((button) => button.textContent === name) as unknown as HTMLElement).click();
+    expect(g.$$('#reviews .rv-sources button').map((button) => button.textContent)).toEqual(['All sources', 'GitHub', 'ume']);
+    choose('GitHub');
+    await g.settle();
+    expect(g.$$('#reviews [data-review]').map((card) => card.getAttribute('data-review'))).toEqual(['review:acme/web#7']);
+    expect(g.$('#reviews [data-review-source="ume"]')).toBeNull();
+    expect(JSON.parse(g.window.localStorage.getItem('spyglass')!).reviewSource).toBe('github');
+    choose('All sources');
+    await g.settle();
+    expect(g.$$('#reviews [data-review]')).toHaveLength(3);
+  });
+});

@@ -1007,6 +1007,15 @@ tr.rowhead:hover {
 .srclogo.tip .srctip {
   display: block;
 }
+/* A review source's own notice: its logo, name and why it is not up to date. */
+.rv-source-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: 12px;
+}
 /* The repo icon (components/card.ts) sits on the text's baseline, a little apart from the name. */
 .repoicon {
   vertical-align: -1px;

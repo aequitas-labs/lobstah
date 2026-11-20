@@ -658,6 +658,8 @@ export interface GlassSnapshot {
    * empty list stays empty) and falls back to `reviews` only when it is absent.
    */
   reviewItems?: import('./watch-surfaces.js').WatchSurfaceItem[];
+  /** Every review source and its health, so a stale or held source says so beside its own items. */
+  reviewSources?: import('./watch-surfaces.js').WatchSurfaceSource[];
   sessionGrants?: import('./grants.js').Grant[];
   /** Every other grant in force: intent grants, commands and files. */
   standingGrants?: import('./grants.js').Grant[];

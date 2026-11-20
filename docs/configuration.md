@@ -571,6 +571,21 @@ Requests land silently in the Reviews inbox with a tab count, never on deck or t
 
 Dismiss closes only that review round. A later commit, review request or re-request, or reopening can create a fresh round. **Mute this PR** suppresses future rounds until you choose **Unmute**; muted PRs remain visible in Reviews. Posted reviews show their posting time and link.
 
+### Incoming ume reviews
+
+Reviews can also list the ume approval requests waiting on you. Name each ume project explicitly; lobstah never uses a worktree's attached set or ume's current project:
+
+```toml
+schemaVersion = 2
+
+[watchTypes.ume-reviews]
+projects = ["ourrwyi8p5"]
+```
+
+The home helm owns one watch per project. It reads `ume needs --kind approval` with the stored ume login, so it consumes no feedback and completes no task in ume. Each artifact waiting on you is one card with the ume logo; several pending requests for it roll into that card. A new formal request, including a re-request for the same revision, makes the card unread again. Approving stays in ume: the card's **Open in ume** opens the artifact there.
+
+A failed or partial read keeps the last cards and marks them stale, and Reviews shows ume's own notice with the reason. A card leaves Reviews after a complete read no longer lists its request. Removing a project from the list stops its watch and keeps its last cards; ume keeps the requests. Once Reviews has more than one source, a source filter appears and the read-only settings line is labelled as GitHub's.
+
 ## `[permissions]` — the Claude Code auto-mode profile
 
 Traps and the helm run Claude Code in auto mode. `lobstah permissions apply`

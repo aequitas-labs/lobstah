@@ -12,3 +12,4 @@ export { createPrMergeWatchType } from '../pr-merge-watch-source.js';
 export * from '../ume-watch-source.js';
 export { prTodoTriggers } from '../pr-todo.js';
 export * from '../review-watch-source.js';
+export * from '../ume-review-source.js';

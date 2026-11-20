@@ -27,7 +27,7 @@ import { Dialog } from './dialog.js';
 import { unansweredReviewDecisions } from '../../../core/src/review-decisions.js';
 import { reviewUnreadReason, reviewUpdating } from '../review-attention.js';
 import type { WatchSurfaceItem } from '@lobstah/core';
-import { ItemActions, ItemGlyph, ItemStatuses, openItemTarget, targetHref, watchItemCard } from './item-card.js';
+import { ItemActions, ItemGlyph, ItemStatuses, SourceLogo, openItemTarget, targetHref, watchItemCard } from './item-card.js';
 
 /** Review failures use the shared toast without exposing CLI keys or diagnostics. */
 function showReviewError(reason: string): void {
@@ -502,6 +502,30 @@ function reviewSettingsLine(setup: GlassSnapshot['reviewSetup'], repo: string): 
     : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`;
 }
 
+/** GitHub's read-only settings beside other review sources: named as GitHub's, with setup as a quiet line. */
+function githubSettingsLine(setup: GlassSnapshot['reviewSetup'], repo: string): Children {
+  if (!setup?.enabled)
+    return html`<div class="rv-controls dim"><span>GitHub reviews are off: <code>lobstah setup reviews</code></span></div>`;
+  const effective = (repo && setup.perRepo?.[repo]) || setup;
+  return html`<div class="rv-controls"><span>GitHub settings · Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${effective?.publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`;
+}
+
+/** The review sources this page knows, by ID, in a stable order: those with items or health, named by their brand. */
+function reviewSourceList(inp: SectionInputs['reviews']): WatchSurfaceItem['source'][] {
+  const byId = new Map<string, WatchSurfaceItem['source']>();
+  for (const entry of [...(inp.sources ?? []), ...(inp.items ?? [])])
+    if (!byId.has(entry.source.id)) byId.set(entry.source.id, entry.source);
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Choose every source or one: the same segmented control Traps groups with. */
+function ReviewSourceFilter({ sources, chosen }: { sources: WatchSurfaceItem['source'][]; chosen?: string }): Children {
+  return html`<div class="tabhead rv-sources"><div class="seg" role="group" aria-label="Review source">
+    <${Button} pressed=${!chosen} onClick=${() => setPrefs({ reviewSource: undefined })}>All sources<//>
+    ${sources.map((source) => html`<${Button} key=${source.id} pressed=${chosen === source.id} onClick=${() => setPrefs({ reviewSource: source.id })}>${source.name}<//>`)}
+  </div></div>`;
+}
+
 /** A section's contents and its heading: Needs your review stays open; the others remember being opened. */
 function reviewSection(
   id: 'needs' | 'waiting' | 'done',
@@ -655,7 +679,11 @@ export function itemGroups(
 }
 
 /** Needs your review, Waiting on response, Done: a group follows its most urgent item; counts are items that wait on you. */
-export function itemSections(entries: readonly WatchSurfaceItem[]): Array<{
+export function itemSections(
+  entries: readonly WatchSurfaceItem[],
+  /** Several sources: unread items that wait on you lead each section, then the newest; GitHub-only keeps its recency order. */
+  mixed = false,
+): Array<{
   id: 'needs' | 'waiting' | 'done';
   title: string;
   groups: ReturnType<typeof itemGroups>;
@@ -670,10 +698,13 @@ export function itemSections(entries: readonly WatchSurfaceItem[]): Array<{
     item.lifecycle.phase === 'completed' || item.lifecycle.phase === 'closed' ? 2 : item.answered ? 1 : 0;
   const recent = ({ item }: WatchSurfaceItem): string => item.updatedAt ?? item.requestedAt ?? '';
   const groups = itemGroups(entries).flatMap((group) => (group.group ? [group] : group.entries.map((entry) => ({ entries: [entry] }))));
-  groups.sort((left, right) => {
-    const latest = (group: { entries: WatchSurfaceItem[] }): string => group.entries.map(recent).sort().at(-1) ?? '';
-    return latest(right).localeCompare(latest(left));
-  });
+  const waiting = (group: { entries: WatchSurfaceItem[] }): number =>
+    Number(mixed && group.entries.some(({ item }) => item.standing && item.notification?.unread));
+  const latest = (group: { entries: WatchSurfaceItem[] }): string => group.entries.map(recent).sort().at(-1) ?? '';
+  const id = (group: { entries: WatchSurfaceItem[] }): string => group.entries[0]!.item.id;
+  groups.sort(
+    (left, right) => waiting(right) - waiting(left) || latest(right).localeCompare(latest(left)) || id(left).localeCompare(id(right)),
+  );
   for (const group of groups) {
     const section = sections[Math.min(...group.entries.map(urgency))]!;
     const previous = section.groups.at(-1);
@@ -702,9 +733,19 @@ function ItemReviews({
 }) {
   const kinds = new Set(inp.items.map((entry) => entry.item.kind));
   const first = kinds.size === 1 && kinds.has('pull-request') ? 'PR' : 'item';
+  const sources = reviewSourceList(inp);
+  const others = sources.some((source) => source.id !== 'github');
   return [
-    reviewSettingsLine(setup, repo),
-    ...itemSections(inp.items).map(({ id, title, groups, count }) => {
+    // The read-only settings are GitHub's; with other sources they say so, and turning GitHub on is not a page-wide error.
+    others ? githubSettingsLine(setup, repo) : reviewSettingsLine(setup, repo),
+    sources.length > 1 && html`<${ReviewSourceFilter} sources=${sources} chosen=${inp.source} />`,
+    ...(inp.sources ?? [])
+      .filter((entry) => entry.health !== 'healthy' && (!inp.source || entry.source.id === inp.source))
+      .map(
+        (entry) =>
+          html`<p class="rv-source-notice" data-review-source=${entry.source.id}><span class="glead"><${SourceLogo} source=${entry.source} /></span><b>${entry.source.name}</b> · ${entry.health === 'held' ? 'stopped' : 'not up to date'}${entry.message && ` · ${entry.message}`}${entry.remedy && html` <span class="dim">${entry.remedy}</span>`}</p>`,
+      ),
+    ...itemSections(inp.items, sources.length > 1).map(({ id, title, groups, count }) => {
       const contents = groups.map(({ group, entries }) => {
         const last = entries.at(-1)!;
         const references = entries.map((entry) => metadataValue(entry, 'reference')).filter(Boolean) as string[];
