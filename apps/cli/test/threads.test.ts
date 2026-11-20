@@ -47,7 +47,6 @@ it('delivers a thread event and supports triage, notes, card answers, chat round
 it('lets the helm write in the conversation with man say, with attachments, and wakes it on the reply', () => {
   const item = startThread({ grounds: 'home', text: 'Is the deck too busy?' });
   takeHelm({ sessionId: 'test-helm', grounds: { name: 'home', repos: ['web'] }, ttlMs: 60_000 });
-  run('man', 'wait', '--timeout', '0', '--session', 'test-helm');
   const shot = path.join(home, 'deck.png');
   fs.writeFileSync(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
   const said = run('man', 'say', item.id, 'A', 'little:', 'see', 'the', 'sketch', '--attach', shot, '--session', 'test-helm');
