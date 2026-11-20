@@ -228,6 +228,11 @@ export function tabFromHash(hash: string | undefined | null): GlassTab {
   return (GLASS_TABS as readonly string[]).includes(tab) ? (tab as GlassTab) : 'deck';
 }
 
+/** The conversation a `#thread/<id>` hash names, else null: the glass shows it in a sheet over the Threads tab. */
+export function threadFromHash(hash: string | undefined | null): string | null {
+  return /^#thread\/([0-9a-f-]{36})$/.exec(hash ?? '')?.[1] ?? null;
+}
+
 /** A PR view can be opened from a card, pet or copied link. */
 export const prHash = (key: string): string => `#pr/${encodeURIComponent(key)}`;
 export function prFromHash(hash: string | undefined | null): string | null {
@@ -443,7 +448,7 @@ export function validShowHash(hash: unknown): hash is string {
       return false;
     }
   }
-  return /^#thread\/[0-9a-f-]{36}$/.test(hash) || hash === '#decisions' || (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
+  return threadFromHash(hash) !== null || hash === '#decisions' || (GLASS_TABS as readonly string[]).includes(hash.slice(1)) || decisionFromHash(hash) !== null || reportFromHash(hash) !== null;
 }
 
 /** The report key a `/report/<key>` page path names, else null. */

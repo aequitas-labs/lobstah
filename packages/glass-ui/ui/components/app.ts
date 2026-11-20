@@ -1,5 +1,5 @@
-import { Helm } from './helm.js';
-import { FishButton, MessageSheet } from './thread-composer.js';
+import { ThreadSheet, Threads } from './helm.js';
+import { MessageButton, MessageSheet } from './thread-composer.js';
 import { isActiveTrap, olderLeft, sectionInputs } from '../../src/glass-diff.js';
 import { visibleTabs } from '../backend.js';
 import type { GlassOlderKind } from '@lobstah/core';
@@ -56,7 +56,7 @@ export function App({ state }: { state: GlassState }) {
         html`<${Deck} inp=${inp.deck} goals=${d?.goals} passes=${d?.helmPasses} drafts=${state.drafts} focus=${state.focusDecision} viewedHere=${state.viewedHere} unread=${unread.length} />`,
         host().deck?.(),
       ];
-    if (t === 'helm') return html`<${Helm} />`;
+    if (t === 'helm') return html`<${Threads} />`;
     if (t === 'boats') return host().boats?.() ?? null;
     if (t === 'dispatches')
       return [
@@ -77,7 +77,7 @@ export function App({ state }: { state: GlassState }) {
       return [html`<${SectionHead} title="Reports" count=${inp.reports.list.length} page />`, html`<${Reports} inp=${inp.reports} />`];
     if (t === 'reviews')
       return [
-        html`<${SectionHead} title="Reviews" count=${inp.reviews.list.length} page />`,
+        html`<${SectionHead} title="Reviews" page />`,
         html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`,
       ];
     if (t === 'todos')
@@ -122,14 +122,16 @@ export function App({ state }: { state: GlassState }) {
         html`<main key=${t} id=${'page-' + t} class=${d ? (t === tab ? 'tabpage on' : 'tabpage') : 'tabpage'}><div id=${t}>${page(t)}</div></main>`,
     ),
     d &&
-      (tab === 'deck' || (tab === 'helm' && !location.hash.startsWith('#thread/'))) &&
+      (tab === 'deck' || tab === 'helm') &&
+      !state.threadSheet &&
       !state.messageSheet &&
       !state.decisionModal &&
       !state.modal &&
-      html`<${FishButton} />`,
+      html`<${MessageButton} />`,
     state.messageSheet && html`<${MessageSheet} key=${state.messageSheet.about ?? 'new'} />`,
     html`<footer id="foot"><${Footer} d=${d} /></footer>`,
     html`<div id="lobs"><${Lobs} state=${state} /></div>`,
+    d && state.threadSheet && html`<${ThreadSheet} key=${state.threadSheet} id=${state.threadSheet} />`,
     d && html`<${ReportSheet} reportKey=${state.reportSheet ?? null} />`,
     html`<${LightboxView} box=${state.lightbox} />`,
     settingsOpen &&

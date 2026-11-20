@@ -58,6 +58,8 @@ export interface TendAttention {
   at?: string;
   /** When this condition began standing; stable across subsequent observations. */
   standingSince?: string;
+  /** The external link on a worker question, including a card covering it. */
+  link?: string;
   note?: string;
   repo?: string;
   /** An item of a grounds on a wharf: that grounds and the wharf's name. Absent for local grounds. */

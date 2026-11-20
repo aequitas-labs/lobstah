@@ -34,6 +34,8 @@ export interface GlassState {
   route: GlassRoute;
   /** The report the sheet shows over the tab, from a `#report/<key>` hash; the tab underneath keeps its place. */
   reportSheet?: string | null;
+  /** The conversation the sheet shows over the Threads tab, from a `#thread/<id>` hash. */
+  threadSheet?: string | null;
   /** This browser's preferences and filters (localStorage). */
   prefs: GlassPrefs;
   /** The open modal, if any. */

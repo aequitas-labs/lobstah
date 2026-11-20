@@ -803,7 +803,9 @@ the same rule.
   it with `lobstah man ask --withdraw <key>`, which retains a read-only archive. A
   newer `man ask` on the same dispatch keeps the older decisions: each shows
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
-  standing decision; a key that is not standing is refused.
+  standing decision; a key that is not standing is refused. A card stays visible
+  if its worker reports `paused`, `working`, `done`, or `failed`, and can still
+  be answered after the dispatch finishes.
 - **Attention.** A standing decision is attention of kind `decision`, in
   the default `attentionKinds`. It makes the verdict `needs-attention`. A
   worker's raw `needs-decision` or `blocked` stays a `question` until the
@@ -1016,7 +1018,12 @@ for pure at-most-once.
 The helm's Stop block lists standing items that need action, open cards at
 their reminder cadence, and one-line trap state changes since the previous
 block. A paused dispatch is reported once, then again every `remindSecs` while
-it remains paused. Use `lobstah man tend` for the full trap roster.
+it remains paused. A question covered by an unanswered card, through its
+dispatch id or the question’s `--link` to the card, wakes the helm once.
+After that, tend and Stop show `waiting on human · card <key>` without
+blocking on that question or reminding the helm to answer it. A new worker
+question still wakes, and a card answer wakes as usual. Withdrawing the card
+restores question reminders. Use `lobstah man tend` for the full trap roster.
 
 A send still waiting on its reply is listed in the `man haul` block as
 `sent · <id> · <first line> · <age>`. Alone, it blocks a stop only when no
@@ -1835,7 +1842,9 @@ share one host UI lease across grounds; the person's keyboard remains free.
 Glass messages start untriaged and wake `man wait` with `event: thread`, the
 conversation id, grounds and text. `man threads [<id>] --grounds <name>` lists
 summaries or reads the notes, rounds and referenced cards. Polls carry summaries;
-rounds and listed attachments load only when opened.
+rounds and listed attachments load only when opened. `man ask --report` accepts
+both a full key such as `report:helm:fleet:<id>` and its bare form
+`helm:fleet:<id>`; work and chore report keys accept the same shorthand.
 
 The helm uses `man triage <id> --as bait|thread`, then keeps `man note <id>
 --decided <line> --open <line>` current. Repeat either flag to replace that set of
@@ -1854,23 +1863,28 @@ on the configured reminder cadence. Discussion threads with no new message for
 seven days and no standing card close as dropped; bait and standing questions
 remain open. Reads never run this maintenance; the helm wait does.
 
-The glass's Helm view lists bait, discussion threads and recent outcomes. The
-fish button on Helm and On deck opens one message composer; the helm classifies
+The glass's Threads page shows one list of conversations as compact decision cards.
+Unread responses use the decision highlight; a state icon distinguishes messages
+waiting for the helm from conversations waiting for you. Resolved conversations
+sit in a collapsed section below. A conversation opens in a full-page sheet over
+the list, as a report does; Back returns to Threads. The orange wheel button on
+Threads and On deck opens one message composer; the helm classifies
 the message. Cards and conversation replies use the same text and attachment
 controls. A card from a thread shows that thread's notes above its question.
-Phone navigation is On deck, Reviews, Helm, Search and Menu; PRs remain in Menu
+Phone navigation is On deck, Reviews, Threads, Search and Menu; PRs remain in Menu
 with their attention count. Message the helm on a dispatch supplies that dispatch
-as context to the same composer.
+as context to the same composer. Desktop header navigation keeps PRs visible.
+Conversation notes are a compact checklist: open items are unchecked and decided
+items are checked. Linked dispatches, reports and known PRs use their usual cards.
 
 Wharf grounds support the same conversation commands. The wharf stores phone
 attachments as account files and emits the conversation in `man wait` over the
 existing wake socket. Thread reads and glass polls write no rows; the wharf's
 alarm repeats unanswered messages and closes idle discussions.
 
-Unread helm responses appear first under Response waiting and count once per
-conversation on Helm. Opening a conversation or its card records only the
+Unread helm responses count once per conversation on Threads. Opening a conversation or its card records only the
 response sequence shown. A later response remains unread, and a standing card
-still needs its answer. Resolved conversations remain visible while unread.
+still needs its answer. Resolved conversations stay in the expandable Resolved section while unread.
 
 `GET /thread-notices` on a boat and `GET /api/glass/threads/notices` on the wharf
 expose one pending subscriber notice per conversation and person, with the latest

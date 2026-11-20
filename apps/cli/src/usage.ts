@@ -15,7 +15,11 @@ export function decisionReferences(args: readonly string[]): DecisionReference[]
   for (let i = 0; i < args.length; i++) {
     const flag = args[i]!;
     if (flag === '--') break;
-    if (flag === '--report' || flag === '--pr') references.push({ kind: flag === '--pr' ? 'pr' : 'report', key: args[i + 1]! });
+    if (flag === '--report' || flag === '--pr') {
+      const raw = args[i + 1]!;
+      const key = flag === '--report' && /^(helm|work|chore):/.test(raw) ? `report:${raw}` : raw;
+      references.push({ kind: flag === '--pr' ? 'pr' : 'report', key });
+    }
     if (COMMANDS['man:ask']!.flags[flag]?.value) i++;
   }
   return references;

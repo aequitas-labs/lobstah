@@ -9,12 +9,49 @@ export function openMessage(about?: string, grounds?: string): void {
 export function closeMessage(): void {
   setState({ messageSheet: undefined });
 }
+/** Whether this page pushed the open conversation's history entry, so Back can return to the entry before it. */
+let threadPushed = false;
+/** Where the Threads list was scrolled when the sheet opened, to put it back on close. */
+let threadScroll: number | undefined;
+/**
+ * Open a conversation in the sheet over the Threads tab, as a report opens:
+ * a `#thread/<id>` hash and a new history entry, so the browser's back button
+ * and the phone's back gesture close it.
+ */
 export function openThread(id: string): void {
-  location.hash = `#thread/${encodeURIComponent(id)}`;
+  const hash = `#thread/${encodeURIComponent(id)}`;
+  // Sending from the open conversation stays on its entry.
+  if (location.hash === hash) return;
+  threadPushed = true;
+  threadScroll = window.scrollY;
+  location.hash = hash;
 }
-export function threadId(): string | undefined {
-  const match = /^#thread\/([0-9a-f-]{36})$/.exec(location.hash);
-  return match?.[1];
+/** The hash named a conversation, or stopped naming one (start.ts onRoute). */
+export function routeThread(id: string | null): void {
+  const closing = id === null && !!getState().threadSheet;
+  if (id === null) threadPushed = false;
+  if ((getState().threadSheet ?? null) !== id) setState({ threadSheet: id });
+  if (closing && threadScroll !== undefined) {
+    const y = threadScroll;
+    threadScroll = undefined;
+    // After the browser's own jump to the tab's anchor.
+    setTimeout(() => window.scrollTo(0, y), 0);
+  }
+}
+/**
+ * Close the sheet: back to the entry this page pushed, or, for a sheet a
+ * link opened, replace its hash with the Threads tab's.
+ */
+export function closeThreadSheet(): void {
+  if (!getState().threadSheet) return;
+  if (threadPushed) {
+    threadPushed = false;
+    history.back();
+    return;
+  }
+  history.replaceState(null, '', '#helm');
+  routeThread(null);
+  setState({ route: 'helm' });
 }
 export async function sendMessage(key: string, target: { id?: string; grounds?: string; about?: string }): Promise<string | undefined> {
   const state = getState(),
