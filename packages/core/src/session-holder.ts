@@ -35,8 +35,18 @@ export interface ClaudeProcess {
 
 const claudeHomeDir = (): string => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 
+/** How long one `ps` answers for: a glass poll asks once per trap, and each `ps` costs a process spawn. */
+const PS_REUSE_MS = 2000;
+let psCache: { at: number; times: Map<number, string> | undefined } | undefined;
+
 /** Every process's start time as Claude records it: `ps lstart`, in UTC, whatever the machine's zone. */
-function utcStartTimes(): Map<number, string> | undefined {
+function utcStartTimes(now = Date.now()): Map<number, string> | undefined {
+  if (psCache && now - psCache.at >= 0 && now - psCache.at < PS_REUSE_MS) return psCache.times;
+  const times = readStartTimes();
+  psCache = { at: now, times };
+  return times;
+}
+function readStartTimes(): Map<number, string> | undefined {
   try {
     const out = execFileSync('ps', ['-A', '-o', 'pid=,stat=,lstart='], { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } });
     const times = new Map<number, string>();

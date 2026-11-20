@@ -2952,7 +2952,8 @@ async function mainCli(): Promise<void> {
           remindThreads(threadGrounds, remindMs);
         };
         threadMaintenance();
-        runDueManWatches();
+        // A peek looks without changing anything: polling watches advances their cursors (and costs GitHub calls).
+        if (consume) runDueManWatches();
         // The grounds `todo add` would use. With several and none named, the todos stand for their helms.
         const todoGroundsName = groundsScope?.name ?? (groundsList(cfgWait).length === 1 ? resolveGrounds(cfgWait).name : undefined);
         const dueTodos = () => (todoGroundsName !== undefined ? takeTodoDue(todoGroundsName, consume) : []);

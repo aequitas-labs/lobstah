@@ -314,13 +314,23 @@ const CHECK_TIMEOUT_MS = 90_000;
  * BEFORE the exec as a soft claim, so pick and an inline `man wait` never
  * double-poll the same watch inside one cadence window.
  */
-export function runWatchCheck(w: Watch, now = new Date()): { watch: Watch; fresh: WatchEvent[] } {
+/** What a check printed and how it exited, as spawnSync reports it. */
+export interface WatchCheckResult {
+  status: number | null;
+  stdout: string;
+  stderr?: string;
+  error?: Error;
+}
+/** Runs a check without a shell, or returns undefined to spawn its command as usual. */
+export type WatchCheckExec = (w: Watch, cmd: string) => WatchCheckResult | undefined;
+
+export function runWatchCheck(w: Watch, now = new Date(), exec?: WatchCheckExec): { watch: Watch; fresh: WatchEvent[] } {
   // Another feeder is fetching this repository; it owns this window.
   if (isPrPresetWatch(w) && prBatchInFlight(w.key)) return { watch: w, fresh: [] };
   w.lastCheckedAt = now.toISOString();
   if (!writeWatch(w)) return { watch: w, fresh: [] };
   const cmd = w.check.replaceAll('{cursor}', w.cursor);
-  const res = spawnSync(cmd, {
+  const res = exec?.(w, cmd) ?? spawnSync(cmd, {
     shell: true,
     encoding: 'utf8',
     timeout: CHECK_TIMEOUT_MS,

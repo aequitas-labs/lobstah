@@ -1712,6 +1712,9 @@ export function serveGlass(
     res.end(JSON.stringify({ error: 'The glass could not answer this request.' }));
   };
   const server = http.createServer((req, res) => {
+    // A change made through this glass shows on the next poll, not after the reuse window.
+    // A page's presence heartbeat is a POST that changes nothing a poll shows.
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.url?.split('?')[0] !== '/api/presence') res.once('finish', () => thread?.invalidate());
     try {
       handle(req, res);
     } catch (e) {

@@ -32,6 +32,7 @@ import {
   readWatch,
   removeWatch,
   runWatchCheck,
+  isPrPresetWatch,
   setPrTitle,
   storedDescriptor,
   upsertPr,
@@ -39,7 +40,7 @@ import {
   syncStackReadiness,
   preparePrWatchBatch,
 } from '@lobstah/core';
-import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch, PrBatchRun } from '@lobstah/core';
+import type { GhPrView, Lane, PrEvent, PrRecord, PrRef, Watch, PrBatchRun, WatchCheckExec } from '@lobstah/core';
 import { githubRepoFromOrigin } from '@lobstah/pick';
 import { repoOf } from './digest.js';
 import { discoverPrStack, ghStackLink } from './pr-stack-watch.js';
@@ -292,7 +293,7 @@ export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}):
   for (const w of listWatches()) {
     if (!w.key.startsWith('pr:') || !watchDue(w, every, now.getTime())) continue;
     const before = readPr(w.key)?.observedAt;
-    const { watch } = runWatchCheck(w, now);
+    const { watch } = runWatchCheck(w, now, inProcessPrCheck);
     const after = readPr(w.key)?.observedAt;
     if (!watch.lastError && after && after !== before) refreshed++;
     if (watch.done) removeWatch(w.key);
@@ -300,6 +301,33 @@ export function syncPrWatches(at = Date.now(), opts: { run?: PrBatchRun } = {}):
   syncStackReadiness(loadConfig(), at);
   return { refreshed };
 }
+
+/** The --for of a shipped check command, quoted as prCheckCommand quotes it. */
+function checkForId(check: string): string | undefined {
+  const m = /\s--for\s+(?:'((?:[^']|'\\'')*)'|"((?:[^"]|"")*)")/.exec(check);
+  return m ? (m[1] !== undefined ? m[1].replace(/'\\''/g, "'") : m[2]!.replace(/""/g, '"')) : undefined;
+}
+
+/**
+ * The shipped PR check, run in this process instead of a new lobstah per
+ * watch: each spawn cost a whole CLI start, and a wait ran one per due PR.
+ * It reads the batch this pass just fetched, as the spawned check did, and
+ * leaves stack readiness to the one pass at the end of syncPrWatches.
+ */
+export const inProcessPrCheck: WatchCheckExec = (w) => {
+  if (!isPrPresetWatch(w)) return undefined;
+  const batch = process.env.LOBSTAH_PR_BATCH;
+  process.env.LOBSTAH_PR_BATCH = '1';
+  try {
+    return { status: 0, stdout: runPrCheck(w.key, w.cursor, checkForId(w.check), { stacks: false }) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { status: 1, stdout: `error: ${message}`, stderr: message };
+  } finally {
+    if (batch === undefined) delete process.env.LOBSTAH_PR_BATCH;
+    else process.env.LOBSTAH_PR_BATCH = batch;
+  }
+};
 
 /** A failed poll (a lock race, a GitHub outage) is logged; the wait goes on and polls again. */
 export function runDueManWatches(log: (message: string) => void = (m) => console.error(m)): void {
@@ -462,14 +490,14 @@ export function manEvents(events: PrEvent[]): PrEvent[] {
  * --for it also stamps the owner's evidence and emits only work events
  * (workEvents); man-owned, only what needs a human (manEvents).
  */
-export function runPrCheck(refArg: string, cursor: string | undefined, forId: string | undefined): string {
+export function runPrCheck(refArg: string, cursor: string | undefined, forId: string | undefined, opts: { stacks?: boolean } = {}): string {
   const ref = parsePrRef(refArg);
   if (!ref) throw new Error(`not a PR reference: ${refArg} (want pr:<owner>/<repo>#<n> or a github.com PR URL)`);
   const view = ghPrView(ref);
   const out = derivePrEvents(ref, view, cursor);
   observePr(ref, view, { dispatchId: forId });
   discoverPrStack(ref, { everySecs: readWatch(ref.key)?.everySecs });
-  syncStackReadiness();
+  if (opts.stacks !== false) syncStackReadiness();
   const events = forId ? workEvents(ref, out.events) : manEvents(out.events);
   // Degraded view (no permission to read checks): the state is recorded and
   // the cursor advances, and the watch still records the permission error.
