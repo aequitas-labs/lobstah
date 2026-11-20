@@ -99,9 +99,10 @@ helm for each:
 - **Mirror grounds** stay on a mirror boat's own machine, helmed there by
   `lobstah man helm`. Each mirror boat tells the wharf its local grounds when
   its socket connects, and the picker lists them. A request goes over that
-  socket into the boat's local helm requests. If no helm holds the grounds
-  yet, the boat keeps it, the receipt says it is queued, and it goes to the
-  next helm that signs on there. The helm's reply comes back to the thread.
+  socket and opens a helm thread on the boat. What you add in the Slack
+  thread joins that helm thread. If no helm holds the grounds yet, the
+  receipt says it is queued, and the next helm that signs on there sees it.
+  The helm's replies come back to the Slack thread.
   Only when the boat has no socket open does the receipt say it is offline;
   nothing is queued then, so send it again once the boat is back.
 
