@@ -15,6 +15,8 @@ import {
   laneDirs,
   readDescriptor,
   readStatusLog,
+  requeue,
+  rewriteQueued,
 } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -128,5 +130,26 @@ describe('queuedAt', () => {
     enqueue(desc('gone'));
     claimNext('work');
     expect(queuedAt('gone', 'work')).toBeUndefined();
+  });
+});
+
+describe('readdressing queued work', () => {
+  it('requeue publishes the new address with the entry', () => {
+    enqueue(desc('r1'));
+    claimNext('work');
+    requeue('r1', 'work', (d) => ({ ...d, for: 'wt:abc' }));
+    expect(queuedDescriptor('r1', 'work')?.for).toBe('wt:abc');
+    expect(claimNext('work', (d) => d.for !== undefined)).toBeNull();
+  });
+
+  it('rewriteQueued changes a queued entry, and leaves a claimed one alone', () => {
+    enqueue(desc('q1'));
+    expect(rewriteQueued('q1', 'work', (d) => ({ ...d, for: 'wt:abc' }))).toBe(true);
+    expect(queuedDescriptor('q1', 'work')?.for).toBe('wt:abc');
+    expect(pendingIds('work')).toEqual(['q1']);
+    claimNext('work');
+    expect(rewriteQueued('q1', 'work', (d) => ({ ...d, for: 'wt:other' }))).toBe(false);
+    expect(queuedDescriptor('q1', 'work')).toBeUndefined();
+    expect(readDescriptor('q1', 'work').for).toBe('wt:abc');
   });
 });

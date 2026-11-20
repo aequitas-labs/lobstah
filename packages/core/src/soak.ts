@@ -725,9 +725,14 @@ export function noticeIdleTrapClaims(now = Date.now(), graceMs = DEFAULT_SOAK.cl
 /**
  * Release a claim: terminal catches finalize, cancelled catches fail, and
  * only unfinished catches go back to the queue. Used by `stow` and the ghost sweep — the two
- * paths where a claimant stops answering for its claim.
+ * paths where a claimant stops answering for its claim. `readdress` changes
+ * the descriptor before it is published, so no other trap can claim it under
+ * its old address.
  */
-export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued?: string; finalized?: string } {
+export function releaseCatch(
+  reg: Pick<TrapRegistration, 'claimed'>,
+  readdress?: (descriptor: Descriptor) => Descriptor,
+): { requeued?: string; finalized?: string } {
   const id = reg.claimed;
   if (!id) return {};
   const lane = laneOf(id);
@@ -743,7 +748,7 @@ export function releaseCatch(reg: Pick<TrapRegistration, 'claimed'>): { requeued
     complete(id, lane);
     return { finalized: id };
   }
-  requeue(id, lane);
+  requeue(id, lane, readdress);
   return { requeued: id };
 }
 

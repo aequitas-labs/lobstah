@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  atomicRenameSync,
   endHarnessProcess,
   handoffNote,
   laneDirs,
@@ -11,10 +10,10 @@ import {
   readSessionClaim,
   readTrap,
   releaseCatch,
+  rewriteQueued,
   sessionHolders,
   setRosterProfile,
   stowTrap,
-  uniqueTempPath,
   worktreeProgress,
 } from '@lobstah/core';
 import type { Config, Descriptor, Lane } from '@lobstah/core';
@@ -48,7 +47,6 @@ export async function swapTrapCatch(id: string, lane: Lane, options: TrapSwapOpt
   const claim = claimed ?? { by: address, sessionId: roster.sessionId, harness: roster.harness };
   if (!['claude', 'codex'].includes(options.harness)) throw new Error('--harness takes claude or codex');
   const dir = path.join(laneDirs(lane).active, id);
-  const descriptor = queued ?? (JSON.parse(fs.readFileSync(path.join(dir, 'descriptor.json'), 'utf8')) as Descriptor);
   const earlier = originProgress(id, lane);
   const process = reg?.harnessProcess ?? roster.harnessProcess;
   if (reg?.codexServer) {
@@ -68,27 +66,34 @@ export async function swapTrapCatch(id: string, lane: Lane, options: TrapSwapOpt
       `Close ${claim.harness} session ${claim.sessionId} for ${roster.name}${roster.window?.tmuxPane ? ` in pane ${roster.window.tmuxPane}` : ''}, then retry lobstah swap ${id} --harness ${options.harness}; its process cannot be verified automatically`,
     );
   }
+  /** The handover: the requested harness, sticky to this trap, with the earlier session's progress. */
+  const handover = (current: Descriptor): Descriptor => {
+    const next: Descriptor = {
+      ...current,
+      harness: options.harness,
+      harnessExplicit: true,
+      for: `wt:${trapId}`,
+      handoffFreshBranch: options.newDispatch === true && !current.followUp && !current.pr,
+      handoff: handoffNote(claim.harness, `${earlier}\n\n${worktreeProgress(roster.worktree)}`),
+    };
+    if (options.model) {
+      next.model = options.model;
+      next.modelExplicit = true;
+    } else {
+      delete next.model;
+      delete next.modelExplicit;
+    }
+    if (options.effort) next.effort = options.effort;
+    return next;
+  };
   // SessionEnd may already have signed off and requeued the catch while its process ended.
   if (readTrap(trapId)) stowTrap(trapId, `swapping to ${options.harness}`, options.by);
-  if (fs.existsSync(path.join(dir, 'claim.json'))) releaseCatch({ claimed: id });
-  if (!queuedDescriptor(id, lane)) throw new Error(`${id} ended while its session stopped; it was not relaunched`);
-  descriptor.harness = options.harness;
-  descriptor.harnessExplicit = true;
-  descriptor.for = `wt:${trapId}`;
-  descriptor.handoffFreshBranch = options.newDispatch === true && !descriptor.followUp && !descriptor.pr;
-  descriptor.handoff = handoffNote(claim.harness, `${earlier}\n\n${worktreeProgress(roster.worktree)}`);
-  if (options.model) {
-    descriptor.model = options.model;
-    descriptor.modelExplicit = true;
-  } else {
-    delete descriptor.model;
-    delete descriptor.modelExplicit;
-  }
-  if (options.effort) descriptor.effort = options.effort;
-  const file = path.join(laneDirs(lane).queue, `${id}.json`),
-    tmp = uniqueTempPath(file);
-  fs.writeFileSync(tmp, JSON.stringify(descriptor, null, 2));
-  atomicRenameSync(tmp, file);
+  // The handover lands before the catch is claimable again: a catch requeued
+  // under its old (often unaddressed) descriptor could go to another trap.
+  const handedOver = fs.existsSync(path.join(dir, 'claim.json'))
+    ? releaseCatch({ claimed: id }, handover).requeued === id
+    : rewriteQueued(id, lane, handover);
+  if (!handedOver || !queuedDescriptor(id, lane)) throw new Error(`${id} ended or was claimed while its session stopped; it was not relaunched`);
   setRosterProfile(trapId, {
     harness: options.harness,
     model: options.model ?? null,
