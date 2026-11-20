@@ -59,6 +59,11 @@ export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: Gla
   });
 }
 
+/** The PRs tab's header count: the person's own open PRs, never closed or merged ones. */
+export function openPrCount(prs: readonly GlassPr[]): number {
+  return prs.filter((p) => p.mine && p.state === 'OPEN').length;
+}
+
 /** How many of the person's own open PRs need them: failed checks, a conflict, or a repair that stopped (a bad badge). */
 export function prsNeedingYou(prs: readonly GlassPr[]): number {
   return prs.filter((p) => p.mine && p.state === 'OPEN' && p.badge.tone === 'bad').length;

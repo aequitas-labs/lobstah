@@ -19,7 +19,7 @@ import { LightboxView } from './lightbox.js';
 import { ReportSheet } from './report-view.js';
 import { Modal, SettingsBody, HelmBody } from './modals.js';
 import { Notices } from './notices.js';
-import { PRs } from './prs.js';
+import { PRs, openPrCount } from './prs.js';
 import { Reports } from './reports.js';
 import { Reviews } from './reviews.js';
 import { Stats } from './stats.js';
@@ -70,7 +70,7 @@ export function App({ state }: { state: GlassState }) {
       ];
     if (t === 'prs')
       return [
-        html`<${SectionHead} title="PRs" count=${inp.prs.prs.filter((pr) => pr.mine).length} page />`,
+        html`<${SectionHead} title="PRs" count=${openPrCount(inp.prs.prs)} page />`,
         html`<${PRs} inp=${inp.prs} more=${more('prs')} />`,
       ];
     if (t === 'reports')

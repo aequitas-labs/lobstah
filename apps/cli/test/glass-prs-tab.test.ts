@@ -77,6 +77,18 @@ for (const view of ['cards', 'table'] as const) {
       expect(listed[0]).toContain('#42');
     });
 
+    it('counts only open PRs in the page header, never merged or closed ones', async () => {
+      const d = withClosed(fleet([42, 43, 50, 51]));
+      const closed = { ...d.prs.find((p) => p.number === 51)!, key: 'pr:acme/web#52', url: 'https://github.com/acme/web/pull/52', number: 52, title: 'A closed PR', stackId: 'pr:acme/web#52', state: 'CLOSED' as const, mergedAt: undefined, closedAt: d.now };
+      d.prs = [...d.prs, closed];
+      d.stacks = [...d.stacks, { id: 'pr:acme/web#52', floor: 'main', repo: d.stacks[0]!.repo, numbers: [52], open: false, nextNumber: 52, behind: 0 }];
+      const g = await page(d, { hash: '#prs', prefs: { view } });
+      expect(text(g.$('#prs .section-head .section-count'))).toBe('· 3');
+      expect(text(g.$('#prs [data-pr-section="closed"]'))).toContain('A closed PR');
+      expect(text(g.$('#prs [data-pr-section="open"] h2'))).toBe('Open');
+      expect(text(g.$('#prs [data-pr-section="closed"] summary'))).toBe('Closed');
+    });
+
     it('splits Open from a collapsed Closed section, with no counts, and remembers Closed for this viewer', async () => {
       const d = withClosed(fleet([50, 51]));
       const g = await page(d, { hash: '#prs', prefs: { view } });
