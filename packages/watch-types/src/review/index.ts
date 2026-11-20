@@ -1,6 +1,8 @@
 import { BaseWatchType } from '../base.js';
 import { CommandWatchType } from '../command.js';
 import type {
+  WatchCommandPolicy,
+  WatchRegistrationPolicy,
   WatchAutomation,
   WatchContext,
   WatchEffectHandler,
@@ -25,6 +27,10 @@ export interface ReviewWatchServices {
   failure(error: unknown): WatchFailure;
   effectHandler?: WatchEffectHandler<ReviewWatchReference>;
   automation?: WatchAutomation<ReviewWatchReference, ReviewWatchState, string, ReviewWatchOptions>;
+  /** Compatibility queries the host installs (the legacy review records older glasses read). */
+  commands?: WatchCommandPolicy;
+  /** Keeps the configured identity's watch registered while reviews are enabled. */
+  registration?: WatchRegistrationPolicy;
 }
 
 /** Remote reconciliation is an authorized effect; local observation remains read-only. */
@@ -54,10 +60,14 @@ export class ReviewWatchType extends BaseWatchType<ReviewWatchReference, ReviewW
   };
   readonly effectHandler: ReviewWatchServices['effectHandler'];
   readonly automation: ReviewWatchServices['automation'];
+  readonly commands: ReviewWatchServices['commands'];
+  readonly registration: ReviewWatchServices['registration'];
   constructor(private readonly services: ReviewWatchServices) {
     super();
     this.effectHandler = services.effectHandler;
     this.automation = services.automation;
+    this.commands = services.commands;
+    this.registration = services.registration;
   }
   identify(input: string): ReviewWatchReference {
     const identity = (input.startsWith('review-requests:') ? decodeURIComponent(input.slice('review-requests:'.length)) : input)

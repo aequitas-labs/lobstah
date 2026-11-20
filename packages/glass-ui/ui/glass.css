@@ -948,6 +948,65 @@ tr.rowhead:hover {
 .gcontext {
   min-height: 28px;
 }
+/* The source logo (components/item-card.ts): a centered 14px slot before the context text, on its center line. */
+.glead {
+  flex: 0 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  align-self: center;
+}
+.srclogo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg);
+  cursor: default;
+  font: inherit;
+}
+.srclogo:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+.hostglyph {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+/* The source's name: shown on hover, keyboard focus or a tap, above the logo. */
+.srctip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  /* Start at the logo, not centered on it: the card's edge would clip a centered tip. */
+  left: -6px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+}
+.srclogo:hover .srctip,
+.srclogo:focus-visible .srctip,
+.srclogo.tip .srctip {
+  display: block;
+}
 /* The repo icon (components/card.ts) sits on the text's baseline, a little apart from the name. */
 .repoicon {
   vertical-align: -1px;

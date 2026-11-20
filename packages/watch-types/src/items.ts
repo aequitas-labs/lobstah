@@ -124,6 +124,8 @@ export interface WatchItemPerson {
   avatarUrl?: string;
   /** What they are to the item, for the hover text: "requested by", "author". */
   role: string;
+  /** A short chip beside their name in tables and details ("automatic"), with its hover text. */
+  badge?: { label: string; detail?: string };
 }
 
 /**
@@ -198,6 +200,8 @@ export interface WatchItemAction {
   confirm?: WatchActionConfirmation;
   /** Opening this action acknowledges the item's displayed notification revision. */
   acknowledges?: boolean;
+  /** A toggle that is on (Cancel merge on a requested merge): the host shows it pressed. */
+  pressed?: boolean;
   binding: WatchItemActionBinding;
 }
 
@@ -214,6 +218,8 @@ export interface WatchItemSurfaces {
 export interface WatchItemGroup {
   id: string;
   title?: string;
+  /** The item's place in its group, bottom first; items without one keep their list order. */
+  position?: number;
 }
 
 /**
@@ -250,6 +256,8 @@ export interface WatchItem {
   actions: WatchItemAction[];
   surfaces: WatchItemSurfaces;
   group?: WatchItemGroup;
+  /** The configured repo key, for repo filters; absent when the item belongs to no repo (an ume artifact). */
+  repo?: string;
 }
 
 /** Fields v2 adds to a source presentation. */

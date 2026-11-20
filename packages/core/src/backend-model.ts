@@ -267,6 +267,8 @@ export const MIRROR_WRITE_KINDS = [
   'decision-answer', 'decision-viewed', 'report-viewed', 'checklist-tick', 'trap-request', 'todo-schedule', 'helm-pass-request', 'pr-ack', 'pr-merge', 'stack-merge', 'attention-ack',
   'grant-revoke', 'permissions-proposal-answer', 'permissions-proposal-preview',
   'review-approve', 'review-comment', 'review-decision-answer', 'review-new', 'review-dismiss', 'review-mute', 'review-unmute', 'review-draft', 'review-redraft', 'review-request-changes', 'review-seen', 'review-skip',
+  // A control on an item a source supplied; the boat resolves and authorizes it again.
+  'watch-item-action',
   // A phone pairing its passkey with this boat: the boat takes it only under the code it issued, from the hosted glass's origin.
   'run-pair-challenge', 'run-pair-register',
   // A Run from the hosted glass: the boat checks a phone's passkey (or that page's window key) and runs only its stored script.

@@ -8,10 +8,57 @@ import type {
   WatchActionRequest,
   WatchEffectResult,
   WatchRegistry,
+  WatchSnapshot,
   WatchValue,
 } from '@lobstah/watch-types';
 import { WatchJournal } from './watch-journal.js';
 type ActionClaim = { kind: 'cached'; result: WatchEffectResult | undefined } | { kind: 'execute'; typeId: string; generation: string } | undefined;
+
+/** A person's request to run one item control, as the glass sends it. */
+export interface WatchItemActionProposal {
+  /** The item's ID within the watch. */
+  item: string;
+  /** The control's ID on that item, or the item's notification acknowledgement. */
+  control: string | { acknowledge: string };
+  /** The watch generation and item revision the person saw. */
+  generation: string;
+  expectedRevision: string;
+  /** Repeated clicks and reconnect retries reuse it, and so reuse one receipt. */
+  idempotencyKey: string;
+}
+
+/** The item or its controls changed since the person saw them; the caller refreshes instead of acting. */
+export class WatchItemConflict extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WatchItemConflict';
+  }
+}
+
+/** The effect an item control or notification acknowledgement runs, resolved from cached source state. */
+function resolveItemControl(snapshot: WatchSnapshot | undefined, proposal: WatchItemActionProposal): { action: string; values: WatchValue } {
+  if (!snapshot || snapshot.status === 'retired') throw new WatchItemConflict('This watch is no longer active.');
+  if (snapshot.generation !== proposal.generation) throw new WatchItemConflict('This watch was replaced. Refresh to see its items.');
+  const item = snapshot.presentation.items?.find((entry) => entry.id === proposal.item);
+  if (!item) throw new WatchItemConflict('This item is no longer listed.');
+  if (item.revision !== proposal.expectedRevision) throw new WatchItemConflict('This item changed. Its controls were refreshed.');
+  let action: string, values: WatchValue;
+  if (typeof proposal.control === 'string') {
+    const control = item.actions.find((entry) => entry.id === proposal.control);
+    if (!control || !('effect' in control.binding)) throw new Error('This control does not run an action.');
+    if (!control.enabled) throw new Error(control.reason ?? 'This action is not available now.');
+    action = control.binding.effect.action;
+    values = control.binding.effect.arguments ?? null;
+  } else {
+    if (!item.notification?.action || item.notification.revision !== proposal.control.acknowledge)
+      throw new WatchItemConflict('This notification changed. Refresh to see it.');
+    action = item.notification.action;
+    values = { notification: item.notification.revision };
+  }
+  const declaration = snapshot.presentation.actions.find((entry) => entry.id === action);
+  if (!declaration || declaration.automatic || !declaration.requiresAuthority) throw new Error('Watch action is not supported');
+  return { action, values };
+}
 
 /** Recorded authority binds an action, arguments, reference and source revision to one receipt. */
 export class WatchActionRunner {
@@ -25,6 +72,8 @@ export class WatchActionRunner {
     key: string,
     proposal: WatchActionProposal,
     authorization: WatchActionRequest<WatchValue>['authorization'],
+    /** Rechecks the current source state under the journal lock before any receipt is recorded. */
+    verify?: (snapshot: WatchSnapshot) => void,
   ): WatchActionRequest<WatchValue> {
     watchJson(proposal);
     watchJson(authorization);
@@ -34,6 +83,7 @@ export class WatchActionRunner {
       throw new Error('Recorded watch action authority is required');
     return this.journal.update(key, (snapshot) => {
       if (!snapshot || snapshot.status === 'retired' || snapshot.status === 'held') throw new Error('Watch cannot accept an action');
+      verify?.(snapshot);
       const adapter = this.registry.get(snapshot.type.id);
       if (!adapter.effectHandler || !snapshot.presentation.actions.some((action) => action.id === proposal.actionId))
         throw new Error('Watch action is not supported');
@@ -69,6 +119,39 @@ export class WatchActionRunner {
       ];
       return { snapshot, result: structuredClone(request) };
     });
+  }
+
+  /**
+   * Resolve an item control from the current cached source state and record
+   * its authority. The client's labels and enabled flags grant nothing: the
+   * control must still exist, be enabled and bind an effect the source
+   * declares as a human action, and the item must still have the revision
+   * the person saw. The receipt and generation checks are those of
+   * `authorize`; the item ID travels in the recorded arguments.
+   */
+  authorizeItem(
+    key: string,
+    proposal: WatchItemActionProposal,
+    authorization: WatchActionRequest<WatchValue>['authorization'],
+  ): WatchActionRequest<WatchValue> {
+    const resolved = resolveItemControl(this.journal.read(key), proposal);
+    return this.authorize(
+      key,
+      {
+        actionId: resolved.action,
+        expectedRevision: `${proposal.item}@${proposal.expectedRevision}`,
+        idempotencyKey: proposal.idempotencyKey,
+        authority: authorization.id,
+        arguments: { item: proposal.item, values: resolved.values },
+      },
+      authorization,
+      // Resolve again under the journal lock, so a concurrent change cannot slip in.
+      (current) => {
+        const again = resolveItemControl(current, proposal);
+        if (again.action !== resolved.action || !isDeepStrictEqual(again.values, resolved.values))
+          throw new WatchItemConflict('This item changed. Its controls were refreshed.');
+      },
+    );
   }
 
   /** Replay returns the recorded result. A stale generation or forged request performs no effect. */

@@ -61,6 +61,7 @@ function normalizeItem(item: WatchItem, declared: ReadonlySet<string>): WatchIte
             role: person.role,
             ...(person.name ? { name: person.name } : {}),
             ...(person.avatarUrl && validWatchAsset(person.avatarUrl) ? { avatarUrl: person.avatarUrl } : {}),
+            ...(person.badge ? { badge: person.badge } : {}),
           },
         }
       : {}),

@@ -115,6 +115,8 @@ export const GLASS_ACTIONS = [
   'review-unmute',
   /** Run a run card's script on this Mac. Only the local glass runs anything. */
   'run',
+  /** Run a control on an item a source supplied (a review's Publish), or acknowledge it on opening. */
+  'watch-item-action',
 ] as const;
 export type GlassAction = (typeof GLASS_ACTIONS)[number];
 

@@ -291,6 +291,7 @@ const itemAction: PluginJsonSchema = {
     progress: string,
     done: string,
     acknowledges: { type: 'boolean' },
+    pressed: { type: 'boolean' },
     confirm: {
       type: 'object',
       required: ['title', 'body', 'label'],
@@ -374,7 +375,13 @@ const item: PluginJsonSchema = {
       type: 'object',
       required: ['id', 'role'],
       additionalProperties: false,
-      properties: { id: nonEmpty, name: string, avatarUrl: string, role: nonEmpty },
+      properties: {
+        id: nonEmpty,
+        name: string,
+        avatarUrl: string,
+        role: nonEmpty,
+        badge: { type: 'object', required: ['label'], additionalProperties: false, properties: { label: nonEmpty, detail: string } },
+      },
     },
     metadata: {
       type: 'array',
@@ -409,7 +416,13 @@ const item: PluginJsonSchema = {
         home: { enum: [...WATCH_SURFACES] },
       },
     },
-    group: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: nonEmpty, title: string } },
+    group: {
+      type: 'object',
+      required: ['id'],
+      additionalProperties: false,
+      properties: { id: nonEmpty, title: string, position: { type: 'integer', minimum: 0 } },
+    },
+    repo: nonEmpty,
   },
 };
 

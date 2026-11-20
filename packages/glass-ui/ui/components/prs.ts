@@ -32,6 +32,7 @@ import { ActionIcon, Card, CardLink, PrIcon, githubAvatarUrl } from './card.js';
 import type { CardPerson, CardProps, CardTone } from './card.js';
 import { Button, type ButtonSize } from './button.js';
 import { reviewStatus } from './reviews.js';
+import { ItemCard } from './item-card.js';
 
 /** The PRs tab groups only owned PRs: authored by the viewer or opened by a trap. */
 export function prGroups(inp: Pick<PrsInputs, 'prs' | 'stacks'>): Array<{ s: GlassStack; prs: GlassPr[] }> {
@@ -216,37 +217,34 @@ export const StatusChip = (word: string, cls: string, hover?: string): Children 
   html`<span class=${'gchip ' + cls + (word.length > 12 ? ' long' : '')} title=${hover ?? (word.length > 12 ? word : undefined)}>${word}</span>`;
 
 /**
- * The one layout for PR and review cards:
- * 1. the PR icon, colored by the PR's state, then the title;
- * 2. the status chips;
- * 3. the meta line in the gray subtitle: repo · age · #number · 🪤 trap · checks;
- * 4. a bar of the card's buttons.
- * The edge carries the tone. The card itself opens its modal.
+ * A PR card's parts for the shared item card (item-card.ts ItemCard):
+ * the PR icon colored by the PR's state, the status chips, then
+ * repo · age · #number · 🪤 trap, and a bar of the card's buttons. The
+ * edge carries the tone; a merged or closed PR has none. The card itself
+ * opens its modal.
  */
 export function prShapedCard(c: PrCardParts) {
   const trap = c.trap && [`${TRAP_MARK} `, WorkerAddress(c.trap)];
   const parts: Children[] = [RepoName(c.repo), c.at && [Age(c.at), ' ago'], `#${c.number}`, trap].filter(Boolean);
-  const meta = parts.flatMap((part, i) => (i ? [' · ', part] : [part]));
   const text = [c.repo, c.at && `${ageText(c.at)} ago`, `#${c.number}`, c.trap && `${TRAP_MARK} ${namedText(c.trap)}`]
     .filter(Boolean)
     .join(' · ');
-  return html`<${Card}
-    key=${c.key}
-    title=${c.title}
-    titleAttr=${c.titleAttr}
-    icon=${html`<${PrStateIcon} state=${c.prState} />`}
-    iconFirst
-    state=${c.prState === 'merged' || c.prState === 'closed' ? undefined : { word: '', tone: c.tone, mark: 'edge' }}
-    status=${[c.status, c.tail]}
-    context=${meta}
-    contextTitle=${text}
-    actions=${c.actions}
-    quiet=${c.quiet}
-    cls=${['prcard', c.cls].filter(Boolean).join(' ')}
-    attrs=${c.attrs}
-    person=${c.person}
-    onClick=${c.onClick}
-  />`;
+  return ItemCard({
+    key: c.key,
+    title: c.title,
+    titleAttr: c.titleAttr,
+    glyph: html`<${PrStateIcon} state=${c.prState} />`,
+    status: [c.status, c.tail],
+    context: parts,
+    contextTitle: text,
+    edge: c.prState === 'merged' || c.prState === 'closed' ? undefined : c.tone,
+    actions: c.actions,
+    quiet: c.quiet,
+    cls: c.cls,
+    attrs: c.attrs,
+    person: c.person,
+    onClick: c.onClick,
+  });
 }
 
 /** A PR's author, as its card's avatar chip shows them. */

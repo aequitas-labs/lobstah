@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import logo from '../../../../docs/assets/favicon.png';
 import type { GlassSnapshot } from '@lobstah/core';
 import type { GlassPrefs, GlassTab, SectionInputs } from '../../src/glass-diff.js';
-import { reviewNeedsAttention } from '../../src/glass-diff.js';
+import { reviewBadgeCount } from '../../src/glass-diff.js';
 import { setPrefs, showModal } from '../actions.js';
 import { html } from '../html.js';
 import { GrantChip } from './session-grants.js';
@@ -273,7 +273,7 @@ function BottomBar({ d, inp, tab, st, unread }: { d?: GlassSnapshot; inp?: Secti
   }, [mode]);
   // A decision or run card takes the bottom edge with its own dock.
   if (getState().decisionModal) return null;
-  const reviews = (inp?.reviews.list ?? []).filter(reviewNeedsAttention).length;
+  const reviews = reviewBadgeCount(inp?.reviews);
   const prsWaiting = prsNeedingYou(d?.prs ?? []);
   const count = (n: number, label: string) => n > 0 && html`<span class="dbadge" aria-label=${label}>${n}</span>`;
   if (mode === 'search') {
@@ -349,7 +349,7 @@ export function Header({
     ),
     d && inp && html`<${Strip} d=${d} inp=${inp.chips} />`,
     html`<div class="chips"><span id="chips" style="display:contents">${d && inp && chips(d, inp.chips)}</span><span class="chip dim" id="clock">${d && new Date(d.now).toLocaleTimeString('en-GB')}</span></div>`,
-    html`<${Navigation} d=${d} tab=${tab} unread=${unread} reviewCount=${(inp?.reviews.list ?? []).filter(reviewNeedsAttention).length} />`,
+    html`<${Navigation} d=${d} tab=${tab} unread=${unread} reviewCount=${reviewBadgeCount(inp?.reviews)} />`,
     controls(d, tab, st),
     html`<${BottomBar} d=${d} inp=${inp} tab=${tab} st=${st} unread=${unread} />`,
   ];

@@ -54,6 +54,8 @@ export interface GlassState {
   runs?: Record<string, RunView>;
   /** Review actions in flight, shared by every surface for the same review key. */
   reviewActions?: Record<string, import('./actions.js').ReviewRequestKind>;
+  /** Item controls in flight, by watch and item, shared by every surface that shows the item: the control and the effect it runs. */
+  itemActions?: Record<string, { item: string; control: string; effect?: string }>;
   /** The stacks this page shows open on the PRs tab, by stack id: for this page only. */
   openStacks?: Record<string, true>;
   /** The ?lob page parameter: show a sample lob when nothing is waiting. */

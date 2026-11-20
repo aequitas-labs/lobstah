@@ -143,3 +143,7 @@ export * from './local-watch-source.js';
 export { registerInstalledWatch, registerWatchEvent, syncWatchRegistrations } from './watch-registration.js';
 export { WatchSubscriptionManager, syncWatchSubscriptions } from './watch-subscriptions.js';
 export * from './review-wait-worktrees.js';
+export * from './review-glass.js';
+export * from './review-attention.js';
+export * from './review-items.js';
+export * from './watch-surfaces.js';

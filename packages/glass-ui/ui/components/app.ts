@@ -74,7 +74,7 @@ export function App({ state }: { state: GlassState }) {
       return [html`<${SectionHead} title="Reports" count=${inp.reports.list.length} page />`, html`<${Reports} inp=${inp.reports} />`];
     if (t === 'reviews')
       return [
-        html`<${SectionHead} title="Reviews" count=${inp.reviews.list.length} page />`,
+        html`<${SectionHead} title="Reviews" count=${(inp.reviews.items ?? inp.reviews.list).length} page />`,
         html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`,
       ];
     if (t === 'todos')

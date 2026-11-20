@@ -1,5 +1,5 @@
 import { legacyPrKey } from '@lobstah/watch-types/legacy-presentation';
-import type { GlassSettings } from '@lobstah/core';
+import type { GlassSettings, WatchSurfaceItem } from '@lobstah/core';
 import type { GlassBeats, GlassDispatch, GlassOlderKind, GlassOlderPage, GlassSnapshot, StatsPage } from '@lobstah/core';
 import {
   addOlder,
@@ -679,7 +679,7 @@ export async function reviewRequest(kind: ReviewRequestKind, payload: Record<str
     return 'Reviews are read-only here.';
   const key = typeof payload.key === 'string' ? payload.key : undefined;
   if (!key || kind === 'review-seen' || kind === 'review-decision-answer') return glassRequest(kind, payload);
-  if (getState().reviewActions?.[key]) return 'A review action is already running.';
+  if (getState().reviewActions?.[key] || itemEffectInFlight(key)) return 'A review action is already running.';
   setState({ reviewActions: { ...getState().reviewActions, [key]: kind } });
   try {
     return await glassRequest(kind, payload);
@@ -730,6 +730,106 @@ export async function muteReviewPr(key: string): Promise<string | undefined> {
 /** Resume review rounds for a muted PR. */
 export async function unmuteReviewPr(key: string): Promise<string | undefined> {
   return glassRequest('review-unmute', { key });
+}
+
+/** One item's identity across surfaces: its watch and its source-owned ID. */
+export const itemActionKey = (entry: Pick<WatchSurfaceItem, 'watch' | 'item'>): string => `${entry.watch.key}\u0000${entry.item.id}`;
+
+/** A fresh idempotency key for one person's click; a retry of the same request reuses it. */
+function actionKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * Run one control on an item a source supplied (Publish, Skip, Cancel
+ * merge). The boat resolves and authorizes it again from the source's
+ * cached state; the page's labels grant nothing. Resolves to the refusal,
+ * or undefined once it ran. A conflict means the item changed: the page
+ * reloads its snapshot so the person sees the current controls.
+ */
+export async function watchItemAction(entry: WatchSurfaceItem, control: string): Promise<string | undefined> {
+  if (!can('watch-item-action')) return 'This source is read-only here.';
+  const key = itemActionKey(entry);
+  if (getState().itemActions?.[key] || getState().reviewActions?.[entry.item.id]) return 'An action on this item is already running.';
+  const binding = entry.item.actions.find((action) => action.id === control)?.binding;
+  const effect = binding && 'effect' in binding ? binding.effect.action : undefined;
+  setState({ itemActions: { ...getState().itemActions, [key]: { item: entry.item.id, control, ...(effect ? { effect } : {}) } } });
+  try {
+    return await itemRequest(entry, control);
+  } finally {
+    const itemActions = { ...getState().itemActions };
+    delete itemActions[key];
+    setState({ itemActions });
+  }
+}
+
+/** The effect a surface is running on an item, by the item's ID, whichever surface started it. */
+export function itemEffectInFlight(item: string): string | undefined {
+  return Object.values(getState().itemActions ?? {}).find((entry) => entry.item === item)?.effect;
+}
+
+/** Mark items read on this page at once, as the boat will; the next snapshot confirms it. */
+export function markItemsRead(ids: ReadonlySet<string>): void {
+  const snapshot = getState().snapshot;
+  if (!snapshot?.reviewItems || !ids.size) return;
+  setState({
+    snapshot: {
+      ...snapshot,
+      reviewItems: snapshot.reviewItems.map((entry) =>
+        ids.has(entry.item.id) && entry.item.notification
+          ? { ...entry, item: { ...entry.item, notification: { ...entry.item.notification, unread: false, seen: true } } }
+          : entry,
+      ),
+    },
+  });
+}
+
+/** Opening an item acknowledges only the notification revision it showed; it never runs another action. */
+export function acknowledgeItem(entry: WatchSurfaceItem): void {
+  const notification = entry.item.notification;
+  if (!notification?.unread || !notification.action || entry.watch.status !== 'watching' || !can('watch-item-action')) return;
+  markItemsRead(new Set([entry.item.id]));
+  void itemRequest(entry, { acknowledge: notification.revision });
+}
+
+/**
+ * The refusal an item action returns when the item changed under the
+ * person: the page has already reloaded its current controls, so nothing
+ * more is said.
+ */
+export const ITEM_REFRESHED = 'This item changed. Its controls were refreshed.';
+
+async function itemRequest(entry: WatchSurfaceItem, control: string | { acknowledge: string }): Promise<string | undefined> {
+  const snapshot = getState().snapshot;
+  const token = snapshot?.focusToken;
+  if (!token) return snapshot?.viewer?.onMachine === false ? READ_ONLY_REASON : 'The glass has no page token yet.';
+  let refusal: string | undefined;
+  try {
+    const result = (
+      await backend().request<GlassVerdict & { conflict?: boolean }>(
+        'watch-item-action',
+        {
+          watch: entry.watch.key,
+          generation: entry.watch.generation,
+          item: entry.item.id,
+          control,
+          revision: entry.item.revision,
+          idempotencyKey: actionKey(),
+        },
+        token,
+      )
+    ).body;
+    if (!result.ok) refusal = result.conflict ? ITEM_REFRESHED : (result.reason ?? 'The request was refused.');
+  } catch {
+    return 'The request could not be sent.';
+  }
+  // Show the result, or the item's current controls after a refusal.
+  try {
+    receive(await backend().snapshot());
+  } catch {
+    // the next poll shows it
+  }
+  return refusal;
 }
 
 async function glassRequest<T extends GlassVerdict = GlassVerdict>(
@@ -884,6 +984,8 @@ async function ackAttention(kind: 'pr-ack' | 'attention-ack', items: Array<{ key
         }),
       },
     });
+  // An item that shares an acknowledged attention item's identity is read too.
+  markItemsRead(new Set((result.acked ?? []).map((ack) => ack.key)));
 }
 
 /** A permissions proposal uses its own glass action; it never passes through generic decision answers. */

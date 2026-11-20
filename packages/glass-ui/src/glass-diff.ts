@@ -15,6 +15,7 @@ import type {
   GlassPr,
   GlassReport,
   GlassReview,
+  WatchSurfaceItem,
   GlassSnapshot,
   GlassStack,
   GlassTrap,
@@ -399,9 +400,25 @@ export function reviewNeedsAttention(review: GlassReview): boolean {
   return reviewUnreadReason(review) !== undefined;
 }
 
+/** The Reviews badge: unread items from every source, or unread legacy records from an older boat. */
+export function reviewBadgeCount(reviews: Pick<SectionInputs['reviews'], 'list' | 'items'> | undefined): number {
+  if (!reviews) return 0;
+  return reviews.items ? reviews.items.filter((entry) => entry.item.notification?.unread).length : reviews.list.filter(reviewNeedsAttention).length;
+}
+
 /** Reviews in list order: badged rows first, then the newest request first. */
 export const reviewOrder = (a: GlassReview, b: GlassReview): number =>
   Number(reviewNeedsAttention(b)) - Number(reviewNeedsAttention(a)) || b.requestedAt.localeCompare(a.requestedAt);
+
+/**
+ * Review items in list order: unread items that wait on you first, then the
+ * newest request, then the item ID so equal times keep a stable order. For
+ * GitHub-only data this is the order reviewOrder gives its records.
+ */
+export const itemOrder = (a: WatchSurfaceItem, b: WatchSurfaceItem): number =>
+  Number(!!b.item.notification?.unread) - Number(!!a.item.notification?.unread) ||
+  (b.item.requestedAt ?? b.item.updatedAt ?? '').localeCompare(a.item.requestedAt ?? a.item.updatedAt ?? '') ||
+  a.item.id.localeCompare(b.item.id);
 
 /** Reports in list order: newest first, regardless of acknowledgment. */
 export const reportOrder = (a: GlassReport, b: GlassReport): number => b.filedAt.localeCompare(a.filedAt);
@@ -637,7 +654,13 @@ export interface SectionInputs {
   traps: { view: GlassPrefs['view'] | undefined; list: Seat<GlassTrapView>[]; configured?: GlassSnapshot['configuredTraps']; groupBy?: TrapGrouping };
   prs: PrsInputs;
   reports: { view: GlassPrefs['view'] | undefined; list: GlassReport[] };
-  reviews: { view: GlassPrefs['view'] | undefined; list: GlassReview[]; expanded?: GlassPrefs['reviewSections'] };
+  reviews: {
+    view: GlassPrefs['view'] | undefined;
+    list: GlassReview[];
+    /** Every source's review items; absent when the boat sends only the legacy records. */
+    items?: WatchSurfaceItem[];
+    expanded?: GlassPrefs['reviewSections'];
+  };
   notices: { list: Notice[] };
   foot: { version: string; repoUrl: string };
   modal: {
@@ -678,6 +701,21 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
   const reviews = (d.reviews || [])
     .filter((r) => matchesRepo(r.repoKey, st, true) && hasQuery(r.repo, r.number, r.title, r.author, r.requestedBy, r.state))
     .sort(reviewOrder);
+  // An absent collection falls back to the legacy records; an empty one stays empty.
+  const reviewItems = d.reviewItems
+    ?.filter(
+      ({ item, source }) =>
+        matchesRepo(item.repo, st, true) &&
+        hasQuery(
+          source.name,
+          item.title,
+          item.person?.id,
+          item.person?.name,
+          ...item.metadata.map((value) => value.value),
+          ...item.statuses.map((status) => status.label),
+        ),
+    )
+    .sort(itemOrder);
   const stacks = (d.stacks || []).filter(inRepo);
   const prs = (d.prs || []).filter(inRepo);
   const deckTraps = traps.map((trap) => trapView(d, trap)).filter((trap) => deckTrapAttention(trap, d) !== undefined);
@@ -737,6 +775,7 @@ export function sectionInputs(d: GlassSnapshot, ui: GlassUi, now: number): Secti
       expanded: st.reviewSections,
       view: st.view,
       list: reviews,
+      ...(reviewItems ? { items: reviewItems } : {}),
     },
     notices: {
       list: (d.notices || []).filter(

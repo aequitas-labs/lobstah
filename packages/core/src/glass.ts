@@ -647,8 +647,17 @@ export interface GlassSnapshot {
   landed: LandedCatch[];
   /** Every filed report, newest first. */
   reports: GlassReport[];
-  /** Review requests ([reviews]); absent on a hosted grounds. */
+  /**
+   * Review requests ([reviews]); absent on a hosted grounds. The legacy wire
+   * records stay for older glasses and for the GitHub review detail view.
+   */
   reviews?: GlassReview[];
+  /**
+   * Every review-capable source's items, normalized into the shared card
+   * slots. A glass renders Reviews from these when the field is present (an
+   * empty list stays empty) and falls back to `reviews` only when it is absent.
+   */
+  reviewItems?: import('./watch-surfaces.js').WatchSurfaceItem[];
   sessionGrants?: import('./grants.js').Grant[];
   /** Every other grant in force: intent grants, commands and files. */
   standingGrants?: import('./grants.js').Grant[];

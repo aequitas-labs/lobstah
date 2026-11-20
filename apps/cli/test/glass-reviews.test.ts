@@ -6,7 +6,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ensureLayout, latestRound, loadConfig, observeReviewRequest, pendingIds, readReview, REVIEW_ROUND_STATES, writeReview, refreshReviewNotifications, reviewRoundDir } from '@lobstah/core';
 import { REVIEW_DECISIONS } from '../../../test/review-decisions.js';
-import { glassReviews } from '../src/reviews.js';
+import { glassReviewRecords as glassReviews } from '@lobstah/core';
 import type { GlassReview } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass } from '../src/glass.js';

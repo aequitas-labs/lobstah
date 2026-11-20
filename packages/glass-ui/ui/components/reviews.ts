@@ -2,7 +2,16 @@ import { useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { GlassReview, GlassSnapshot } from '@lobstah/core';
 import type { SectionInputs } from '../../src/glass-diff.js';
-import { dismissReview, hideLob, muteReviewPr, reviewRequest, setPrefs, showModal, unmuteReviewPr } from '../actions.js';
+import {
+  dismissReview,
+  hideLob,
+  itemEffectInFlight,
+  muteReviewPr,
+  reviewRequest,
+  setPrefs,
+  showModal,
+  unmuteReviewPr,
+} from '../actions.js';
 import type { ReviewRequestKind } from '../actions.js';
 import { html, type Children } from '../html.js';
 import { Age, Table, ageText } from './common.js';
@@ -17,6 +26,8 @@ import { showToast } from './toast.js';
 import { Dialog } from './dialog.js';
 import { unansweredReviewDecisions } from '../../../core/src/review-decisions.js';
 import { reviewUnreadReason, reviewUpdating } from '../review-attention.js';
+import type { WatchSurfaceItem } from '@lobstah/core';
+import { ItemActions, ItemGlyph, ItemStatuses, openItemTarget, targetHref, watchItemCard } from './item-card.js';
 
 /** Review failures use the shared toast without exposing CLI keys or diagnostics. */
 function showReviewError(reason: string): void {
@@ -169,7 +180,8 @@ export function ReviewActions({
   decisionSaving?: boolean;
 }) {
   const [confirmApproval, setConfirmApproval] = useState(false);
-  const pending = getState().reviewActions?.[r.key];
+  // The same review's action may be running from its item card.
+  const pending = getState().reviewActions?.[r.key] ?? (itemEffectInFlight(r.key) as ReviewRequestKind | undefined);
   // A source without review actions may still dismiss or mute through its boat.
   if (!can('review-request')) {
     if (r.mutedAt) return html`<span class="rv-actions"><${MuteAction} r=${r} /></span>`;
@@ -481,15 +493,45 @@ const REVIEW_MODE_LABELS: Record<NonNullable<GlassSnapshot['reviewSetup']>['mode
   'auto-review': 'Auto review',
 };
 
-/** Review rounds and the current repo's settings; all settings are read-only. */
+/** The read-only review settings line, or how to turn reviews on. */
+function reviewSettingsLine(setup: GlassSnapshot['reviewSetup'], repo: string): Children {
+  const effective = (repo && setup?.perRepo?.[repo]) || setup;
+  const publish = effective?.publish ?? false;
+  return setup?.enabled
+    ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
+    : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`;
+}
+
+/** A section's contents and its heading: Needs your review stays open; the others remember being opened. */
+function reviewSection(
+  id: 'needs' | 'waiting' | 'done',
+  title: string,
+  count: number,
+  empty: boolean,
+  contents: Children,
+  expanded: SectionInputs['reviews']['expanded'],
+): Children {
+  return id === 'needs'
+    ? html`<section class="rv-section" data-review-section=${id}><h2>${title} (${count})</h2>${empty ? html`<p class="empty">No reviews need you</p>` : contents}</section>`
+    : html`<details class="rv-section" data-review-section=${id} open=${expanded?.[id] === true} onToggle=${(event: Event) => {
+        const open = (event.currentTarget as HTMLDetailsElement).open;
+        if ((getState().prefs.reviewSections?.[id] === true) !== open)
+          setPrefs({ reviewSections: { ...getState().prefs.reviewSections, [id]: open } });
+      }}><summary>${title} (${count})</summary>${contents}</details>`;
+}
+
+/**
+ * Review requests from every review-capable source, through the shared item
+ * slots, and the current repo's settings; all settings are read-only. An
+ * older boat that sends only the legacy records renders them as before.
+ */
 export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews']; setup?: GlassSnapshot['reviewSetup']; repo?: string }) {
+  if (inp.items) return ItemReviews({ inp: { ...inp, items: inp.items }, setup, repo });
   const effective = (repo && setup?.perRepo?.[repo]) || setup;
   const canDraft = effective?.mode !== 'notify';
   const publish = effective?.publish ?? false;
   return [
-    setup?.enabled
-      ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
-      : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
+    reviewSettingsLine(setup, repo),
     ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
       const contents = groups.map(
         ({ stack, reviews }) =>
@@ -520,13 +562,177 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
                   )
           }</section>`,
       );
-      return id === 'needs'
-        ? html`<section class="rv-section" data-review-section=${id}><h2>${title} (${count})</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
-        : html`<details class="rv-section" data-review-section=${id} open=${inp.expanded?.[id] === true} onToggle=${(event: Event) => {
-            const expanded = (event.currentTarget as HTMLDetailsElement).open;
-            if ((getState().prefs.reviewSections?.[id] === true) !== expanded)
-              setPrefs({ reviewSections: { ...getState().prefs.reviewSections, [id]: expanded } });
-          }}><summary>${title} (${count})</summary>${contents}</details>`;
+      return reviewSection(id, title, count, !groups.length, contents, inp.expanded);
+    }),
+  ];
+}
+
+/** An item's metadata value of one kind. */
+const metadataValue = (entry: WatchSurfaceItem, kind: string): string | undefined =>
+  entry.item.metadata.find((value) => value.kind === kind)?.value;
+
+/** Where a review item's own page is: its Open link. */
+const itemHref = (entry: WatchSurfaceItem): string | undefined => {
+  const open = entry.item.actions.find((action) => action.placement === 'open' && 'link' in action.binding);
+  return open && 'link' in open.binding ? targetHref(open.binding.link) : targetHref(entry.item.target);
+};
+
+/** The item's reference as the table's first column shows it: `owner/repo#12`, or `project · plan r2`. */
+function itemReference(entry: WatchSurfaceItem): string {
+  const project = metadataValue(entry, 'project');
+  const reference = metadataValue(entry, 'reference');
+  if (!project) return reference ?? entry.item.title;
+  if (!reference) return project;
+  return reference.startsWith('#') ? `${project}${reference}` : `${project} · ${reference}`;
+}
+
+/** A row's notes: a labelled note collapses under its label; a finding is one line in its tone. */
+const itemNotes = (entry: WatchSurfaceItem): Children =>
+  (entry.item.notes ?? []).map((note) =>
+    note.label
+      ? html`<details onClick=${(e: Event) => e.stopPropagation()}><summary>${note.label}</summary><div class="rv-reason">${note.text}</div></details>`
+      : html`<div class=${'rv-reason' + (note.meaning === 'failed' || note.meaning === 'needs-you' ? ' bad' : '')}>${note.text}</div>`,
+  );
+
+/** Who asked, as the table's and detail's asker cell shows them. */
+function itemAsker(entry: WatchSurfaceItem): Children {
+  const person = entry.item.person;
+  if (!person) return null;
+  return html`<span class="rv-person" title=${person.id}>
+    ${person.avatarUrl && html`<${Avatar} url=${person.avatarUrl} name=${person.name ?? person.id} />`}
+    <span>${person.name ?? person.id}</span>
+    ${person.badge && StatusChip(person.badge.label, 'dim', person.badge.detail)}
+  </span>`;
+}
+
+/** One review item as a table row: the same columns the review table had. */
+function itemRow(entry: WatchSurfaceItem): Children {
+  const { item } = entry;
+  const open = () => openItemTarget(item.target);
+  return html`<tr key=${`${entry.watch.key}:${item.id}`} id=${'review-' + encodeURIComponent(item.id)} data-review=${item.id} class=${'rowhead' + (item.notification?.seen ? ' seen' : item.resolved ? ' acked' : '')} onClick=${open}>
+    <td><a href=${itemHref(entry)} target="_blank" rel="noopener" onClick=${(e: Event) => {
+      e.stopPropagation();
+      open();
+      e.preventDefault();
+    }}><${ItemGlyph} item=${item} /> ${itemReference(entry)}</a></td>
+    <td class="grow">${item.title}${itemNotes(entry)}</td>
+    <td>${item.metadata.find((value) => value.kind === 'person')?.value}</td>
+    <td>${itemAsker(entry)}</td>
+    <td>${item.requestedAt && Age(item.requestedAt)}</td>
+    <td><${ItemStatuses} item=${item} /></td>
+    <td><${ItemActions} entry=${entry} open=${false} /></td>
+  </tr>`;
+}
+
+/** One review item as a card in the shared slots; it opens where its source points. */
+const itemCard = (entry: WatchSurfaceItem): Children =>
+  watchItemCard(entry, {
+    onOpen: () => openItemTarget(entry.item.target),
+    cls: 'rv-card',
+    attrs: { id: 'review-' + encodeURIComponent(entry.item.id), 'data-review': entry.item.id },
+  });
+
+/** Items in list order, grouped as their source groups them: a group's members stay together, bottom first. */
+export function itemGroups(
+  entries: readonly WatchSurfaceItem[],
+): Array<{ group?: { id: string; title?: string }; entries: WatchSurfaceItem[] }> {
+  const groups: Array<{ group?: { id: string; title?: string }; entries: WatchSurfaceItem[] }> = [];
+  const seen = new Set<WatchSurfaceItem>();
+  for (const entry of entries) {
+    if (seen.has(entry)) continue;
+    const group = entry.item.group;
+    const members = group
+      ? entries
+          .filter((candidate) => candidate.watch.key === entry.watch.key && candidate.item.group?.id === group.id)
+          .sort((a, b) => (a.item.group?.position ?? Infinity) - (b.item.group?.position ?? Infinity))
+      : [entry];
+    members.forEach((member) => seen.add(member));
+    const previous = groups.at(-1);
+    if (!group && previous && !previous.group) previous.entries.push(entry);
+    else groups.push({ ...(group ? { group } : {}), entries: members });
+  }
+  return groups;
+}
+
+/** Needs your review, Waiting on response, Done: a group follows its most urgent item; counts are items that wait on you. */
+export function itemSections(entries: readonly WatchSurfaceItem[]): Array<{
+  id: 'needs' | 'waiting' | 'done';
+  title: string;
+  groups: ReturnType<typeof itemGroups>;
+  count: number;
+}> {
+  const sections = [
+    { id: 'needs' as const, title: 'Needs your review', groups: [] as ReturnType<typeof itemGroups>, count: 0 },
+    { id: 'waiting' as const, title: 'Waiting on response', groups: [] as ReturnType<typeof itemGroups>, count: 0 },
+    { id: 'done' as const, title: 'Done', groups: [] as ReturnType<typeof itemGroups>, count: 0 },
+  ];
+  const urgency = ({ item }: WatchSurfaceItem): number =>
+    item.lifecycle.phase === 'completed' || item.lifecycle.phase === 'closed' ? 2 : item.answered ? 1 : 0;
+  const recent = ({ item }: WatchSurfaceItem): string => item.updatedAt ?? item.requestedAt ?? '';
+  const groups = itemGroups(entries).flatMap((group) => (group.group ? [group] : group.entries.map((entry) => ({ entries: [entry] }))));
+  groups.sort((left, right) => {
+    const latest = (group: { entries: WatchSurfaceItem[] }): string => group.entries.map(recent).sort().at(-1) ?? '';
+    return latest(right).localeCompare(latest(left));
+  });
+  for (const group of groups) {
+    const section = sections[Math.min(...group.entries.map(urgency))]!;
+    const previous = section.groups.at(-1);
+    if (!('group' in group && group.group) && previous && !previous.group) previous.entries.push(...group.entries);
+    else section.groups.push(group);
+    section.count += group.entries.filter((entry) => entry.item.standing).length;
+  }
+  return sections;
+}
+
+/** The lifecycle a group card shows: open while any member is active or draft, else merged, else closed. */
+function groupState(entries: readonly WatchSurfaceItem[]): 'open' | 'merged' | 'closed' {
+  if (entries.some(({ item }) => item.lifecycle.phase === 'active' || item.lifecycle.phase === 'draft')) return 'open';
+  return entries.some(({ item }) => item.lifecycle.phase === 'completed') ? 'merged' : 'closed';
+}
+
+/** Reviews from items: the same sections, stacks, cards and table as before, for every source. */
+function ItemReviews({
+  inp,
+  setup,
+  repo,
+}: {
+  inp: SectionInputs['reviews'] & { items: WatchSurfaceItem[] };
+  setup?: GlassSnapshot['reviewSetup'];
+  repo: string;
+}) {
+  const kinds = new Set(inp.items.map((entry) => entry.item.kind));
+  const first = kinds.size === 1 && kinds.has('pull-request') ? 'PR' : 'item';
+  return [
+    reviewSettingsLine(setup, repo),
+    ...itemSections(inp.items).map(({ id, title, groups, count }) => {
+      const contents = groups.map(({ group, entries }) => {
+        const last = entries.at(-1)!;
+        const references = entries.map((entry) => metadataValue(entry, 'reference')).filter(Boolean) as string[];
+        return html`<section class="rv-group">${
+          group
+            ? html`<${StackCard}
+                id=${`review-stack:${group.id}`}
+                prState=${groupState(entries)}
+                repo=${entries[0]!.item.repo ?? metadataValue(entries[0]!, 'project') ?? ''}
+                updatedAt=${entries
+                  .map(({ item }) => item.updatedAt ?? item.requestedAt)
+                  .filter(Boolean)
+                  .sort()
+                  .at(-1)}
+                range=${references.length === 1 ? references[0] : references.length ? `${references[0]} → ${references.at(-1)}` : undefined}
+                header=${{
+                  title: group.title ?? last.item.title,
+                  titleAttr: group.title ?? last.item.title,
+                  attrs: { 'data-review-stack': group.id, 'aria-label': group.title ?? last.item.title },
+                }}
+                members=${() => entries.map(itemCard)}
+              />`
+            : inp.view === 'cards'
+              ? html`<div class="cards">${entries.map(itemCard)}</div>`
+              : Table([first, 'title', 'author', 'asked by', 'asked', 'state', ''], entries.map(itemRow), 'no review requests match')
+        }</section>`;
+      });
+      return reviewSection(id, title, count, !groups.length, contents, inp.expanded);
     }),
   ];
 }

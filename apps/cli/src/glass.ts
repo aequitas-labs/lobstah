@@ -105,7 +105,10 @@ import { answerPermissionsProposal, previewPermissionsProposal } from './permiss
 import type { TendAttention } from './tend.js';
 import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, redraftReviewRound } from '@lobstah/pick';
 import { muteReview, unmuteReview } from '@lobstah/core';
-import { glassReviews } from './reviews.js';
+import { refreshItemSources, watchSurfaceItems } from '@lobstah/core';
+import type { GlassReview } from '@lobstah/core';
+import { createCliWatchRegistry } from './watch-automation.js';
+import { parseWatchItemAction, runWatchItemAction } from './watch-item-actions.js';
 import { reviewSetupView } from './reviews-setup.js';
 import { buildTendReport, landedCatches, walkingAttention } from './tend.js';
 import { helmTimezone, todoStaleLine, todoViews } from './todo.js';
@@ -171,6 +174,7 @@ export const REQUEST_KIND_MAX_BYTES: ReadonlyMap<string, number> = new Map([
   ['report-viewed', 1024],
   ['grant-revoke', 1024],
   ['review-dismiss', 1024],
+  ['watch-item-action', 2048],
   ...['review-skip', 'review-seen', 'review-approve', 'review-approve-anyway', 'review-request-changes', 'review-comment'].map(k => [k, 1024] as [string, number]),
   ['review-decision-answer', 12 * 1024],
   ['review-new', 1024],
@@ -644,6 +648,12 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
   reconcilePermissionCards();
   const cfg = loadConfig();
   queryCliWatch('watch.refresh', {}, null);
+  // Sources that supply items re-present from their stored state first, so a local change shows at once.
+  try {
+    refreshItemSources(createCliWatchRegistry(() => {}));
+  } catch {
+    // Each source keeps its last cached items.
+  }
   const executor = readJson<{ heartbeat?: string; version?: string }>(executorPath());
   const workSlots = slotUsage('work');
   const helms = listHelms().map((h) => ({
@@ -806,7 +816,9 @@ export function buildGlassSnapshot(options: { local?: boolean } = {}): GlassFull
     stacks,
     ...attention,
     reports: reportRows(),
-    reviews: glassReviews(reviewTools(cfg)),
+    // Legacy records for older glasses and the review detail view, through the installed review source.
+    reviews: queryCliWatch<GlassReview[]>('glass.reviews', {}, []),
+    reviewItems: watchSurfaceItems('reviews'),
     reviewSetup: reviewSetupView(),
     sessionGrants: listGrants().grants.filter(g => g.mode === 'session').map(({ callIds: _ids, ...g }) => g),
     standingGrants: listGrants().grants.filter(g => g.mode !== 'session').map(({ callIds: _ids, ...g }) => g),
@@ -1212,6 +1224,16 @@ export function serveGlass(
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),
               () => reply(500, { ok: false, reason: 'The review could not be changed.' }),
+            );
+            return;
+          }
+          case 'watch-item-action': {
+            // A control on an item a source supplied: the server resolves and authorizes it again.
+            const payload = parseWatchItemAction(body.payload);
+            if (!payload) return reply(400, { ok: false, reason: 'A watch item and control are required.' });
+            void runWatchItemAction(payload, source).then(
+              (result) => reply(result.status, result.body),
+              () => reply(500, { ok: false, reason: 'The action could not be run.' }),
             );
             return;
           }

@@ -503,6 +503,28 @@ export class WatchRuntime {
     });
   }
 
+  /**
+   * Re-present an in-process source from its stored state without observing
+   * it: no provider read, no new check time, no events. A page that shows a
+   * source's items calls this so a local change (a review published) shows
+   * at once. Returns whether the cached presentation changed.
+   */
+  represent(key: string, now = Date.now()): boolean {
+    const stored = this.journal.read(key);
+    if (!stored || stored.status !== 'watching') return false;
+    const adapter = this.registry.get(stored.type.id);
+    if (adapter.descriptor.installation) return false;
+    const restored = adapter.restore(structuredClone(stored));
+    const presentation = retainWatchConditionTimes(presentSource(adapter, restored), stored.presentation, new Date(now).toISOString());
+    if (JSON.stringify(presentation) === JSON.stringify(stored.presentation)) return false;
+    return this.journal.update(key, (current) => {
+      if (!current || current.generation !== stored.generation || current.status !== 'watching' || sourceRevision(current) !== sourceRevision(stored))
+        return { result: false };
+      current.presentation = presentation;
+      return { snapshot: current, result: true };
+    });
+  }
+
   /** Resume a held type only after its adapter can restore the stored state. */
   release(key: string): void {
     const observed = this.journal.read(key);

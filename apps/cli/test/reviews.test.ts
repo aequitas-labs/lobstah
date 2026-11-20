@@ -4,7 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ensureLayout, executorPath, latestRound, observeReviewRequest, readReview, reviewBrief, reviewRoundDir, writeReview, withdrawUnseenReviews } from '@lobstah/core';
 import { buildTendReport } from '../src/tend.js';
-import { reviewRows, glassReviews } from '../src/reviews.js';
+import { reviewRows } from '../src/reviews.js';
+import { glassReviewRecords as glassReviews } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
