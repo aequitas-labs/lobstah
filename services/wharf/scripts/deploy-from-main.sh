@@ -3,10 +3,14 @@
 #
 #   services/wharf/scripts/deploy-from-main.sh                        code, and any pending migrations
 #   services/wharf/scripts/deploy-from-main.sh --set-var SLACK_CLIENT_ID   also set a Worker var, read from stdin
+#   services/wharf/scripts/deploy-from-main.sh --dry-run                  find the checkout and stop
 #
 # As a glass run card: lobstah man ask --run services/wharf/scripts/deploy-from-main.sh
-#   --interactive --cwd ~ --timeout 20m (add --input SLACK_CLIENT_ID:secret with --set-var).
+#   --interactive --cwd <the lobstah checkout> --timeout 20m (add --input SLACK_CLIENT_ID:secret with --set-var).
 #
+# - The glass runs a copy of the script from its own run directory, so it finds
+#   the checkout from LOBSTAH_REPO, then the working directory, then its own
+#   location.
 # - It deploys origin/main from its own detached checkout under /tmp, and
 #   leaves it there so the rollback command it prints runs from it.
 # - Wrangler uses its own stored login (`npx wrangler login`). No token here.
@@ -20,24 +24,51 @@ set -euo pipefail
 export FORCE_COLOR=0 NO_COLOR=1 CI=1
 
 SET_VAR=""
+DRY_RUN=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --set-var)
       SET_VAR="${2:-}"
       shift 2 || true
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     *)
-      echo "Unknown argument: $1. Usage: deploy-from-main.sh [--set-var NAME]"
+      echo "Unknown argument: $1. Usage: deploy-from-main.sh [--set-var NAME] [--dry-run]"
       exit 2
       ;;
   esac
 done
+if [ -n "$SET_VAR" ] && ! [[ "$SET_VAR" =~ ^[A-Z][A-Z0-9_]{0,63}$ ]]; then
+  echo "--set-var takes a variable name such as SLACK_CLIENT_ID. Nothing changed."
+  exit 2
+fi
+
+lobstah_checkout() {
+  local top
+  top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ -f "$top/services/wharf/wrangler.jsonc" ] || return 1
+  printf '%s\n' "$top"
+}
+REPO=""
+for candidate in "${LOBSTAH_REPO:-}" "$PWD" "$(dirname "${BASH_SOURCE[0]}")"; do
+  if [ -n "$candidate" ] && REPO=$(lobstah_checkout "$candidate"); then break; fi
+  REPO=""
+done
+if [ -z "$REPO" ]; then
+  echo "Couldn't find the lobstah checkout. Set LOBSTAH_REPO to it, or run this from inside it. Nothing changed."
+  exit 1
+fi
+HERE="$REPO/services/wharf"
+if [ -n "$DRY_RUN" ]; then
+  echo "Would deploy main from $REPO. Dry run: nothing changed."
+  exit 0
+fi
+
 VALUE=""
 if [ -n "$SET_VAR" ]; then
-  if ! [[ "$SET_VAR" =~ ^[A-Z][A-Z0-9_]{0,63}$ ]]; then
-    echo "--set-var takes a variable name such as SLACK_CLIENT_ID. Nothing changed."
-    exit 2
-  fi
   IFS= read -r VALUE || true
   if [ -z "$VALUE" ]; then
     echo "No value for $SET_VAR on stdin. Nothing changed."
@@ -46,8 +77,6 @@ if [ -n "$SET_VAR" ]; then
 fi
 
 DB="lobstah-wharf-auth"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO="$(git -C "$HERE" rev-parse --show-toplevel)"
 git -C "$REPO" fetch -q origin
 SHA=$(git -C "$REPO" rev-parse origin/main)
 DIR="/tmp/lobstah-wharf-deploy-${SHA:0:8}"
