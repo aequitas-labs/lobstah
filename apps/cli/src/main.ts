@@ -322,7 +322,7 @@ import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, decisionReferences, type FlagValue } from './usage.js';
-import { listThreads, readThread, startThread, postThread, sayThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, trackThreads, ThreadError } from '@lobstah/core';
+import { listThreads, readThread, startThread, startHelmThread, postThread, sayThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, trackThreads, checkThreadForLink, linkThreadDispatch, ThreadError } from '@lobstah/core';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
@@ -652,6 +652,32 @@ function gateHelm(who: ResolvedSession | undefined, grounds?: string): void {
   const cfg = loadConfig();
   const refusal = helmGate(liveHelms(cfg.helm.ttlSecs * 1000), who?.id, grounds, cfg);
   if (refusal) throw new Error(explainRefusal(refusal, who));
+}
+
+/**
+ * The conversation `dispatch --thread` or `send --thread` links its work to,
+ * checked before anything is queued or sent: the claimed helm's own, open or
+ * tracking. Undefined without --thread.
+ */
+function threadForLink(thread: string | undefined, who: ResolvedSession | undefined, groundsFlag: string | undefined): string | undefined {
+  if (thread === undefined) return undefined;
+  const cfg = loadConfig();
+  const grounds = displayGrounds(resolveGrounds(cfg, groundsFlag ?? (who?.id ? helmOf(who.id)?.grounds : undefined)).name, cfg);
+  gateHelm(who, grounds);
+  try { return checkThreadForLink(thread, grounds).id; }
+  catch (error) { if (error instanceof ThreadError) throw new UsageError(error.message); throw error; }
+}
+
+/** Link a dispatch to the conversation `threadForLink` checked; the work is already under way, so a late refusal only warns. */
+function linkDispatchToThread(thread: string | undefined, dispatch: string, brief: string | undefined): void {
+  if (thread === undefined) return;
+  try {
+    linkThreadDispatch(thread, dispatch, brief);
+    console.log(toonKV({ thread }));
+  } catch (error) {
+    if (!(error instanceof ThreadError)) throw error;
+    console.log(toonKV({ warning: `the work started, but the thread link failed: ${error.message}` }));
+  }
 }
 
 /** The arm-block tail: the hook already waited for a watcher that was still starting. */
@@ -1267,10 +1293,12 @@ async function mainCli(): Promise<void> {
         const descriptor: Descriptor = { id: opt('--id') ?? randomUUID(), brief: briefText ?? fs.readFileSync(briefFile!, 'utf8'), for: configuredAddress,
           target: { kind: 'configured-trap', profile: name, grounds: profile.grounds, surface: profile.surface, ...(opt('--assist') ? { parentDispatch: opt('--assist') } : {}) } };
         validateAssistanceParent(descriptor);
+        const thread = threadForLink(opt('--thread'), caller, profile.grounds);
         const lane: Lane = has('--chore') ? 'chore' : 'work';
         descriptor.attachments = copyFiles(values('--attach'), dispatchAttachmentsDir(descriptor.id, lane));
         enqueue(descriptor, lane);
         console.log(toonKV({ id: descriptor.id, for: configuredAddress, grounds: profile.grounds, repo: 'none', lane }));
+        linkDispatchToThread(thread, descriptor.id, descriptor.brief);
         break;
       }
       if (opt('--assist')) throw new UsageError('--assist requires --for trap:<profile>');
@@ -1320,6 +1348,7 @@ async function mainCli(): Promise<void> {
         if (!cfg.repos[repo]) throw new Error(`no repo "${repo}" is configured`);
         d.trapAny = true;
       }
+      const thread = threadForLink(opt('--thread'), caller, opt('--grounds'));
       const warnings = startDispatch(d, lane, values('--attach'), caller);
       if (!d.pr && !d.followUp) {
         for (const url of briefPrMentions(d.brief, repo))
@@ -1327,6 +1356,7 @@ async function mainCli(): Promise<void> {
       }
       console.log(toonKV({ id: d.id, repo, lane, ...(d.pr ? { pr: d.pr.url } : {}), ...(d.for ? { for: d.for } : {}), ...(d.trapAny ? { for: 'first free suitable trap (no headless fallback)' } : {}), ...(d.pool ? { pool: d.pool } : {}), ...(d.headless ? { for: 'headless one-off (--headless)' } : !d.for && !d.trapAny && !d.pool ? { for: UNADDRESSED_DELIVERY } : {}), queued: d.queuedAt }));
       if (d.trapAny) console.log(toonKV(trapAnyOutlook(loadConfig(), repo, d.harness)));
+      linkDispatchToThread(thread, d.id, d.brief);
       for (const w of warnings) console.log(toonKV({ warning: w }));
       console.log(
         toonHelp([
@@ -1482,6 +1512,9 @@ async function mainCli(): Promise<void> {
       const sender = callerSession(opt('--session'));
       const sid = sender?.id;
       gateHelm(sender);
+      const thread = threadForLink(opt('--thread'), sender, undefined);
+      const noDispatchForThread = '--thread links a dispatch: this trap has none claimed. Send to the dispatch id instead';
+      const claimedBrief = (id: string) => { try { return storedDescriptor(id, laneOf(id) ?? 'work')?.brief; } catch { return undefined; } };
       // --for-decision: this send is what the helm did with a card's answer, so it acks that card once delivered.
       const forDecision = opt('--for-decision');
       if (forDecision !== undefined && decisionHandoff(forDecision)?.state !== 'answered')
@@ -1517,6 +1550,7 @@ async function mainCli(): Promise<void> {
         const off = reg ? undefined : recentlySignedOff(trapId, graceMs);
         if (!reg && off) {
           if (has('--compact')) throw new UsageError('--compact needs a live trap session');
+          if (thread !== undefined) throw new UsageError(noDispatchForThread);
           const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
           const name = sendTrapMessage(trapId, from, [text, attachmentBlock(attachments)].filter(Boolean).join('\n\n'), attachments);
           const leftSecs = Math.max(0, Math.round((Date.parse(off.at) + graceMs - Date.now()) / 1000));
@@ -1530,6 +1564,7 @@ async function mainCli(): Promise<void> {
           break;
         }
         if (!reg) throw new Error(`${unknownTrapMessage(target)} — \`lobstah man tend\` lists live traps`);
+        if (thread !== undefined && !reg.claimed) throw new UsageError(noDispatchForThread);
         if (has('--compact')) console.log(toonKV({ compact: await compactTrapSession(reg, reg.claimed ? { id: reg.claimed, lane: laneOf(reg.claimed) ?? 'work' } : undefined) }));
         const attachments = copyFiles(values('--attach'), trapAttachmentsDir(trapId)) ?? [];
         const block = attachmentBlock(attachments);
@@ -1543,6 +1578,7 @@ async function mainCli(): Promise<void> {
             }),
           );
         }
+        if (reg.claimed) linkDispatchToThread(thread, reg.claimed, claimedBrief(reg.claimed));
         ackSent(trapId);
         break;
       }
@@ -1570,6 +1606,7 @@ async function mainCli(): Promise<void> {
         const expects = !has('--no-reply');
         if (expects) expectReply({ dispatchId: member.id, lane: member.lane, from, text });
         console.log(toonKV({ id: member.id, from, queued: name, ...(expects ? { reply: 'expected' } : {}) }));
+        linkDispatchToThread(thread, member.id, member.descriptor.brief);
         ackSent(member.id);
         break;
       }
@@ -1623,6 +1660,7 @@ async function mainCli(): Promise<void> {
       else if (headless) console.log(`delivery: unaddressed${followUp.pool ? ` (pool ${followUp.pool})` : ''}; a matching trap or headless worker may take it`);
       else console.log(`delivery: ${trapAddressText(address!, 'label')} (sticky; follows the previous trap claim)`);
       for (const warning of warnings) console.log(toonKV({ warning }));
+      linkDispatchToThread(thread, followUp.id, origin.descriptor.brief);
       ackSent(origin.id);
       break;
     }
@@ -2227,6 +2265,7 @@ async function mainCli(): Promise<void> {
       break;
     }
     case 'man:threads':
+    case 'man:thread':
     case 'man:triage':
     case 'man:discuss':
     case 'man:note':
@@ -2242,6 +2281,29 @@ async function mainCli(): Promise<void> {
         break;
       }
       gateHelm(caller, grounds);
+      if (cmd === 'man:thread') {
+        if (pos[0] !== 'new' || pos.length > 1) throw new UsageError(`man thread takes new\n\n${usageFor('man:thread')!}`);
+        const detailFile = opt('--detail');
+        let detail: string | undefined;
+        if (detailFile !== undefined) {
+          try { detail = fs.readFileSync(detailFile, 'utf8'); }
+          catch { throw new UsageError(`Cannot read ${detailFile}`); }
+        }
+        let started: ReturnType<typeof startHelmThread>;
+        try { started = startHelmThread({ grounds, title: opt('--title'), detail, links: values('--link') }); }
+        catch (error) {
+          if (error instanceof ThreadError || error instanceof DecisionError) throw new UsageError(error.message);
+          throw error;
+        }
+        const url = `${glassUrl(glassPort())}/#thread/${started.id}`;
+        console.log(toonKV({ id: started.id, url, title: started.title, grounds, links: values('--link').length }));
+        console.log(toonHelp([
+          `Point to it with [thread](${url})`,
+          `lobstah man ask --thread ${started.id} --title "<question>"   (a card in this thread)`,
+          `lobstah dispatch ... --thread ${started.id}   (link the work)`,
+        ]));
+        break;
+      }
       const id = pos[0];
       if (!id) throw new UsageError('Choose a conversation or title');
       const existing = readThread(id);
@@ -2264,7 +2326,7 @@ async function mainCli(): Promise<void> {
           item = noteThread(id, { ...(has('--decided') ? { decided: values('--decided') } : {}), ...(has('--open') ? { open: values('--open') } : {}), link: opt('--link'), text: pos.slice(1).join(' ') || undefined });
         }
         console.log(JSON.stringify(threadView(item), null, 2));
-      } catch (error) { if (error instanceof ThreadError) throw new UsageError(error.message); throw error; }
+      } catch (error) { if (error instanceof ThreadError || error instanceof DecisionError) throw new UsageError(error.message); throw error; }
       break;
     }
     case 'man:ask': {

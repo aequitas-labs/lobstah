@@ -15,6 +15,8 @@ export type ThreadEntry =
   | { event: 'tracked'; text: string; at: string };
 export type ThreadLinkKind = 'dispatched' | 'report' | 'planned' | 'pr';
 export const THREAD_LINK_KINDS: readonly ThreadLinkKind[] = ['dispatched', 'report', 'planned', 'pr'];
+/** Who opened a conversation. Absent means the person did, as every thread before helm-started ones. */
+export type ThreadStarter = 'person' | 'helm';
 /** Open: still a conversation. Tracking: the helm resolved it, but linked work is still running. */
 export type ThreadState = 'open' | 'tracking' | 'resolved';
 /** Work a thread waits on while it is tracking, with its live state, read on demand. */
@@ -63,6 +65,8 @@ export interface HelmThread {
   notifiedAt?: string;
   outcome?: ThreadOutcome;
   relay?: ThreadRelay;
+  /** Set to 'helm' on a conversation the helm opened with `man thread new`. */
+  startedBy?: ThreadStarter;
 }
 /** Polls carry summaries, never the conversation or attachment bytes. */
 export interface ThreadSummary {
@@ -85,6 +89,8 @@ export interface ThreadSummary {
   cards: string[];
   waitingForHelm: boolean;
   outcome?: ThreadOutcome;
+  /** Set to 'helm' on a conversation the helm opened. */
+  startedBy?: ThreadStarter;
 }
 export interface ThreadView extends HelmThread {
   seenThrough?: number;

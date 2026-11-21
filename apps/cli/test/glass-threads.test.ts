@@ -466,3 +466,54 @@ it('opens the next conversation at its newest message after reading back through
   expect(scroller(g).scrollTop).toBe(bottom(g));
 });
 
+/** A thread the helm started: its summary, two linked cards (one answerable inline, one gone), and a linked dispatch. */
+function helmThread(d: GlassSnapshot): ThreadView {
+  const second = 'decision:0a1b2c3e', gone = 'decision:0a1b2c3f';
+  d.decisions = [KEY, second].map((key, i) => ({ key, thread: ID, title: i ? 'Approve in the glass?' : 'Use Helm?', detail: '', options: ['Yes', 'No'], attachments: [], askedBy: 'helm', askedAt: new Date(NOW - (2 - i) * 60_000).toISOString(), stateHash: `s${i}` }));
+  d.attention = [KEY, second].map((key, i) => ({ kind: 'decision', key, id: key, verb: 'decision', ageSecs: 0, stateHash: `s${i}` }));
+  d.threads = [{ ...summary(), startedBy: 'helm', cards: [KEY, second], unreadResponse: true, responseSeq: 1, seenThrough: 0 }];
+  return { ...view(), startedBy: 'helm', unreadResponse: true, responseSeq: 1, seenThrough: 0, notes: { decided: [], open: [] },
+    rounds: [{ at: AT, entries: [
+      { by: 'helm', text: 'Parked traps came up on three cards tonight.', attachments: [], at: AT, seq: 1 },
+      { card: KEY }, { card: gone }, { card: second },
+    ] }],
+    cards: [{ key: KEY, title: 'Use Helm?', options: ['Yes', 'No'], standing: true }, { key: second, title: 'Approve in the glass?', options: ['Yes', 'No'], standing: true }] };
+}
+
+it('marks a thread the helm started in the threads list', async () => {
+  const d = fleet(); helmThread(d);
+  d.threads!.push({ ...summary(), id: 'abcdef02-1234-4000-8000-abcdef012345', title: 'From you', cards: [] });
+  const g = await page(d, { hash: '#helm' });
+  expect(g.$(`#helm [data-thread="${ID}"] .thread-starter`)?.textContent).toBe('Started by the helm');
+  expect(g.$(`#helm [data-thread="${ID}"] .thread-starter svg`)).not.toBeNull();
+  expect(g.$(`#helm [data-thread="${ID}"] .dopen`)?.getAttribute('aria-label')).toBe('Unread response: Navigation, Started by the helm');
+  expect(g.$('#helm [data-thread="abcdef02-1234-4000-8000-abcdef012345"] .thread-starter')).toBeNull();
+});
+
+it('shows linked cards inline, answers one from the thread, and keeps previous and next in its modal', async () => {
+  const d = fleet(), detail = helmThread(d);
+  const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined, post: () => ({ status: 200, body: { ok: true } }) });
+  expect(g.$('.thread-timeline .from-helm .thread-text')?.textContent).toBe('Parked traps came up on three cards tonight.');
+  // The card replaced before it was answered is gone; the two that stand show their options in the thread.
+  const cards = g.$$('.thread-timeline .thread-card-entry');
+  expect(cards.map((el) => el.querySelector('button')?.textContent)).toEqual(['Use Helm?', 'Approve in the glass?']);
+  expect(cards.map((el) => [...el.querySelectorAll('.dopt .dlabel')].map((o) => o.textContent))).toEqual([['Yes', 'No'], ['Yes', 'No']]);
+  expect(g.$('.thread-card-entry .dkey')).toBeNull();
+  // A card opened from the thread steps through the open cards as the deck does.
+  (cards[0]!.querySelector('button') as HTMLElement).click(); await g.settle();
+  expect(g.$('.dmodal')?.getAttribute('data-decision')).toBe(KEY);
+  expect(g.$('.dmodal .dpos')?.textContent).toBe('1 of 2');
+  await click(g, '.dmodal .dnext');
+  expect(g.$('.dmodal')?.getAttribute('data-decision')).toBe('decision:0a1b2c3e');
+  await click(g, '.dmodal .dprev');
+  expect(g.$('.dmodal')?.getAttribute('data-decision')).toBe(KEY);
+  await click(g, '.dmodal .x');
+  expect(g.$('.dmodal')).toBeNull();
+  // Answering in the thread answers the card: the same request the modal sends.
+  const second = g.$$('.thread-card-entry')[1]!;
+  (second.querySelector('.dopt') as HTMLElement).click(); await g.settle();
+  (second.querySelector('.dsend') as HTMLElement).click(); await g.settle();
+  expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:0a1b2c3e', option: 'Yes', files: [] } });
+  expect(g.$$('.thread-card-entry')[1]?.querySelector('.danswered')?.textContent).toContain('answered');
+});
+

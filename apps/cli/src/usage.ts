@@ -79,6 +79,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
       '--session': { value: '<id>' },
       '--chore': {},
       '--id': { value: '<uuid>' },
+      '--thread': { value: '<thread-id>' },
     },
   },
   ls: { flags: { '--all': {} } },
@@ -90,7 +91,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   tmux: { flags: {}, positionals: '[<repo>]', maxPositionals: 1 },
   heavy: { flags: { '--bg': {}, '--json': {} }, positionals: '[-- <command>]' },
   logs: { flags: { '--follow': {}, '--full': {} }, positionals: '<uuid>' },
-  send: { flags: { '--compact': {}, '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' }, '--for-decision': { value: '<key>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
+  send: { flags: { '--compact': {}, '--session': { value: '<id>' }, '--attach': { value: '<file>', repeatable: true }, '--no-reply': {}, '--pr': { value: '<url|number>' }, '--for-decision': { value: '<key>' }, '--thread': { value: '<thread-id>' } }, positionals: '<uuid>|<trap-name>|wt:<trap> [<message...>]' },
   inbox: { flags: {}, positionals: '<uuid>' },
   attach: { flags: { '--print': {}, '--force': {} }, positionals: '<uuid>' },
   swap: {
@@ -329,6 +330,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
     positionals: '[<dispatch-id>]',
   },
   'man:threads': { flags: { '--grounds': { value: '<name>' } }, positionals: '[<thread-id>]' },
+  'man:thread': { subverbs: ['new'], maxPositionals: 1, flags: { '--title': { value: '<text>', required: true }, '--detail': { value: '<file.md>' }, '--link': { value: '<kind:ref>', repeatable: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: 'new' },
   'man:triage': { flags: { '--as': { value: 'bait|thread', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
   'man:discuss': { flags: { '--said': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<title|thread-id>' },
   'man:note': { flags: { '--decided': { value: '<line>', repeatable: true }, '--open': { value: '<line>', repeatable: true }, '--link': { value: '<kind:ref>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> [<note>]' },
@@ -358,7 +360,7 @@ COMMANDS['man:wait']!.flags['--after'] = { value: '<cursor>' };
 export const PROSE: Record<string, string> = {
   setup: `\`setup reviews\` derives your GitHub login (or --identity), writes a self-contained notify configuration,
 enables review notifications, and installs pick. Refuses installation while unrelated issue or PR-feedback pickup is enabled.`,
-  dispatch: `Queue work; prints id. Traps by default: the helm's unaddressed work is --trap-any, which waits for a free trap or starts one within the repo cap. --for is sticky. --headless: a headless one-off. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait. Local repo work: --fresh starts without prior conversation, with the brief and git progress; --continue keeps the session. Default: continue for --for and follow-ups, fresh for unaddressed work.`,
+  dispatch: `Queue work; prints id. Traps by default: the helm's unaddressed work is --trap-any, which waits for a free trap or starts one within the repo cap. --for is sticky. --headless: a headless one-off. --pool uses a warm headless worktree (exclusive with --for/--trap-any). --pr works on that open PR. --attach copies files; --session names the helm. Alias: set --bait. Local repo work: --fresh starts without prior conversation, with the brief and git progress; --continue keeps the session. Default: continue for --for and follow-ups, fresh for unaddressed work. --thread <id> links it to a helm thread.`,
   ls: `Queue, active, and recent done dispatches (--all includes chores). Alias: buoys.`,
   status: `Reconciled state for one dispatch, or all active without an id. A trap name,
 wt:<name>, or wt:<id> shows free/busy availability or its stowed/ghosted roster record. Alias: buoy.`,
@@ -378,11 +380,10 @@ moving other views. Closing the window ends the view, never a trap. Inside tmux 
 macOS it prints the command to run.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
-  send: `Steer a live chain, queue for pending work, or wake a finished chain
-as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
+  send: `Steer a live chain, queue for pending work, or wake a finished chain as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
 choose the follow-up's worker, harness, or model, use dispatch --follow-up with
 --for, --harness, or --model. --attach copies files. A claimed helm requires
---session <helm-id>. --compact queues /compact in Claude or the Codex TUI; shared Codex threads use thread/compact/start. Codex traps without an input route swap to a fresh session with git progress. Requires a live local trap. Other sends keep the session. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR.`,
+--session <helm-id>. --compact queues /compact in Claude or the Codex TUI; shared Codex threads use thread/compact/start. Codex traps without an input route swap to a fresh session with git progress. Requires a live local trap. Other sends keep the session. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR. --thread <id> links the receiving dispatch to a helm thread.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
@@ -544,7 +545,8 @@ Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:threads': `List conversations on these grounds, or read one with its notes, rounds and cards.`,
   'man:triage': `Classify a new glass message as bait or a discussion thread. Helm only.`,
   'man:discuss': `Record an open exchange from chat, or append a chat round to its existing thread. Helm only.`,
-  'man:note': `Replace decided/open notes or add a link: dispatched:<id>, report:<key>, planned:<https-url> or pr:<url>. Helm only.`,
+  'man:thread': `new: start a conversation for the person, unread until shown; prints its id and glass URL. --detail is your first message, such as a summary of the chat so far. --link (repeatable) takes the kinds man note does. Link more with man ask --thread, man note --link, and dispatch or send --thread. Helm only.`,
+  'man:note': `Replace decided/open notes or add a link: dispatched:<id>, report:<key>, planned:<https-url>, pr:<url> or decision:<key> (an existing card). Helm only.`,
   'man:say': `Write to the person in a conversation, with optional --attach files. It shows as unread in the glass. Helm only.`,
   'man:resolve': `Close a conversation with its outcome and a one-line note. While a linked dispatch, card, PR or todo is unfinished it tracks instead: man wait closes it when the work finishes and hands it back to the person if the work stalls. The person can reopen it. Helm only.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into

@@ -256,6 +256,22 @@ export function readDecision(key: string): DecisionMeta | undefined {
   return meta?.key === key ? meta : undefined;
 }
 
+/**
+ * Name the conversation a standing or answered card belongs to, so its modal
+ * shows that thread's notes and a `--replace` keeps it there. A card belongs to
+ * one conversation: naming another is refused. A withdrawn card is not changed.
+ */
+export function setDecisionThread(key: string, thread: string): void {
+  const dir = decisionDir(key);
+  if (!dir || !readDecision(key)) return;
+  withDecisionLock(key, () => {
+    const meta = readDecision(key);
+    if (!meta || meta.thread === thread) return;
+    if (meta.thread !== undefined) throw new DecisionError(`${key} already belongs to another conversation`, 409);
+    writeAtomic(path.join(dir, DECISION_JSON), `${JSON.stringify({ ...meta, thread }, null, 2)}\n`);
+  });
+}
+
 /** The retained directory of a withdrawn card, never a caller-supplied path. */
 export function archivedDecisionDir(key: string): string | undefined {
   const dir = decisionDir(key);
@@ -568,7 +584,11 @@ function checkOptions(raw: string[]): string[] {
  * `replace` names one standing decision to remove, or an answered one
  * awaiting the helm's ack, which it acks; its key is returned in `replaced`.
  */
-export function askDecision(opts: AskOptions): { meta: DecisionMeta; replaced: string[] } {
+export function askDecision(asked: AskOptions): { meta: DecisionMeta; replaced: string[] } {
+  // A replacement stays in the replaced card's conversation while that conversation can still take a card.
+  const inherited = asked.thread === undefined && asked.replace !== undefined ? readDecision(asked.replace)?.thread : undefined;
+  const inheritedState = inherited !== undefined ? readThread(inherited)?.state : undefined;
+  const opts: AskOptions = inheritedState !== undefined && inheritedState !== 'resolved' ? { ...asked, thread: inherited } : asked;
   const conversation = opts.thread ? readThread(opts.thread) : undefined;
   if (opts.thread && (!conversation || conversation.state === 'resolved' || (opts.grounds && conversation.grounds !== displayGrounds(opts.grounds, loadConfig())))) throw new DecisionError('Choose an open conversation on these grounds');
   // An answered card awaiting the helm may be replaced too: the new card is what the helm did with the answer.

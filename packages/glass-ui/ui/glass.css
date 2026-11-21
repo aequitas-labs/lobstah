@@ -4363,9 +4363,24 @@ footer .glass-brand {
   border-radius: 8px;
   background: var(--card);
 }
-.thread-card-entry > p {
+.thread-card-entry > p,
+.thread-card-entry > .thread-card-answer,
+.thread-card-entry > .danswered {
   flex: 1 0 100%;
   margin: 0;
+}
+.thread-card-answer .doptions {
+  margin-top: 0;
+}
+/* A conversation the helm opened: its wheel and words lead the row's meta. */
+.thread-starter {
+  color: var(--link);
+}
+.thread-starter svg {
+  width: 12px;
+  height: 12px;
+  margin: 0 4px 0 0;
+  vertical-align: -2px;
 }
 .thread-answer {
   color: var(--ok);
