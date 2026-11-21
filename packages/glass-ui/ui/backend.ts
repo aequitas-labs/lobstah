@@ -9,7 +9,6 @@ import type {
   GlassSettings,
   GlassSnapshot,
   StatsPage,
-  UmeReviews,
 } from '@lobstah/core';
 import type { GlassRead, GlassVerdict, GlassWrite } from './answers.js';
 import { GLASS_TABS } from '../src/glass-diff.js';
@@ -45,8 +44,6 @@ export interface GlassBackend {
   older(kind: GlassOlderKind, offset: number, limit: number): Promise<GlassRead<GlassOlderPage>>;
   /** The Stats tab's numbers and heatmap. */
   stats(): Promise<GlassRead<StatsPage>>;
-  /** ume artifacts waiting on your review, read from this machine's ume CLI. Absent: Reviews shows no ume section. */
-  umeReviews?(): Promise<GlassRead<UmeReviews>>;
   /** The Settings tab's values, masked by the server. */
   settings(): Promise<GlassRead<GlassSettings>>;
   /** One glass request (an answer, a view, an ack, a trap request…), with the page's write token. */
@@ -150,9 +147,6 @@ export function backend(): GlassBackend {
 
 /** Whether this page's source takes an action. Before a backend is set (the hosted glass's own pages), nothing optional shows. */
 export const can = (action: GlassAction): boolean => current?.capabilities.actions.has(action) ?? false;
-
-/** Whether this page's source reads ume review requests (only the local glass runs the ume CLI). */
-export const readsUme = (): boolean => !!current?.umeReviews;
 
 /** This page's source's capabilities; everything before a backend is set. */
 export const capabilities = (): GlassCapabilities => current?.capabilities ?? ALL_CAPABILITIES;

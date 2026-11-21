@@ -526,28 +526,6 @@ export interface Config {
   reviews: ReviewsConfig;
   /** `[permissions]`: additions to lobstah's Claude Code auto-mode profile. */
   permissions: PermissionsConfig;
-  /** `[ume]`: the ume projects whose review requests the glass's Reviews page reads. */
-  ume: UmeConfig;
-}
-
-/** `[ume]`: where the glass's Reviews page looks for ume artifacts waiting on your review. */
-export interface UmeConfig {
-  /** ume project ids, as `ume projects` lists them. Empty: Reviews shows no ume section. */
-  projects: string[];
-  /** Whose reviews count: a ume person id or email. Unset: the person `ume whoami` names. */
-  person?: string;
-}
-
-function parseUme(raw: unknown): UmeConfig {
-  if (raw === undefined) return { projects: [] };
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('[ume] must be a table');
-  const { projects, person, ...rest } = raw as Record<string, unknown>;
-  const unknown = Object.keys(rest)[0];
-  if (unknown !== undefined) throw new Error(`[ume].${unknown} is not a key: use projects or person`);
-  if (projects !== undefined && (!Array.isArray(projects) || projects.some((id) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id))))
-    throw new Error('[ume].projects must be a list of ume project ids, e.g. ["vr95mce908"]');
-  if (person !== undefined && (typeof person !== 'string' || !person.trim())) throw new Error('[ume].person must be a ume person id or email');
-  return { projects: [...new Set((projects as string[] | undefined) ?? [])], ...(person ? { person: (person as string).trim() } : {}) };
 }
 
 /**
@@ -890,7 +868,6 @@ export function loadConfig(): Config {
     attentionKinds: parseAttentionKinds(raw.attentionKinds ?? ((raw.reviews as { enabled?: boolean } | undefined)?.enabled ? [...DEFAULT_ATTENTION_KINDS, 'review'] : undefined)),
     reviews: withConfigPath(() => parseReviews(raw.reviews, reposRaw)),
     permissions: withConfigPath(() => parsePermissions(raw.permissions)),
-    ume: withConfigPath(() => parseUme(raw.ume)),
   };
 }
 

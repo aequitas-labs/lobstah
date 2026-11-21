@@ -18,7 +18,6 @@ import {
   decisionNumberKey,
   loadSettings,
   loadStats,
-  loadUmeReviews,
   openDecision,
   receive,
   reviewRequest,
@@ -247,7 +246,6 @@ function startGlass(): Array<() => void> {
     }
     if (route === 'stats') void loadStats();
     if (route === 'settings') void loadSettings();
-    if (route === 'reviews') void loadUmeReviews();
   });
   /** Whether a key lands in something the person is typing into. */
   const typing = (t: HTMLElement | null): boolean =>
@@ -317,7 +315,6 @@ function startGlass(): Array<() => void> {
   const polling = startPolling();
   if (getState().route === 'stats') void loadStats();
   if (getState().route === 'settings') void loadSettings();
-  if (getState().route === 'reviews') void loadUmeReviews();
   return [
     unsubscribe,
     unroute,

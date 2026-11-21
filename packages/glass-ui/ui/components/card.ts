@@ -53,9 +53,9 @@ export interface CardProps {
   context?: Children;
   contextTitle?: string;
   /**
-   * A fixed slot before the context text: an item's source logo, centered
-   * in 14px. It sits outside the text's clamp, so its tooltip and focus
-   * ring stay visible.
+   * A fixed slot before the context text: an item's source logo, on the
+   * text's first baseline like the repo icon. It sits outside the text's
+   * clamp, so its tooltip and focus ring stay visible.
    */
   lead?: Children;
   /** The card's one action, at the right of line 2. */
@@ -288,7 +288,7 @@ export function Card(p: CardProps) {
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
     <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}${p.person && html`<${PersonChip} person=${p.person} />`}${p.open && html`<${OpenArrow} open=${p.open} />`}</div>
     ${p.status && html`<div class="gline gstate">${p.status}</div>`}
-    ${(p.context || p.action || p.lead) && html`<div class="gline gcontext">${p.lead && html`<span class="glead">${p.lead}</span>`}<span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
+    ${(p.context || p.action || p.lead) && html`<div class="gline gcontext">${p.lead ? html`<span class="gctx"><span class="glead">${p.lead}</span><span class="gtext" title=${p.contextTitle}>${p.context}</span></span>` : html`<span class="gtext" title=${p.contextTitle}>${p.context}</span>`}${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
     ${p.now && html`<div class="gline gnow dim"><span class="gtext" title=${p.nowTitle}>${p.now}</span></div>`}
     ${p.foot && html`<div class="gline gfoot dim"><span class="gtext">${p.foot.left}</span>${p.foot.right && html`<span class="gright">${p.foot.right}</span>`}</div>`}
     ${p.actions && html`<div class="gline gactions" onClick=${(e: Event) => e.stopPropagation()}>${p.actions}</div>`}

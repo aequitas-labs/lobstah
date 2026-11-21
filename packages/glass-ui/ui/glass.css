@@ -953,23 +953,32 @@ tr.rowhead:hover {
 .gcontext {
   min-height: 28px;
 }
-/* The source logo (components/item-card.ts): a centered 14px slot before the context text, on its center line. */
+/*
+ * The source logo and the context text (components/card.ts lead): one group,
+ * centered in the row like a bare context, whose parts share the text's
+ * first baseline. The logo has no baseline of its own, so its bottom edge
+ * sits on the text's; it drops 1px and is 12px, as the repo icon does.
+ */
+.gctx {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .glead {
-  flex: 0 0 14px;
+  flex: 0 0 12px;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  align-self: center;
+  position: relative;
+  top: 1px;
 }
 .srclogo {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   padding: 0;
   margin: 0;
   border: 0;
@@ -988,6 +997,10 @@ tr.rowhead:hover {
   width: 14px;
   height: 14px;
   flex: none;
+}
+.srclogo .hostglyph {
+  width: 12px;
+  height: 12px;
 }
 /* The source's name: shown on hover, keyboard focus or a tap, above the logo. */
 .srctip {
@@ -1011,11 +1024,6 @@ tr.rowhead:hover {
 .srclogo:focus-visible .srctip,
 .srclogo.tip .srctip {
   display: block;
-}
-/* Why ume reviews can't show: one quiet line under its heading. */
-.rv-ume-note {
-  margin: var(--space-2) 0 0;
-  overflow-wrap: anywhere;
 }
 /* The repo icon (components/card.ts) sits on the text's baseline, a little apart from the name. */
 .repoicon {

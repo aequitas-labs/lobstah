@@ -6,7 +6,7 @@ import { dismissReview, hideLob, muteReviewPr, reviewRequest, setPrefs, showModa
 import type { ReviewRequestKind } from '../actions.js';
 import { html, type Children } from '../html.js';
 import { Age, Table, ageText } from './common.js';
-import { can, readsUme } from '../backend.js';
+import { can } from '../backend.js';
 import { getState, setState } from '../store.js';
 import { ActionIcon, Avatar, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone, MenuAction } from './card.js';
@@ -14,7 +14,6 @@ import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, StackCard
 import { ItemCard } from './item-card.js';
 import { GITHUB_REVIEW_SOURCE } from '../../../core/src/review-item.js';
 import type { ReviewAttention, ReviewRequestItem, ReviewLifecyclePhase, ReviewStatusMeaning } from '@lobstah/core';
-import type { GlassState } from '../store.js';
 import type { PrIconState } from './prs.js';
 import { Button } from './button.js';
 import { showToast } from './toast.js';
@@ -491,30 +490,6 @@ function card(r: GlassReview, canDraft: boolean, publish: boolean) {
   />`;
 }
 
-/**
- * The ume part of Reviews: the artifacts waiting on your review, or one
- * quiet line saying why they can't be shown. A source that can't read ume
- * (the hosted glass) shows nothing.
- */
-export function UmeReviewsSection({ ume }: { ume: GlassState['ume'] }): Children {
-  if (!readsUme()) return null;
-  const data = ume?.data;
-  if (data && !data.configured) return null;
-  if (!data && !ume?.error) return null;
-  const items = data?.items ?? [];
-  const note = !data
-    ? 'Couldn’t read ume reviews. Reload the page to try again.'
-    : data.missing
-      ? 'Install the ume CLI to see ume reviews here.'
-      : data.problems.length
-        ? `Couldn’t read ume ${data.problems.length === 1 ? 'project' : 'projects'} ${data.problems.map((p) => `${p.project} (${p.reason})`).join(', ')}.`
-        : undefined;
-  return html`<section class="rv-section" data-review-section="ume"><h2>Needs your review in ume (${items.length})</h2>
-    ${items.length ? html`<div class="cards">${items.map((item) => html`<${ItemCard} key=${item.id} item=${item} cls="rv-card" />`)}</div>` : !note && html`<p class="empty">No ume reviews need you</p>`}
-    ${note && html`<p class="dim rv-ume-note" data-ume-note>${note}</p>`}
-  </section>`;
-}
-
 /** What leaves a review's card: the asker, findings, reason, pending review and every action. */
 export function reviewModal(r: GlassReview) {
   const setup = getState().snapshot?.reviewSetup;
@@ -539,18 +514,8 @@ const REVIEW_MODE_LABELS: Record<NonNullable<GlassSnapshot['reviewSetup']>['mode
   'auto-review': 'Auto review',
 };
 
-/** Review rounds, then ume's review requests after Needs your review, and the current repo's settings; all settings are read-only. */
-export function Reviews({
-  inp,
-  setup,
-  repo = '',
-  ume,
-}: {
-  inp: SectionInputs['reviews'];
-  setup?: GlassSnapshot['reviewSetup'];
-  repo?: string;
-  ume?: GlassState['ume'];
-}) {
+/** Review rounds and the current repo's settings; all settings are read-only. */
+export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews']; setup?: GlassSnapshot['reviewSetup']; repo?: string }) {
   const effective = (repo && setup?.perRepo?.[repo]) || setup;
   const canDraft = effective?.mode !== 'notify';
   const publish = effective?.publish ?? false;
@@ -558,7 +523,7 @@ export function Reviews({
     setup?.enabled
       ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
-    ...reviewSections(inp.list).flatMap(({ id, title, groups, count }) => {
+    ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
       const heading = count === undefined ? title : `${title} (${count})`;
       const contents = groups.map(
         ({ stack, reviews }) =>
@@ -590,10 +555,7 @@ export function Reviews({
           }</section>`,
       );
       return id === 'needs'
-        ? [
-            html`<section class="rv-section" data-review-section=${id}><h2>${heading}</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`,
-            html`<${UmeReviewsSection} ume=${ume} />`,
-          ]
+        ? html`<section class="rv-section" data-review-section=${id}><h2>${heading}</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
         : html`<details class="rv-section" data-review-section=${id} open=${inp.expanded?.[id] === true} onToggle=${(event: Event) => {
             const expanded = (event.currentTarget as HTMLDetailsElement).open;
             if ((getState().prefs.reviewSections?.[id] === true) !== expanded)

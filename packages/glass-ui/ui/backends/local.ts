@@ -25,7 +25,6 @@ export const localBackend: GlassBackend = {
   decision: (key) => read(`/data/decision/${encodeURIComponent(key)}`),
   older: (kind, offset, limit) => read(`/data/older?kind=${kind}&offset=${offset}&limit=${limit}`, { cache: 'no-store' }),
   stats: () => read('/data/stats', { cache: 'no-store' }),
-  umeReviews: () => read('/data/ume-reviews', { cache: 'no-store' }),
   settings: () => read('/data/settings', { cache: 'no-store' }),
   request: (kind, payload, token) =>
     write('/requests', {

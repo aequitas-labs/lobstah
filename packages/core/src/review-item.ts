@@ -1,6 +1,6 @@
 /**
- * A review request as plain data, whatever its source: a GitHub PR that
- * asked for your review, a ume artifact in review. The glass renders every
+ * A review request as plain data, whatever its source; today a GitHub PR
+ * that asked for your review. The glass renders every
  * one with the same item card (glass-ui item-card.ts), drawing the source's
  * logo, the item's glyph and its chips from these fields. A source fills the
  * fields; it never sends markup, classes or colors. This module has no Node
@@ -8,7 +8,7 @@
  */
 
 /** Glyphs the glass draws. A source names one; the glass owns its artwork and color. */
-export const REVIEW_ITEM_GLYPHS = ['github', 'ume', 'source', 'pull-request', 'document'] as const;
+export const REVIEW_ITEM_GLYPHS = ['github', 'source', 'pull-request', 'document'] as const;
 export type ReviewRequestItemGlyph = (typeof REVIEW_ITEM_GLYPHS)[number];
 
 /**
@@ -129,9 +129,8 @@ export interface ReviewRequestItem {
   resolved?: boolean;
 }
 
-/** Brands the glass knows. */
+/** GitHub review requests carry the GitHub brand. */
 export const GITHUB_REVIEW_SOURCE: ReviewSource = { id: 'github', name: 'GitHub', icon: { glyph: 'github' } };
-export const UME_REVIEW_SOURCE: ReviewSource = { id: 'ume', name: 'ume', icon: { glyph: 'ume' } };
 
 /** The glyph for a phase: the source's variant for it, else the kind glyph. */
 export function reviewGlyphFor(glyph: ReviewKindGlyph, phase: ReviewLifecyclePhase): ReviewRequestItemGlyph {
@@ -181,16 +180,3 @@ export const REVIEW_LIFECYCLE_TOKEN: Readonly<Record<ReviewLifecyclePhase, 'pr-o
   closed: 'pr-closed',
 };
 
-/**
- * What the glass's Reviews page reads from ume: the artifacts waiting on
- * your review, and why anything could not be read. `missing` means the ume
- * CLI is not installed, so nothing was read; `problems` names the projects
- * that failed while the others were read.
- */
-export interface UmeReviews {
-  /** `[ume] projects` lists at least one project. Unset, the page shows no ume section. */
-  configured: boolean;
-  items: ReviewRequestItem[];
-  missing?: boolean;
-  problems: Array<{ project: string; reason: string }>;
-}

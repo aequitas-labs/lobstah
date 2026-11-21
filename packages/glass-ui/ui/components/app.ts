@@ -78,7 +78,7 @@ export function App({ state }: { state: GlassState }) {
     if (t === 'reviews')
       return [
         html`<${SectionHead} title="Reviews" page />`,
-        html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} ume=${state.ume} />`,
+        html`<${Reviews} inp=${inp.reviews} setup=${d?.reviewSetup} repo=${state.prefs.repo} />`,
       ];
     if (t === 'todos')
       return [
