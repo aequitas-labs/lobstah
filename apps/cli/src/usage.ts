@@ -380,11 +380,10 @@ moving other views. Closing the window ends the view, never a trap. Inside tmux 
 macOS it prints the command to run.`,
   logs: `The dispatch's normalized event stream — last 50 events by default,
 --full for everything, --follow to tail.`,
-  send: `Steer a live chain, queue for pending work, or wake a finished chain
-as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
+  send: `Steer a live chain, queue for pending work, or wake a finished chain as a follow-up; the worker's next note wakes man wait (--no-reply: none). To
 choose the follow-up's worker, harness, or model, use dispatch --follow-up with
 --for, --harness, or --model. --attach copies files. A claimed helm requires
---session <helm-id>. --compact queues /compact in Claude or the Codex TUI; shared Codex threads use thread/compact/start. Codex traps without an input route swap to a fresh session with git progress. Requires a live local trap. Other sends keep the session. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR. --thread <id> links the dispatch that receives it to a helm thread.`,
+--session <helm-id>. --compact queues /compact in Claude or the Codex TUI; shared Codex threads use thread/compact/start. Codex traps without an input route swap to a fresh session with git progress. Requires a live local trap. Other sends keep the session. Trap-name messages arrive at its next park. --pr: the follow-up pushes to that PR. --thread <id> links the receiving dispatch to a helm thread.`,
   inbox: `Read and acknowledge pending messages (workers: check at natural checkpoints).`,
   attach: `Open the dispatch's own harness session in its worktree. Refused while
 working unless --force; --print shows the command instead of running it.`,
