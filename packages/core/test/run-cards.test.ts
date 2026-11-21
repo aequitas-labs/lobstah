@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   askDecision,
+  checkScriptInterpreter,
   decisionDir,
   findRunProposal,
   parseRunInput,
@@ -137,7 +138,8 @@ describe("a trap's proposal", () => {
     expect(runProposalFileName('/x/my deploy;rm.py')).toBe('my_deploy_rm.py');
   });
 
-  it('refuses a script whose #! interpreter is not installed', () => {
+  // The interpreter check is POSIX-only (checkScriptInterpreter): Windows has no /usr/bin/env to look for.
+  it.skipIf(process.platform === 'win32')('refuses a script whose #! interpreter is not installed', () => {
     expect(() => proposeRunScript('aaaaaaaa-0000-4000-8000-000000000003', script('m.py', '#!/usr/bin/env lobstah-no-such-python\nprint(1)\n'))).toThrow(
       /lobstah-no-such-python is not installed/,
     );
@@ -146,6 +148,12 @@ describe("a trap's proposal", () => {
   });
 });
 
+it('checks no interpreter on Windows, where the glass runs no card', () => {
+  expect(() => checkScriptInterpreter(scriptInterpreter('#!/usr/bin/env lobstah-no-such-python\n'), '', 'win32')).not.toThrow();
+  expect(() => checkScriptInterpreter(scriptInterpreter('#!/opt/none/python3\n'), '', 'win32')).not.toThrow();
+});
+
+// These read real POSIX interpreters (/bin/sh, /usr/bin/env), which Windows doesn't have.
 describe.skipIf(process.platform === 'win32')("a script's interpreter", () => {
   it('reads the #! line, splitting its arguments, and falls back to bash without one', () => {
     expect(scriptInterpreter('#!/usr/bin/env python3\n"""`git clean -xdf`"""\n')).toEqual({ source: 'shebang', program: '/usr/bin/env', args: ['python3'], label: '/usr/bin/env python3' });

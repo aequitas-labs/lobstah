@@ -168,8 +168,13 @@ function isExecutable(file: string): boolean {
  * Refuse a script whose interpreter is not on this Mac: the `#!` program
  * must exist and be executable, and for `/usr/bin/env <name>` the name must
  * be found on `searchPath` (the PATH the run gets).
+ *
+ * The check runs only on a POSIX system, where the glass can run a card. On
+ * Windows a `#!` program such as `/bin/bash` has no file at that path and the
+ * glass doesn't run cards, so posting one there checks nothing.
  */
-export function checkScriptInterpreter(interpreter: ScriptInterpreter, searchPath: string = process.env.PATH ?? ''): void {
+export function checkScriptInterpreter(interpreter: ScriptInterpreter, searchPath: string = process.env.PATH ?? '', platform: NodeJS.Platform = process.platform): void {
+  if (platform === 'win32') return;
   if (!isExecutable(interpreter.program))
     throw new ScriptInterpreterMissing(`the script's #! line names ${interpreter.label}, but ${interpreter.program} is not an executable file on this Mac`, interpreter.program);
   if (path.basename(interpreter.program) !== 'env') return;
