@@ -394,6 +394,33 @@ export async function loadStats(): Promise<void> {
   }
 }
 
+/** How long the Reviews page keeps a ume read before a poll reads ume again. */
+export const UME_REFRESH_MS = 60_000;
+let umeInflight = false;
+
+/**
+ * Read ume's review requests for the Reviews page. `stale` reads only when
+ * the last read is older than UME_REFRESH_MS: a poll passes it, so ume runs
+ * once a minute while Reviews is open and never while the glass is closed.
+ */
+export async function loadUmeReviews(stale = false): Promise<void> {
+  const read = backend().umeReviews;
+  if (!read || umeInflight) return;
+  const last = getState().ume;
+  if (stale && last?.at !== undefined && Date.now() - last.at < UME_REFRESH_MS) return;
+  umeInflight = true;
+  setState({ ume: { ...last, loading: true } });
+  try {
+    const r = await read.call(backend());
+    if (!r.ok) throw new Error(`/data/ume-reviews answered ${r.status}`);
+    setState({ ume: { data: r.data, at: Date.now() } });
+  } catch {
+    setState({ ume: { ...getState().ume, loading: false, error: 'unreadable', at: Date.now() } });
+  } finally {
+    umeInflight = false;
+  }
+}
+
 let settingsInflight = false;
 
 /** The Settings tab's values: masked by the server, and only read. */

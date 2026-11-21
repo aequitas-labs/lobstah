@@ -12,7 +12,8 @@ import { Button } from './button.js';
  * - Line 3: what is happening now.
  * - Line 4, under a thin divider: where it is, with a count or time at the right.
  * - A PR or review card instead puts status chips under the title and its
- *   buttons in a bar along the bottom (prs.ts prShapedCard).
+ *   buttons in a bar along the bottom (prs.ts prShapedCard); a review card
+ *   also puts its source's logo before the context (item-card.ts ItemCard).
  *
  * State is shown one of two ways. A chip (a lowercase word in a pill) is for
  * state you read; an edge (a colored left border plus the word) is for state
@@ -51,6 +52,12 @@ export interface CardProps {
   state?: CardState;
   context?: Children;
   contextTitle?: string;
+  /**
+   * A fixed slot before the context text: an item's source logo, centered
+   * in 14px. It sits outside the text's clamp, so its tooltip and focus
+   * ring stay visible.
+   */
+  lead?: Children;
   /** The card's one action, at the right of line 2. */
   action?: Children;
   now?: Children;
@@ -281,7 +288,7 @@ export function Card(p: CardProps) {
   return html`<div ...${p.attrs ?? {}} class=${cls} onClick=${p.onClick} style=${p.onClick ? undefined : 'cursor:default'}>
     <div class="gline gtop">${p.iconFirst && icon}<b class="gtitle" title=${p.titleAttr}>${p.title}</b>${!p.iconFirst && icon}<span class="gfill"></span>${!p.status && state}${p.person && html`<${PersonChip} person=${p.person} />`}${p.open && html`<${OpenArrow} open=${p.open} />`}</div>
     ${p.status && html`<div class="gline gstate">${p.status}</div>`}
-    ${(p.context || p.action) && html`<div class="gline gcontext"><span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
+    ${(p.context || p.action || p.lead) && html`<div class="gline gcontext">${p.lead && html`<span class="glead">${p.lead}</span>`}<span class="gtext" title=${p.contextTitle}>${p.context}</span>${p.action && html`<span class="gaction">${p.action}</span>`}</div>`}
     ${p.now && html`<div class="gline gnow dim"><span class="gtext" title=${p.nowTitle}>${p.now}</span></div>`}
     ${p.foot && html`<div class="gline gfoot dim"><span class="gtext">${p.foot.left}</span>${p.foot.right && html`<span class="gright">${p.foot.right}</span>`}</div>`}
     ${p.actions && html`<div class="gline gactions" onClick=${(e: Event) => e.stopPropagation()}>${p.actions}</div>`}

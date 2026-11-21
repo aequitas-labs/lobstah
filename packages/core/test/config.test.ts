@@ -175,6 +175,20 @@ describe('config precedence: descriptor > repo > global > default', () => {
       expect(() => loadConfig()).toThrow(error);
     }
   });
+  it('[ume] lists the projects Reviews reads; a bad id or key is refused', () => {
+    expect(loadConfig().ume).toEqual({ projects: [] });
+    fs.writeFileSync(path.join(home, 'config.toml'), `[ume]\nprojects = ["vr95mce908", "ourrwyi8p5", "vr95mce908"]\nperson = "sam@example.com"\n`);
+    expect(loadConfig().ume).toEqual({ projects: ['vr95mce908', 'ourrwyi8p5'], person: 'sam@example.com' });
+    for (const [body, error] of [
+      ['projects = "vr95mce908"', /\[ume\]\.projects must be a list of ume project ids/],
+      ['projects = ["has space"]', /\[ume\]\.projects must be a list of ume project ids/],
+      ['person = ""', /\[ume\]\.person must be a ume person id or email/],
+      ['project = ["vr95mce908"]', /\[ume\]\.project is not a key/],
+    ] as const) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[ume]\n${body}\n`);
+      expect(() => loadConfig()).toThrow(error);
+    }
+  });
   it('defaults auto-stow to 60 minutes and validates its override', () => {
     expect(loadConfig().soak.idleStowMins).toBe(60);
     for (const minutes of [0, 30, 120]) {
