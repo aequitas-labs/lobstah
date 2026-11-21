@@ -39,7 +39,9 @@ afterEach(() => removeTempDir(root));
 
 const found = (result: ReturnType<typeof run>) => {
   expect(result.status, result.stdout + result.stderr).toBe(0);
-  expect(result.stdout.trim()).toBe(`Would deploy main from ${slash(checkout)}. Dry run: nothing changed.`);
+  // Git's own spelling of the checkout: on Windows the temp dir can be an 8.3 short path git expands.
+  const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: checkout, encoding: 'utf8' }).trim();
+  expect(result.stdout.trim()).toBe(`Would deploy main from ${top}. Dry run: nothing changed.`);
 };
 
 it('finds the checkout from LOBSTAH_REPO when run from a copy', () => {
