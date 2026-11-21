@@ -1897,8 +1897,18 @@ both a full key such as `report:helm:fleet:<id>` and its bare form
 The helm uses `man triage <id> --as bait|thread`, then keeps `man note <id>
 --decided <line> --open <line>` current. Repeat either flag to replace that set of
 notes; an empty line clears it. `--link dispatched:<id>|report:<key>|planned:<url>`
-adds context. `man ask --thread <id>` asks on a card; its answer stays on the card
-and the answer event names the conversation. Bait always goes through the helm.
+adds context; `--link decision:<key>` attaches an existing card. `man ask --thread
+<id>` asks on a card; its answer stays on the card and the answer event names the
+conversation. `man ask --replace <key>` keeps the replaced card's conversation.
+Bait always goes through the helm.
+
+The helm can start a conversation too: `man thread new --title "<title>"
+[--detail <summary.md>] [--link <kind:ref>]...` prints its id and glass URL. Use
+it for a discussion that spans more than one card or will come back, including
+one from chat, with `--detail` summarizing the discussion so far. `--link` takes
+the kinds `man note` does. The conversation is unread for the person and waits on
+no one. `dispatch --thread <id>` and `send --thread <id>` link the dispatch that
+does the work; its card and live state show in the conversation.
 
 `man say <id> "<text>" [--attach <file>]...` writes to the person in the
 conversation. The message joins the current round after what the person said
@@ -1942,12 +1952,15 @@ A conversation reads as one continuous chat: the helm's notes pinned on top
 message in order, with the person's messages on the right and the helm's beside
 its wheel on the left. Rounds stay in the stored conversation for the helm but
 are not shown. Cards, links and triage show inline; the outcome and Reopen sit
-at the end. A conversation opens at its newest message and stays there as
+at the end. A standing card takes its answer in the conversation, with the same
+options, text and files as its modal; opening it shows the modal, with previous
+and next over the open cards. A card replaced before it was answered drops out. A conversation opens at its newest message and stays there as
 messages arrive, unless you have scrolled up to read.
 
 The glass's Threads page shows one list of conversations as compact decision cards.
 Unread responses use the decision highlight; a state icon distinguishes messages
-waiting for the helm from conversations waiting for you. Resolved conversations
+waiting for the helm from conversations waiting for you. A conversation the helm
+started says so beside the helm's wheel. Resolved conversations
 sit in a collapsed section below. A conversation opens in a full-page sheet over
 the list, as a report does; Back returns to Threads. The orange wheel button on
 Threads and On deck opens one message composer; the helm classifies

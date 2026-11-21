@@ -13,6 +13,7 @@ import { SectionHead } from './section-head.js';
 import { LinkedText } from './links.js';
 import { Age, ImageThumb } from './common.js';
 import { DecisionRow } from './decision-row.js';
+import { InlineDecisionAnswer } from './decisions.js';
 import { isIconVerb, VerbIcon, WorkStateIcon, type WorkStateIconState } from './run-status.js';
 import { dispatchCard, dispatchHeadCard } from './dispatches.js';
 import { ReportEmbed } from './decision-embeds.js';
@@ -206,7 +207,14 @@ const SYSTEM_EVENT: Record<string, string> = { thread: 'Discussion started', bai
 function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: string }) {
   if ('card' in entry) {
     const card = view.cards.find((c) => c.key === entry.card);
-    return html`<article class="thread-entry thread-card-entry"><${WorkIcon} kind="card" />${card?.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} onClick=${() => openDecision(entry.card)}>${card?.title ?? 'Open card'}<//>${card?.answer ? html`<p class="thread-answer">${LinkedText([card.answer.option, card.answer.text].filter(Boolean).join(' · '))}</p>` : !card?.standing && html`<p class="dim">Closed card</p>`}${card?.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
+    // A card replaced before it was answered is gone; its replacement follows in the conversation.
+    if (!card) return null;
+    const answer = card.answer
+      ? html`<p class="thread-answer">${LinkedText([card.answer.option, card.answer.text].filter(Boolean).join(' · '))}</p>`
+      : card.standing
+        ? html`<${InlineDecisionAnswer} cardKey=${card.key} />`
+        : html`<p class="dim">Closed card</p>`;
+    return html`<article class="thread-entry thread-card-entry"><${WorkIcon} kind="card" />${card.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} onClick=${() => openDecision(card.key)}>${card.title}<//>${answer}${card.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
   }
   if ('link' in entry)
     return html`<div class="thread-entry thread-system"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} /></div>`;
@@ -336,14 +344,17 @@ export function threadStatus(item: ThreadSummary) {
   if (item.waitingForHelm) return { verb: 'queued' as const, label: 'Waiting for helm' };
   return { verb: 'done' as const, label: 'Acknowledged' };
 }
+/** The threads list's mark on a conversation the helm opened, beside its wheel. */
+const HELM_STARTED = 'Started by the helm';
 function ThreadCard({ item }: { item: ThreadSummary }) {
   const status = threadStatus(item);
   const preview =
     item.responseText === 'Notes updated' ? (item.openLine ?? item.responseText) : (item.responseText ?? item.openLine ?? status.label);
-  return html`<${DecisionRow} title=${item.title} label=${`${item.unreadResponse ? 'Unread response: ' : ''}${item.title}`} state=${item.unreadResponse ? 'unread' : 'read'}
+  const byHelm = item.startedBy === 'helm';
+  return html`<${DecisionRow} title=${item.title} label=${`${item.unreadResponse ? 'Unread response: ' : ''}${item.title}${byHelm ? `, ${HELM_STARTED}` : ''}`} state=${item.unreadResponse ? 'unread' : 'read'}
     attrs=${{ 'data-thread': item.id, class: `drow thread-card ${item.unreadResponse ? 'unread' : 'read'}` }}
     prefix=${html`<span class="thread-state" role="img" aria-label=${status.label} title=${status.label}><span aria-hidden="true"><${VerbIcon} verb=${status.verb} /></span></span>`}
-    preview=${preview} meta=${[item.grounds, ' · ', Age(item.updatedAt), ' ago']}
+    preview=${preview} meta=${[byHelm && html`<span class="thread-starter">${HelmIcon}${HELM_STARTED}</span>`, byHelm && ' · ', item.grounds, ' · ', Age(item.updatedAt), ' ago']}
     onOpen=${() => openThread(item.id)} />`;
 }
 export function Threads() {

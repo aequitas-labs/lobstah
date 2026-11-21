@@ -133,6 +133,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     if (!found || typeof found.id !== 'string') throw new Error(`boat ${name} not found; enroll it with wharf login on that boat`);
     return found.id;
   };
+  if ((cmd === 'dispatch' || cmd === 'send') && opts.opt('--thread') !== undefined) throw new Error('--thread requires local grounds; nothing was sent');
   switch (cmd) {
     case 'dispatch': {
       if (opts.has('--fresh') || opts.has('--continue')) throw new Error('session choices require local grounds');

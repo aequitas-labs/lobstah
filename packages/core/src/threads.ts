@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { atomicRenameSync, lobstahHome, uniqueTempPath } from './paths.js';
 import { withDirLock } from './dir-lock.js';
-import { answerFileType, ANSWER_FILES_MAX, readDecision, readDecisionAnswer, readArchivedDecision } from './decisions.js';
+import { answerFileType, ANSWER_FILES_MAX, readDecision, readDecisionAnswer, readArchivedDecision, setDecisionThread } from './decisions.js';
 import type { DecisionUpload } from './decisions.js';
 import type { Attachment } from './types.js';
 import { postNotice } from './notices.js';
@@ -142,29 +142,90 @@ export function sayThread(id: string, input: { text: unknown; uploads?: Decision
  */
 const relayResponse = (item: HelmThread, at: string, text: string): HelmThread => item.relay ? recordThreadResponse(item, at, text) : item;
 export const triageThread = (id: string, kind: unknown, now = new Date()) => update(id, (item) => { const at = nextAt(item, now); return relayResponse(classifyThread(item, kind, at), at, kind === 'thread' ? 'Discussion started' : 'Bait received'); });
+/**
+ * A `kind:ref` link as the entry it adds: `dispatched:`, `report:`, `planned:`
+ * or `pr:` adds a link entry; `decision:<key>` adds an existing card. The card
+ * must exist and belong to no other conversation.
+ */
+function threadLinkEntry(link: string, text: string | undefined, at: string, thread: string): ThreadEntry {
+  const split = link.indexOf(':'), kind = link.slice(0, split), ref = link.slice(split + 1);
+  if (kind === 'decision') {
+    const key = ref.startsWith('decision:') ? ref : `decision:${ref}`;
+    const card = readDecision(key) ?? readArchivedDecision(key);
+    if (!card) throw new ThreadError(`No card ${key}`, 404);
+    if (card.thread !== undefined && card.thread !== thread) throw new ThreadError(`${key} already belongs to another conversation`, 409);
+    return { card: key };
+  }
+  if (!THREAD_LINK_KINDS.includes(kind as ThreadLinkKind) || !ref || ref.length > 1000 || (kind === 'planned' && !ref.startsWith('https://')) || (kind === 'pr' && !parsePrRef(ref))) throw new ThreadError('Choose a dispatch, report, card, PR or HTTPS plan link');
+  return { link: kind as ThreadLinkKind, ref, text: threadWords(text ?? ref, 'a link note', 1000), at };
+}
+const hasCard = (item: HelmThread, key: string) => item.rounds.some((round) => round.entries.some((entry) => 'card' in entry && entry.card === key));
+/** Add link entries; a card already in the conversation is not added twice. */
+function addLinks(item: HelmThread, entries: readonly ThreadEntry[]): HelmThread {
+  return entries.reduce((next, entry) => ('card' in entry && hasCard(next, entry.card) ? next : appendThreadEntry(next, entry)), item);
+}
+/** Record the conversation on each card a link added, so its modal shows the notes and a replacement stays here. */
+function claimCards(id: string, entries: readonly ThreadEntry[]): void {
+  for (const entry of entries) if ('card' in entry) setDecisionThread(entry.card, id);
+}
 export function noteThread(id: string, notes: { decided?: string[]; open?: string[]; link?: string; text?: string }, now = new Date()): HelmThread {
-  return update(id, (item) => {
+  let added: ThreadEntry[] = [];
+  const item = update(id, (item) => {
     open(item);
     const at = nextAt(item, now);
     const lines = (list: string[]) => {
       if (list.length > 50) throw new ThreadError('Keep notes to 50 lines');
       return list.filter((s) => s.trim()).map((s) => threadWords(s, 'a note', 2000));
     };
-    let entry: ThreadEntry | undefined;
-    if (notes.link) {
-      const split = notes.link.indexOf(':'), kind = notes.link.slice(0, split), ref = notes.link.slice(split + 1);
-      if (!THREAD_LINK_KINDS.includes(kind as ThreadLinkKind) || !ref || ref.length > 1000 || (kind === 'planned' && !ref.startsWith('https://')) || (kind === 'pr' && !parsePrRef(ref))) throw new ThreadError('Choose a dispatch, report, PR or HTTPS plan link');
-      entry = { link: kind as ThreadLinkKind, ref, text: threadWords(notes.text ?? ref, 'a link note', 1000), at };
-    }
+    added = notes.link ? [threadLinkEntry(notes.link, notes.text, at, id)] : [];
+    const entry = added[0];
+    const newCard = !!entry && 'card' in entry && !hasCard(item, entry.card);
     const noted = notes.decided !== undefined || notes.open !== undefined;
-    const { rounds } = entry ? appendThreadEntry(item, entry) : item;
-    return relayResponse({ ...item, rounds, ...(noted ? { notesAt: at } : {}), notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at }, at, entry && 'text' in entry ? entry.text : THREAD_NOTES_UPDATED);
+    const { rounds } = addLinks(item, added);
+    const said = newCard ? THREAD_CARD_READY : entry && 'text' in entry ? entry.text : THREAD_NOTES_UPDATED;
+    const next: HelmThread = { ...item, rounds, ...(noted ? { notesAt: at } : {}), notes: { decided: notes.decided === undefined ? item.notes.decided : lines(notes.decided), open: notes.open === undefined ? item.notes.open : lines(notes.open) }, updatedAt: at, lastHelmAt: at };
+    // A new card is a reply the person reads, as man ask --thread records it; other links update the thread quietly.
+    return newCard ? recordThreadResponse(next, at, said) : relayResponse(next, at, said);
   });
+  claimCards(id, added);
+  return item;
+}
+/**
+ * A conversation the helm opens to collect a discussion that spans cards,
+ * dispatches or chat sessions. Its `detail` is the helm's first message, such
+ * as a summary of the chat so far; without one, the title is the response.
+ * It is unread for the person until shown, and nothing waits on the helm.
+ */
+export function startHelmThread(input: { grounds: string; title: unknown; detail?: unknown; links?: readonly string[]; now?: Date }): HelmThread {
+  groundDir(input.grounds);
+  const id = randomUUID(), at = (input.now ?? new Date()).toISOString();
+  const title = threadWords(input.title, 'a title', 200);
+  const detail = input.detail === undefined ? undefined : threadWords(input.detail, 'a summary');
+  const links = (input.links ?? []).map((link) => threadLinkEntry(link, undefined, at, id));
+  const opened: HelmThread = { id, grounds: input.grounds, title, text: detail ?? '', attachments: [], kind: 'thread', state: 'open', startedBy: 'helm',
+    notes: { decided: [], open: [] }, rounds: [{ at, entries: [] }], createdAt: at, updatedAt: at, lastPersonAt: at, lastHelmAt: at };
+  const said = detail !== undefined ? sayInThread(opened, detail, [], at) : recordThreadResponse(opened, at, title);
+  const item = addLinks(said, links);
+  save(item);
+  claimCards(id, links);
+  return item;
+}
+/** Link a dispatch to a conversation, named for its brief. Quiet: the person reads the dispatch's own state. */
+export function linkThreadDispatch(id: string, dispatch: string, brief: string | undefined, now = new Date()): HelmThread {
+  return noteThread(id, { link: `dispatched:${dispatch}`, text: dispatchThreadTitle(brief) ?? dispatch }, now);
+}
+/** Refuse a link before the work it names starts: the conversation must be open or tracking, on these grounds. */
+export function checkThreadForLink(id: string, grounds: string): HelmThread {
+  const item = readThread(id);
+  if (!item) throw new ThreadError('Conversation not found', 404);
+  if (item.grounds !== grounds) throw new ThreadError('This conversation belongs to another grounds', 409);
+  open(item);
+  return item;
 }
 export function linkThreadCard(id: string, key: string, now = new Date()): HelmThread {
   return update(id, (item) => {
     open(item);
-    if (item.rounds.some((round) => round.entries.some((entry) => 'card' in entry && entry.card === key))) return item;
+    if (hasCard(item, key)) return item;
     const { rounds } = appendThreadEntry(item, { card: key });
     const at = nextAt(item, now);
     return recordThreadResponse({ ...item, rounds, updatedAt: at, lastHelmAt: at }, at, THREAD_CARD_READY);
@@ -216,7 +277,7 @@ export function threadSummaries(grounds?: string, now = Date.now()): ThreadSumma
     ...responseState(item), id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, state: item.state, updatedAt: item.updatedAt,
     roundCount: item.rounds.length, ...(item.about ? { about: item.about } : {}), ...(item.notes.open[0] ? { openLine: item.notes.open[0] } : {}),
     cards: threadCards(item).filter((card) => card.standing).map((card) => card.key),
-    waitingForHelm: item.state === 'open' && (!item.lastHelmAt || newestPersonAt(item) > item.lastHelmAt), ...(item.outcome ? { outcome: item.outcome } : {}) }));
+    waitingForHelm: item.state === 'open' && (!item.lastHelmAt || newestPersonAt(item) > item.lastHelmAt), ...(item.outcome ? { outcome: item.outcome } : {}), ...(item.startedBy ? { startedBy: item.startedBy } : {}) }));
 }
 export function remindThreads(grounds?: string, remindMs = 900_000, now = Date.now()): void {
   for (const item of listThreads(grounds)) {

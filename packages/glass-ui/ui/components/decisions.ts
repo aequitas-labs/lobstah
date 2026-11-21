@@ -12,6 +12,7 @@ import {
   closeDecision,
   dismissAlert,
   markViewed,
+  modalOrder,
   openDecision,
   sendAnswer,
   setDraft,
@@ -58,7 +59,8 @@ function attachments(key: string, list: Attachment[]) {
   )}</div>`;
 }
 
-function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: string) {
+/** `hotkeys` is false outside the modal, where number keys do not choose. */
+function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: string, hotkeys = true) {
   const key = c.key;
   // A permission card takes only an explicit option; a text reply can't grant anything.
   const permission = c.kind === 'decision' && c.permission;
@@ -69,7 +71,7 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
   const sending = !!draft?.sending;
   // 1..N choose an option, N+1 the text field; only 1–9 are keys, and none on a touch screen.
   const touch = touchOnly();
-  const hotkey = (i: number) => (!touch && i + 1 <= HOTKEY_MAX ? String(i + 1) : undefined);
+  const hotkey = (i: number) => (hotkeys && !touch && i + 1 <= HOTKEY_MAX ? String(i + 1) : undefined);
   const textKey = hotkey(options.length);
   // A run card's one option, Decline, sits in the run row beside Run (RunDecline).
   const shown = c.kind === 'decision' && c.run ? [] : options;
@@ -88,6 +90,21 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
     !permission &&
       html`<${Composer} draftKey=${key} draft=${draft} accept=${accept} textKey=${textKey} label=${options.length && !instant ? 'Your answer, in your own words' : 'Your answer'} placeholder=${options.length && !instant ? 'Add to your answer, or answer in your own words' : 'Your answer'} onSend=${() => sendAnswer(key)} hideError=${!!(instant && draft?.option)} />`,
   ];
+}
+
+/**
+ * A standing card's answer form inside its conversation. It shares the
+ * modal's draft, so an answer here answers the card and the modal shows it
+ * sent. Cards that run, grant access or start an app answer in the modal
+ * only; for those, and for a card not open here, it renders nothing.
+ */
+export function InlineDecisionAnswer({ cardKey }: { cardKey: string }) {
+  const state = getState();
+  const draft = state.drafts[cardKey];
+  if (draft?.sent) return html`<div class="danswered ok">answered · ${draft.sent}</div>`;
+  const c = modalOrder().find((card) => card.key === cardKey);
+  if (c?.kind !== 'decision' || c.readOnly || c.handoff || c.permission || c.permissionsProposal || c.run || c.appStart) return null;
+  return html`<div class="thread-card-answer">${answerForm(c, draft, (state.snapshot?.answerLimits?.extensions ?? []).join(','), false)}</div>`;
 }
 
 /**
