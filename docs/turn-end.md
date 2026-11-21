@@ -102,6 +102,27 @@ not move what `read` shows the agent: the agent reads it later.
 - A record ends when its registration file is removed while the trap is
   live, or when its dispatch finishes.
 
+## Claude Code background tasks
+
+A Claude Code trap's Stop-hook park also wakes when one of that session's
+background tasks completes, fails or is killed. The task notification then
+reaches the trap, which reads the result and continues. The trap does not
+need a message from the helm to collect it. Codex and hookless listeners
+keep their existing behavior; tools should still register turn waits.
+
+The park reads the `transcript_path` supplied in the Stop payload. Claude
+Code appends a `queue-operation` with `operation: "enqueue"`, the session's
+`sessionId`, and a terminal `<task-notification>` before delivering the
+notification. The park checks new transcript bytes on its existing polling
+interval (at most 1.5 seconds), without changing the transcript. It does not
+scan other sessions or task output directories.
+
+Completions already present when the park starts do not wake it. Task IDs
+suppress duplicate enqueues; queue removals and delivered attachments do
+not wake it. Notifications tied to Bash calls running lobstah's own park
+commands are ignored. A missing or unreadable transcript leaves the other
+park waits running as before.
+
 ## Doctor
 
 `lobstah doctor` has a `turn waits` row. It names no tool:

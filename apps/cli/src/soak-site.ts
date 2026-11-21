@@ -51,6 +51,8 @@ export function inspectSoakSite(cwd: string, repos: Record<string, RepoConfig>):
 
 export interface HookInput {
   session_id?: string;
+  /** Claude Code's session transcript, supplied by the harness on Stop. */
+  transcript_path?: string;
   cwd?: string;
   hook_event_name?: string;
   stop_hook_active?: boolean;

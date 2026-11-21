@@ -5,6 +5,7 @@ import {
   TRAP_INSTRUCTION_RULE, unhandled, unhandledTrapMessages, unreportedTrapBait,
 } from '@lobstah/core';
 import type { Lane } from '@lobstah/core';
+import { ClaudeTaskCompletions } from './claude-task-completions.js';
 
 /** Leave time for hook setup and output before the harness's 14,500s limit. */
 export const HOOK_PARK_MS = 14_400_000;
@@ -32,11 +33,14 @@ function dispatchInboxInstruction(id: string, lane: Lane): string | undefined {
  * deadlines renew in the shell) or run as `soak --wait` in a hookless
  * session (wakes print plain; --timeout 0 is an explicit one-shot probe).
  */
-export async function soakPark(trapId: string, timeout: string | undefined, plain = false): Promise<ParkEnd> {
+export async function soakPark(trapId: string, timeout: string | undefined, plain = false, transcriptPath?: string): Promise<ParkEnd> {
   // Both plugins allow 14,500 seconds. Quiet deadlines renew independently;
   // return to the harness before its absolute deadline kills this hook.
   const hookDeadline = plain ? Infinity : Date.now() + HOOK_PARK_MS;
-  const sessionId = readTrap(trapId)?.sessionId;
+  const registration = readTrap(trapId);
+  const sessionId = registration?.sessionId;
+  const tasks = !plain && registration?.harness === 'claude' && sessionId && typeof transcriptPath === 'string'
+    ? new ClaudeTaskCompletions(transcriptPath, sessionId) : undefined;
   let idle = new IdleWait(sessionId, loadConfig().wait, timeout);
   const rearm = `lobstah soak --wait${timeout === undefined ? '' : ` --timeout ${timeout}`}`;
   // Self-instructive in plain mode (axi.md P9): every exit tells the session
@@ -111,6 +115,10 @@ export async function soakPark(trapId: string, timeout: string | undefined, plai
         block([baitBrief(caught.id, caught.descriptor), dispatchInboxInstruction(caught.id, caught.lane)].filter(Boolean).join('\n\n'));
         return 'woke';
       }
+    }
+    if (tasks?.poll()) {
+      block('A background task in this Claude Code session finished. Read its task notification and act on the result.');
+      return 'woke';
     }
     if (!idle.probe && Date.now() >= hookDeadline) {
       console.log(JSON.stringify({ decision: 'block', reason: PARK_RENEWAL_REASON }));

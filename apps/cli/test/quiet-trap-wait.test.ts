@@ -92,6 +92,27 @@ it('a plain listener stays in its process across quiet deadlines and exits on si
   expect(output).not.toContain('timeout: true');
 }, 10_000);
 
+it('Claude Stop watches the transcript supplied by its hook payload', async () => {
+  const worktree = path.join(home, 'worktree'); fs.mkdirSync(worktree);
+  const signed = signOnTrap({ repo: 'r', worktree, cwd: worktree, harness: 'claude', sessionId: 'task-session', ttlMs: 60_000 });
+  if (!('ok' in signed)) throw new Error('held');
+  const transcript = path.join(home, 'task-session.jsonl'); fs.writeFileSync(transcript, '');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CLAUDE|CODEX|LOBSTAH_TRAP_TICKET)/.test(key)));
+  const child = spawn(process.execPath, [cli, 'hook', 'stop', '--timeout', '0.05'], { cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  children.push(child);
+  let output = ''; child.stdout!.on('data', chunk => { output += String(chunk); });
+  let errors = ''; child.stderr!.on('data', chunk => { errors += String(chunk); });
+  const exited = new Promise<void>(resolve => child.once('close', () => resolve()));
+  child.stdin!.end(JSON.stringify({ session_id: 'task-session', hook_event_name: 'Stop', transcript_path: transcript }));
+  for (let i = 0; i < 100 && !readTrap(signed.ok.trapId)?.parkedAt; i++) await sleep(20);
+  expect(readTrap(signed.ok.trapId)?.parkedAt).toBeDefined();
+  fs.appendFileSync(transcript, JSON.stringify({ type: 'queue-operation', operation: 'enqueue', sessionId: 'task-session',
+    content: '<task-notification>\n<task-id>test-task</task-id>\n<status>completed</status>\n</task-notification>' }) + '\n');
+  await exited;
+  expect(child.exitCode, errors).toBe(0);
+  expect(JSON.parse(output)).toEqual({ decision: 'block', reason: expect.stringContaining('background task') });
+}, 10_000);
+
 it.each(['paused', 'needs-decision'] as const)('a Codex trap parked on %s returns a send arriving after the hook started', async verb => {
   const worktree = path.join(home, 'worktree'); fs.mkdirSync(worktree);
   const signed = signOnTrap({ repo: 'r', worktree, cwd: worktree, harness: 'codex', sessionId: 'steered-session', ttlMs: 60_000 });
