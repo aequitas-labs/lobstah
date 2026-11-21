@@ -6,11 +6,15 @@ import { dismissReview, hideLob, muteReviewPr, reviewRequest, setPrefs, showModa
 import type { ReviewRequestKind } from '../actions.js';
 import { html, type Children } from '../html.js';
 import { Age, Table, ageText } from './common.js';
-import { can } from '../backend.js';
+import { can, readsUme } from '../backend.js';
 import { getState, setState } from '../store.js';
-import { ActionIcon, Avatar, CardLink, githubAvatarUrl, SplitButton } from './card.js';
+import { ActionIcon, Avatar, githubAvatarUrl, SplitButton } from './card.js';
 import type { CardPerson, CardTone, MenuAction } from './card.js';
-import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, StackCard, dispatchTrap, prShapedCard } from './prs.js';
+import { MergeIntent, MergeWhenGreen, PrStateIcon, PrTags, StatusChip, StackCard, dispatchTrap } from './prs.js';
+import { ItemCard } from './item-card.js';
+import { GITHUB_REVIEW_SOURCE } from '../../../core/src/review-item.js';
+import type { ReviewAttention, ReviewRequestItem, ReviewLifecyclePhase, ReviewStatusMeaning } from '@lobstah/core';
+import type { GlassState } from '../store.js';
 import type { PrIconState } from './prs.js';
 import { Button } from './button.js';
 import { showToast } from './toast.js';
@@ -411,50 +415,104 @@ const showReview = (r: GlassReview) => () => {
   showModal('review', r.key);
 };
 
+const PHASE: Record<PrIconState, ReviewLifecyclePhase> = { open: 'active', draft: 'draft', merged: 'completed', closed: 'closed' };
+const PHASE_LABEL: Record<PrIconState, string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
+// Review tones are never info; it maps to the dim edge and chip.
+const ATTENTION: Record<CardTone, ReviewAttention> = { bad: 'needs-you', warn: 'working', ok: 'ready', dim: 'none', info: 'none' };
+const MEANING: Record<CardTone, ReviewStatusMeaning> = { bad: 'needs-you', warn: 'pending', ok: 'done', dim: 'neutral', info: 'neutral' };
+
 /**
- * A review card, in the PR card's layout (prShapedCard): the PR icon and
- * title; the PR lifecycle and review status tags;
- * then repo · age · #number · 🪤 the trap drafting it; then its main action
- * as a big button (draft, or send the drafted verdict) with Skip in its ▾
- * menu, or dismiss on a wharf; then the Open icon at the bar's right, named
- * Open draft once there is one. Who asked, the findings and the reason are in its modal.
+ * A GitHub review request as a review item: the PR's lifecycle, the
+ * round's status chip and the muted chip, repo · age · #number · 🪤 the
+ * trap drafting it, who asked, and Open (Open draft once there is one).
+ * The chips, edge and order are the ones the review card always showed.
+ */
+export function githubReviewRequestItem(r: GlassReview): ReviewRequestItem {
+  const state = reviewPrState(r);
+  const status = reviewStatus(r);
+  const trap = dispatchTrap([r.dispatch]);
+  const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;
+  const person = reviewPerson(r);
+  return {
+    id: r.key,
+    source: GITHUB_REVIEW_SOURCE,
+    title: r.title,
+    kind: 'pull request',
+    glyph: { kind: 'pull-request' },
+    lifecycle: { phase: PHASE[state], label: PHASE_LABEL[state] },
+    statuses: [
+      // The lifecycle chip already says merged or closed.
+      ...(status.word.toLowerCase() === state
+        ? []
+        : [{ label: status.word, meaning: MEANING[status.tone], unread: !reviewUpdating(r) && !!reviewUnreadReason(r) }]),
+      ...(r.mutedAt ? [{ label: 'muted', meaning: 'neutral' as const }] : []),
+    ],
+    attention: ATTENTION[reviewTone(r)],
+    person: {
+      id: person.login,
+      ...(person.name ? { name: person.name } : {}),
+      ...(person.avatarUrl ? { avatarUrl: person.avatarUrl } : {}),
+      role: person.role,
+    },
+    context: [
+      { kind: 'project', value: r.repo },
+      { kind: 'time', value: r.requestedAt },
+      { kind: 'reference', value: `#${r.number}` },
+      ...(trap ? [{ kind: 'owner' as const, value: trap }] : []),
+    ],
+    requestedAt: r.requestedAt,
+    target: r.reviewUrl,
+    actions: [{ label: draft ? 'Open draft' : 'Open', href: draft ?? r.reviewUrl, placement: 'open' }],
+    resolved: !OPEN.has(r.state),
+  };
+}
+
+/**
+ * A review card, through the item card: the PR icon and title; the PR
+ * lifecycle and review status chips; the GitHub logo, then repo · age ·
+ * #number · 🪤 the trap drafting it; then its main action as a big button
+ * (draft, or send the drafted verdict) with Skip in its ▾ menu, or dismiss
+ * on a wharf; then the Open icon at the bar's right, named Open draft once
+ * there is one. Who asked, the findings and the reason are in its modal.
  */
 function card(r: GlassReview, canDraft: boolean, publish: boolean) {
-  const draft = r.staged ? (r.stagedReviewUrl ?? r.reviewUrl) : undefined;
-  const open = showReview(r);
-  return prShapedCard({
-    key: r.key,
-    title: r.title,
-    titleAttr: r.title,
-    prState: reviewPrState(r),
-    status: [html`<${ReviewTags} r=${r} />`, posted(r)],
-    tail: html`<${MergeIntent} p=${mergePr(r)} />`,
-    tone: reviewTone(r),
-    repo: r.repo,
-    number: r.number,
-    at: r.requestedAt,
-    trap: dispatchTrap([r.dispatch]),
-    person: reviewPerson(r),
-    actions: [
+  return html`<${ItemCard}
+    key=${r.key}
+    item=${githubReviewRequestItem(r)}
+    status=${[posted(r), html`<${MergeIntent} p=${mergePr(r)} />`]}
+    controls=${[
       mergePr(r)?.mergeRequest && html`<${MergeWhenGreen} p=${mergePr(r)} />`,
       html`<${ReviewActions} r=${r} canDraft=${r.mode ? r.mode !== 'notify' : canDraft} publish=${r.publish ?? publish} split />`,
-      html`<${CardLink} href=${draft ?? r.reviewUrl} label=${draft ? 'Open draft' : 'Open'} onOpen=${() => {
-        markReviewOpened(r);
-      }} />`,
-    ],
-    quiet: !OPEN.has(r.state),
-    cls: 'rv-card' + (r.seenAt || r.acknowledgedAt ? ' seen' : ''),
-    attrs: {
-      id: 'review-' + encodeURIComponent(r.key),
-      'data-review': r.key,
-      role: 'button',
-      tabindex: '0',
-      onKeyDown: (e: KeyboardEvent) => {
-        if (e.key === 'Enter' && e.target === e.currentTarget) open();
-      },
-    },
-    onClick: open,
-  });
+    ]}
+    onFollow=${() => markReviewOpened(r)}
+    onOpen=${showReview(r)}
+    cls=${'rv-card' + (r.seenAt || r.acknowledgedAt ? ' seen' : '')}
+    attrs=${{ id: 'review-' + encodeURIComponent(r.key), 'data-review': r.key }}
+  />`;
+}
+
+/**
+ * The ume part of Reviews: the artifacts waiting on your review, or one
+ * quiet line saying why they can't be shown. A source that can't read ume
+ * (the hosted glass) shows nothing.
+ */
+export function UmeReviewsSection({ ume }: { ume: GlassState['ume'] }): Children {
+  if (!readsUme()) return null;
+  const data = ume?.data;
+  if (data && !data.configured) return null;
+  if (!data && !ume?.error) return null;
+  const items = data?.items ?? [];
+  const note = !data
+    ? 'Couldn’t read ume reviews. Reload the page to try again.'
+    : data.missing
+      ? 'Install the ume CLI to see ume reviews here.'
+      : data.problems.length
+        ? `Couldn’t read ume ${data.problems.length === 1 ? 'project' : 'projects'} ${data.problems.map((p) => `${p.project} (${p.reason})`).join(', ')}.`
+        : undefined;
+  return html`<section class="rv-section" data-review-section="ume"><h2>Needs your review in ume (${items.length})</h2>
+    ${items.length ? html`<div class="cards">${items.map((item) => html`<${ItemCard} key=${item.id} item=${item} cls="rv-card" />`)}</div>` : !note && html`<p class="empty">No ume reviews need you</p>`}
+    ${note && html`<p class="dim rv-ume-note" data-ume-note>${note}</p>`}
+  </section>`;
 }
 
 /** What leaves a review's card: the asker, findings, reason, pending review and every action. */
@@ -481,8 +539,18 @@ const REVIEW_MODE_LABELS: Record<NonNullable<GlassSnapshot['reviewSetup']>['mode
   'auto-review': 'Auto review',
 };
 
-/** Review rounds and the current repo's settings; all settings are read-only. */
-export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews']; setup?: GlassSnapshot['reviewSetup']; repo?: string }) {
+/** Review rounds, then ume's review requests after Needs your review, and the current repo's settings; all settings are read-only. */
+export function Reviews({
+  inp,
+  setup,
+  repo = '',
+  ume,
+}: {
+  inp: SectionInputs['reviews'];
+  setup?: GlassSnapshot['reviewSetup'];
+  repo?: string;
+  ume?: GlassState['ume'];
+}) {
   const effective = (repo && setup?.perRepo?.[repo]) || setup;
   const canDraft = effective?.mode !== 'notify';
   const publish = effective?.publish ?? false;
@@ -490,7 +558,7 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
     setup?.enabled
       ? html`<div class="rv-controls"><span>Review mode · ${repo || 'default'}: ${REVIEW_MODE_LABELS[effective?.mode ?? 'notify']}</span><span>Publish: ${publish ? 'on' : 'off'}</span><span class="dim">${setup.identity ?? 'GitHub identity'} · pick ${setup.running ? 'running' : 'not running'} · read-only</span></div>`
       : html`<div class="empty">Enable review notifications: <code>lobstah setup reviews</code></div>`,
-    ...reviewSections(inp.list).map(({ id, title, groups, count }) => {
+    ...reviewSections(inp.list).flatMap(({ id, title, groups, count }) => {
       const heading = count === undefined ? title : `${title} (${count})`;
       const contents = groups.map(
         ({ stack, reviews }) =>
@@ -522,7 +590,10 @@ export function Reviews({ inp, setup, repo = '' }: { inp: SectionInputs['reviews
           }</section>`,
       );
       return id === 'needs'
-        ? html`<section class="rv-section" data-review-section=${id}><h2>${heading}</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`
+        ? [
+            html`<section class="rv-section" data-review-section=${id}><h2>${heading}</h2>${groups.length ? contents : html`<p class="empty">No reviews need you</p>`}</section>`,
+            html`<${UmeReviewsSection} ume=${ume} />`,
+          ]
         : html`<details class="rv-section" data-review-section=${id} open=${inp.expanded?.[id] === true} onToggle=${(event: Event) => {
             const expanded = (event.currentTarget as HTMLDetailsElement).open;
             if ((getState().prefs.reviewSections?.[id] === true) !== expanded)

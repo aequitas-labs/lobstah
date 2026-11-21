@@ -1,4 +1,4 @@
-import { loadSettings, loadStats, markStale, receive, receiveBeats, refreshDetail } from './actions.js';
+import { loadSettings, loadStats, loadUmeReviews, markStale, receive, receiveBeats, refreshDetail } from './actions.js';
 import { getState } from './store.js';
 import { sendPresence } from './presence.js';
 import { backend } from './backend.js';
@@ -9,7 +9,8 @@ import { backend } from './backend.js';
  * reads changed, and only its beats (server time, heartbeats) apply. Each
  * snapshot goes to the store; rendering is Preact's. An open dispatch modal
  * refreshes its detail after every poll, and an open Stats tab its numbers
- * (/data/stats). Every poll also reports this page's
+ * (/data/stats); an open Reviews tab re-reads ume once its last read is a
+ * minute old (/data/ume-reviews). Every poll also reports this page's
  * presence (presence.ts).
  */
 
@@ -40,6 +41,7 @@ export async function poll(): Promise<void> {
     void refreshDetail();
     if (getState().route === 'stats') void loadStats();
     if (getState().route === 'settings') void loadSettings();
+    if (getState().route === 'reviews') void loadUmeReviews(true);
   } catch (e) {
     markStale();
   } finally {

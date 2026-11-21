@@ -572,6 +572,22 @@ Requests land silently in the Reviews inbox with a tab count, never on deck or t
 
 Dismiss closes only that review round. A later commit, review request or re-request, or reopening can create a fresh round. **Mute this PR** suppresses future rounds until you choose **Unmute**; muted PRs remain visible in Reviews. Posted reviews show their posting time and link.
 
+## `[ume]` — ume review requests in the glass
+
+The glass Reviews page also lists ume artifacts that wait on your review, under **Needs your review in ume**. Each card shows the artifact's title, its kind (its set role, such as plan, or ume's kind), its revision, who asked and when, and an **Open in ume** button. The page reads ume with the `ume` CLI on this machine (`ume artifacts --json`, then `ume activity --json` and `ume people --json` for a project with something in review). It reads when Reviews opens, and again about once a minute while Reviews stays open. Nothing runs while the glass is closed, and the daemon never reads ume. An artifact counts when it is in review and its newest review request went to you with no verdict from you since. A request older than the newest 500 activity entries is not seen. The hosted glass shows no ume section.
+
+```toml
+[ume]
+projects = ["vr95mce908", "ourrwyi8p5"]
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `projects` | `[]` | ume project ids, as `ume projects` lists them. Empty: Reviews shows no ume section and runs no `ume` command. |
+| `person` | the person `ume whoami` names | Whose reviews count: a ume person id or email. |
+
+When `ume` isn't installed, or a project can't be read (for example, no `ume login` token reaches it), the ume section says so in one line, and the GitHub rows still show.
+
 ## `[permissions]` — the Claude Code auto-mode profile
 
 Traps and the helm run Claude Code in auto mode. `lobstah permissions apply`

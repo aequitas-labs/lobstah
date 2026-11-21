@@ -9,6 +9,7 @@ import { dispatchUsageLimit, trapUsageLimit, usageLimitGroups } from '@lobstah/c
 import { reviewTools } from './review-tools.js';
 import { takeSlackRequest } from './slack-threads.js';
 import { readPrDetails } from './pr-details.js';
+import { readUmeReviews } from './ume-reviews.js';
 import { glassSettings } from './glass-settings.js';
 import { readStats, readStatsPage } from './stats.js';
 import * as os from 'node:os';
@@ -96,7 +97,7 @@ import {
   TodoError,
   heavyGlassView,
 } from '@lobstah/core';
-import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane } from '@lobstah/core';
+import type { AnswerSource, Attachment, ClaudeProcess, Descriptor, GlassDispatch, GlassFullSnapshot, GlassViewer, GlassMessage, GlassOlderKind, GlassReport, GlassTrap, Lane, UmeReviews } from '@lobstah/core';
 import { ackWalkingItem } from './attention-ack.js';
 import { compareByLastUpdate, dispatchUpdateTimes, lastRealUpdateMs } from './dispatch-order.js';
 import type { WalkingAck } from './attention-ack.js';
@@ -972,6 +973,8 @@ export function serveGlass(
     presence?: GlassPresence;
     /** Read a fresh PR description with this server's forge sign-in. */
     prDetails?: typeof readPrDetails;
+    /** Read the ume review requests the Reviews page shows (tests pass a fake). */
+    umeReviews?: () => Promise<UmeReviews>;
     /** Run-card challenges this server issued (tests share one to sign them). */
     runChallenges?: RunChallenges;
     runWindows?: RunWindows;
@@ -994,6 +997,12 @@ export function serveGlass(
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   // A caller's own snapshot function runs here; the default builds on the snapshot thread.
   const thread = options.snapshot ? undefined : startSnapshotThread();
+  // Pages that ask while a read is running share it, so several open tabs start one set of ume calls.
+  let umeRead: Promise<UmeReviews> | undefined;
+  const umeReviews = (): Promise<UmeReviews> =>
+    (umeRead ??= (options.umeReviews ?? (() => readUmeReviews(loadConfig().ume)))().finally(() => {
+      umeRead = undefined;
+    }));
   const logged = new Set<string>();
   const focusToken = randomBytes(32).toString('hex');
   // In every ETag: a restarted glass (a new page token) never matches an old one.
@@ -1659,6 +1668,16 @@ export function serveGlass(
       const ok = req.method === 'GET';
       res.writeHead(ok ? 200 : 405, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(ok ? readStatsPage() : { error: 'GET required' }));
+    } else if (req.url === '/data/ume-reviews') {
+      // The Reviews page's ume rows: read from the ume CLI when the page asks, on this machine only.
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'GET required' })); return;
+      }
+      if (!isOwnHost(req.headers.host)) { res.writeHead(403); res.end(); return; }
+      void umeReviews().then(value => {
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(value));
+      }).catch(error => fail(req, res, error));
     } else if (req.url === '/data/settings') {
       // The Settings tab: read-only, with secrets masked before they leave this function.
       const ok = req.method === 'GET';

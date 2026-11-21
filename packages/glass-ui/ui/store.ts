@@ -1,5 +1,5 @@
 import type { GlassSettings } from '@lobstah/core';
-import type { GlassOlderKind, GlassSnapshot, StatsPage } from '@lobstah/core';
+import type { GlassOlderKind, GlassSnapshot, StatsPage, UmeReviews } from '@lobstah/core';
 import { withOlder } from '../src/glass-diff.js';
 import type { DispatchDetail, GlassOlder, GlassPrefs, GlassRoute, ModalRef } from '../src/glass-diff.js';
 
@@ -87,6 +87,11 @@ export interface GlassState {
   settingsError: string | null;
   /** The heatmap day that holds keyboard focus (the grid's one tab stop). */
   statsFocus: string | null;
+  /**
+   * The Reviews page's ume rows (/data/ume-reviews), read when Reviews opens
+   * and again while it stays open. Unset until the first read starts.
+   */
+  ume?: { data?: UmeReviews; error?: string; loading?: boolean; at?: number };
 }
 
 /** An image shown over the page: where it loads from, and its name. */

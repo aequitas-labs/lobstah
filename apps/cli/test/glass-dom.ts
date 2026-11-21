@@ -1,6 +1,6 @@
 import type { GlassSettings } from '@lobstah/core';
 import { Window } from 'happy-dom';
-import type { GlassFullSnapshot, GlassOlderKind } from '@lobstah/core';
+import type { GlassFullSnapshot, GlassOlderKind, UmeReviews } from '@lobstah/core';
 import { olderPage, pollBody } from '../src/glass-poll.js';
 
 /**
@@ -63,6 +63,8 @@ export interface GlassDomOptions {
   now: number;
   /** What `GET /data/settings` answers; absent, it answers 500. */
   settings?: GlassSettings;
+  /** What `GET /data/ume-reviews` answers; absent, no ume projects are configured. */
+  ume?: UmeReviews;
   /** Optional installed-app API; absent in browsers that do not support it. */
   badge?: (count: number) => Promise<void>;
   /** The page path, e.g. `/report/<key>`; the default is `/`. */
@@ -149,6 +151,7 @@ export async function loadGlass(page: string, snapshot: GlassFullSnapshot, opts:
     if (supplied) return json(supplied.status, supplied.body);
     if (typeof url === 'string' && (url.startsWith('/data/decision/') || url.startsWith('/api/checklist?'))) return json(404, { reason: 'Document not found.' });
     if (url === '/data/settings') return opts.settings ? json(200, opts.settings) : json(500, { error: 'no settings' });
+    if (url === '/data/ume-reviews') return json(200, opts.ume ?? { configured: false, items: [], problems: [] });
     if (typeof url === 'string' && url.startsWith('/data/dispatch/')) {
       dataFetched.push(url);
       const id = decodeURIComponent(url.slice('/data/dispatch/'.length));
