@@ -27,7 +27,7 @@ interface Snapshot extends Omit<GhPrView, 'reviews'> {
   url: string;
   reviews?: Connection<NonNullable<GhPrView['reviews']>[number]>;
   comments?: Connection<{ id: string; updatedAt: string }>;
-  reviewThreads?: Connection<{ isResolved: boolean }>;
+  reviewThreads?: Connection<{ isResolved: boolean; comments?: Connection<{ createdAt: string; author?: { login?: string } }> }>;
   commits?: Connection<{ commit: { statusCheckRollup?: { contexts?: Connection<NonNullable<GhPrView['statusCheckRollup']>[number]> } } }>;
 }
 interface Cached {
@@ -74,7 +74,7 @@ export function cachedPrView(ref: PrRef): GhPrView | undefined {
 const fields = `number url title author{login} state isDraft isCrossRepository headRefOid baseRefName baseRefOid headRefName mergeStateStatus reviewDecision createdAt mergedAt closedAt updatedAt autoMergeRequest{enabledAt mergeMethod enabledBy{login}}
   reviews(last:100){nodes{author{login} state submittedAt} pageInfo{hasPreviousPage endCursor}}
   comments(last:1){nodes{id updatedAt} pageInfo{endCursor}}
-  reviewThreads(first:100){nodes{isResolved} pageInfo{hasNextPage endCursor}}
+  reviewThreads(first:100){nodes{isResolved comments(last:10){nodes{createdAt author{login}} pageInfo{hasPreviousPage}}} pageInfo{hasNextPage endCursor}}
   commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
     ... on CheckRun{name status conclusion detailsUrl startedAt completedAt checkSuite{app{name slug} workflowRun{workflow{name}}}}
     ... on StatusContext{context state targetUrl createdAt}} pageInfo{hasNextPage endCursor}}}}}}`;
@@ -112,6 +112,8 @@ function toView(s: Snapshot): GhPrView {
     reviews: s.reviews?.nodes ?? [],
     statusCheckRollup: contexts?.nodes ?? [],
     unresolvedThreads: s.reviewThreads?.nodes?.filter((t) => !t.isResolved).length,
+    lastInlineCommentAt: s.reviewThreads?.nodes?.flatMap((t) => t.comments?.nodes ?? [])
+      .filter((c) => !s.author?.login || c.author?.login !== s.author.login).map((c) => c.createdAt).sort().at(-1),
   };
   // Match gh's flattened rollup shape so checks with the same name but different apps stay distinct.
   view.statusCheckRollup = view.statusCheckRollup?.map((c) => {
@@ -241,6 +243,7 @@ export function preparePrWatchBatch(
           const incomplete =
             raw.reviews?.pageInfo?.hasPreviousPage ||
             raw.reviewThreads?.pageInfo?.hasNextPage ||
+            raw.reviewThreads?.nodes?.some((t) => t.comments?.pageInfo?.hasPreviousPage) ||
             raw.commits?.nodes?.[0]?.commit.statusCheckRollup?.contexts?.pageInfo?.hasNextPage ||
             answer.errors?.some((e) => e.path?.includes(`pr${ref.number}`));
           // Every complete snapshot was just read, regardless of this watch's

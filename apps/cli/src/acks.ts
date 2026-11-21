@@ -102,7 +102,7 @@ export function prStateHash(pr: PrEvidence): string {
     checks: pr.checks,
     unresolvedThreads: pr.review?.unresolvedThreads,
     changesRequested: pr.review?.changesRequested ?? false,
-    repair: pr.repair ? { headSha: pr.repair.headSha, kind: pr.repair.kind, status: pr.repair.status, reason: pr.repair.reason } : undefined,
+    repair: pr.repair ? { headSha: pr.repair.headSha, kind: pr.repair.kind, status: pr.repair.status, reason: pr.repair.reason, stoppedAt: pr.repair.stoppedAt } : undefined,
   });
 }
 

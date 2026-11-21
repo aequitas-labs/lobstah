@@ -415,10 +415,10 @@ wait ends, the normal rules apply again.
 the head the repair pushed and did not merge. lobstah then queues no repair
 for that PR, marks its repair `gave-up`, raises `pr:conflict` (or
 `pr:checks`, `pr:review`) attention that names the cap, and posts one
-`repair-stopped` notice. The count resets when the PR merges or closes,
+`repair-stopped` notice. A PR comment alerts its requested reviewers, or its owner when no reviewer is requested, with the release command and the option to address it by hand. Failed comments retry on the next repair pass. The count resets on a new submitted request for changes or a new inline reviewer comment, when the PR merges or closes,
 when a push that is not the repair's moves the head, and on
 `lobstah watch release <key>`, which prints `repairsResumed` with the PRs it
-resumed.
+resumed. Release also reports `repairsHeld` when a live or queued dispatch already holds the PR or branch. Automatic repairs wait for that dispatch to finish.
 
 **A repair pushes** to its PR's head branch, and so does a rebase chore
 from pickup's merge loop. The descriptor of each names its PR (`pr`), so

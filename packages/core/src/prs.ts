@@ -48,7 +48,7 @@ export interface PrRecord extends PrEvidence {
   humanGates?: string[];
   /**
    * Consecutive lobstah repairs that made no merge progress. It survives
-   * head changes; a push by anyone else or `lobstah watch release` resets it.
+   * head changes; new reviewer input, a push by anyone else, or `lobstah watch release` resets it.
    */
   repairStreak?: RepairStreak;
   /** Last daemon repair, independent of the current PR head and no-progress counter. */
@@ -173,6 +173,20 @@ export function recordPrDispatch(key: string, dispatchId: string): void {
   });
 }
 
+/** Retain reviewer input across incomplete or older observations, so one input resets the budget once. */
+function latestReviewTimestamp(observed?: string, recorded?: string): string | undefined {
+  if (!observed) return recorded;
+  return !recorded || Date.parse(observed) > Date.parse(recorded) ? observed : recorded;
+}
+
+/** A submitted request for changes or inline reviewer comment starts a fresh repair round. */
+function hasNewReviewerInput(observed: PrEvidence, recorded: PrRecord): boolean {
+  const newer = (next?: string, previous?: string): boolean =>
+    !!next && Date.parse(next) > Date.parse(previous ?? '1970-01-01');
+  return newer(observed.review?.lastChangesRequestedAt, recorded.review?.lastChangesRequestedAt) ||
+    newer(observed.review?.lastInlineCommentAt, recorded.review?.lastInlineCommentAt);
+}
+
 /**
  * Write one observation. Fields come from the new observation (an absent
  * optional field keeps the previous value; a new title replaces the old one);
@@ -205,6 +219,10 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
       dispatches,
       observedHeadShas: [...new Set([...(before?.observedHeadShas ?? []), before?.headSha, pr.headSha].filter((s): s is string => !!s))],
       standingSince,
+      ...(merged.review ? { review: { ...merged.review,
+        lastChangesRequestedAt: latestReviewTimestamp(merged.review.lastChangesRequestedAt, before?.review?.lastChangesRequestedAt),
+        lastInlineCommentAt: latestReviewTimestamp(merged.review.lastInlineCommentAt, before?.review?.lastInlineCommentAt),
+      } } : {}),
       observations: (before?.observations ?? 0) + 1,
       firstSeenAt,
       headSince: sinceOf(before?.headSha === pr.headSha, before?.headSince, before?.observedAt, pr.observedAt),
@@ -221,6 +239,13 @@ export function upsertPr(pr: PrEvidence, dispatchId?: string): { before?: PrReco
       // A merged or closed PR ends the run of repairs without progress.
       ...(pr.state === 'OPEN' ? {} : { repairStreak: undefined }),
     };
+    if (before && hasNewReviewerInput(pr, before)) {
+      after.repairStreak = undefined;
+      // Keep a live repair claim; completion must not charge the new review round.
+      // A stop at either limit is lifted, and a new round gets its own per-head budget.
+      if (after.repair?.status === 'repairing') after.repair = { ...after.repair, attempts: 0, checks: undefined, observationsAtRepair: undefined };
+      else if (after.repair?.status !== 'blocked') after.repair = undefined;
+    }
     writePr(after);
     return { before, after };
   });

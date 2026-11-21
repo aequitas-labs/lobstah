@@ -142,6 +142,8 @@ export interface GhPrView {
    * carries no unresolvedThreads.
    */
   unresolvedThreads?: number;
+  /** Latest inline comment by someone other than the PR author, including replies on resolved threads. */
+  lastInlineCommentAt?: string;
   /**
    * Set when check results could not be read (the App lacks `Checks: read`)
    * and the view was fetched without them: gh's reason. The observation then
@@ -218,6 +220,10 @@ export interface PrRepair {
    */
   status: 'repairing' | 'gave-up' | 'blocked' | 'waiting';
   reason?: string;
+  /** The stop alert was posted to the PR. Failed posts retry on the next pass. */
+  alerted?: boolean;
+  /** Each stop is a new attention item, including another stop at the same head. */
+  stoppedAt?: string;
   /**
    * Who holds a waiting repair: `wt:<trap>`, `dispatch:<id>`, `helm`,
    * `settle`, `checks`, `human-gate` (only human gates fail), or `repaired`
@@ -376,6 +382,10 @@ export interface PrReview {
   unresolvedThreads?: number;
   changesRequested: boolean;
   lastReviewAt?: string;
+  /** New requests for changes and inline reviewer comments start a fresh repair budget. */
+  lastChangesRequestedAt?: string;
+  /** Latest inline reviewer comment; observing the same timestamp cannot reset the budget again. */
+  lastInlineCommentAt?: string;
   /** The latest approval's time: a conflict repair waits the settle time after it. */
   lastApprovalAt?: string;
 }
@@ -390,10 +400,12 @@ export function prReview(view: GhPrView): PrReview {
   const latest = new Map<string, string>();
   let lastReviewAt: string | undefined;
   let lastApprovalAt: string | undefined;
+  let lastChangesRequestedAt: string | undefined;
   const reviews = [...(view.reviews ?? [])].sort((a, b) => (a.submittedAt ?? '').localeCompare(b.submittedAt ?? ''));
   for (const r of reviews) {
     if (r.submittedAt && (!lastReviewAt || r.submittedAt > lastReviewAt)) lastReviewAt = r.submittedAt;
     const state = (r.state ?? '').toUpperCase();
+    if (state === 'CHANGES_REQUESTED' && r.submittedAt) lastChangesRequestedAt = r.submittedAt;
     if (state === 'APPROVED' && r.submittedAt && (!lastApprovalAt || r.submittedAt > lastApprovalAt)) lastApprovalAt = r.submittedAt;
     if (state === 'APPROVED' || state === 'CHANGES_REQUESTED' || state === 'DISMISSED') latest.set(r.author?.login ?? '?', state);
   }
@@ -403,6 +415,8 @@ export function prReview(view: GhPrView): PrReview {
     changesRequested,
     ...(lastReviewAt ? { lastReviewAt } : {}),
     ...(lastApprovalAt ? { lastApprovalAt } : {}),
+    ...(lastChangesRequestedAt ? { lastChangesRequestedAt } : {}),
+    ...(view.lastInlineCommentAt ? { lastInlineCommentAt: view.lastInlineCommentAt } : {}),
   };
 }
 
@@ -623,8 +637,11 @@ export function ghPrViewDirect(ref: PrRef): GhPrView {
   const view = JSON.parse(res.stdout) as GhPrView;
   if (checksError) view.checksError = checksError;
   if (view.state === 'OPEN') {
-    const threads = ghUnresolvedThreads(ref);
-    if (threads !== undefined) view.unresolvedThreads = threads;
+    const review = ghReviewThreadState(ref, view.author?.login);
+    if (review) {
+      view.unresolvedThreads = review.unresolvedThreads;
+      view.lastInlineCommentAt = review.lastInlineCommentAt;
+    }
   }
   view.fetchedAt = new Date().toISOString();
   return view;
@@ -643,23 +660,44 @@ export function ghPrTitle(ref: PrRef): string {
   return title;
 }
 
+/** Read all pages so replies on older threads also reset the budget. Ignore the PR author's replies. */
+export function ghLatestInlineCommentAt(ref: PrRef, author?: string): string | undefined {
+  const res = spawnSync('gh', ['api', `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments?per_page=100`, '--paginate', '--jq',
+    `.[] | select(.user.login != ${JSON.stringify(author ?? '')}) | .created_at`], { encoding: 'utf8', timeout: 60_000 });
+  if (res.error || res.status !== 0) return undefined;
+  return res.stdout.trim().split(/\s+/).filter((at) => Number.isFinite(Date.parse(at))).sort().at(-1);
+}
+
 const THREADS_QUERY =
-  'query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved}}}}}';
+  'query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved comments(last:10){nodes{createdAt author{login}} pageInfo{hasPreviousPage}}} pageInfo{hasNextPage}}}}}';
 
 /**
  * The one extra read-only call: unresolved review threads over GraphQL,
- * which `gh pr view --json` cannot return. Only isResolved is requested —
- * no bodies. A failure yields undefined, never an error: the observation
+ * which `gh pr view --json` cannot return. Comment metadata shares that
+ * query; no bodies are requested. A failure yields undefined: the observation
  * still stamps changesRequested and lastReviewAt from gh pr view.
  */
 export function ghUnresolvedThreads(ref: PrRef): number | undefined {
+  return ghReviewThreadState(ref)?.unresolvedThreads;
+}
+
+function ghReviewThreadState(ref: PrRef, author?: string): { unresolvedThreads: number; lastInlineCommentAt?: string } | undefined {
   const res = spawnSync(
     'gh',
     ['api', 'graphql', '-f', `query=${THREADS_QUERY}`, '-f', `owner=${ref.owner}`, '-f', `repo=${ref.repo}`, '-F', `n=${ref.number}`],
     { encoding: 'utf8', timeout: 60_000 },
   );
   if (res.error || res.status !== 0) return undefined;
-  return parseUnresolvedThreads(res.stdout);
+  const unresolvedThreads = parseUnresolvedThreads(res.stdout);
+  if (unresolvedThreads === undefined) return undefined;
+  const threads = JSON.parse(res.stdout).data.repository.pullRequest.reviewThreads as {
+    nodes: Array<{ comments?: { nodes?: Array<{ createdAt: string; author?: { login?: string } }>; pageInfo?: { hasPreviousPage?: boolean } } }>;
+    pageInfo?: { hasNextPage?: boolean };
+  };
+  const incomplete = threads.pageInfo?.hasNextPage || threads.nodes.some((t) => t.comments?.pageInfo?.hasPreviousPage);
+  const lastInlineCommentAt = incomplete ? ghLatestInlineCommentAt(ref, author) : threads.nodes.flatMap((t) => t.comments?.nodes ?? [])
+    .filter((c) => !author || c.author?.login !== author).map((c) => c.createdAt).sort().at(-1);
+  return { unresolvedThreads, ...(lastInlineCommentAt ? { lastInlineCommentAt } : {}) };
 }
 
 /** Count unresolved threads in the GraphQL response; undefined when it isn't the expected shape. */

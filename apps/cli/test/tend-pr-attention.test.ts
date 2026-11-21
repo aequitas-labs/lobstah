@@ -287,6 +287,11 @@ describe('the on-the-hook rule', () => {
     expect(kinds()).toEqual([]);
     claimNext('work');
     expect(kinds()).toEqual([]);
+    const record = readPr('pr:acme/web#9')!;
+    writePr({ ...record, repair: { headSha: record.headSha, kind: 'conflict', status: 'gave-up', attempts: 2,
+      reason: 'no merge progress; run `lobstah watch release pr:acme/web#9`' } });
+    expect(buildTendReport().attention.find((a) => a.kind === 'pr:review')?.note).toContain('no merge progress');
+    writePr(record);
     appendStatus(FIX, 'work', 'done', 'addressed');
     complete(FIX, 'work');
     expect(kinds()).toEqual(['pr:review']);

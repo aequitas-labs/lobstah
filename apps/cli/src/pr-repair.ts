@@ -232,8 +232,34 @@ export function checksStillFailing(
   return failing > 0 || names.length === 0 ? undefined : 'no failing check on the latest runs';
 }
 
+/** Alert the requested reviewers, falling back to the PR owner. */
+export function alertRepairStopped(pr: PrRecord, run = spawnSync): boolean {
+  const ref = parsePrRef(pr.key);
+  if (!ref) return false;
+  const read = run('gh', ['pr', 'view', String(ref.number), '--repo', pr.repo, '--json', 'author,reviewRequests'], { encoding: 'utf8', timeout: 30_000 });
+  let logins: string[] = [];
+  try {
+    const view = JSON.parse(String(read.stdout)) as { author?: { login?: string }; reviewRequests?: Array<{ login?: string }> };
+    logins = (view.reviewRequests ?? []).flatMap((r) => r.login ? [r.login] : []);
+    if (!logins.length && view.author?.login) logins.push(view.author.login);
+  } catch { /* The recorded owner is still a useful fallback. */ }
+  if (!logins.length && pr.author) logins.push(pr.author);
+  // Retry later if neither reviewers nor an owner can be named.
+  if (!logins.length) return false;
+  const streak = pr.repairStreak?.stoppedHead !== undefined;
+  const why = streak ? `after ${pr.repairStreak!.count} rounds without merge progress` : `at the per-commit limit (${pr.repair?.attempts ?? 0} of ${pr.repair?.maxAttempts ?? 2})`;
+  const next = streak ? `Run \`lobstah watch release ${pr.key}\` to resume, or address the PR by hand.` : 'Address the PR by hand. Automatic repairs resume after a new commit or reviewer input.';
+  const body = `${[...new Set(logins)].map((login) => `@${login}`).join(' ')}: Automatic repairs stopped ${why}.\n\n${next}\n\n<!-- lobstah -->`;
+  const result = run('gh', ['api', `repos/${pr.repo}/issues/${ref.number}/comments`, '--method', 'POST', '--input', '-'], {
+    encoding: 'utf8', timeout: 30_000, input: JSON.stringify({ body }),
+  });
+  return !result.error && result.status === 0;
+}
+
 export interface RepairOptions {
   now?: number;
+  /** Post a stopped-repair alert (default: GitHub PR comment). */
+  alertStopped?: (pr: PrRecord) => boolean;
   /** Read the latest check runs of a PR before a checks repair (default: gh). */
   readChecks?: (pr: PrRecord) => LatestChecks | undefined;
   /** Read a PR's commits before a repair of a head no dispatch committed (default: gh). */
@@ -397,7 +423,22 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         }
         return;
       }
-      if (previous?.status === 'blocked' || previous?.status === 'gave-up') return;
+      const alert = (stopped: PrRecord): void => {
+        if (stopped.repair?.alerted) return;
+        if ((opts.alertStopped ?? alertRepairStopped)(stopped)) writePr({ ...stopped, repair: { ...stopped.repair!, alerted: true } });
+        else log(`repair ${watch.key}: PR alert failed; will retry`);
+      };
+      const stop = (reason: string, streak?: RepairStreak): void => {
+        const stopped: PrRecord = { ...pr, ...(streak ? { repairStreak: streak } : {}),
+          repair: { headSha: pr.headSha, kind, attempts, maxAttempts: limit, status: 'gave-up', reason, stoppedAt: new Date(now).toISOString() } };
+        writePr(stopped);
+        postNotice({ kind: 'repair-stopped', text: `${prKeyLabel(pr.key, pr.title)}: repairs stopped — ${reason} (${pr.url})`,
+          refId: owner, repo: storedDescriptor(owner, 'work')?.repo, dedupeKey: `repair-stopped-${pr.key}-${pr.headSha}-${stopped.repair!.stoppedAt}` });
+        alert(stopped);
+        log(`repair ${watch.key}: stopped — ${reason}`);
+      };
+      if (previous?.status === 'gave-up') { alert(pr); return; }
+      if (previous?.status === 'blocked') return;
       if (previous?.observationsAtRepair !== undefined && (pr.observations ?? 0) <= previous.observationsAtRepair) return;
       // The floor: one round per PR, check, and commit. A head that has not
       // moved cannot give a check a new outcome.
@@ -410,17 +451,7 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
         return;
       }
       if (attempts >= limit) {
-        writePr({
-          ...pr,
-          repair: {
-            headSha: pr.headSha,
-            kind,
-            attempts,
-            maxAttempts: limit,
-            status: 'gave-up',
-            reason: `repair limit reached (${attempts} of ${limit})`,
-          },
-        });
+        stop(`repair limit reached (${attempts} of ${limit}); address the PR by hand`);
         return;
       }
       const wait = (hold: RepairHold, until?: string): void => {
@@ -447,19 +478,19 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       // The chain's own trap, between catches, is where the repair goes:
       // its worktree on the PR's branch does not hold the PR against it.
       const ownerTrap = trapAddressOf(chainState(owner).latest);
-      const held = repairHold(
-        pr,
-        (records ??= readPrs()),
-        (workers ??= (opts.workerHolds ?? readWorkerHolds)()).filter((w) => !(w.dispatchId === undefined && w.trapId !== undefined && `wt:${w.trapId}` === ownerTrap)),
-      );
-      if (held) return wait(held);
+      const holders = (workers ??= (opts.workerHolds ?? readWorkerHolds)()).filter((w) =>
+        !(w.dispatchId === undefined && w.trapId !== undefined && `wt:${w.trapId}` === ownerTrap));
+      const direct = repairHold(pr, [], holders);
+      if (direct) return wait(direct);
       // A repair of a PR below this one also updates this PR: wait for it.
-      for (const below of prsBelow(records, pr.key)) {
+      for (const below of prsBelow((records ??= readPrs()), pr.key)) {
         const r = readPr(below.key)?.repair;
         if (r?.status === 'repairing' && r.dispatchId && !isTerminal(r.dispatchId)) {
           return wait({ heldBy: 'stack', reason: `a repair of #${below.number} below this PR also updates it (dispatch ${r.dispatchId.slice(0, 8)})` });
         }
       }
+      const held = repairHold(pr, (records ??= readPrs()), holders);
+      if (held) return wait(held);
       const changed = Math.max(
         Date.parse(pr.headSince ?? pr.observedAt) || now,
         Date.parse(pr.baseSince ?? pr.observedAt) || now,
@@ -502,22 +533,9 @@ export function deliverPrRepairs(log: (message: string) => void, cap = 3, opts: 
       const streak = progressStreak(pr);
       const maxNoProgress = Number.isFinite(cfg.maxRepairsWithoutProgress) ? Math.max(1, Math.floor(cfg.maxRepairsWithoutProgress)) : 2;
       if (streak.count >= maxNoProgress) {
-        const reason =
-          `no merge progress after ${streak.count} repair(s) in a row ([watch].maxRepairsWithoutProgress = ${maxNoProgress}); ` +
-          `\`lobstah watch release ${watch.key}\` repairs again`;
-        writePr({
-          ...pr,
-          repairStreak: { count: streak.count, stoppedHead: pr.headSha },
-          repair: { headSha: pr.headSha, kind, attempts, maxAttempts: limit, status: 'gave-up', reason },
-        });
-        postNotice({
-          kind: 'repair-stopped',
-          text: `${prKeyLabel(pr.key, pr.title)}: repairs stopped — ${reason} (${pr.url})`,
-          refId: owner,
-          repo: target.repo,
-          dedupeKey: `repair-stopped-${pr.key}-${pr.headSha}`,
-        });
-        log(`repair ${watch.key}: stopped — ${reason}`);
+        const reason = `no merge progress after ${streak.count} repair(s) in a row ([watch].maxRepairsWithoutProgress = ${maxNoProgress}); ` +
+          `run \`lobstah watch release ${watch.key}\` or address the PR by hand`;
+        stop(reason, { count: streak.count, stoppedHead: pr.headSha });
         return;
       }
       const end = Date.parse(pr.repairCooldown?.endedAt ?? '');
