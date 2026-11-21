@@ -23,7 +23,7 @@ import { githubRepoFromOrigin } from '@lobstah/pick';
 import { prsBelow } from './glass-prs.js';
 
 /**
- * What a live worker holds. A live worker is an active headless dispatch,
+ * What a live worker holds. A live worker is an active or queued PR-bound headless dispatch,
  * or a signed-on trap, with or without an open catch. It holds a branch
  * when its worktree has the branch checked out, when its current branch
  * tracks the branch on the remote, or when it pushed the branch during its
@@ -69,7 +69,7 @@ function terminal(id: string, lane: Lane): boolean {
 }
 
 /**
- * Active headless dispatches and every signed-on trap. A trap between
+ * Active headless dispatches, queued PR-bound dispatches, and every signed-on trap. A trap between
  * catches still holds its worktree's branch and what it was told: a helm
  * may send it work on a PR whose own dispatch is done.
  */
@@ -93,6 +93,13 @@ export function liveWorkers(): LiveWorker[] {
       ids = fs.readdirSync(laneDirs(lane).active).filter((id) => !id.startsWith('.'));
     } catch {
       continue;
+    }
+    // Queued PR-bound work reserves the branch before a runner or trap claims it.
+    for (const name of fs.readdirSync(laneDirs(lane).queue)) {
+      if (!name.endsWith('.json')) continue;
+      const id = name.slice(0, -5);
+      const descriptor = storedDescriptor(id, lane);
+      if (descriptor?.pr && !terminal(id, lane)) out.push({ label: `dispatch:${id.slice(0, 8)}`, dispatchId: id, lane, repo: descriptor.repo });
     }
     for (const id of ids) {
       // A trap's catch counts only while its trap is live (above).
@@ -159,7 +166,11 @@ export function workerHold(worker: LiveWorker): WorkerHold {
   for (const push of evidence.pushes ?? []) {
     if (!branches.has(push.branch)) branches.set(push.branch, `pushed ${push.branch} at ${push.at}`);
   }
-  const named = evidence.prUrl ? parsePrRef(evidence.prUrl) : undefined;
+  const descriptor = worker.dispatchId ? storedDescriptor(worker.dispatchId, worker.lane) : undefined;
+  const bound = descriptor?.pr;
+  if (bound?.headRefName) branches.set(bound.headRefName, `works on ${bound.headRefName}`);
+  const named = parsePrRef(bound?.url ?? evidence.prUrl ?? '');
+  if (!forgeRepo && named) forgeRepo = `${named.owner}/${named.repo}`;
   if (named) prs.set(named.key, 'works on this PR');
   const owned = worker.dispatchId ? chainPr(worker.dispatchId, worker.lane) : undefined;
   const ownedRef = owned ? parsePrRef(owned.url) : undefined;
@@ -175,7 +186,8 @@ export function workerHold(worker: LiveWorker): WorkerHold {
     ...(forgeRepo ? { forgeRepo } : {}),
     branches,
     prs,
-    said,
+    // A system repair names the whole stack in its brief; only its bound PR is a direct hold.
+    said: descriptor?.systemRepair ? '' : said,
   };
 }
 

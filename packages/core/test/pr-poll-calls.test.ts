@@ -63,3 +63,31 @@ it('measures legacy open-PR transport calls versus the batched transport for 40 
   }
   expect(run).toHaveBeenCalledTimes(80); // one repository batch per cycle, zero detail calls
 });
+
+it.each([false, true])('reads inline reviewer metadata with the thread query (paginated fallback: %s)', (incomplete) => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-pr-comment-read-'));
+  process.env.LOBSTAH_HOME = home;
+  ensureLayout();
+  const run = vi.mocked(spawnSync);
+  run.mockImplementation((_cmd, rawArgs) => {
+    const args = rawArgs as string[];
+    const stdout = args[0] === 'pr'
+      ? JSON.stringify({ state: 'OPEN', author: { login: 'owner' }, isDraft: false, headRefOid: 'head', statusCheckRollup: [] })
+      : args[1] === 'graphql'
+        ? JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: false,
+          comments: { nodes: [
+            { createdAt: '2026-10-09T07:00:00Z', author: { login: 'reviewer' } },
+            { createdAt: '2026-10-09T08:00:00Z', author: { login: 'owner' } },
+          ], pageInfo: { hasPreviousPage: incomplete } } }], pageInfo: { hasNextPage: false } } } } } })
+        : '2026-10-09T07:00:00Z\n2026-10-09T06:00:00Z\n';
+    return { status: 0, stdout, stderr: '', pid: 1, output: [], signal: null };
+  });
+  const view = ghPrViewDirect(parsePrRef('pr:acme/web#7')!);
+  expect(view.lastInlineCommentAt).toBe('2026-10-09T07:00:00Z');
+  expect(view.unresolvedThreads).toBe(1);
+  expect(run).toHaveBeenCalledTimes(incomplete ? 3 : 2);
+  if (incomplete) {
+    expect(run.mock.calls[2]![1]).toContain('--paginate');
+    expect(run.mock.calls[2]![1]).toContain('.[] | select(.user.login != "owner") | .created_at');
+  }
+});

@@ -320,6 +320,7 @@ export function humanPrAttention(
   if (kind !== 'pr:conflict' && kind !== 'pr:checks' && kind !== 'pr:review') return { show: true };
   const repairableReview = kind === 'pr:review' && pr.review?.changesRequested === true;
   if (kind === 'pr:review' && !repairableReview) return { show: true }; // unresolved question for a person
+  if (pr.repair?.status === 'gave-up' && pr.repair.headSha === pr.headSha) return { show: true, reason: pr.repair.reason };
   const enabled = cfg.watch.autoRepair && (kind !== 'pr:conflict' || cfg.watch.conflicts) && (kind !== 'pr:checks' || cfg.watch.checks);
   if (!enabled) return { show: true, reason: 'auto-repair is off' };
   const owned = 'dispatches' in pr && Array.isArray(pr.dispatches) && pr.dispatches.length > 0;
@@ -442,7 +443,8 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
         if (pr.failingChecks?.length === pr.checks.failed && pr.failingChecks.every((c) => matchesGate(c.name, gates))) continue;
       }
       // Pickup claims review rounds without creating a watch repair record.
-      if (kind === 'pr:review' && onTheHook(kind, chain, { reviewRounds })) continue;
+      const stopped = pr.repair?.status === 'gave-up' && pr.repair.headSha === pr.headSha;
+      if (!stopped && kind === 'pr:review' && onTheHook(kind, chain, { reviewRounds })) continue;
       const human = humanPrAttention(pr, kind, cfg, !!prWatch && !prWatch.done, now);
       if (!human.show) continue;
       const repairCannotAct =

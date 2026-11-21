@@ -95,6 +95,20 @@ afterEach(() => {
 });
 
 describe('repository PR batch', () => {
+  it('records new inline reviewer comments on existing threads, excluding author replies', () => {
+    register(1);
+    const raw = { ...snapshot(1), author: { login: 'owner' }, reviewThreads: { nodes: [{ isResolved: false,
+      comments: { nodes: [
+        { createdAt: '2026-10-09T07:00:00Z', author: { login: 'reviewer' } },
+        { createdAt: '2026-10-09T07:30:00Z', author: { login: 'owner' } },
+      ] } }], pageInfo: { hasNextPage: false } } };
+    preparePrWatchBatch(45, T, { run: () => response({ pr1: raw }) });
+    expect(cachedPrView(ref(1))?.lastInlineCommentAt).toBe('2026-10-09T07:00:00Z');
+    raw.reviewThreads.nodes[0]!.comments.nodes.push({ createdAt: '2026-10-09T08:00:00Z', author: { login: 'reviewer' } });
+    preparePrWatchBatch(45, T + 60_000, { run: () => response({ pr1: raw }) });
+    expect(cachedPrView(ref(1))?.lastInlineCommentAt).toBe('2026-10-09T08:00:00Z');
+  });
+
   it('40 watches make 80 batch calls/hour, not 6400 legacy view/thread calls; unchanged snapshots need no details', () => {
     const repo: Record<string, unknown> = {};
     for (let n = 1; n <= 40; n++) {
