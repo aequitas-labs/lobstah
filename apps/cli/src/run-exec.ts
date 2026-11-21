@@ -6,6 +6,8 @@ import * as path from 'node:path';
 import {
   OutputScrubber,
   RUN_RELAY,
+  RunCardError,
+  ScriptInterpreterMissing,
   appendRunAudit,
   decisionDir,
   harnessProcessAlive,
@@ -17,7 +19,9 @@ import {
   readRunAttempt,
   readRunOutput,
   readStoredRunScript,
+  resolveScriptInterpreter,
   runOutputTail,
+  runScriptCommand,
   terminalText,
   withDirLock,
   writeRequest,
@@ -30,7 +34,8 @@ export type { RunResult } from '@lobstah/core';
  * Running a run card (ume 3ef69c1d-026, intent run-execute). The glass
  * server runs the card's stored script, which run-routes.ts has just checked
  * against the card's hash and a passkey assertion, as Chris's user:
- * `/bin/bash --noprofile --norc <copy>` in the card's cwd, in its own process
+ * under the interpreter its `#!` line names (`/bin/bash --noprofile --norc
+ * <copy>` for a script without one) in the card's cwd, in its own process
  * group, with a minimal environment (never the glass's own). The inputs go
  * to stdin, one line each in declared order, and stdin then closes: never
  * argv (`ps` shows it) or the environment (`ps -E` shows it), never a file
@@ -132,6 +137,22 @@ export function runEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.
     LANG: source.LANG ?? 'en_US.UTF-8',
     TMPDIR: source.TMPDIR ?? os.tmpdir(),
   };
+}
+
+/**
+ * Why the card's script can't run on this Mac, for the person at the card:
+ * its `#!` interpreter is not installed on the run's PATH, or its `#!` line
+ * names no usable program. Undefined when it can run.
+ */
+export function runInterpreterRefusal(scriptText: string, env: NodeJS.ProcessEnv = runEnvironment()): string | undefined {
+  try {
+    resolveScriptInterpreter(scriptText, env.PATH);
+    return undefined;
+  } catch (error) {
+    if (error instanceof ScriptInterpreterMissing) return `This script needs ${error.program}, which isn't installed on this Mac. Install it, then run the card again.`;
+    if (error instanceof RunCardError) return "This script's first line doesn't name a program that can run it. Ask the helm for a new card.";
+    throw error;
+  }
 }
 
 const elapsed = (ms: number): string =>
@@ -375,6 +396,9 @@ export class RunRegistry {
     };
     const stored = readStoredRunScript(decisionDir(meta.key)!);
     if (stored?.sha256 !== card.scriptSha256) throw new Error('The script changed. Reload the card.');
+    const runEnv = options.env ?? runEnvironment();
+    const unrunnable = runInterpreterRefusal(stored.text, runEnv);
+    if (unrunnable) throw new Error(unrunnable);
     const relay = card.interactive ? relayFile() : undefined;
     // Keep the verified execution copy stable if the card is withdrawn while bash opens it.
     const executionDir = path.join(lobstahHome(), 'run', 'active', attempt.id);
@@ -441,12 +465,13 @@ export class RunRegistry {
     };
     const done = new Promise<RunResult>((resolve) => {
       let outputBytes = 0;
-      const script = [card.interpreter, '--noprofile', '--norc', scriptFile];
+      // The interpreter comes from the verified script's own #! line, never bash for a script that names another.
+      const script = runScriptCommand(stored.text, scriptFile);
       // An interactive run gets a terminal through the relay; a plain one reads EOF after its inputs.
       const [command, ...args] = relay ? [RUN_RELAY, '-f', relay, pidFile, ...script] : script;
       const child = spawn(command!, args, {
         cwd: card.cwd,
-        env: options.env ?? runEnvironment(),
+        env: runEnv,
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

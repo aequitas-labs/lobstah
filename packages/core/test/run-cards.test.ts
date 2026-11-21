@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   askDecision,
+  checkScriptInterpreter,
   decisionDir,
   findRunProposal,
   parseRunInput,
@@ -11,8 +12,13 @@ import {
   prepareRunCard,
   proposeRunScript,
   readStoredRunScript,
+  resolveScriptInterpreter,
   RUN_SCRIPT_MAX_BYTES,
   RunCardError,
+  runProposalFileName,
+  runScriptCommand,
+  ScriptInterpreterMissing,
+  scriptInterpreter,
   scriptWarnings,
   sha256Hex,
 } from '../src/index.js';
@@ -119,5 +125,57 @@ describe("a trap's proposal", () => {
     expect(findRunProposal('aaaaaaaa-0000-4000-8000-000000000001', proposal.sha256)).toMatchObject({ trap: 'wt:t1', file: proposal.file });
     expect(findRunProposal('aaaaaaaa-0000-4000-8000-000000000001', sha256Hex('other'))).toBeUndefined();
     expect(() => proposeRunScript('../x', script('p2.sh', body))).toThrow(RunCardError);
+  });
+
+  it('keeps the script file name and extension, and never renames it to .sh', () => {
+    const body = '#!/bin/sh\necho propose\n';
+    const proposal = proposeRunScript('aaaaaaaa-0000-4000-8000-000000000002', script('deploy.py', body));
+    expect(path.basename(proposal.file)).toBe('deploy.py');
+    expect(path.dirname(proposal.file)).toBe(path.join(home, 'run-proposals', 'aaaaaaaa-0000-4000-8000-000000000002', proposal.sha256));
+    expect(fs.readFileSync(proposal.file, 'utf8')).toBe(body);
+    // The same script under another name keeps its first copy.
+    expect(proposeRunScript('aaaaaaaa-0000-4000-8000-000000000002', script('again.rb', body)).file).toBe(proposal.file);
+    expect(runProposalFileName('/x/my deploy;rm.py')).toBe('my_deploy_rm.py');
+  });
+
+  // The interpreter check is POSIX-only (checkScriptInterpreter): Windows has no /usr/bin/env to look for.
+  it.skipIf(process.platform === 'win32')('refuses a script whose #! interpreter is not installed', () => {
+    expect(() => proposeRunScript('aaaaaaaa-0000-4000-8000-000000000003', script('m.py', '#!/usr/bin/env lobstah-no-such-python\nprint(1)\n'))).toThrow(
+      /lobstah-no-such-python is not installed/,
+    );
+    expect(() => proposeRunScript('aaaaaaaa-0000-4000-8000-000000000003', script('m2.py', '#!/opt/none/python3\nprint(1)\n'))).toThrow(ScriptInterpreterMissing);
+    expect(fs.existsSync(path.join(home, 'run-proposals', 'aaaaaaaa-0000-4000-8000-000000000003'))).toBe(false);
+  });
+});
+
+it('checks no interpreter on Windows, where the glass runs no card', () => {
+  expect(() => checkScriptInterpreter(scriptInterpreter('#!/usr/bin/env lobstah-no-such-python\n'), '', 'win32')).not.toThrow();
+  expect(() => checkScriptInterpreter(scriptInterpreter('#!/opt/none/python3\n'), '', 'win32')).not.toThrow();
+});
+
+// These read real POSIX interpreters (/bin/sh, /usr/bin/env), which Windows doesn't have.
+describe.skipIf(process.platform === 'win32')("a script's interpreter", () => {
+  it('reads the #! line, splitting its arguments, and falls back to bash without one', () => {
+    expect(scriptInterpreter('#!/usr/bin/env python3\n"""`git clean -xdf`"""\n')).toEqual({ source: 'shebang', program: '/usr/bin/env', args: ['python3'], label: '/usr/bin/env python3' });
+    expect(scriptInterpreter('#! /bin/sh -e\r\necho\n')).toMatchObject({ program: '/bin/sh', args: ['-e'], label: '/bin/sh -e' });
+    expect(scriptInterpreter('echo no shebang\n')).toEqual({ source: 'default', program: '/bin/bash', args: ['--noprofile', '--norc'], label: '/bin/bash' });
+    expect(runScriptCommand('#!/usr/bin/env python3\n', '/tmp/s')).toEqual(['/usr/bin/env', 'python3', '/tmp/s']);
+    expect(runScriptCommand('echo hi\n', '/tmp/s')).toEqual(['/bin/bash', '--noprofile', '--norc', '/tmp/s']);
+    expect(() => scriptInterpreter('#!\necho\n')).toThrow(/names no interpreter/);
+    expect(() => scriptInterpreter('#!python3\n')).toThrow(/absolute path/);
+  });
+
+  it('finds an env program on the PATH it is given', () => {
+    const bin = fs.mkdtempSync(path.join(home, 'bin-'));
+    fs.writeFileSync(path.join(bin, 'fake-python'), '#!/bin/sh\n', { mode: 0o755 });
+    expect(() => resolveScriptInterpreter('#!/usr/bin/env fake-python\n', bin)).not.toThrow();
+    expect(() => resolveScriptInterpreter('#!/usr/bin/env -S FOO=1 fake-python -u\n', bin)).not.toThrow();
+    expect(() => resolveScriptInterpreter('#!/usr/bin/env fake-python\n', '/usr/bin:/bin')).toThrow(ScriptInterpreterMissing);
+  });
+
+  it('records the #! command on the card, and man ask --run refuses one that is not installed', () => {
+    expect(prepareRunCard({ scriptFile: script('ok.sh', '#!/bin/sh\necho\n'), cwd: home }).card.interpreter).toBe('/bin/sh');
+    expect(prepareRunCard({ scriptFile: script('plain.sh', 'echo\n'), cwd: home }).card.interpreter).toBe('/bin/bash');
+    expect(() => prepareRunCard({ scriptFile: script('no.py', '#!/usr/bin/env lobstah-no-such-python\n'), cwd: home })).toThrow(/lobstah-no-such-python is not installed/);
   });
 });

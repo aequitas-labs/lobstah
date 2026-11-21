@@ -919,6 +919,10 @@ lobstah man ask --title "Publish the package" --run /tmp/publish.sh \
 Use `--input NAME:secret` for secrets (values via stdin, never in the script),
 `--interactive` for logins/prompts, `--cwd` for the working folder,
 `--timeout` for the time limit, and `--output scrubbed|exit` for the result.
+The script runs under the interpreter its `#!` line names, such as
+`#!/usr/bin/env python3`. A script without a `#!` line runs under bash.
+`man ask --run` and `report needs-decision --run` refuse a script whose
+interpreter isn't installed. A trap's proposal keeps its file name and extension.
 The person reviews and runs the script from the glass. Scripts read declared
 inputs from stdin, one line each in `--input` order. `scrubbed` returns
 scrubbed output to the helm. `exit` returns only the exit code. The output

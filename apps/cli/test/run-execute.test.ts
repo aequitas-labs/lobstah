@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -20,6 +21,16 @@ import { removeTempDir } from '../../../test/temp-dir.js';
  */
 
 const SECRET = 'S3cr3t-VALUE-9f8e7d6c5b';
+
+/** Whether python3 is on PATH, for the check that a Python script runs under python. */
+const hasPython = ((): boolean => {
+  try {
+    execFileSync('/usr/bin/env', ['python3', '--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 let home: string;
 let outside: string;
@@ -158,6 +169,50 @@ printf '%s' "$S" | base64
     await runs.settled();
     expect(fs.existsSync(marker)).toBe(false);
     expect(readDecisionAnswer(c.key)).toBeUndefined();
+  });
+
+  it.skipIf(!hasPython)('runs a Python script under python, and runs none of the commands quoted in its docstring', async () => {
+    const shellRan = path.join(outside, 'shell-ran');
+    const pythonRan = path.join(outside, 'python-ran');
+    const c = card(`#!/usr/bin/env python3
+"""Deploy helper.
+
+Runs \`touch ${shellRan}\`, then \`echo bash > ${shellRan}\`.
+"""
+import pathlib
+pathlib.Path(${JSON.stringify(pythonRan)}).write_text("python")
+print("python ran")
+`);
+    expect((await run(c)).status).toBe(202);
+    expect(await answer(c.key)).toContain('python ran');
+    expect(fs.readFileSync(pythonRan, 'utf8')).toBe('python');
+    expect(fs.existsSync(shellRan)).toBe(false);
+  });
+
+  it('runs a script without a #! line under bash', async () => {
+    const marker = path.join(outside, 'bash-ran');
+    const c = card(`if [[ -n "$BASH_VERSION" ]]; then echo bash > "${marker}"; fi\necho done\n`);
+    await run(c);
+    expect(await answer(c.key)).toContain('done');
+    expect(fs.readFileSync(marker, 'utf8')).toBe('bash\n');
+  });
+
+  it('refuses a Run when the #! interpreter is no longer installed, before asking for the passkey', async () => {
+    const bin = fs.mkdtempSync(path.join(outside, 'bin-'));
+    const marker = path.join(outside, 'ran');
+    fs.writeFileSync(path.join(bin, 'lobstah-gone-interpreter'), `#!/bin/sh\ntouch "${marker}"\n`, { mode: 0o755 });
+    const before = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${before ?? ''}`;
+    let c: { key: string; sha256: string };
+    try {
+      c = card('#!/usr/bin/env lobstah-gone-interpreter\necho unused\n');
+    } finally {
+      process.env.PATH = before;
+    }
+    const res = await post('run-challenge', c);
+    expect(res.status).toBe(409);
+    expect(res.json.reason).toBe("This script needs lobstah-gone-interpreter, which isn't installed on this Mac. Install it, then run the card again.");
+    expect(fs.existsSync(marker)).toBe(false);
   });
 
   it('answers a card posted with --output exit with the exit code and no output text', async () => {
