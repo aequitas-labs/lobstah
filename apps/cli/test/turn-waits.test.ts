@@ -31,6 +31,7 @@ import {
 import type { TrapRegistration } from '@lobstah/core';
 import { createTurnWaits, deliverTurnWaitLine, noticeUnreadPointers, readTurnWaitRecords, STALE_MS, syncTurnWaitRecords } from '../src/turn-waits.js';
 import { soakPark } from '../src/trap-park.js';
+import { runBeat } from '../src/beat.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
@@ -54,6 +55,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const listener of process.listeners('exit')) if (!exitListeners.has(listener)) process.removeListener('exit', listener);
   delete process.env.LOBSTAH_HOME;
   delete process.env.AGENT_TURN_HOME;
@@ -348,6 +350,41 @@ describe('waking the session', () => {
 });
 
 describe('the daemon pass', () => {
+  it('retries a persisted no_such_artifact failure with the project recorded by the trap hook', async () => {
+    const t = working();
+    vi.stubEnv('UME_PROJECT', 'default');
+    const script = path.join(dir, 'project.cjs');
+    fs.writeFileSync(script, `
+      if (process.env.UME_PROJECT !== 'vr95mce908') {
+        console.error('ume: no_such_artifact');
+        process.exit(1);
+      }
+      console.log(JSON.stringify({ cursor: '31', summary: 'approved in ' + process.env.UME_PROJECT }));
+    `);
+    register('ume.json', { ...UME, wait: `"${process.execPath}" "${script}"` });
+    const firstDaemon = createTurnWaits();
+    firstDaemon.pass(Date.now(), () => {});
+    await new Promise<void>(resolve => firstDaemon.children.values().next().value!.once('close', () => resolve()));
+    const failed = readTurnWaitRecords()[0]!;
+    expect(failed).toMatchObject({ failures: 1, lastError: 'ume: no_such_artifact', cursor: '30' });
+    expect(Date.parse(failed.nextRunAt!)).toBeGreaterThan(Date.now());
+
+    runBeat({ session_id: SESSION, cwd: t.cwd, tool_name: 'functions.exec_command',
+      tool_input: { cmd: 'UME_PROJECT=vr95mce908 ume await --watch a1' } }, { run: () => ({ status: 1, stdout: '' }) });
+    const restartedDaemon = createTurnWaits();
+    const retryAt = Date.parse(failed.nextRunAt!);
+    restartedDaemon.pass(retryAt - 1, () => {});
+    expect(restartedDaemon.children.size).toBe(0);
+    restartedDaemon.pass(retryAt, () => {});
+    await new Promise<void>(resolve => restartedDaemon.children.values().next().value!.once('close', () => resolve()));
+
+    expect(unhandled('plan', 'work')[0]?.text).toContain('approved in vr95mce908');
+    expect(readTurnWaitRecords()[0]).toMatchObject({ key: failed.key, cursor: '31' });
+    expect(readTurnWaitRecords()[0]).not.toHaveProperty('failures');
+    expect(readTurnWaitRecords()[0]).not.toHaveProperty('nextRunAt');
+    expect(readTurnWaitRecords()[0]).not.toHaveProperty('lastError');
+  });
+
   it('runs the wait with its cursor and delivers what it prints', async () => {
     working();
     const script = path.join(dir, 'wait.js');
