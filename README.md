@@ -249,7 +249,9 @@ The same glass is hosted at [glass.lobstah.dev](https://glass.lobstah.dev),
 through a wharf. Enroll this machine with `lobstah wharf login --wharf <name>
 --mirror`, set `[glass] mirror` to that wharf, and run `lobstah daemon restart`.
 The hosted glass then shows this machine's glass, and what you do there is
-carried out on this machine. The fleet stays on its local grounds.
+carried out on this machine. The fleet stays on its local grounds. With Slack
+linked to the wharf, its cards also come to you as Slack messages, and you can
+submit or approve a drafted review from there after you confirm it.
 [docs/configuration.md](docs/configuration.md) has the details.
 
 ## When something needs you 🛎️

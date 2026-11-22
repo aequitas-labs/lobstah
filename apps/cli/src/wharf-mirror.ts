@@ -5,17 +5,20 @@ import {
   ANSWER_INLINE_MAX_BYTES,
   BackendError,
   WharfBackend,
+  displayGrounds,
   encodeFrame,
+  liveHelms,
   loadConfig,
   lobstahVersion,
   mirrorReadAllowed,
   mirrorWriteAllowed,
   postNotice,
   readMirrorStatus,
+  standDownHelm,
   wharfCredential,
   writeMirrorStatus,
 } from '@lobstah/core';
-import type { BackendScope, ClientSocketMessage, Config, MirrorStatus, ServerSocketMessage, WharfAttentionList, WharfMirrorCall } from '@lobstah/core';
+import type { BackendScope, ClientSocketMessage, CommandMessage, Config, MirrorStatus, ServerSocketMessage, WharfAttentionList, WharfMirrorCall } from '@lobstah/core';
 import { glassPort } from './glass-lifecycle.js';
 import { adoptChannel, dropChannel } from './wharf-channel.js';
 import { WharfSocket } from './wharf-socket.js';
@@ -44,6 +47,8 @@ export const MIRROR_IDLE_READ_MS = 30_000;
 export const MIRROR_STALE_NOTICE_MS = 10 * 60_000;
 /** The largest local answer a relayed call carries back. */
 const MIRROR_ANSWER_MAX_BYTES = 25 * 1024 * 1024;
+/** How often the mirror takes the wharf's helm seat again for a live local helm: twice in each two-minute lease. */
+export const MIRROR_HELM_RENEW_MS = 60_000;
 
 /** One answer from the local glass. */
 export interface LocalGlassResponse {
@@ -77,6 +82,16 @@ export interface MirrorChannel {
   connected(): boolean;
   send(message: ClientSocketMessage): boolean;
   sendFrame(frame: Uint8Array): boolean;
+  /** Run one route on the socket; undefined when it could not. */
+  command?(command: Omit<CommandMessage, 't'>): Promise<{ status: number; value: unknown } | undefined>;
+}
+
+/** This Mac's helm, which holds the wharf's one helm seat while it is live. */
+export interface MirrorHelm {
+  /** The live helms on this boat's own grounds: each session, and its grounds as the wharf names them. */
+  live(): Array<{ session: string; grounds: string }>;
+  /** Another helm took the seat (`by`, its session): this session stands down. */
+  displaced(session: string, by: string): void;
 }
 
 export interface WharfMirrorOptions {
@@ -93,6 +108,8 @@ export interface WharfMirrorOptions {
   glassPort?: number;
   /** Helm threads opened from Slack; without it the mirror relays nothing back. */
   slackThreads?: MirrorSlackThreads;
+  /** This Mac's helm; without it the mirror never takes the wharf's helm seat. */
+  helm?: MirrorHelm;
 }
 
 /** The mirror's state between reads of the local glass. */
@@ -115,6 +132,9 @@ export class WharfMirror {
   private healthyAt: number;
   private staleNoticed = false;
   private retryMs = MIRROR_WATCHED_READ_MS;
+  /** When the wharf last renewed the helm seat, and for which live helms. */
+  private helmAt = -Infinity;
+  private helmSent?: string;
   constructor(private options: WharfMirrorOptions) {
     const prior = readMirrorStatus();
     const same = prior?.wharf === options.wharf ? prior : undefined;
@@ -175,6 +195,7 @@ export class WharfMirror {
       this.sendAttentionIfChanged();
       this.sendGroundsIfChanged();
       await this.syncSlackThreads();
+      await this.keepHelmSeat();
       if (this.options.channel.connected()) {
         delete this.status.error;
         this.healthyAt = this.now();
@@ -270,6 +291,30 @@ export class WharfMirror {
       threads.synced(sync);
     }
   }
+  /**
+   * Hold the wharf's one helm seat for this Mac's live helm, on the socket:
+   * taking it again renews it, at once when a helm signs on here and each
+   * MIRROR_HELM_RENEW_MS after. A seat another helm took refuses, and the
+   * local helm stands down. With no live helm it sends nothing.
+   */
+  private async keepHelmSeat(): Promise<void> {
+    const helm = this.options.helm, channel = this.options.channel;
+    if (!helm || !channel.command || !channel.connected()) return;
+    const live = helm.live();
+    const sent = JSON.stringify(live);
+    if (!live.length || (sent === this.helmSent && this.now() - this.helmAt < MIRROR_HELM_RENEW_MS)) return;
+    for (const seat of live) {
+      const result = await channel.command({ id: randomUUID(), method: 'POST', path: 'helm/take', body: { session: seat.session, grounds: seat.grounds, mirror: true } });
+      // The socket dropped: the next read tries again.
+      if (!result) return;
+      if (result.status === 409) {
+        const holder = (result.value as { holder?: { session?: unknown } } | null)?.holder?.session;
+        helm.displaced(seat.session, typeof holder === 'string' ? holder : 'another helm');
+      } else if (result.status >= 400) throw new Error(`helm seat: ${(result.value as { error?: unknown } | null)?.error ?? result.status}`);
+    }
+    this.helmAt = this.now();
+    this.helmSent = sent;
+  }
   /** Run one call against the local glass if it is one the hosted glass may make, and answer it: in a frame, or over HTTP when too large. */
   private async carryOut(call: WharfMirrorCall): Promise<void> {
     let answer: LocalGlassResponse;
@@ -364,6 +409,39 @@ export function mirrorScope(config: Config, wharf: string): Extract<BackendScope
 }
 
 /**
+ * This Mac's live helms on its own grounds, newest sign-on first, one per
+ * session: what the wharf's helm seat may name.
+ */
+export function localHelms(config: Config, now = Date.now()): Array<{ session: string; grounds: string }> {
+  const local = new Set(localGrounds(config));
+  const seats = new Map<string, string>();
+  for (const h of liveHelms(config.helm.ttlSecs * 1000, now).sort((a, b) => Date.parse(b.signedOnAt) - Date.parse(a.signedOnAt))) {
+    const grounds = displayGrounds(h.grounds, config);
+    if (local.has(grounds) && !seats.has(h.sessionId)) seats.set(h.sessionId, grounds);
+  }
+  return [...seats].map(([session, grounds]) => ({ session, grounds }));
+}
+
+/**
+ * `man helm` on a mirrored Mac: take the wharf's one helm seat for this
+ * session, so the person's Slack DMs come to it. Without a mirror it makes
+ * no wharf call. A seat another helm holds refuses, naming it. With the
+ * wharf away the sign-on stands, and the daemon takes the seat once it can.
+ */
+export async function takeMirrorSeat(config: Config, session: string, grounds: string, take: boolean, backend?: Pick<WharfBackend, 'request'>): Promise<'taken' | 'pending' | undefined> {
+  const wharf = config.glass.mirror;
+  if (!wharf || !localGrounds(config).includes(grounds)) return undefined;
+  const scope = mirrorScope(config, wharf);
+  try {
+    await (backend ?? new WharfBackend(scope.location, () => wharfCredential(scope))).request('helm/take', { session, grounds, mirror: true, take }, randomUUID());
+    return 'taken';
+  } catch (error) {
+    if (error instanceof BackendError && error.status === 409) throw new Error(error.message);
+    return 'pending';
+  }
+}
+
+/**
  * Start the daemon's mirror when `[glass] mirror` names a wharf, and not
  * otherwise: without it the mirror makes no wharf request at all. Its
  * socket stays open (reconnecting after a drop), and its reads of the local
@@ -401,7 +479,8 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
     pending: () => slackThreadsToSync(loadConfig(), wharf),
     synced: slackThreadSynced,
   };
-  mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, credential), channel: socket, glass: loopbackGlass(port), glassPort: port, log, slackThreads });
+  const helm: MirrorHelm = { live: () => localHelms(loadConfig()), displaced: (session, by) => void standDownHelm(session, by) };
+  mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, credential), channel: socket, glass: loopbackGlass(port), glassPort: port, log, slackThreads, helm });
   socket.start();
   let stopped = false;
   let sleeping: ReturnType<typeof setTimeout> | undefined;

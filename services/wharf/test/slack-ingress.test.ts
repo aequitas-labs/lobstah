@@ -63,7 +63,7 @@ beforeEach(async () => {
   const linkedAt = '2026-10-30T00:00:00.000Z';
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 async function helm() {
@@ -98,7 +98,7 @@ it('a DM asks for work once: recorded, then a canned receipt in its thread; a re
   expect(receipts()).toHaveLength(1);
   expect(receipts()[0]).toMatchObject({ method: 'chat.postMessage', body: { channel: 'D1', thread_ts: '1700000000.000100' } });
   // Received is not running: no helm is live, so it says it waits.
-  expect(section(receipts()[0]!)).toContain('Received · waiting for the helm');
+  expect(section(receipts()[0]!)).toContain('Queued — the helm will pick this up when it’s back');
 });
 
 it('stars each message from the linked person within 5 seconds, a new DM and a thread reply alike, and no one else’s', async () => {

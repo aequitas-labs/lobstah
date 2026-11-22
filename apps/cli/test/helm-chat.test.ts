@@ -81,7 +81,8 @@ it('CLI toggles persist across processes, heartbeat, re-sign and takeover, scope
   expect(run(['man', 'chat', 'brief', 'extra']).status).toBe(2);
 });
 
-it('brief reaches charter, SessionStart, prompt, wait next hints and Stop; full has no brief rule', () => {
+// Seven CLI runs back to back: about 1 s locally, but past vitest's 5 s default on a loaded CI runner.
+it('brief reaches charter, SessionStart, prompt, wait next hints and Stop; full has no brief rule', { timeout: 20_000 }, () => {
   seat();
   setHelmChat('fleet', 'brief');
   expect(charter({ name: 'fleet', repos: ['web'] })).toContain(CHAT_BRIEF_RULE);

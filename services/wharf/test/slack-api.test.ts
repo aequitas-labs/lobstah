@@ -63,7 +63,7 @@ it('a delivery that throws waits its backoff and the drain still sends the rest'
       controllable: () => [],
       pause: async () => {},
     });
-    outbox.link('p1', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: '2026-11-22T06:00:00.000Z', grounds: ['home'] }, [], Date.now());
+    outbox.link('p1', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: '2026-11-22T06:00:00.000Z' }, [], Date.now());
     sql.exec('INSERT INTO slack_deliveries(card,person,want,next_at) VALUES (1,?,1,0),(2,?,1,0)', 'p1', 'p1');
     const before = Date.now();
     await outbox.drain();
