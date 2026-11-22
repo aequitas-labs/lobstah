@@ -1,12 +1,13 @@
 import type { ChecklistProgress } from '../../../core/src/checklist-types.js';
 import { imageDisplay, markdownImageSources, markdownTasks, parseMarkdown, safeHref } from '../../src/glass-markdown.js';
-import type { ImageSurface, MdBlock, MdInline } from '../../src/glass-markdown.js';
+import type { ImageSurface, LineBreaks, MdBlock, MdInline } from '../../src/glass-markdown.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html } from '../html.js';
 import { h } from 'preact';
 import { checklistSource, hasChecklistSource } from '../checklists.js';
 import type { Children } from '../html.js';
 import { Button } from './button.js';
+import { UrlLink } from './links.js';
 
 /** Shared safe Markdown: raw HTML stays text; images resolve to owned files, or to https on a card. */
 type Image = (name: string, alt: string) => Children;
@@ -20,6 +21,8 @@ interface RenderOptions {
   surface: ImageSurface;
   openImage?: OpenImage;
   copyCode: boolean;
+  /** A bare URL opens in the glass when the glass shows it (a PR), as LinkedText does. */
+  glassLinks: boolean;
   checklist?: { progress?: ChecklistProgress; pending: boolean; readOnly: boolean; toggle: (id: string, checked: boolean) => void };
 }
 
@@ -132,6 +135,8 @@ function inline(options: RenderOptions, nodes: MdInline[]): Children {
         return html`<br />`;
       case 'a': {
         const href = safeHref(n.href);
+        const bare = n.c.length === 1 && n.c[0]!.t === 'text' && n.c[0]!.v === n.href;
+        if (href && bare && options.glassLinks && /^https?:\/\//i.test(href)) return UrlLink(href);
         // Code inside a link stays the link: its click opens it.
         return href
           ? html`<a href=${href} target="_blank" rel="noopener noreferrer">${inline({ ...options, copyCode: false }, n.c)}</a>`
@@ -191,11 +196,12 @@ function blocks(options: RenderOptions, list: MdBlock[]): Children {
 const parsed = new Map<string, MdBlock[]>();
 
 /** The parsed tree for `text`, from a small cache of recent bodies. */
-function parsedMarkdown(text: string): MdBlock[] {
-  let tree = parsed.get(text);
+function parsedMarkdown(text: string, lineBreaks: LineBreaks = 'markdown'): MdBlock[] {
+  const key = `${lineBreaks}\n${text}`;
+  let tree = parsed.get(key);
   if (!tree) {
-    tree = parseMarkdown(text);
-    parsed.set(text, tree);
+    tree = parseMarkdown(text, { lineBreaks });
+    parsed.set(key, tree);
     if (parsed.size > 8) parsed.delete(parsed.keys().next().value!);
   }
   return tree;
@@ -218,6 +224,8 @@ export function MarkdownElements({
   surface = 'report',
   openImage,
   copyCode = false,
+  lineBreaks = 'markdown',
+  glassLinks = false,
   documentKey,
   token,
   readOnly = false,
@@ -229,11 +237,15 @@ export function MarkdownElements({
   /** Where a remote image opens larger when clicked. */
   openImage?: OpenImage;
   copyCode?: boolean;
+  /** `typed` keeps each newline as a line break, for a chat message. */
+  lineBreaks?: LineBreaks;
+  /** A bare URL to something the glass shows (a PR) opens it in the glass. */
+  glassLinks?: boolean;
   documentKey?: string;
   token?: string;
   readOnly?: boolean;
 }): Children {
-  const tree = parsedMarkdown(text);
+  const tree = parsedMarkdown(text, lineBreaks);
   const hasTasks = markdownTasks(tree).length > 0;
   const [progress, setProgress] = useState<ChecklistProgress>();
   const [pending, setPending] = useState(false);
@@ -298,6 +310,7 @@ export function MarkdownElements({
         surface,
         openImage,
         copyCode,
+        glassLinks,
         checklist: { progress, pending, readOnly, toggle: (id, checked) => void toggle(id, checked) },
       },
       tree,

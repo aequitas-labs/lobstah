@@ -631,6 +631,14 @@ describe('glass: the report markdown', () => {
       { t: 'text', v: ' *e' },
     ]);
   });
+
+  it('reads a single newline as a space in a report, and as a line break when typed', () => {
+    expect(parseMarkdown('one\ntwo')).toEqual([{ t: 'p', c: [{ t: 'text', v: 'one two' }] }]);
+    expect(parseMarkdown('one\n**two**\n- three\n  four', { lineBreaks: 'typed' })).toEqual([
+      { t: 'p', c: [{ t: 'text', v: 'one' }, { t: 'br' }, { t: 'b', c: [{ t: 'text', v: 'two' }] }] },
+      { t: 'list', ordered: false, start: 1, items: [[{ t: 'p', c: [{ t: 'text', v: 'three' }, { t: 'br' }, { t: 'text', v: 'four' }] }]] },
+    ]);
+  });
 });
 
 describe('glass: a block quote', () => {
