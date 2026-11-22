@@ -26,17 +26,41 @@ it('opens one card composer from the message button and retains its draft after 
   await click(g, '.dialog-close'); await click(g, '.message-fab');
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('Keep reviews in the bar');
 });
-it('keeps a failed send for retry and opens its stored conversation after success', async () => {
-  const d = fleet(); let tries = 0;
-  const g = await page(d, { post: (_url, req) => { const body = JSON.parse(req.body); if (body.kind !== 'thread-start') return { status: 404, body: {} }; return ++tries === 1 ? { status: 503, body: { ok: false, reason: 'Try again' } } : { status: 201, body: { ok: true, item: view() } }; } });
-  await click(g, '.message-fab'); await type(g, 'Where should Helm go?');
-  await click(g, '.dsend'); expect(g.$('.derr')?.textContent).toBe('Try again');
-  expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('Where should Helm go?');
+it('shows a sent message at once, keeps a failed one with Retry, and shows the stored conversation once delivered', async () => {
+  const d = fleet(); let tries = 0; let started = ''; let delivered = false;
+  const words = 'Where should Helm go?';
+  const stored = (): ThreadView => ({ ...view(), id: started, title: words, rounds: [{ at: AT, entries: [{ by: 'person', via: 'glass', text: words, attachments: [], at: AT, submission: started }] }] });
+  const g = await page(d, {
+    get: (url) => url.startsWith('/api/submissions/') ? { status: 200, body: { ok: true, state: 'applied' } }
+      // The conversation exists once the message is delivered.
+      : url === `/threads/${encodeURIComponent(started)}` ? (delivered ? { status: 200, body: stored() } : { status: 404, body: { error: 'not found' } }) : undefined,
+    post: (_url, req) => {
+      const body = JSON.parse(req.body);
+      if (body.kind !== 'thread-start') return { status: 404, body: {} };
+      started = body.payload.submission;
+      if (++tries === 1) return { status: 503, body: { ok: false, reason: 'Try again' } };
+      // Recorded: the snapshot after delivery lists the new conversation.
+      delivered = true;
+      d.threads = [...(d.threads ?? []), { ...summary(), id: started, title: words, updatedAt: new Date(NOW + 1000).toISOString() }];
+      return { status: 202, body: { ok: true, state: 'pending', submission: started } };
+    },
+  });
+  await click(g, '.message-fab'); await type(g, words);
   await click(g, '.dsend');
-  expect(g.window.location.hash).toBe(`#thread/${ID}`);
+  // The conversation opens under the page's own id, with the message in it; the dialog is gone.
+  expect(g.window.location.hash).toBe(`#thread/${started}`);
   expect(g.$('.dialog-scrim')).toBeNull();
-  expect(g.$('.tsheet')?.textContent).toContain('Keep Reviews');
-  expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'thread-start', payload: { text: 'Where should Helm go?', grounds: 'home' } });
+  expect(g.$('.tsheet .pending-msg .thread-text')?.textContent).toBe(words);
+  // The send failed: the message stays, with the reason and Retry.
+  expect(g.$('.pending-msg.failed .thread-meta')?.textContent).toBe('You · Not sent');
+  expect(g.$('.pending-msg .derr')?.textContent).toBe('Try again');
+  await click(g, '.pending-msg .dretry');
+  // Retried under the same id, so it can be recorded only once.
+  const sent = g.posts().filter((p) => JSON.parse(p.body).kind === 'thread-start').map((p) => JSON.parse(p.body).payload);
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toMatchObject({ text: words, grounds: 'home', submission: sent[0].submission });
+  expect(g.$('.pending-msg')).toBeNull();
+  expect(g.$$('.tsheet .thread-msg.from-person .thread-text').map((el) => el.textContent)).toEqual([words]);
 });
 it('shows current notes, cards, every round, chat provenance, and the long-thread hint', async () => {
   const g = await page(fleet(), { hash: `#thread/${ID}` });
@@ -513,7 +537,7 @@ it('shows linked cards inline, answers one from the thread, and keeps previous a
   const second = g.$$('.thread-card-entry')[1]!;
   (second.querySelector('.dopt') as HTMLElement).click(); await g.settle();
   (second.querySelector('.dsend') as HTMLElement).click(); await g.settle();
-  expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:0a1b2c3e', option: 'Yes', files: [] } });
+  expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:0a1b2c3e', option: 'Yes', files: [], submission: expect.stringMatching(/^[0-9a-f-]{36}$/) } });
   expect(g.$$('.thread-card-entry')[1]?.querySelector('.danswered')?.textContent).toContain('answered');
 });
 

@@ -48,6 +48,12 @@ export interface GlassBackend {
   settings(): Promise<GlassRead<GlassSettings>>;
   /** One glass request (an answer, a view, an ack, a trap request…), with the page's write token. */
   request<T extends GlassVerdict>(kind: string, payload: unknown, token: string): Promise<GlassWrite<T>>;
+  /**
+   * How a recorded submission went (submissions.ts), answered once it settles
+   * or after `waitMs`. A source with this takes answers and messages as
+   * submissions: its server replies once they are recorded and delivers them after.
+   */
+  submission?(id: string, token: string, waitMs: number): Promise<GlassWrite<SubmissionVerdict>>;
   /** Raise one live trap's window on this machine. */
   focus(trapId: string, token: string): Promise<GlassWrite<{ focused?: boolean; message?: string; reason?: string }>>;
   /** Report this page as open (and visible or not); the answer may hold a show for it. */
@@ -60,6 +66,12 @@ export interface GlassBackend {
   checklists?: ChecklistSource;
   /** Where the browser loads a file the glass lists: a decision's, a report's, a dispatch's or a trap's. */
   fileUrl(owner: GlassFileOwner, name: string): string;
+}
+
+/** A submission's state as the server answers it: waiting for delivery, delivered, or refused with a reason. */
+export interface SubmissionVerdict extends GlassVerdict {
+  submission?: string;
+  state?: 'pending' | 'applied' | 'failed';
 }
 
 /** What a listed file belongs to, as fileUrl names it. */

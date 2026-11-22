@@ -171,7 +171,28 @@ function startGlass(): Array<() => void> {
 
   let hadSnapshot = false;
   let reviewScrolled: string | null = null;
+  /**
+   * A change made while the app renders (an effect Preact flushes before a
+   * component re-renders, such as the decision modal recording a view) would
+   * start a second render of the whole page inside the first, which leaves a
+   * stale copy of the page's last nodes behind. It renders once more after
+   * this render instead.
+   */
+  let painting = false;
+  let repaint = false;
   const paint = () => {
+    if (painting) return void (repaint = true);
+    painting = true;
+    try {
+      do {
+        repaint = false;
+        paintOnce();
+      } while (repaint);
+    } finally {
+      painting = false;
+    }
+  };
+  const paintOnce = () => {
     const state = getState();
     const firstSnapshot = !hadSnapshot && !!state.snapshot;
     render(h(App, { state }), document.body);

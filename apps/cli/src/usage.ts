@@ -224,7 +224,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   doctor: { flags: {} },
   telemetry: { subverbs: ['status', 'enable', 'disable', 'show'], flags: { '--json': {} }, flagSubverbs: { '--json': ['status'] }, maxPositionals: 1 },
   glass: {
-    subverbs: ['stop', 'status', 'install', 'uninstall', 'restart', 'show'],
+    // `deliver` is the glass's own: it applies the answers and messages the glass recorded (glass-submissions.ts).
+    subverbs: ['stop', 'status', 'install', 'uninstall', 'restart', 'show', 'deliver'],
     flags: { '--port': { value: '<n>' }, '--detach': {}, '--json': {}, '--app': {} },
     flagSubverbs: { '--json': ['show'], '--app': ['show'] },
   },

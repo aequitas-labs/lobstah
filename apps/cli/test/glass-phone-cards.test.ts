@@ -19,6 +19,8 @@ afterEach(async () => {
 });
 
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** The id the page gives each answer it sends (submissions.ts). */
+const SUBMISSION = expect.stringMatching(/^[0-9a-f-]{36}$/);
 const RUN = { scriptSha256: 'a'.repeat(64), scriptBytes: 10, inputs: [], cwd: '/r', timeoutSecs: 300, output: 'scrubbed', interpreter: '/bin/bash', script: 'echo hi', warnings: [] };
 
 function fleet(withRun = false): GlassFullSnapshot {
@@ -118,11 +120,11 @@ describe('a run card', () => {
     await g.settle();
     (g.$('.dmodal .dsend') as HTMLElement).click();
     await g.settle();
-    expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:aaaa0003', text: 'Run it after the deploy', files: [] } });
+    expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:aaaa0003', text: 'Run it after the deploy', files: [], submission: SUBMISSION } });
     const d = await page(fleet(true), 'decision:aaaa0003');
     (d.$$('.dmodal .dopt').find((b) => text(b).endsWith('Decline')) as HTMLElement).click();
     await d.settle();
-    expect(d.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:aaaa0003', option: 'Decline', files: [] } });
+    expect(d.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:aaaa0003', option: 'Decline', files: [], submission: SUBMISSION } });
   });
 
   it('says it runs on its boat when the boats merge into the hosted glass', async () => {

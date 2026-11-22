@@ -78,7 +78,8 @@ describe('the copy pass on the glass', () => {
     (refused.$$('.dmodal .dopt')[0] as HTMLElement).click();
     (refused.$('.dmodal .dsend') as HTMLElement).click();
     await refused.settle();
-    expect(text(refused.$('.dmodal .derr'))).toBe("Your answer didn't go through. Reload and try again.");
+    expect(text(refused.$('.dmodal .derr'))).toBe("Your answer didn't go through. Try again.");
+    expect(text(refused.$('.dmodal .dretry'))).toBe('Retry');
 
     // Answering the last open decision leaves the "all answered" card.
     const one = withDecision('tok');

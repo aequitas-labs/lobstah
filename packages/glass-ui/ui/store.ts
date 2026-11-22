@@ -38,6 +38,8 @@ export interface GlassState {
   reportSheet?: string | null;
   /** The conversation the sheet shows over the Threads tab, from a `#thread/<id>` hash. */
   threadSheet?: string | null;
+  /** Messages this page sent that its conversations do not show yet, oldest first (thread-actions.ts). */
+  pendingMessages?: PendingMessage[];
   /** This browser's preferences and filters (localStorage). */
   prefs: GlassPrefs;
   /** The open modal, if any. */
@@ -117,8 +119,35 @@ export interface DecisionDraft {
   files: DraftFile[];
   sending?: boolean;
   error?: string;
-  /** Set once the server stored the answer: what the card says it sent. */
+  /** Set when the answer is sent: what the card says it sent. The page sets it at once and clears it if delivery fails. */
   sent?: string;
+  /** The submission this answer went out as, kept while a retry must reuse it (submissions.ts). */
+  submission?: string;
+  /** The fingerprint of what `submission` carried: an edited draft goes out under a new id. */
+  submissionFor?: string;
+  /** The last send failed: the draft is as it was, and the card offers Retry beside `error`. */
+  failed?: boolean;
+}
+
+/**
+ * A message this page sent to the helm, shown in its conversation before
+ * the conversation holds it. `thread` is the conversation's id: for a new
+ * one, the submission's own id, which the server gives the conversation.
+ */
+export interface PendingMessage {
+  submission: string;
+  thread: string;
+  kind: 'thread-start' | 'thread-post';
+  /** A new conversation's grounds and dispatch, as the message sheet chose them. */
+  target: { id?: string; grounds?: string; about?: string };
+  text: string;
+  files: DraftFile[];
+  at: string;
+  /** `sending` until delivered; `sent` until the conversation shows it; `failed` with the reason and a Retry. */
+  state: 'sending' | 'sent' | 'failed';
+  reason?: string;
+  /** Whether a retry must reuse this submission id (it may have been recorded). */
+  retrySame?: boolean;
 }
 
 let current: GlassState;

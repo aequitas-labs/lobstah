@@ -21,6 +21,8 @@ export interface AnswerRequest {
   /** `wharf` only from the boat's receipt applier, after its own checks (wharf-answers.ts). */
   by: AnswerSource;
   receipt?: string;
+  /** The request id to store the answer under: the glass's submission id (glass-submissions.ts). */
+  request?: string;
 }
 
 /** A standing, unframed question for `<lane>:<id>`, as the glass shows it. */

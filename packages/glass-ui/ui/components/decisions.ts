@@ -86,7 +86,11 @@ function answerForm(c: DecisionCard, draft: DecisionDraft | undefined, accept: s
           } else toggleOption(key, o);
         }}>${k && html`<kbd class="dkey" aria-hidden="true">${k}</kbd>`}<span class="dtext"><span class="dlabel">${LinkedText(o)}</span>${notes[o] && html`<span class="dnote">: ${notes[o]}</span>`}</span><//>`;
       })}</div>`,
-    instant && options.length > 0 && draft?.option && draft?.error && html`<div class="bad derr">${draft.error}</div>`,
+    instant &&
+      options.length > 0 &&
+      draft?.option &&
+      draft?.error &&
+      html`<div class="dfoot"><span class="bad derr" role="alert">${draft.error}</span>${draft.failed && html`<${Button} class="dretry" onClick=${() => void sendAnswer(key)}>Retry<//>`}</div>`,
     !permission &&
       html`<${Composer} draftKey=${key} draft=${draft} accept=${accept} textKey=${textKey} label=${options.length && !instant ? 'Your answer, in your own words' : 'Your answer'} placeholder=${options.length && !instant ? 'Add to your answer, or answer in your own words' : 'Your answer'} onSend=${() => sendAnswer(key)} hideError=${!!(instant && draft?.option)} />`,
   ];

@@ -98,32 +98,48 @@ function aboutTitle(about: string | undefined): string | undefined {
   try { return lane ? dispatchThreadTitle(storedDescriptor(id, lane)?.brief) : undefined; }
   catch { return undefined; }
 }
-export function startThread(input: { grounds: string; text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; about?: string; via?: ThreadVia; title?: string; relay?: ThreadRelay; now?: Date }): HelmThread {
-  const text = message(input.text, input.uploads ?? []), id = randomUUID(), at = (input.now ?? new Date()).toISOString();
+/**
+ * Start a conversation. `id` is the glass's submission id: the page opens the
+ * conversation under it before the helm's files are written. A second start
+ * under an id that exists is refused.
+ */
+export function startThread(input: { grounds: string; text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; about?: string; via?: ThreadVia; title?: string; relay?: ThreadRelay; now?: Date; id?: string }): HelmThread {
+  const text = message(input.text, input.uploads ?? []), id = input.id ?? randomUUID(), at = (input.now ?? new Date()).toISOString();
   groundDir(input.grounds);
+  if (input.id !== undefined && (!THREAD_ID.test(input.id) || readThread(input.id))) throw new ThreadError('This conversation already exists', 409);
   if (input.about !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input.about)) throw new ThreadError('Choose a valid dispatch');
   const title = input.title ? threadWords(input.title, 'a title', 200) : (aboutTitle(input.about) ?? (text.split('\n')[0] || input.uploads?.[0]?.name || 'Attachment').slice(0, 200));
   const attachments = uploads(id, input.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024);
   const item: HelmThread = { id, grounds: input.grounds, title, text, attachments,
     kind: input.via === 'chat' ? 'thread' : 'untriaged', state: 'open', notes: { decided: [], open: [] },
-    rounds: [{ at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }],
+    rounds: [{ at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at, ...(input.id ? { submission: input.id } : {}) }] }],
     createdAt: at, updatedAt: at, lastPersonAt: at, ...(input.about ? { about: input.about } : {}), ...(input.relay ? { relay: input.relay } : {}) };
   save(item);
   if (input.via !== 'chat') remindThreads(input.grounds, 900_000, Date.parse(at));
   return item;
 }
-export function postThread(id: string, input: { text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; via?: ThreadVia; source?: string; now?: Date }): HelmThread {
+/**
+ * Add the person's message. With `submission` (the glass's submission id), a
+ * message that conversation already holds is not added again.
+ */
+export function postThread(id: string, input: { text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; via?: ThreadVia; source?: string; now?: Date; submission?: string }): HelmThread {
   const text = message(input.text, input.uploads ?? []);
   const item = update(id, (item) => {
+    if (input.submission && threadHoldsSubmission(item, input.submission)) return item;
     open(item);
     const at = nextAt(item, input.now ?? new Date());
     if (item.rounds.length >= THREAD_MESSAGES_MAX) throw new ThreadError('This conversation needs a report or plan before more messages', 409);
     const attachments = uploads(id, item.grounds, input.uploads ?? [], input.maxBytes ?? 10 * 1024 * 1024);
     const relay = item.relay && input.source ? { relay: { ...item.relay, sources: [...item.relay.sources, input.source].slice(-THREAD_MESSAGES_MAX) } } : {};
-    return { ...item, ...relay, state: 'open', rounds: [...item.rounds, { at, entries: [{ by: 'person', via: input.via ?? 'glass', text, attachments, at }] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
+    const entry: ThreadEntry = { by: 'person', via: input.via ?? 'glass', text, attachments, at, ...(input.submission ? { submission: input.submission } : {}) };
+    return { ...item, ...relay, state: 'open', rounds: [...item.rounds, { at, entries: [entry] }], updatedAt: at, lastPersonAt: at, notifiedAt: undefined };
   });
   if (input.via !== 'chat') remindThreads(item.grounds, 900_000, Date.parse(item.lastPersonAt));
   return item;
+}
+/** Whether a message from this glass submission is already in the conversation. */
+export function threadHoldsSubmission(item: HelmThread, submission: string): boolean {
+  return item.rounds.some((round) => round.entries.some((entry) => 'by' in entry && entry.by === 'person' && entry.submission === submission));
 }
 /** The helm's own words in the conversation, after whatever the person said last. */
 export function sayThread(id: string, input: { text: unknown; uploads?: DecisionUpload[]; maxBytes?: number; now?: Date }): HelmThread {

@@ -1,7 +1,10 @@
 import type { ThreadView } from '@lobstah/core';
 import { backend } from './backend.js';
 import { getState, setState } from './store.js';
+import type { PendingMessage } from './store.js';
 import { receive, setDraft } from './actions.js';
+import { newSubmissionId, submit, takesSubmissions } from './submissions.js';
+import { showToast } from './components/toast.js';
 
 /** Message the helm: a dispatch with an unresolved thread opens that thread, ready to type in. */
 export function openMessage(about?: string, grounds?: string): void {
@@ -70,6 +73,33 @@ export async function sendMessage(key: string, target: { id?: string; grounds?: 
   };
   if (!draft || (!draft.text.trim() && !draft.files.length)) return fail('Write a message or attach a file');
   if (!state.snapshot?.focusToken) return fail('Reload the page to send');
+  if (takesSubmissions()) {
+    // The message shows in its conversation at once, and the composer is ready for the next one.
+    const submission = newSubmissionId();
+    const message: PendingMessage = {
+      submission,
+      thread: target.id ?? submission,
+      kind: target.id ? 'thread-post' : 'thread-start',
+      target,
+      text: draft.text,
+      files: draft.files,
+      at: new Date().toISOString(),
+      state: 'sending',
+    };
+    setState({ pendingMessages: [...(getState().pendingMessages ?? []), message] });
+    setDraft(key, { text: '', files: [], sending: false, error: undefined });
+    if (!target.id) {
+      // The new conversation replaces the sheet; its Back entry must not reopen it.
+      if (history.state?.glassOverlay) {
+        const { glassOverlay: _overlay, ...rest } = history.state;
+        history.replaceState(rest, '', location.href);
+      }
+      closeMessage();
+      openThread(message.thread);
+    }
+    void deliverMessage(message, state.snapshot.focusToken);
+    return undefined;
+  }
   setDraft(key, { sending: true, error: undefined });
   try {
     const response = await backend().request<{ ok?: boolean; reason?: string; item?: ThreadView }>(
@@ -101,6 +131,69 @@ export async function sendMessage(key: string, target: { id?: string; grounds?: 
     return fail('The message could not be sent');
   }
 }
+/** The note and toast for a message that did not reach the helm. */
+export const MESSAGE_UNSENT = "Your message didn't go through. Try again.";
+
+/** Replace one pending message, by its submission id. */
+function updatePending(submission: string, patch: Partial<PendingMessage>): void {
+  setState({ pendingMessages: (getState().pendingMessages ?? []).map((m) => (m.submission === submission ? { ...m, ...patch } : m)) });
+}
+
+/** Deliver a pending message, then show the conversation that holds it, or mark it failed with Retry. */
+async function deliverMessage(message: PendingMessage, token: string): Promise<void> {
+  const payload = { ...message.target, text: message.text, files: message.files.map(({ name, data }) => ({ name, data })) };
+  const outcome = await submit(message.kind, message.submission, payload, token, MESSAGE_UNSENT);
+  if (outcome.state === 'failed') {
+    updatePending(message.submission, { state: 'failed', reason: outcome.reason, retrySame: outcome.retrySame });
+    showToast(MESSAGE_UNSENT);
+    return;
+  }
+  updatePending(message.submission, { state: 'sent' });
+  // The conversation reloads once the snapshot names its new revision. A failed read leaves it to the next poll.
+  try {
+    receive(await backend().snapshot());
+  } catch {
+    /* the next poll retries */
+  }
+}
+
+/**
+ * Send a failed message again. One that may have been recorded keeps its
+ * id, so it is written once; a refused new conversation starts under a new
+ * id, and the sheet follows it.
+ */
+export function retryMessage(submission: string): void {
+  const message = getState().pendingMessages?.find((m) => m.submission === submission);
+  const token = getState().snapshot?.focusToken;
+  if (!message || message.state !== 'failed' || !token) return;
+  const id = message.retrySame ? message.submission : newSubmissionId();
+  const next: PendingMessage = {
+    ...message,
+    submission: id,
+    thread: message.kind === 'thread-start' ? id : message.thread,
+    state: 'sending',
+    reason: undefined,
+    retrySame: undefined,
+  };
+  setState({ pendingMessages: (getState().pendingMessages ?? []).map((m) => (m.submission === submission ? next : m)) });
+  if (next.thread !== message.thread && getState().threadSheet === message.thread) {
+    history.replaceState(history.state, '', `#thread/${encodeURIComponent(next.thread)}`);
+    routeThread(next.thread);
+  }
+  void deliverMessage(next, token);
+}
+
+/** Drop pending messages the conversation now shows. */
+export function settlePendingMessages(view: ThreadView): void {
+  const pending = getState().pendingMessages ?? [];
+  const shown = new Set(
+    view.rounds.flatMap((round) =>
+      round.entries.flatMap((entry) => ('by' in entry && entry.by === 'person' && entry.submission ? [entry.submission] : [])),
+    ),
+  );
+  if (pending.some((m) => shown.has(m.submission))) setState({ pendingMessages: pending.filter((m) => !shown.has(m.submission)) });
+}
+
 export async function reopenConversation(id: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
   if (!token) return 'Reload the page to reopen';
