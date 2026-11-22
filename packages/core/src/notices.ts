@@ -72,8 +72,8 @@ export type NoticeKind =
 
 /**
  * Notices that never wake a helm on their own: they show in tend, the
- * digest, and the glass. A trap's start is one wake, `trap-available`, when
- * it is listening; its reservation (`trap-starting`), sign-on
+ * digest, and the glass. A listening trap gives one `trap-available` wake
+ * per free period; its reservation (`trap-starting`), sign-on
  * (`trap-signed-on`), and first park (`trap-listening`, older homes) ask
  * nothing of the helm, and neither does a sign-off (`trap-stowed`). A notice
  * can also be posted `quiet` on its own (a trap that ghosted while idle, a

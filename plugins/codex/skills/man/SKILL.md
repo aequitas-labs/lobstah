@@ -105,7 +105,8 @@ Images it links under its folder (`shots/01.png`) go with `--attach` or `--attac
   terminal cannot open (a refused Automation permission), say so; the human
   can copy the start command from the trap's card in the glass. Never work
   around a refused permission.
-- A trap's start wakes you once, with `trap-available`; a batch wakes you
+- A listening trap wakes you once per free period, with `trap-available`
+  after an idle start or its work ends. Busy traps and repeated parks stay quiet; a batch wakes you
   once, with `trap-batch`, when every throw settled. Sign-offs and idle
   ghosts are in the digest and the glass, not wakes.
 - A PR stack has one persistent `stack-ready` item containing its members and human problems, in bottom-first merge order; no member lobsters. It wakes once when ready (again after unready or growth), updates in place, and links to the current top PR. Bottom-first merges keep the item without another wake; legacy duplicates collapse silently. Follow an external stack from any member with `lobstah watch add pr:<owner>/<repo>#<n>`.

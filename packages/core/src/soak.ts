@@ -36,6 +36,7 @@ import type { WorkerConfig, WorkerMetadata } from './worker-metadata.js';
 import { resumeTrapTurn } from './trap-turn.js';
 import { dispatchUsageLimit, trapUsageLimit } from './usage-limits.js';
 import { rememberTrapPane, retireTrapPane } from './tmux-panes.js';
+import { trapAvailability } from './trap-availability.js';
 
 /**
  * A trap is anchored to a worktree, not a session: `.lobstah-trap` in the
@@ -74,6 +75,8 @@ export interface TrapRegistration {
   heartbeatAt: string;
   /** Set the first time the trap actually parks. Absent = signed on but never listened. */
   firstParkedAt?: string;
+  /** This free period was announced; preserved across sessions and cleared when work reserves the trap. */
+  availabilityAnnounced?: boolean;
   /** A thrown session arriving after this deadline announces availability separately from its batch. */
   startDeadline?: string;
   /** The last heartbeat of a park (the Stop hook or `soak --wait`): fresh while the trap listens. */
@@ -414,6 +417,7 @@ export function signOnTrap(opts: {
     signedOnAt: sameSession ? prior.signedOnAt : iso,
     heartbeatAt: iso,
     firstParkedAt: sameSession ? prior.firstParkedAt : undefined,
+    availabilityAnnounced: prior?.availabilityAnnounced,
     idleSince: sameSession ? prior.idleSince : undefined,
     window,
     ...(harnessProcess ? { harnessProcess } : {}),
@@ -598,20 +602,24 @@ export function confirmTrapTitle(trapId: string, now = Date.now()): TrapRegistra
   return next;
 }
 
-/**
- * Refresh liveness. `parked: true` marks the trap as actually listening —
- * the first time also raises the trap-available notice, so the helm learns
- * the address is ready for near-instant delivery.
- */
+/** Changes accompanying a trap's liveness heartbeat. Null explicitly releases an assignment. */
+export interface TrapHeartbeatOptions {
+  parked?: boolean;
+  claimed?: string | null;
+  hostedCatch?: string | null;
+  active?: boolean;
+}
+
+/** Refresh liveness and announce each free period once, when the trap is listening. */
 export function heartbeatTrap(
   trapId: string,
-  opts: { parked?: boolean; claimed?: string | null; hostedCatch?: string | null; active?: boolean } = {},
+  opts: TrapHeartbeatOptions = {},
 ): TrapRegistration | undefined {
   return withTrapLifecycleLock(trapId, () => writeTrapHeartbeat(trapId, opts));
 }
 
 /** A heartbeat made while the caller owns the lifecycle lock. */
-function writeTrapHeartbeat(trapId: string, opts: { parked?: boolean; claimed?: string | null; hostedCatch?: string | null; active?: boolean }): TrapRegistration | undefined {
+function writeTrapHeartbeat(trapId: string, opts: TrapHeartbeatOptions): TrapRegistration | undefined {
   const reg = readTrap(trapId);
   if (!reg) return undefined;
   const firstPark = opts.parked && reg.firstParkedAt === undefined;
@@ -625,11 +633,18 @@ function writeTrapHeartbeat(trapId: string, opts: { parked?: boolean; claimed?: 
   };
   if (opts.active || hasOpenCatch(next) || next.hostedCatch) delete next.idleSince;
   else if (opts.parked) next.idleSince ??= new Date().toISOString();
+  // Listening between turns does not release a catch. The same availability
+  // check used by the helm also reserves traps for queued sticky assignments.
+  const availability = trapAvailability(next);
+  const free = !next.hostedCatch && availability.state === 'free';
+  const announceAvailability = !!opts.parked && free && !next.availabilityAnnounced;
+  if (hasOpenCatch(next) || next.hostedCatch || availability.state === 'busy') delete next.availabilityAnnounced;
+  else if (announceAvailability) next.availabilityAnnounced = true;
   atomicWrite(regPath(trapId), JSON.stringify(next, null, 2));
   if (hasOpenCatch(next)) renewDesktopLease(next);
   if (firstPark && reg.configured) closeDesktopStartCards(trapId);
-  if (firstPark) {
-    // The one wake a trap's start gives the helm: it is free to take work.
+  if (announceAvailability) {
+    // A session restart keeps the announcement for the same free period.
     // A trap a batch started is announced by the batch's summary instead.
     postNotice({
       kind: 'trap-available',
@@ -637,7 +652,7 @@ function writeTrapHeartbeat(trapId: string, opts: { parked?: boolean; claimed?: 
       refId: trapId,
       repo: reg.repo,
       grounds: reg.configured?.grounds,
-      ...(reg.batch && (!reg.startDeadline || Date.now() <= Date.parse(reg.startDeadline)) ? { quiet: true } : {}),
+      ...(firstPark && reg.batch && (!reg.startDeadline || Date.now() <= Date.parse(reg.startDeadline)) ? { quiet: true } : {}),
     });
   }
   return next;
