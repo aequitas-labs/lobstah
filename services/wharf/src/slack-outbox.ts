@@ -160,31 +160,43 @@ export class SlackOutbox {
     for (let calls = 0; calls < DRAIN_CALLS; ) {
       const job = this.sql.exec<Delivery>('SELECT * FROM slack_deliveries WHERE want>sent AND next_at<=? ORDER BY next_at, card LIMIT 1', Date.now()).toArray()[0];
       if (!job) return;
-      const link = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', job.person).toArray()[0];
-      const card = this.deps.card(job.card);
-      if (!card) { this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person); continue; }
-      if (!link || link.revoked_at) { this.settle(job, { next_at: NEVER, error: 'unlinked' }); continue; }
-      if (!this.serves(job.person, card.grounds)) { this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person); continue; }
-      // Not posted yet and already ended: there is nothing left to show or close.
-      if (!job.ts && card.terminal) { this.settle(job, { sent: job.want, error: null }); continue; }
-      const token = await this.deps.token(link.team);
-      if (!token) { this.settle(job, { next_at: Date.now() + 300_000, error: 'not installed' }); continue; }
-      const message = renderCard(card, this.deps.glassOrigin, this.controls(job.person, card, Date.now()));
-      const hash = await digest(JSON.stringify(message));
-      if (job.ts && hash === job.sent_hash) { this.settle(job, { sent: job.want, error: null }); continue; }
-      const wait = (last.get(link.channel) ?? 0) + CONVERSATION_SPACING_MS - Date.now();
-      if (wait > 0) await (this.deps.pause ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(wait);
-      // Rebinding may happen while fetching the installation or waiting for Slack's rate limit.
-      if (!this.serves(job.person, card.grounds)) continue;
-      const currentLink = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', job.person).toArray()[0];
-      if (!currentLink || currentLink.channel !== link.channel || currentLink.team !== link.team || currentLink.user !== link.user) continue;
-      const currentCard = this.deps.card(job.card);
-      if (!currentCard || currentCard.grounds !== card.grounds) continue;
-      const api = new SlackApi(token);
-      const outcome = job.ts ? await api.update(link.channel, job.ts, message) : await api.post(link.channel, message, this.deps.thread?.(card, link.channel));
-      calls++; last.set(link.channel, Date.now());
-      this.record(job, outcome, hash);
+      try {
+        if (await this.deliver(job, last)) calls++;
+      } catch (e) {
+        // One job that throws (an unsealable token, a render) waits its backoff; the rest still go.
+        const name = e instanceof Error ? e.name : 'error';
+        console.log(JSON.stringify({ slack: 'delivery', card: job.card, ok: false, outcome: 'failed', error: name }));
+        this.settle(job, { attempts: job.attempts + 1, next_at: Date.now() + backoff(job.attempts), error: `failed: ${name}` });
+      }
     }
+  }
+  /** Settle one due delivery; true when it made a Slack call. */
+  private async deliver(job: Delivery, last: Map<string, number>): Promise<boolean> {
+    const link = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', job.person).toArray()[0];
+    const card = this.deps.card(job.card);
+    if (!card) { this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person); return false; }
+    if (!link || link.revoked_at) { this.settle(job, { next_at: NEVER, error: 'unlinked' }); return false; }
+    if (!this.serves(job.person, card.grounds)) { this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person); return false; }
+    // Not posted yet and already ended: there is nothing left to show or close.
+    if (!job.ts && card.terminal) { this.settle(job, { sent: job.want, error: null }); return false; }
+    const token = await this.deps.token(link.team);
+    if (!token) { this.settle(job, { next_at: Date.now() + 300_000, error: 'not installed' }); return false; }
+    const message = renderCard(card, this.deps.glassOrigin, this.controls(job.person, card, Date.now()));
+    const hash = await digest(JSON.stringify(message));
+    if (job.ts && hash === job.sent_hash) { this.settle(job, { sent: job.want, error: null }); return false; }
+    const wait = (last.get(link.channel) ?? 0) + CONVERSATION_SPACING_MS - Date.now();
+    if (wait > 0) await (this.deps.pause ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(wait);
+    // Rebinding may happen while fetching the installation or waiting for Slack's rate limit.
+    if (!this.serves(job.person, card.grounds)) return false;
+    const currentLink = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', job.person).toArray()[0];
+    if (!currentLink || currentLink.channel !== link.channel || currentLink.team !== link.team || currentLink.user !== link.user) return false;
+    const currentCard = this.deps.card(job.card);
+    if (!currentCard || currentCard.grounds !== card.grounds) return false;
+    const api = new SlackApi(token);
+    const outcome = job.ts ? await api.update(link.channel, job.ts, message) : await api.post(link.channel, message, this.deps.thread?.(card, link.channel));
+    last.set(link.channel, Date.now());
+    this.record(job, outcome, hash);
+    return true;
   }
   private record(job: Delivery, outcome: SlackOutcome, hash: string) {
     const now = Date.now();
