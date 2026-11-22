@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { askDecision, decisionDir, ensureLayout, listRequests, prepareRunCard, processStartedAt, readDecision, readDecisionAnswer, readRunAttempt, readRunAudit, readRunOutput, withdrawDecision, writeRunAttempt } from '@lobstah/core';
+import { ackDecision, askDecision, decisionDir, ensureLayout, listRequests, prepareRunCard, processStartedAt, readDecision, readDecisionAnswer, readRunAttempt, readRunAudit, readRunOutput, withdrawDecision, writeRunAttempt } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges } from '../src/run-passkey.js';
 import { RunRegistry, runEnvironment } from '../src/run-exec.js';
@@ -264,6 +264,7 @@ print("python ran")
     expect(await answer(c.key)).toContain('timed out');
     expect(readRunAttempt(c.key)).toMatchObject({ state: 'failed', result: { exitCode: 124, timedOut: true } });
     expect(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run).toMatchObject({ state: 'failed', exitCode: 124 });
+    expect(readDecisionAnswer(c.key)?.run).toMatchObject({ state: 'failed', exitCode: 124 });
   }, 15_000);
 
   it('refuses inputs the card does not declare, a missing one, or one with a newline', async () => {
@@ -281,11 +282,11 @@ print("python ran")
     const res = await post('run-output', { key: c.key, after: 0 });
     expect(res.json.text).toBe('key is ‹K›\n');
     expect(res.json.result).toMatchObject({ exitCode: 0, timedOut: false, scrubbed: 1 });
-    // A finished attempt stays available for another passkey-confirmed run.
+    // A terminal outcome answers the card; another run needs a new card.
     const again = await post('run-challenge', c);
-    expect(again.status).toBe(200);
+    expect(again.status).toBe(409);
     expect(readDecision(c.key)).toBeDefined();
-    expect(readDecisionAnswer(c.key)).toBeUndefined();
+    expect(readDecisionAnswer(c.key)?.run).toMatchObject({ state: 'succeeded', exitCode: 0, tail: 'key is ‹K›' });
   });
 
   it('scrubs split secrets and encoded secrets from both streams before live polls can read them', async () => {
@@ -346,23 +347,17 @@ sleep 30
     expect(JSON.stringify(snapshot)).not.toContain('local-failure-detail');
   });
 
-  it('retries the same script as a new attempt, keeps both histories, and dismisses only after it ends', async () => {
+  it('keeps the finished history and refuses to run an answered card again', async () => {
     const c = card('#!/bin/bash\necho hello\n');
     await run(c);
     await runs.settled();
     const first = readRunAttempt(c.key)!;
     expect(first.state).toBe('succeeded');
-    expect((await run(c)).status).toBe(202);
-    await runs.settled();
-    const second = readRunAttempt(c.key)!;
-    expect(second.id).not.toBe(first.id);
-    expect(second.scriptSha256).toBe(first.scriptSha256);
+    expect((await post('run-challenge', c)).status).toBe(409);
+    expect(readRunAttempt(c.key)?.id).toBe(first.id);
     expect(fs.existsSync(path.join(decisionDir(c.key)!, 'run', first.id, 'state.json'))).toBe(true);
-    expect(listRequests({ kind: 'decision-answer' }).filter((event) => event.payload.key === c.key)).toHaveLength(2);
-    expect((await post('run-dismiss', { key: c.key })).status).toBe(200);
-    expect(readDecision(c.key)).toBeUndefined();
-    expect(readRunAttempt(c.key)?.id).toBe(second.id);
-    expect((await post('run-challenge', c)).status).toBe(404);
+    expect(listRequests({ kind: 'decision-answer' }).filter((event) => event.payload.key === c.key)).toHaveLength(1);
+    expect(readDecisionAnswer(c.key)?.run?.id).toBe(first.id);
   });
 
   it('stops a running process group, records stopped, and wakes the helm', async () => {
@@ -370,6 +365,8 @@ sleep 30
     await run(c);
     for (let index = 0; index < 100 && !fs.existsSync(path.join(outside, 'child.pid')); index++) await new Promise((resolve) => setTimeout(resolve, 20));
     expect(readRunAttempt(c.key)?.state).toBe('running');
+    expect(readDecisionAnswer(c.key)).toBeUndefined();
+    expect(() => ackDecision(c.key)).toThrow(/not answered yet/);
     expect((await run(c)).status).toBe(409);
     expect((await post('run-dismiss', { key: c.key })).status).toBe(409);
     expect((await post('run-stop', { key: c.key })).status).toBe(202);
@@ -424,6 +421,16 @@ wait
     await runs.settled();
     expect((await answer(c.key)).length).toBeLessThan(20000);
     expect(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run).toMatchObject({ state: 'succeeded', exitCode: 0 });
+  });
+
+  it('stores the same bounded answer when escaping output fences exceeds the prose answer limit', async () => {
+    const c = card("for ((i=0;i<20000;i++)); do printf '`'; done\n");
+    await run(c);
+    const text = await answer(c.key);
+    expect(text.length).toBeGreaterThan(20000);
+    const stored = readDecisionAnswer(c.key)!;
+    expect(stored.text).toBe(text);
+    expect(stored.run).toEqual(listRequests({ kind: 'decision-answer' }).at(-1)?.payload.run);
   });
 
   it('recovers a run whose glass owner is gone as a durable failure, once', async () => {

@@ -7,6 +7,15 @@ import { atomicRenameSync, uniqueTempPath } from './paths.js';
 /** A run attempt's state. A finished one leaves the active views after RUN_DONE_GRACE_MS (decisions.ts). */
 export type RunState = 'running' | 'succeeded' | 'failed' | 'stopped';
 
+/** A terminal run outcome stored with its decision answer and sent to the helm. */
+export interface RunDecisionOutcome {
+  id: string;
+  state: Exclude<RunState, 'running'>;
+  exitCode: number;
+  /** Scrubbed terminal output, or empty when the card withholds output. */
+  tail: string;
+}
+
 /** The result shared with the glass and the helm, without private output. */
 export interface RunResult {
   exitCode: number;

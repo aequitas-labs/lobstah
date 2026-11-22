@@ -7,7 +7,7 @@ import type { KeyObject } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { RUN_LINE_SEAL_INFO, RUN_SEAL_INFO, askDecision, ensureLayout, prepareRunCard, runInputsText, runLineSignedText, sha256Hex } from '@lobstah/core';
+import { RUN_LINE_SEAL_INFO, RUN_SEAL_INFO, askDecision, ensureLayout, prepareRunCard, readDecisionAnswer, runInputsText, runLineSignedText, sha256Hex } from '@lobstah/core';
 import type { RunInputValues, SealedInput } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { RunChallenges, addRunPasskey } from '../src/run-passkey.js';
@@ -349,26 +349,26 @@ describe.skipIf(!RUNS_HERE || !fs.existsSync('/usr/bin/expect'))('a line typed i
   }, 15_000);
 });
 
-describe.skipIf(!RUNS_HERE)('Stop, Run again and Dismiss from the hosted glass', () => {
-  it('stops a running card and dismisses a finished one, with no passkey', async () => {
+describe.skipIf(!RUNS_HERE)('Stop and terminal answers from the hosted glass', () => {
+  it('stops a running card with no passkey and records its answer', async () => {
     const card = runCard({ body: '#!/bin/bash\nsleep 20\n' });
     expect((await passkeyRun(card)).status).toBe(202);
     // Stop needs no passkey: stopping is safe and urgent.
     expect((await relayed('run-stop', { key: card.key })).status).toBe(202);
     await runs.settled();
     expect((await relayed('run-output', { key: card.key })).json.state).toBe('stopped');
-    expect((await relayed('run-dismiss', { key: card.key })).status).toBe(200);
-    expect((await relayed('run-challenge', card)).status).toBe(404);
+    expect(readDecisionAnswer(card.key)?.run?.state).toBe('stopped');
+    expect((await relayed('run-challenge', card)).status).toBe(409);
   });
 
-  it('runs again inside the window with no passkey', async () => {
+  it('refuses to run an answered card again, even inside the page window', async () => {
     const page = windowKey();
     const card = runCard();
     const first = await passkeyRun(card, { window: page.spki });
     await runs.settled();
     const id = first.json.window as string;
     const asked = await relayed('run-challenge', { ...card, window: id });
-    expect(asked.json.window).toBe(id);
-    expect((await relayed('run', { key: card.key, challenge: asked.json.challenge, window: id, windowSignature: signWith(page.privateKey, asked.json.challenge as string), inputs: {} })).status).toBe(202);
+    expect(asked.status).toBe(409);
+    expect(readDecisionAnswer(card.key)?.run?.state).toBe('succeeded');
   });
 });
