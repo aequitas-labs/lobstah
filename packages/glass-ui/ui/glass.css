@@ -4370,6 +4370,36 @@ footer .glass-brand {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/*
+ * A message's Markdown (components/helm.ts MessageText): the report's styles
+ * without its box. Code sits on the page's inset color, and a code block
+ * wraps instead of scrolling, so a narrow screen never scrolls sideways.
+ */
+.thread-text.mdpage {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  white-space: normal;
+}
+.thread-text.mdpage > :first-child {
+  margin-top: 0;
+}
+.thread-text.mdpage > :last-child {
+  margin-bottom: 0;
+}
+.thread-text.mdpage code,
+.thread-text.mdpage pre.mdcode {
+  background: var(--inset);
+}
+.thread-text.mdpage pre.mdcode {
+  padding-right: 40px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thread-text.mdpage pre.mdcode code {
+  background: none;
+}
 .from-person .thread-bubble {
   border-color: color-mix(in srgb, var(--link) 45%, var(--line));
   background: color-mix(in srgb, var(--link) 14%, var(--card));
@@ -4453,6 +4483,20 @@ footer .glass-brand {
   border-left: 3px solid var(--warn);
   border-radius: 8px;
   background: var(--card);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+/* A linked card's title wraps over as many lines as it needs, within the card. */
+.thread-card-entry > .thread-card-title {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: flex-start;
+  padding-block: 6px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
 }
 .thread-card-entry > p,
 .thread-card-entry > .thread-card-answer,

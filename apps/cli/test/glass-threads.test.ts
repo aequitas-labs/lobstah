@@ -3,7 +3,7 @@ import type { ThreadView, ThreadSummary, GlassSnapshot } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom, GlassDomOptions } from './glass-dom.js';
-import { NOW, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
+import { NOW, acceptanceFleet, emptyFleet, everyAttentionFleet } from './fixtures/glass-snapshots.js';
 const ID = 'abcdef01-1234-4000-8000-abcdef012345';
 const KEY = 'decision:0a1b2c3d';
 const AT = new Date(NOW).toISOString();
@@ -287,6 +287,53 @@ it('reads as a chat: the person on the right, the helm beside its wheel, system 
   expect(timeline.compareDocumentPosition(composer) & g.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
+it('shows messages as Markdown: bold, lists, code and links, raw HTML as text, line breaks as typed', async () => {
+  const detail = view();
+  const helm = [
+    '**The Slack card gap:** the wharf reads its own store.',
+    '- It is for a *shared* grounds',
+    '- Run `lobstah wharf push` first',
+    '',
+    '```',
+    'lobstah wharf push --cards',
+    '```',
+    'See [the docs](https://lobstah.dev/docs) or [this](javascript:alert(1)).',
+    '<script>alert(2)</script><img src=x onerror="alert(3)">',
+  ].join('\n');
+  detail.rounds = [{ at: AT, entries: [
+    { by: 'person', via: 'glass', text: 'First line\nsecond line', attachments: [], at: AT },
+    { by: 'helm', text: helm, attachments: [], at: AT, seq: 1 },
+  ] }];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  const message = g.$('.from-helm .thread-text')!;
+  expect(message.querySelector('strong')?.textContent).toBe('The Slack card gap:');
+  expect([...message.querySelectorAll('ul > li')].map((li) => li.textContent)).toEqual(['It is for a shared grounds', 'Run lobstah wharf push first']);
+  expect(message.querySelector('li em')?.textContent).toBe('shared');
+  expect(message.querySelector('li code')?.textContent).toBe('lobstah wharf push');
+  expect(message.querySelector('pre code')?.textContent).toBe('lobstah wharf push --cards');
+  expect([...message.querySelectorAll('a')].map((a) => [a.getAttribute('href'), a.textContent, a.getAttribute('target'), a.getAttribute('rel')])).toEqual([
+    ['https://lobstah.dev/docs', 'the docs', '_blank', 'noopener noreferrer'],
+  ]);
+  expect(message.textContent).toContain('or this.');
+  // Raw HTML is shown as text: nothing it names becomes an element.
+  expect(message.querySelector('script, img')).toBeNull();
+  expect(message.textContent).toContain('<script>alert(2)</script><img src=x onerror="alert(3)">');
+  // A single newline in a message is a line break, as the person typed it.
+  const person = g.$('.from-person .thread-text p')!;
+  expect(person.querySelector('br')).not.toBeNull();
+  expect(person.textContent).toBe('First linesecond line');
+});
+
+it('opens a bare PR link in a message in the glass, as other notes do', async () => {
+  const d = fleet();
+  d.prs = acceptanceFleet().prs;
+  const PR = d.prs!.find((pr) => pr.key === 'pr:acme/web#43')!.url;
+  const detail = view();
+  detail.rounds = [{ at: AT, entries: [{ by: 'helm', text: `Review ${PR} next`, attachments: [], at: AT, seq: 1 }] }];
+  const g = await page(d, { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  expect(g.$('.from-helm .thread-text a')?.getAttribute('href')).toBe('#pr/pr%3Aacme%2Fweb%2343');
+});
+
 it('opens Message the helm on a dispatch page with the cursor in the message, over the dispatch', async () => {
   const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [];
   const id = d.dispatches[0]!.id;
@@ -564,3 +611,18 @@ it('shows linked cards inline, answers one from the thread, and keeps previous a
   expect(g.$$('.thread-card-entry')[1]?.querySelector('.danswered')?.textContent).toContain('answered');
 });
 
+
+it('keeps the new-decision alert away while Threads is open, the list or a conversation, and brings it back on leaving', async () => {
+  const d = fleet(), detail = helmThread(d);
+  const g = await page(d, { hash: '#prs', get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  expect(g.$('.dalert .dalert-open')?.textContent).toContain('2 new decisions');
+  await g.go('#helm');
+  expect(g.$('.dalert')).toBeNull();
+  await click(g, `#helm [data-thread="${ID}"] .dopen`);
+  expect(g.$('.tsheet')).not.toBeNull();
+  expect(g.$('.dalert')).toBeNull();
+  await click(g, '.tsheet .rback');
+  expect(g.$('.dalert')).toBeNull();
+  await g.go('#prs');
+  expect(g.$('.dalert .dalert-open')?.textContent).toContain('2 new decisions');
+});
