@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { BackendError, DecisionError, GrantError, backendScopes, lobstahHome, loadConfig, readDecision, readDecisionAnswer, uniqueTempPath, wharfFor } from '@lobstah/core';
+import { BackendError, DecisionError, GrantError, cardScopes, lobstahHome, loadConfig, readDecision, readDecisionAnswer, uniqueTempPath, wharfFor } from '@lobstah/core';
 import type { BackendScope, CardAnswerReceipt, Config, TendAttention } from '@lobstah/core';
 import { answerKey } from './decision-answer.js';
 import { applyPermissionAnswer } from './grants-cli.js';
@@ -95,7 +95,8 @@ export async function applyWharfAnswers(now = Date.now(), log: (m: string) => vo
   if (timed) checkedAt = now;
   const cfg = loadConfig();
   const byWharf = new Map<string, Extract<BackendScope, { kind: 'wharf' }>>();
-  for (const s of backendScopes(cfg)) if (s.kind === 'wharf' && !byWharf.has(s.wharf!)) byWharf.set(s.wharf!, s);
+  // A mirrored grounds' cards are answered on its mirror's wharf.
+  for (const s of cardScopes(cfg)) if (!byWharf.has(s.wharf)) byWharf.set(s.wharf, s);
   let attention: TendAttention[] | undefined;
   let applied = 0;
   for (const [wharf, scope] of byWharf) {

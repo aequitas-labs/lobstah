@@ -533,6 +533,10 @@ export class Account extends DurableObject<Env> {
         if (!source.startsWith('boat:')) return;
         this.ctx.waitUntil(Promise.resolve().then(() => this.nudgeBoat(source.slice(5), 'cards/answers')));
       },
+      // A mirror boat's cards are its local grounds': they lapse when it stops restating them.
+      mirrored: (source) => source.startsWith('boat:') && ctx.storage.sql.exec(`SELECT 1 FROM boat_permissions p
+        WHERE p.boat=? AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror')`, source.slice(5)).toArray().length > 0,
+      forgotten: (cards) => this.outbox.forget(cards),
     });
     this.outbox = new SlackOutbox(ctx.storage.sql, {
       glassOrigin: env.GLASS_ORIGIN, card: (seq) => this.cards.store.get(`c${seq}`),

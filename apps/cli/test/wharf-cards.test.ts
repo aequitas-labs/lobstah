@@ -51,6 +51,23 @@ it('only cards of repos in a grounds bound to a wharf leave the boat, and each p
   expect(JSON.stringify(sets)).not.toContain('Pick a name');
 });
 
+it('a mirrored local grounds’ cards join the wharf grounds’ set on the mirror’s wharf; an unmirrored one’s stay here', () => {
+  const attention = [
+    item({ kind: 'decision', key: permission.key, note: permission.title, repo: 'remote' }),
+    item({ kind: 'decision', key: localAsk.key, note: localAsk.title, repo: 'local' }),
+  ];
+  const mirrored = { ...cfg, glass: { port: 4949, mirror: 'cloud' } } as Config;
+  const sets = boatCards(mirrored, attention, [permission, localAsk], [notice('n2', 'local')], NOW);
+  expect(sets.map((s) => s.wharf)).toEqual(['cloud']);
+  expect(sets[0]!.cards.map((c) => `${c.grounds}:${c.key}`).sort()).toEqual(['away:decision:grant1', 'home:decision:local', 'home:notice:n2']);
+  expect(boatCards(cfg, attention, [permission, localAsk], [notice('n2', 'local')], NOW)[0]!.cards.map((c) => c.grounds)).toEqual(['away']);
+  // The implicit home is `fleet` on disk: a helm's question with no repo still finds it.
+  const implicit = { repos: cfg.repos, grounds: {}, wharves: cfg.wharves, glass: { port: 4949, mirror: 'cloud' } } as unknown as Config;
+  const helmAsk: DecisionMeta = { ...localAsk, key: 'decision:helm', repo: undefined, grounds: 'fleet' };
+  const [home] = boatCards(implicit, [item({ kind: 'decision', key: helmAsk.key, note: helmAsk.title })], [helmAsk], [], NOW);
+  expect(home!.cards).toEqual([expect.objectContaining({ key: 'decision:helm', grounds: 'home' })]);
+});
+
 it('a set over the wharf’s limit keeps what asks for attention first', () => {
   const attention = Array.from({ length: BOAT_CARDS_MAX + 20 }, (_, i) =>
     item({ kind: 'dispatch-progress', key: `progress:work:${i}`, repo: 'remote', quiet: true, at: new Date(NOW - i * 1000).toISOString() }));

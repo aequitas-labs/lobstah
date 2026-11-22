@@ -105,6 +105,10 @@ helm for each:
   The helm's replies come back to the Slack thread.
   Only when the boat has no socket open does the receipt say it is offline;
   nothing is queued then, so send it again once the boat is back.
+  The grounds' standing cards reach Slack too, with their buttons, and your
+  answer is applied on the boat. If the boat stays offline for 7 days, its
+  cards close in Slack, leave the hosted glass's deck, and are deleted. They
+  come back when the boat does.
 
 When two mirror boats run a grounds of the same name, a request goes to the
 one whose socket is open, or else to the one that reported it last.
@@ -410,12 +414,17 @@ restatements go on the socket as commands. A reopened socket makes every read
 due once, since it may have missed a push; while the socket is down each read
 falls back to every 30 seconds. An idle boat on an open socket sends no HTTP
 request: its hourly usage read (`_boat`, which a boat may read on its socket, and
-`glass`) goes on the socket too.
+`glass`) goes on the socket too. A mirror boat restates its local grounds'
+cards and reads their answers the same way, on its mirror socket, with the
+`read` its mirror credential already holds. A mirror boat's cards it has not
+restated for 7 days end as `expired`; an hour later they are deleted with their
+answers and Slack delivery, and its snapshot is listed without its standing
+items. A wharf grounds' cards never lapse.
 
 The account keeps one alarm, at the earliest time something comes due with no
 request: an active lease or a paused report's hold ends, a worker goes stale
 while untargeted work waits, a live mirror call or an open request expires, a
-card answer no boat took expires, or a Slack delivery's retry comes round. The
+card answer no boat took expires, a mirror boat's cards lapse, or a Slack delivery's retry comes round. The
 alarm runs the same expiry the commands run, pushes the events it makes,
 delivers Slack, and sets the next one. With nothing due there is no alarm, so
 an idle account costs nothing. Native tests evict the DO with a connected

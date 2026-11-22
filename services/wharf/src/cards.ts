@@ -10,12 +10,14 @@ import type { Actor, Command } from './account.js';
  * One row per card. `seq` names the card in links (`c<seq>`); source, family
  * and key are its identity, so a source restating an item finds its card.
  * `card_answers` holds each person's answer to a boat's card, for that boat.
+ * `card_sources` says when each boat last restated its set, to the hour.
  */
 export const cardSchema = `
   CREATE TABLE IF NOT EXISTS cards (seq INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, family TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(source,family,key));
   CREATE TABLE IF NOT EXISTS card_answers (id TEXT PRIMARY KEY, card INTEGER NOT NULL, source TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS card_sources (source TEXT PRIMARY KEY, at INTEGER NOT NULL);
 `;
-export const cardTables = ['cards', 'card_answers'];
+export const cardTables = ['cards', 'card_answers', 'card_sources'];
 /** An answer its boat has not taken in this long expires: an offline boat never applies a stale answer late. */
 export const ANSWER_RECEIPT_MS = 15 * 60_000;
 /** The answer a relayed action gives, in the words its card showed. */
@@ -34,6 +36,16 @@ export function answerLabel(action: GlassCardAction, words?: string): string {
 }
 /** A card that ended is kept this long, so a projection of it can still close where it was shown. */
 export const ENDED_CARD_MS = 7 * 86400_000;
+/**
+ * A mirror boat's cards lapse when it has not restated them in this long:
+ * they end as expired, so their Slack messages close, and LAPSED_CLOSE_MS
+ * later they are deleted with their answers and Slack delivery. A wharf
+ * grounds' cards never lapse.
+ */
+export const MIRRORED_CARD_MS = 7 * 86400_000;
+export const LAPSED_CLOSE_MS = 3_600_000;
+/** How stale a source's restatement time may get before a restatement writes it again: one row an hour, not one per restatement. */
+const RESTATED_STEP_MS = 3_600_000;
 /** At most this many cards in one boat's published set. */
 export const BOAT_CARDS_MAX = 100;
 /** A worker or boat counts as online while it checked in within this window: the claim lease. */
@@ -342,6 +354,10 @@ type Hooks = {
   read: (actor: Actor) => void; publish: (actor: Actor) => void; changed: (cards: GlassCard[], now: number) => void;
   /** A person answered a boat's card: that boat (`boat:<id>`) is told to read its answers. */
   answered?: (source: GlassCardSource) => void;
+  /** Whether a source is a mirror boat, whose cards are a mirrored grounds' and lapse. */
+  mirrored?: (source: GlassCardSource) => boolean;
+  /** Cards deleted from the store (by seq): where they were shown forgets them. */
+  forgotten?: (cards: number[]) => void;
 };
 /** The account's card routes: read the cards, and a boat's restatement of its own. */
 export class Cards {
@@ -351,15 +367,55 @@ export class Cards {
   project(now: number): GlassCard[] {
     const changed = this.store.replace('wharf', wharfCards(this.records, now), now);
     this.expireAnswers(now, changed);
+    this.lapse(now, changed);
     if (changed.length) this.hooks.changed(changed, now);
     return changed;
   }
   /** Answers no boat took in time expire before anyone reads them: a boat is never handed a stale one. */
-  /** When the oldest answer still waiting for its boat expires; none when no answer waits. */
+  /** When the oldest answer still waiting for its boat expires, or a mirror boat's cards lapse or close; none when nothing waits. */
   nextExpiry(now: number): number | undefined {
     const row = this.sql.exec<{ at: string | null }>("SELECT min(json_extract(data,'$.at')) AS at FROM card_answers WHERE json_extract(data,'$.state')='pending'").toArray()[0];
-    if (!row?.at) return undefined;
-    return Math.max(Date.parse(row.at) + ANSWER_RECEIPT_MS, now);
+    const times = [...(row?.at ? [Date.parse(row.at) + ANSWER_RECEIPT_MS] : []), ...this.lapses(now)];
+    return times.length ? Math.max(Math.min(...times), now) : undefined;
+  }
+  /** The mirror boats that still have cards, and when each last restated them. */
+  private mirroredSources(): Array<{ source: GlassCardSource; at: number }> {
+    return this.sql.exec<{ source: GlassCardSource; at: number }>('SELECT s.source,s.at FROM card_sources s WHERE EXISTS (SELECT 1 FROM cards c WHERE c.source=s.source)').toArray()
+      .filter((s) => this.hooks.mirrored?.(s.source));
+  }
+  /** When each mirror boat's cards next move: they lapse, or, lapsed, the first to have ended closes. */
+  private lapses(now: number): number[] {
+    return this.mirroredSources().map(({ source, at }) => {
+      if (at + MIRRORED_CARD_MS > now) return at + MIRRORED_CARD_MS;
+      const ended = this.sql.exec<{ at: string | null }>("SELECT min(json_extract(data,'$.terminal.at')) AS at FROM cards WHERE source=?", source).one().at;
+      const close = Date.parse(ended ?? '') + LAPSED_CLOSE_MS;
+      return Number.isFinite(close) ? close : now;
+    });
+  }
+  /**
+   * A mirror boat that has not restated its cards in MIRRORED_CARD_MS: each
+   * standing card ends as expired, a new revision, so its Slack messages
+   * close; one ended LAPSED_CLOSE_MS ago is deleted with its answers and
+   * Slack delivery. Restating brings a card that still stands back.
+   */
+  private lapse(now: number, changed: GlassCard[]) {
+    const forgotten: number[] = [], iso = new Date(now).toISOString();
+    for (const { source, at } of this.mirroredSources()) {
+      if (at + MIRRORED_CARD_MS > now) continue;
+      for (const row of this.sql.exec<CardRow>('SELECT seq,data FROM cards WHERE source=?', source).toArray()) {
+        const card = JSON.parse(row.data) as GlassCard;
+        if (!card.terminal) {
+          const ended: GlassCard = { ...card, stateHash: `${card.stateHash}:expired`, revision: card.revision + 1, observedAt: iso, actions: [], terminal: { state: 'expired', at: iso } };
+          this.sql.exec('UPDATE cards SET data=? WHERE seq=?', JSON.stringify(ended), row.seq);
+          changed.push(ended);
+        } else if (!(now - Date.parse(card.terminal.at) < LAPSED_CLOSE_MS)) {
+          this.sql.exec('DELETE FROM cards WHERE seq=?', row.seq);
+          this.sql.exec('DELETE FROM card_answers WHERE card=?', row.seq);
+          forgotten.push(row.seq);
+        }
+      }
+    }
+    if (forgotten.length) this.hooks.forgotten?.(forgotten);
   }
   private expireAnswers(now: number, changed: GlassCard[]) {
     for (const row of this.sql.exec<{ id: string; card: number; data: string }>("SELECT id,card,data FROM card_answers WHERE json_extract(data,'$.state')='pending'").toArray()) {
@@ -425,6 +481,7 @@ export class Cards {
       const cards = b.cards.map(boatCardInput);
       requireThat(new Set(cards.map((x) => `${x.family}\n${x.key}`)).size === cards.length, 400, 'duplicate card');
       const changed = this.store.replace(`boat:${actor.id}`, cards, now);
+      this.sql.exec('INSERT INTO card_sources VALUES (?,?) ON CONFLICT(source) DO UPDATE SET at=excluded.at WHERE excluded.at-card_sources.at>=?', `boat:${actor.id}`, now, RESTATED_STEP_MS);
       if (changed.length) this.hooks.changed(changed, now);
       return { status: 200, value: { changed: changed.length } };
     }

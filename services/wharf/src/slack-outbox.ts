@@ -136,6 +136,13 @@ export class SlackOutbox {
     if (!card || card.revision !== row.revision || card.terminal) return { refused: 'stale', ...(card ? { card } : {}) };
     return { card, action: JSON.parse(row.action) };
   }
+  /** Cards deleted from the store: their deliveries and buttons go too, inside the same transaction. */
+  forget(cards: number[]) {
+    for (const card of cards) {
+      this.sql.exec('DELETE FROM slack_deliveries WHERE card=?', card);
+      this.sql.exec('DELETE FROM slack_actions WHERE card=?', card);
+    }
+  }
   /** Show a person's card again, whatever their message of it last said. */
   refresh(person: string, card: GlassCard, now: number) {
     if (!this.serves(person, card.grounds)) return;

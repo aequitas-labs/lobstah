@@ -75,12 +75,15 @@ async function mirrorResponse(request: Request, env: Env, c: Command): Promise<R
   if (c.path === 'mirror' && c.method === 'GET') {
     const known = new Map((new URL(request.url).searchParams.get('known') ?? '').split(',').filter(Boolean).map((pair) => pair.split(':') as [string, string]));
     const boats = (object(result.value).boats as MirrorListing[]);
-    // Each snapshot is spliced in as the JSON the boat put, never parsed again here.
-    const parts = await Promise.all(boats.map(async ({ key, ...boat }) => {
+    // Each snapshot is spliced in as the JSON the boat put, never parsed again here,
+    // but a lapsed boat's: its standing items lapsed with its cards, so they leave its deck. Its own etag says so.
+    const parts = await Promise.all(boats.map(async ({ key, lapsed, ...listed }) => {
+      const boat = lapsed ? { ...listed, etag: `${listed.etag}-lapsed` } : listed;
       if (known.get(boat.boat) === boat.etag) return JSON.stringify({ ...boat, unchanged: true });
       const stored = await env.FILES.get(key);
       if (!stored) return JSON.stringify({ ...boat, missing: true });
-      const text = await new Response(stored.body.pipeThrough(new DecompressionStream('gzip'))).text();
+      let text = await new Response(stored.body.pipeThrough(new DecompressionStream('gzip'))).text();
+      if (lapsed) text = JSON.stringify({ ...JSON.parse(text), attention: [] });
       return `${JSON.stringify(boat).slice(0, -1)},"snapshot":${text}}`;
     }));
     return new Response(`{"boats":[${parts.join(',')}]}`, { headers: { ...noStore, 'Content-Type': 'application/json' } });

@@ -1,6 +1,7 @@
 import { MIRROR_ATTENTION_MAX_BYTES, MIRROR_ATTENTION_MAX_ITEMS, MIRROR_CALL_MS, MIRROR_WHARF_KINDS, mirrorReadAllowed, mirrorWriteAllowed } from '../../../packages/core/src/backend-model.js';
 import type { MirrorWriteKind, WharfAttentionList, WharfMirrorCall, WharfMirrorCallInput, WharfMirrorSnapshot } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
+import { MIRRORED_CARD_MS } from './cards.js';
 import type { Actor, Command } from './account.js';
 
 /**
@@ -46,8 +47,8 @@ export const mirrorAnswerKey = (account: string, call: string): string => `${acc
 /** The R2 key of a file the hosted glass uploaded for a relayed answer. */
 export const mirrorFileKey = (account: string, file: string): string => `${account}/mirror/files/${file}`;
 
-/** One mirror boat as the hosted glass lists it, with where its snapshot's bytes are. */
-export type MirrorListing = WharfMirrorSnapshot & { key: string };
+/** One mirror boat as the hosted glass lists it, with where its snapshot's bytes are, and whether its cards lapsed. */
+export type MirrorListing = WharfMirrorSnapshot & { key: string; lapsed?: true };
 /** A call's answer as the boat sends it. */
 export type MirrorAnswerInput = { status: number; contentType: string; bytes: number };
 /** What a mirror operation leaves for R2 once its transaction commits. */
@@ -226,11 +227,14 @@ export class MirrorState {
     const parts = c.path.split('/');
     const ok = (value: unknown = {}) => ({ status: 200, value });
     // The hosted glass's list: every mirror boat's latest snapshot, with its name, time and ETag.
+    // A boat whose cards lapsed (cards.ts) is listed `lapsed`: its snapshot is served without its standing items.
     if (c.path === 'mirror' && c.method === 'GET') {
       this.person(actor);
-      const boats = this.sql.exec<{ boat: string; name: string; at: string; etag: string; bytes: number }>(`SELECT s.boat,b.name,s.at,s.etag,s.bytes FROM mirror_snapshots s JOIN boats b ON b.id=s.boat
-        JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY b.name LIMIT 100`).toArray()
-        .map((s): MirrorListing => ({ boat: s.boat, name: s.name, at: s.at, etag: s.etag, bytes: s.bytes, key: mirrorSnapshotKey(account, s.boat) }));
+      const boats = this.sql.exec<{ boat: string; name: string; at: string; etag: string; bytes: number; cards: number | null }>(`SELECT s.boat,b.name,s.at,s.etag,s.bytes,cs.at AS cards FROM mirror_snapshots s JOIN boats b ON b.id=s.boat
+        JOIN boat_permissions p ON p.boat=b.id LEFT JOIN card_sources cs ON cs.source='boat:'||s.boat
+        WHERE b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY b.name LIMIT 100`).toArray()
+        .map((s): MirrorListing => ({ boat: s.boat, name: s.name, at: s.at, etag: s.etag, bytes: s.bytes, key: mirrorSnapshotKey(account, s.boat),
+          ...(s.cards !== null && s.cards + MIRRORED_CARD_MS <= now ? { lapsed: true as const } : {}) }));
       return ok({ boats });
     }
     // Ask the boat that owns an item to acknowledge it: one relayed attention-ack call, as a hosted glass click makes.

@@ -15,8 +15,9 @@ import {
   wharfCredential,
   writeMirrorStatus,
 } from '@lobstah/core';
-import type { BackendScope, ClientSocketMessage, Config, MirrorStatus, WharfAttentionList, WharfMirrorCall } from '@lobstah/core';
+import type { BackendScope, ClientSocketMessage, Config, MirrorStatus, ServerSocketMessage, WharfAttentionList, WharfMirrorCall } from '@lobstah/core';
 import { glassPort } from './glass-lifecycle.js';
+import { adoptChannel, dropChannel } from './wharf-channel.js';
 import { WharfSocket } from './wharf-socket.js';
 import { ownAttentionList, writeOtherBoats } from './wharf-attention.js';
 import { localGrounds, slackThreadSynced, slackThreadsToSync } from './slack-threads.js';
@@ -377,13 +378,15 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
   const credential = (): string => wharfCredential(scope);
   const port = glassPort();
   let mirror: WharfMirror | undefined;
-  const socket = new WharfSocket(scope.location, credential, {
+  const connect = (channel?: { message: (m: ServerSocketMessage) => void; state: (open: boolean) => void }) => new WharfSocket(scope.location, credential, {
     client: lobstahVersion(),
     onState: (open) => {
+      channel?.state(open);
       if (open) mirror?.onReconnect();
     },
     onError: (error) => mirror?.onError(error),
     onMessage: (message) => {
+      channel?.message(message);
       if (!mirror) return;
       if (message.t === 'watch') void mirror.onWatch(message.on);
       else if (message.t === 'call') void mirror.onCall(message.call);
@@ -391,6 +394,10 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
       else if (message.t === 'error') mirror.onError(new Error(message.reason));
     },
   });
+  // The local grounds' cards and their answers ride this same socket (wharf-cards.ts).
+  let lent: WharfSocket | undefined;
+  const channel = adoptChannel(scope, (on) => (lent = connect(on)));
+  const socket = lent ?? connect();
   const slackThreads: MirrorSlackThreads = {
     grounds: () => localGrounds(loadConfig()),
     pending: () => slackThreadsToSync(loadConfig(), wharf),
@@ -410,6 +417,7 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
     stop: () => {
       stopped = true;
       if (sleeping) clearTimeout(sleeping);
+      if (channel) dropChannel(channel);
       socket.close();
     },
   };
