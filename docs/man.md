@@ -1922,8 +1922,10 @@ answer; use `man say` for everything else you would tell the person.
 A Slack message for a grounds this machine helms arrives the same way, through
 the wharf this machine mirrors to (`[glass].mirror`). Its event says `via:
 slack`. What the person adds in that Slack thread joins the conversation, and
-reopens it if it was resolved. Each helm response (triage, notes, a card,
-the outcome) goes back to the Slack thread.
+reopens it if it was resolved. Your words stay in the glass: Slack shows the
+person only a link. Each helm response (triage, notes, a card, the outcome)
+posts **Updated** with **Open in glass** in the Slack thread, and a dispatch
+you link to the conversation posts **Dispatch started** with its link.
 
 Record a chat that remains open with `man discuss "<title>" --said "<exchange>"`,
 or append it with `man discuss <id> --said "<exchange>"`. Tell the person it was

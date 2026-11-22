@@ -94,16 +94,29 @@ type SlackEvent = { type?: unknown; challenge?: unknown; team_id?: unknown; even
 const ok = () => new Response(null, { status: 200 });
 const id = (v: unknown, pattern = /^[A-Z0-9]{1,32}$/) => (typeof v === 'string' && pattern.test(v) ? v : undefined);
 const SLACK_TS = /^\d{1,12}\.\d{1,9}$/;
+/** The reaction that tells the person lobstah has their message. */
+export const RECEIVED_REACTION = 'star';
+
+/**
+ * Mark a linked person's message as received. It runs beside the routing, so
+ * Slack's three-second wait never includes it; an install without the
+ * reactions scope, or any failure, is logged by SlackApi and blocks nothing.
+ */
+async function star(env: SlackEnv, team: string, channel: string, ts: string): Promise<void> {
+  try {
+    const token = await installationToken(env, team);
+    if (token) await new SlackApi(token).react(channel, ts, RECEIVED_REACTION);
+  } catch { /* The message still counts without its star. */ }
+}
 
 /**
  * The Slack app's HTTPS ingress on the API host. Every request is verified
  * first and answered quickly; work is recorded before Slack is told it
  * arrived, and nothing here runs work. A message counts only from a linked
  * person, in their own DM with the app; anything else is acknowledged and
- * ignored. Card controls are links into the glass in this release, so an
- * interaction is acknowledged and changes nothing.
+ * ignored. Each message that counts gets a star at once, before it is routed.
  */
-export async function slackIngress(request: Request, env: SlackEnv): Promise<Response> {
+export async function slackIngress(request: Request, env: SlackEnv, ctx: Pick<ExecutionContext, 'waitUntil'>): Promise<Response> {
   const path = new URL(request.url).pathname;
   requireThat(request.method === 'POST' && (path === '/slack/events' || path === '/slack/interactions'), 404, 'route not found');
   const raw = await verifySlack(env, request);
@@ -122,6 +135,7 @@ export async function slackIngress(request: Request, env: SlackEnv): Promise<Res
   const link = await env.AUTH_DB.prepare('SELECT person,channel FROM slackLink WHERE team=? AND slackUser=? AND revokedAt IS NULL').bind(team, user).first<{ person: string; channel: string }>();
   // Only the linked person, in the DM the app opened with them.
   if (!link || link.channel !== channel) return ok();
+  ctx.waitUntil(star(env, team, channel, ts));
   const threadTs = typeof e.thread_ts === 'string' && SLACK_TS.test(e.thread_ts) && e.thread_ts !== ts ? e.thread_ts : undefined;
   const account = env.ACCOUNTS.getByName(link.person);
   const result = await account.slackMessage(link.person, { eventId, team, user, channel, ts, ...(threadTs ? { threadTs } : {}), text: e.text.slice(0, 16000) });

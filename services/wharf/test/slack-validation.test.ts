@@ -52,6 +52,8 @@ beforeEach(async () => {
     const url = input instanceof Request ? input.url : String(input);
     if (!url.startsWith('https://slack.com/api/')) return real(input, init);
     if (slackDown) return new Response('upstream error', { status: 503 });
+    // Each message's star is slack-ingress.test.ts's: these tests count messages.
+    if (url.endsWith('/reactions.add')) return Response.json({ ok: true });
     posted.push({ method: url.slice('https://slack.com/api/'.length), body: JSON.parse(String(init?.body)) });
     return Response.json({ ok: true, ts: `1800000000.${String(++n).padStart(6, '0')}` });
   });

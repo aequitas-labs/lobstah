@@ -253,15 +253,15 @@ export class WharfMirror {
   }
   /**
    * Tell the wharf what changed for its Slack threads: a helm signed on and
-   * has one that waited, or the helm responded. A failure is tried again on
-   * the next read.
+   * has one that waited, or the thread changed. Never what the helm said.
+   * A failure is tried again on the next read.
    */
   private async syncSlackThreads(): Promise<void> {
     const threads = this.options.slackThreads, update = this.options.backend.updateMirrorRequest?.bind(this.options.backend);
     if (!threads || !update || !this.options.channel.connected()) return;
     for (const sync of threads.pending()) {
       try {
-        if (sync.reply) await update(sync.request, { reply: clip(sync.reply, 2000) });
+        if (sync.updated) await update(sync.request, { updated: sync.seq, dispatches: sync.dispatches });
         else await update(sync.request, { state: 'delivered' });
       } catch (error) {
         // The wharf ended the request (expired, or another boat's): nothing more to tell it.
@@ -316,8 +316,6 @@ export class WharfMirror {
     return this.options.glass.request(call.write.kind, payload, this.token);
   }
 }
-
-const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 /** A refusal the boat makes itself, in the local glass's shape. */
 function refusal(status: number, reason: string): LocalGlassResponse {

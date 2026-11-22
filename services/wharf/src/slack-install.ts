@@ -3,8 +3,10 @@ import { groundStatements, linkedGrounds, slackGrounds } from './slack-grounds.j
 
 /** The Slack app's credentials. The client id is public config; the secrets are optional Worker secrets. */
 export type SlackEnv = Env & { SLACK_CLIENT_ID?: string; SLACK_CLIENT_SECRET?: string; SLACK_SIGNING_SECRET?: string };
-/** What the selected first release asks of Slack: post and edit in a person's DM with the app, and read what they write there. */
-export const SLACK_SCOPES = ['chat:write', 'im:write', 'im:history'] as const;
+/** What the app needs of Slack: post and edit in a person's DM with the app, and read what they write there. */
+const REQUIRED_SCOPES = ['chat:write', 'im:write', 'im:history'] as const;
+/** What it asks for: those, and the star it adds to each message it receives, which it can do without. */
+export const SLACK_SCOPES = [...REQUIRED_SCOPES, 'reactions:write'] as const;
 /** A connect state is good once, for ten minutes, for the browser session that asked for it. */
 const CONNECT_MS = 600_000;
 const API = 'https://slack.com/api/';
@@ -96,7 +98,7 @@ export async function completeConnect(env: SlackEnv, glass: string, person: stri
   requireThat(!access.is_enterprise_install, 400, 'install the app in one workspace, not an enterprise organization');
   const team = access.team?.id, slackUser = access.authed_user?.id, token = access.access_token, granted = (access.scope ?? '').split(',');
   requireThat(team && slackUser && token && access.token_type === 'bot' && access.bot_user_id, 502, 'Slack returned an incomplete installation');
-  requireThat(SLACK_SCOPES.every((s) => granted.includes(s)), 400, `the app needs ${SLACK_SCOPES.join(', ')}`);
+  requireThat(REQUIRED_SCOPES.every((s) => granted.includes(s)), 400, `the app needs ${REQUIRED_SCOPES.join(', ')}`);
   const opened = await slackCall<{ channel?: { id?: string } }>('conversations.open', { users: slackUser }, token);
   requireThat(opened.ok && opened.channel?.id, 502, `Slack would not open your DM with the app: ${opened.error ?? 'no channel'}`);
   const owner = await env.AUTH_DB.prepare('SELECT person FROM slackLink WHERE team=? AND slackUser=? AND revokedAt IS NULL').bind(team, slackUser).first<{ person: string }>();

@@ -37,10 +37,15 @@ const stored = () => runInDurableObject(env.ACCOUNTS.getByName('a'), (_i: Accoun
   return row ? (JSON.parse(row.data) as WharfHumanRequest) : undefined;
 });
 const deliver = () => env.ACCOUNTS.getByName('a').deliverSlack();
-type Posted = { method: string; body: { channel: string; ts?: string; thread_ts?: string; text: string; blocks: Array<{ text?: { text: string } }> } };
+type Posted = { method: string; body: { channel: string; ts?: string; thread_ts?: string; text?: string; blocks?: Array<{ text?: { text: string }; elements?: Array<{ action_id: string; url?: string }> }> } };
 let posted: Posted[] = [];
+const receipts = () => posted.filter((p) => p.body.text?.startsWith('Request:'));
 /** What the request's receipt says now: its newest post or update. */
-const receipt = () => posted.filter((p) => p.body.text.startsWith('Request:')).at(-1)!.body.blocks.map((b) => b.text?.text ?? '').join('\n');
+const receipt = () => receipts().at(-1)!.body.blocks!.map((b) => b.text?.text ?? '').join('\n');
+/** The new messages the request's thread got after its receipt: what each says, and the glass page it opens. */
+const reposts = () => posted.filter((p) => p.method === 'chat.postMessage' && p.body.thread_ts && !p.body.text?.startsWith('Request:')).map((p) => ({
+  thread: p.body.thread_ts, said: p.body.blocks!.map((b) => b.text?.text ?? '').join(''), opens: p.body.blocks!.flatMap((b) => b.elements ?? []).find((e) => e.action_id === 'open-glass')?.url,
+}));
 
 type Boat = { id: string; token: string };
 async function enrol(name: string, permissions = ['mirror', 'read']): Promise<Boat> {
@@ -73,8 +78,7 @@ const answer = (b: BoatSocket, id: string, status: number, body: unknown) =>
   b.socket.send(encodeFrame({ t: 'answer', id, status, contentType: 'application/json' }, encode(JSON.stringify(body))));
 const THREAD = '6f1c2a7e-3b4d-4c5e-8f9a-0b1c2d3e4f50';
 /** Where the receipt's Open in glass button goes. */
-const opens = () => (posted.filter((p) => p.body.text.startsWith('Request:')).at(-1)!.body.blocks as Array<{ type: string; elements?: Array<{ action_id: string; url?: string }> }>)
-  .flatMap((b) => b.elements ?? []).find((e) => e.action_id === 'open-card')?.url;
+const opens = () => receipts().at(-1)!.body.blocks!.flatMap((b) => b.elements ?? []).find((e) => e.action_id === 'open-card')?.url;
 const update = (boat: Boat, body: unknown) => call(`mirror/requests/${requestId}`, body, boat.token);
 
 beforeEach(async () => {
@@ -133,26 +137,79 @@ it('relays a DM to the boat’s helm, says it is queued while no helm holds the 
   expect((await update(north, { state: 'delivered' })).status).toBe(200);
   await deliver();
   expect(await stored()).toMatchObject({ state: 'received', mirror: { state: 'delivered' } });
-  expect(receipt()).toContain('Received · the helm has it');
+  expect(receipt()).toContain('Sent to away · north');
+  // Where the request stands edits the one receipt; it is no update to the thread.
+  expect(receipts().filter((p) => p.method === 'chat.postMessage')).toHaveLength(1);
+  expect(reposts()).toEqual([]);
   // A late queued answer never sends it back to waiting.
   expect((await update(north, { state: 'queued' })).status).toBe(200);
   expect((await stored())?.mirror?.state).toBe('delivered');
 });
 
-it('says at once when the boat’s helm already has it, sends the helm’s reply to the thread, and relays what the person adds', async () => {
+it('posts one receipt that says where the request went and opens its glass thread, and never the helm’s words', async () => {
   const north = await enrol('north'), b = await boatSocket(north, ['away']);
   await slack(message());
   const first = await helmCall(b);
   answer(b, first.id, 201, { ok: true, thread: THREAD, state: 'delivered' });
   await until(async () => (await stored())?.mirror?.state === 'delivered');
+  await deliver();
+  // One message, edited as the request moves: never a second receipt.
+  expect(receipts().filter((p) => p.method === 'chat.postMessage')).toEqual([expect.objectContaining({ body: expect.objectContaining({ channel: 'D1', thread_ts: '1700000000.000100' }) })]);
+  expect(receipt()).toContain('Sent to away · north');
+  expect(opens()).toBe(`${env.GLASS_ORIGIN}/#thread/${THREAD}`);
 
+  // A boat from before updates still sends its helm's words: they count as an update, and are kept nowhere.
   expect((await update(north, { reply: 'Which branch?' })).status).toBe(200);
   await deliver();
-  expect(receipt()).toContain('The helm replied: Which branch?');
+  expect(receipts().filter((p) => p.method === 'chat.postMessage')).toHaveLength(1);
+  expect(reposts()).toEqual([{ thread: '1700000000.000100', said: 'Updated', opens: `${env.GLASS_ORIGIN}/#thread/${THREAD}` }]);
+  expect((await stored())?.response).toBeUndefined();
+  expect(JSON.stringify(posted)).not.toContain('Which branch?');
+});
 
+it('posts one new message for each update of the glass thread, and one per dispatch with its glass link; an update heard twice posts once', async () => {
+  const north = await enrol('north'), b = await boatSocket(north, ['away']);
+  await slack(message());
+  const first = await helmCall(b);
+  answer(b, first.id, 201, { ok: true, thread: THREAD, state: 'delivered' });
+  await until(async () => (await stored())?.mirror?.state === 'delivered');
+  await deliver();
+  const thread = { thread: '1700000000.000100', opens: `${env.GLASS_ORIGIN}/#thread/${THREAD}` };
+
+  expect((await update(north, { updated: 1, dispatches: [] })).status).toBe(200);
+  await deliver();
+  expect(reposts()).toEqual([{ ...thread, said: 'Updated' }]);
+  // The same update again, as after a lost answer: nothing new.
+  expect((await update(north, { updated: 1, dispatches: [] })).status).toBe(200);
+  await deliver();
+  expect(reposts()).toHaveLength(1);
+
+  // The helm started a dispatch: that is the message, with the dispatch's link.
+  expect((await update(north, { updated: 2, dispatches: ['fix-checkout'] })).status).toBe(200);
+  expect((await update(north, { updated: 2, dispatches: ['fix-checkout'] })).status).toBe(200);
+  await deliver();
+  expect(reposts().slice(1)).toEqual([{ thread: '1700000000.000100', said: 'Dispatch started', opens: `${env.GLASS_ORIGIN}/#job/fix-checkout` }]);
+  // A later update names the same dispatch: it is an update, not a new dispatch.
+  expect((await update(north, { updated: 3, dispatches: ['fix-checkout'] })).status).toBe(200);
+  await deliver();
+  expect(reposts().slice(2)).toEqual([{ ...thread, said: 'Updated' }]);
+  expect(receipts().filter((p) => p.method === 'chat.postMessage')).toHaveLength(1);
+  expect((await update(north, { updated: -1 })).status).toBe(400);
+  expect((await update(north, { updated: 4, dispatches: ['../x'] })).status).toBe(400);
+});
+
+it('relays what the person adds in the thread to the boat’s helm, and reposts the link once', async () => {
+  const north = await enrol('north'), b = await boatSocket(north, ['away']);
+  await slack(message());
+  const first = await helmCall(b);
+  answer(b, first.id, 201, { ok: true, thread: THREAD, state: 'delivered' });
+  await until(async () => (await stored())?.mirror?.state === 'delivered');
+  await deliver();
   await slack(message({ ts: '1700000000.000200', thread_ts: '1700000000.000100', text: 'main' }));
   const followUp = await helmCall(b, 2);
   expect((followUp.write!.payload as MirrorHelmRequestPayload).followUp).toMatchObject({ text: 'main', source: '1700000000.000200' });
+  await deliver();
+  expect(reposts()).toEqual([{ thread: '1700000000.000100', said: 'Updated', opens: `${env.GLASS_ORIGIN}/#thread/${THREAD}` }]);
 });
 
 it('only the boat the request went to may update it', async () => {

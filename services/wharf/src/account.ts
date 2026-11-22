@@ -518,7 +518,7 @@ export class Account extends DurableObject<Env> {
     ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
     this.threads = new Threads(ctx.storage.sql, { person: () => ctx.id.name ?? 'owner', remindMs: () => (JSON.parse(this.get('helm') ?? 'null')?.remindSecs ?? 900) * 1000, helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note) });
     this.glass = new GlassState(ctx.storage.sql, { threadGrounds: () => { const h = JSON.parse(this.get('helm') ?? 'null'); return [...new Set([...(h?.grounds ? [h.grounds] : []), ...this.threads.summaries(Date.now()).map(t => t.grounds)])]; }, messageLimits: () => ({ maxBytes: Math.min(10 * 1024 * 1024, Number(this.env.MAX_FILE_BYTES)), maxFiles: 8, textMax: 20000, extensions: Object.keys(MESSAGE_FILE_TYPES) }), threads: (n) => this.threads.summaries(n), threadCheck: (id, g) => this.threads.checkCard(id, g), threadLink: (id, key, n) => this.threads.linkCard(id, key, n), helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
-      helmLive: (now) => this.helmLive(now) });
+      helmLive: (now) => this.helmLive(now), slackUpdate: (request, update, now) => this.outbox.repost(request, update, now) });
     this.cards = new Cards(ctx.storage.sql, {
       dispatches: () => ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches ORDER BY rowid DESC LIMIT 100').toArray().map((d) => this.view(d) as DispatchView),
       documents: () => this.glass.publishedDocuments(), requests: (now) => this.glass.requestViews(now),
@@ -553,6 +553,14 @@ export class Account extends DurableObject<Env> {
       thread: (card, channel) => {
         const origin = card.source === 'wharf' && card.family === 'request' ? this.glass.requestOrigin(card.key) : undefined;
         return origin?.channel === channel ? origin.ts : undefined;
+      },
+      // A request's updates go under the message that asked, and open its helm thread, or its receipt until the boat names one.
+      repostTarget: (request) => {
+        const r = this.glass.workRequest(request);
+        if (!r?.origin) return undefined;
+        const card = ctx.storage.sql.exec<{ seq: number }>("SELECT seq FROM cards WHERE source='wharf' AND family='request' AND key=?", request).toArray()[0];
+        const open = r.mirror?.thread ? `#thread/${r.mirror.thread}` : card ? `#card/c${card.seq}` : '';
+        return { person: r.by, channel: r.origin.channel, threadTs: r.origin.ts, title: r.text ?? '', open };
       },
     });
     this.mirrorState = new MirrorState(ctx.storage.sql, { read: (a) => this.requirePermission(a, 'read'), mirror: (a) => this.requirePermission(a, 'mirror') });

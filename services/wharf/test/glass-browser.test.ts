@@ -100,7 +100,7 @@ it('links this person’s own Slack once per connect, shows their standing cards
   expect((await browser('slack/connect', { grounds: ['private'] })).status).toBe(400);
   const start = new URL((await (await browser('slack/connect', { grounds: ['away'] })).json<{ url: string }>()).url);
   expect(start.origin + start.pathname).toBe('https://slack.com/oauth/v2/authorize');
-  expect(Object.fromEntries(start.searchParams)).toMatchObject({ client_id: 'stub-slack-client', scope: 'chat:write,im:write,im:history', redirect_uri: 'https://glass.test/api/slack/oauth' });
+  expect(Object.fromEntries(start.searchParams)).toMatchObject({ client_id: 'stub-slack-client', scope: 'chat:write,im:write,im:history,reactions:write', redirect_uri: 'https://glass.test/api/slack/oauth' });
   const state = start.searchParams.get('state')!;
   const slackCalls: string[] = [];
   const real = globalThis.fetch;

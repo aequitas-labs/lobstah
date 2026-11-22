@@ -112,6 +112,23 @@ type Button = Extract<SlackBlock, { type: 'actions' }>['elements'][number];
 const button = (label: string, action: string, fields: { url?: string; value?: string }): Button =>
   ({ type: 'button', text: { type: 'plain_text', text: clip(label, SLACK_BUDGET.buttonLabel), emoji: false }, action_id: action, ...fields });
 
+/** What a repost says: canned words only, never the helm's. */
+const REPOSTED = { update: 'Updated', dispatch: 'Dispatch started' } as const;
+/**
+ * A new message in a Slack request's thread: the glass thread changed, or
+ * the helm started a dispatch for it. It notifies the person and links to
+ * the glass, where the conversation is. The notification names the request.
+ */
+export function renderRepost(kind: keyof typeof REPOSTED, title: string, url: string): SlackMessage {
+  const said = REPOSTED[kind];
+  const name = clip(title.replace(/\s+/g, ' ').trim(), SLACK_BUDGET.title);
+  return {
+    text: clip(name ? `${said}: ${slackEscape(name)}` : said, SLACK_BUDGET.fallback),
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: said } }, { type: 'actions', elements: [button('Open in glass', 'open-glass', { url })] }],
+    unfurl_links: false, unfurl_media: false,
+  };
+}
+
 /**
  * One card as one Slack message. The same card and controls render the
  * same message, so a delivery can tell whether its last post still matches.

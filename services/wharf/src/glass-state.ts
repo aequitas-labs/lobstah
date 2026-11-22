@@ -27,7 +27,12 @@ export const glassSchema = `
 `;
 export const glassTables = ['helm_threads', 'documents', 'human_requests', 'worker_details', 'dispatch_acks', 'slack_ground_requests', ...cardTables, ...slackTables];
 type Result = { status: number; value: unknown };
-type Hooks = { threadGrounds: () => string[]; messageLimits: () => unknown; threads: (now: number) => ThreadSummary[]; threadCheck: (id: unknown, grounds?: string) => import('../../../packages/core/src/thread-model.js').HelmThread; threadLink: (id: string, key: string, now: number) => void; helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void };
+type Hooks = { threadGrounds: () => string[]; messageLimits: () => unknown; threads: (now: number) => ThreadSummary[]; threadCheck: (id: unknown, grounds?: string) => import('../../../packages/core/src/thread-model.js').HelmThread; threadLink: (id: string, key: string, now: number) => void; helm: (c: Command, actor: Actor, now: number) => void; read: (actor: Actor) => void; work: (actor: Actor) => void; helmLive: (now: number) => boolean; event: (kind: string, dispatch?: string, note?: string) => void;
+  /** A Slack request's glass thread changed, or a dispatch started for it: its Slack thread gets a new message. */
+  slackUpdate: (request: string, update: { seq?: number; dispatches?: string[] }, now: number) => void };
+/** At most this many dispatch ids in one boat update about a Slack request. */
+const UPDATE_DISPATCHES_MAX = 20;
+const DISPATCH_ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** Pure synchronous SQL operations inside the account's auth/idempotency transaction. */
 export class GlassState {
   constructor(private sql: SqlStorage, private hooks: Hooks) {}
@@ -97,9 +102,10 @@ export class GlassState {
   /**
    * A linked person's message in their DM with the app. A top-level message
    * asks for new work: one request per Slack message, so a retried delivery
-   * finds the same request. A reply in that request's thread adds to it; a
-   * reply under anything else (a card's message) is not a request and does
-   * nothing. The helm is woken; nothing runs until it acts.
+   * finds the same request. A reply in that request's thread adds to it, and
+   * is an update to its glass thread; a reply under anything else (a card's
+   * message) is not a request and does nothing. The helm is woken; nothing
+   * runs until it acts.
    */
   slackMessage(m: SlackMessageIn, person: string, now: number, grounds: string, mirror?: { boat: string; name: string; online: boolean }): { request?: string; ignored?: string; relay?: { boat: string; payload: MirrorHelmRequestPayload } } {
     const top = m.threadTs ?? m.ts;
@@ -127,18 +133,21 @@ export class GlassState {
     const followUp = { text: m.text, at, source: m.ts };
     r.followUps = [...(r.followUps ?? []), followUp].slice(-20);
     this.put('human_requests', id, r);
+    this.hooks.slackUpdate(id, {}, now);
     if (r.mirror) return { request: id, relay: { boat: r.mirror.boat, payload: { request: id, grounds: r.grounds!, text: r.text ?? '', by: r.by, at: r.at, followUp } } };
     this.hooks.event('human-request-update', undefined, id);
     return { request: id };
   }
   /**
    * A mirror boat says where its request stands: its local helm has it
-   * queued or delivered, it could not take it, or the helm replied. Only the
-   * boat the request went to may say so, and only while it is open.
+   * queued or delivered, it could not take it, or its glass thread changed
+   * (`updated`, the thread's update sequence, with the dispatches linked to
+   * it). Only the boat the request went to may say so, and only while it is
+   * open. The wharf keeps no word of the thread: the update reposts a link.
    */
   mirrorRequest(id: string, boat: string, body: unknown, now: number): WharfHumanRequest {
     const b = object(body);
-    requireThat(Object.keys(b).every((k) => k === 'state' || k === 'reply' || k === 'reason' || k === 'thread'), 400, 'unexpected field');
+    requireThat(Object.keys(b).every((k) => ['state', 'reason', 'thread', 'updated', 'dispatches', 'reply'].includes(k)), 400, 'unexpected field');
     const r = this.get<WharfHumanRequest>('human_requests', identifier(id));
     requireThat(r && r.kind === 'work' && r.mirror, 404, 'request not found');
     requireThat(r.mirror.boat === boat, 403, 'addressed boat required');
@@ -154,12 +163,22 @@ export class GlassState {
       requireThat(typeof b.thread === 'string' && THREAD_ID.test(b.thread), 400, 'invalid thread');
       r.mirror.thread = b.thread;
     }
-    if (b.reply !== undefined) {
-      r.response = text(b.reply, 2000).trim(); requireThat(r.response, 400, 'reply needs text');
+    if (b.updated !== undefined || b.dispatches !== undefined || b.reply !== undefined) {
+      requireThat(b.updated === undefined || (Number.isSafeInteger(b.updated) && (b.updated as number) >= 0), 400, 'invalid update');
+      const dispatches = b.dispatches ?? [];
+      requireThat(Array.isArray(dispatches) && dispatches.length <= UPDATE_DISPATCHES_MAX && dispatches.every((d) => typeof d === 'string' && DISPATCH_ID.test(d)), 400, 'invalid dispatches');
+      // A boat from before updates sends its helm's words: they count as an update, and are not kept.
+      if (b.reply !== undefined) requireThat(typeof b.reply === 'string', 400, 'invalid reply');
       r.state = 'received'; r.mirror.state = 'delivered';
+      this.hooks.slackUpdate(r.id, { ...(b.updated !== undefined ? { seq: b.updated as number } : {}), dispatches: dispatches as string[] }, now);
     }
     this.put('human_requests', r.id, r);
     return r;
+  }
+  /** A work request as stored, for its Slack reposts. */
+  workRequest(id: string): WharfHumanRequest | undefined {
+    const r = this.get<WharfHumanRequest>('human_requests', id);
+    return r?.kind === 'work' ? r : undefined;
   }
   /** The Slack message a work request came from, for its receipt to reply in that thread. */
   requestOrigin(id: string): WharfHumanRequest['origin'] {
@@ -173,6 +192,7 @@ export class GlassState {
     requireThat(r.grounds && r.grounds === grounds, 400, 'Dispatch the request on its selected grounds');
     r.state = 'fulfilled'; r.dispatch = dispatch; r.outcome = `dispatched as ${dispatch}`;
     this.put('human_requests', r.id, r);
+    if (r.origin) this.hooks.slackUpdate(r.id, { dispatches: [dispatch] }, now);
   }
   /**
    * A person's answer to a standing decision, from the glass or their Slack:
@@ -382,10 +402,13 @@ export class GlassState {
       }
       if (parts.length === 3 && parts[2] === 'respond' && c.method === 'POST') {
         // The helm answers a work request without dispatching it: a question back, or why not. It stays open.
+        // The glass shows the words; a Slack request's thread only hears that there is something new.
         this.hooks.helm(c, actor, now);
         requireThat(r.kind === 'work' && ['queued', 'received'].includes(r.state) && Date.parse(r.expiresAt) > now, 409, 'no open work request to respond to');
         r.response = text(b.text, 2000).trim(); requireThat(r.response, 400, 'response needs text');
-        r.state = 'received'; this.put('human_requests', r.id, r); return ok(r);
+        r.state = 'received'; this.put('human_requests', r.id, r);
+        if (r.origin) this.hooks.slackUpdate(r.id, {}, now);
+        return ok(r);
       }
       if (parts.length === 3 && parts[2] === 'execute' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(r.state === 'received' && Date.parse(r.expiresAt) > now, 409, 'receipt a live request first');

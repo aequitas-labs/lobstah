@@ -38,7 +38,8 @@ Slack Web API call logs one JSON line with its method, whether it succeeded, and
 Slack's error code or the exception name, for example
 `{"slack":"chat.update","ok":false,"outcome":"refused","error":"channel_not_found"}`.
 A delivery that fails before it reaches Slack logs `"slack":"delivery"` with its
-card number. No line holds a token or message text. Read them in the dashboard's
+card number, or `"slack":"repost"` for a request thread's update. An install
+without `reactions:write` logs `reactions.add` refused with `missing_scope`. No line holds a token or message text. Read them in the dashboard's
 Workers Logs, or live with `pnpm --filter @lobstah/wharf run wrangler tail`.
 
 | Name | Kind | Value or source |
@@ -76,11 +77,13 @@ Local development needs a second OAuth app whose callback is
 The Slack app is optional and private to one workspace: at api.slack.com,
 create an app, keep distribution off, and under OAuth & Permissions add the
 redirect URL `https://glass.lobstah.dev/api/slack/oauth` and the bot scopes
-`chat:write`, `im:write` and `im:history`. Turn on App Home's Messages tab. Put
-its client ID in `SLACK_CLIENT_ID` and its client secret in
+`chat:write`, `im:write`, `im:history` and `reactions:write`. Turn on App Home's
+Messages tab. Put its client ID in `SLACK_CLIENT_ID` and its client secret in
 `SLACK_CLIENT_SECRET`. Each person then links their own Slack from the boat
 list; the install stores the workspace's bot token sealed under `AUTH_SECRET`,
-and links no one but the person who connected.
+and links no one but the person who connected. An app installed before
+`reactions:write` keeps working without the star on each message; adding the
+scope means installing again, which **Connect Slack** does.
 
 Choose the grounds the link serves before connecting. The picker selects the
 only available grounds; with several, choose explicitly. Cards, PR watches,
@@ -91,9 +94,15 @@ For asking for work from Slack, also set Event Subscriptions' Request URL to
 `https://api.lobstah.dev/slack/events` with the bot event `message.im`, set
 Interactivity's Request URL to `https://api.lobstah.dev/slack/interactions`,
 and put the app's signing secret in `SLACK_SIGNING_SECRET`. Each call is
-checked against that secret before anything is read. A linked person's
-top-level message in their DM with the app becomes a work request for the
-helm, with a receipt in its thread; replies in that thread add to it.
+checked against that secret before anything is read. Each message a linked
+person sends the app gets a ⭐ at once. A top-level message in their DM with
+the app becomes a work request for the helm, with a receipt in its thread
+that says where it went and links to the glass; replies in that thread add
+to it. The conversation is in the glass, and Slack never shows what the helm
+says. When the request's glass thread changes (the helm writes, adds a card
+or resolves it, or you reply in Slack), the thread gets a new message,
+**Updated**, with **Open in glass**. When the helm starts a dispatch for it,
+the message is **Dispatch started**, linking that dispatch.
 If the link serves several grounds, the app first asks which one in that
 message's thread. Reply with a listed grounds name; no work is queued until
 that choice is made.
@@ -110,7 +119,6 @@ helm for each:
   socket and opens a helm thread on the boat. What you add in the Slack
   thread joins that helm thread. If no helm holds the grounds yet, the
   receipt says it is queued, and the next helm that signs on there sees it.
-  The helm's replies come back to the Slack thread.
   Only when the boat has no socket open does the receipt say it is offline;
   nothing is queued then, so send it again once the boat is back.
   The grounds' standing cards reach Slack too, with their buttons, and your
@@ -528,8 +536,13 @@ each boat's latest snapshot and calls in transit, never a second record.
   boat's answer says `queued` or `delivered`, and names the helm thread the
   request opened there (`thread`). The Slack message's Open in glass then
   goes to `#thread/<id>`, which the hosted glass reads from that boat. Later
-  changes, and the helm's replies, arrive on `POST mirror/requests/:id` with
-  `{ "state": "delivered" }` or `{ "reply": "<text>" }`, from that boat only.
+  changes arrive on `POST mirror/requests/:id`, from that boat only:
+  `{ "state": "delivered" }`, or `{ "updated": <seq>, "dispatches": [<id>…] }`
+  when the helm thread changed. `seq` is the thread's update count, so an
+  update heard twice posts once; a dispatch id not heard before posts
+  **Dispatch started** instead of **Updated**. The boat never sends what the
+  helm said, and the wharf keeps no message text for it. A `{ "reply": … }`
+  from an older boat counts as an update, and its text is dropped.
 - **Files.** A file attached to a relayed answer goes to
   `POST /api/glass/mirror/files` (`X-File-Name`, `X-Mirror-Boat`) and waits ten
   minutes for its boat's `GET mirror/files/:file`.
