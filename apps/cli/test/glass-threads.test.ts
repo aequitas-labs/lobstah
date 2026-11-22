@@ -26,8 +26,9 @@ it('opens one card composer from the message button and retains its draft after 
   await click(g, '.dialog-close'); await click(g, '.message-fab');
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('Keep reviews in the bar');
 });
-it('shows a sent message at once, keeps a failed one with Retry, and shows the stored conversation once delivered', async () => {
+it('shows a sent message at once; a failed one returns to its draft through a toast, and is written once when sent again', async () => {
   const d = fleet(); let tries = 0; let started = ''; let delivered = false;
+  let fail: () => void = () => {};
   const words = 'Where should Helm go?';
   const stored = (): ThreadView => ({ ...view(), id: started, title: words, rounds: [{ at: AT, entries: [{ by: 'person', via: 'glass', text: words, attachments: [], at: AT, submission: started }] }] });
   const g = await page(d, {
@@ -38,7 +39,7 @@ it('shows a sent message at once, keeps a failed one with Retry, and shows the s
       const body = JSON.parse(req.body);
       if (body.kind !== 'thread-start') return { status: 404, body: {} };
       started = body.payload.submission;
-      if (++tries === 1) return { status: 503, body: { ok: false, reason: 'Try again' } };
+      if (++tries === 1) return new Promise((done) => (fail = () => done({ status: 503, body: { ok: false, reason: 'Try again' } })));
       // Recorded: the snapshot after delivery lists the new conversation.
       delivered = true;
       d.threads = [...(d.threads ?? []), { ...summary(), id: started, title: words, updatedAt: new Date(NOW + 1000).toISOString() }];
@@ -50,17 +51,39 @@ it('shows a sent message at once, keeps a failed one with Retry, and shows the s
   // The conversation opens under the page's own id, with the message in it; the dialog is gone.
   expect(g.window.location.hash).toBe(`#thread/${started}`);
   expect(g.$('.dialog-scrim')).toBeNull();
+  expect(g.$('.tsheet .pending-msg .thread-meta')?.textContent).toBe('You · Sending');
   expect(g.$('.tsheet .pending-msg .thread-text')?.textContent).toBe(words);
-  // The send failed: the message stays, with the reason and Retry.
-  expect(g.$('.pending-msg.failed .thread-meta')?.textContent).toBe('You · Not sent');
-  expect(g.$('.pending-msg .derr')?.textContent).toBe('Try again');
-  await click(g, '.pending-msg .dretry');
-  // Retried under the same id, so it can be recorded only once.
+  // The send fails: the never-written conversation closes, and a toast says what didn't go through.
+  fail(); await g.settle();
+  expect(g.$('.tsheet')).toBeNull();
+  expect(g.$('.dretry')).toBeNull();
+  const toast = g.$('.toast-action .toast-open')!;
+  expect(toast.textContent).toBe("Your message to the helm didn't go through. Open it to try again.");
+  // It opens the message dialog with the draft and the reason.
+  await click(g, '.toast-action .toast-open');
+  expect((g.$('textarea[aria-label="Your message"]') as HTMLTextAreaElement).value).toBe(words);
+  expect(g.$('[role="dialog"] .derr')?.textContent).toBe('Try again');
+  await click(g, '[role="dialog"] .dsend');
+  // Sent again under the same id, so it can be recorded only once.
   const sent = g.posts().filter((p) => JSON.parse(p.body).kind === 'thread-start').map((p) => JSON.parse(p.body).payload);
   expect(sent).toHaveLength(2);
   expect(sent[1]).toMatchObject({ text: words, grounds: 'home', submission: sent[0].submission });
   expect(g.$('.pending-msg')).toBeNull();
   expect(g.$$('.tsheet .thread-msg.from-person .thread-text').map((el) => el.textContent)).toEqual([words]);
+});
+it('a reply that fails goes back to its conversation’s composer, and the toast opens that conversation', async () => {
+  const g = await page(fleet(), { hash: '#helm', post: (_url, req) => (JSON.parse(req.body).kind === 'thread-post' ? { status: 409, body: { ok: false, state: 'failed', reason: 'Reopen this conversation before adding to it' } } : { status: 200, body: { ok: true } }) });
+  await g.go(`#thread/${ID}`);
+  await type(g, 'Keep the old tab too', 'Add to this thread');
+  await click(g, '.tsheet .dsend');
+  expect(g.$('.pending-msg')).toBeNull();
+  expect(g.$('.toast-action .toast-open')?.textContent).toBe("Your message in “Navigation” didn't go through. Open it to try again.");
+  await g.go('#helm');
+  expect(g.$('.tsheet')).toBeNull();
+  await click(g, '.toast-action .toast-open');
+  expect(g.window.location.hash).toBe(`#thread/${ID}`);
+  expect((g.$('.tsheet textarea[aria-label="Add to this thread"]') as HTMLTextAreaElement).value).toBe('Keep the old tab too');
+  expect(g.$('.tsheet .derr')?.textContent).toBe('Reopen this conversation before adding to it');
 });
 it('shows current notes, cards, every round, chat provenance, and the long-thread hint', async () => {
   const g = await page(fleet(), { hash: `#thread/${ID}` });

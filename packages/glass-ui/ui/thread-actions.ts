@@ -2,8 +2,8 @@ import type { ThreadView } from '@lobstah/core';
 import { backend } from './backend.js';
 import { getState, setState } from './store.js';
 import type { PendingMessage } from './store.js';
-import { receive, setDraft } from './actions.js';
-import { newSubmissionId, submit, takesSubmissions } from './submissions.js';
+import { receive, setDraft, toastTitle } from './actions.js';
+import { newSubmissionId, submissionFingerprint, submit, takesSubmissions } from './submissions.js';
 import { showToast } from './components/toast.js';
 
 /** Message the helm: a dispatch with an unresolved thread opens that thread, ready to type in. */
@@ -75,19 +75,22 @@ export async function sendMessage(key: string, target: { id?: string; grounds?: 
   if (!state.snapshot?.focusToken) return fail('Reload the page to send');
   if (takesSubmissions()) {
     // The message shows in its conversation at once, and the composer is ready for the next one.
-    const submission = newSubmissionId();
+    // A message that came back from a failed send keeps its id while unchanged, so it is written once.
+    const fingerprint = submissionFingerprint({ target, text: draft.text, files: draft.files.map((f) => f.name) });
+    const submission = draft.submission && draft.submissionFor === fingerprint ? draft.submission : newSubmissionId();
     const message: PendingMessage = {
       submission,
       thread: target.id ?? submission,
       kind: target.id ? 'thread-post' : 'thread-start',
       target,
+      draftKey: key,
       text: draft.text,
       files: draft.files,
       at: new Date().toISOString(),
       state: 'sending',
     };
     setState({ pendingMessages: [...(getState().pendingMessages ?? []), message] });
-    setDraft(key, { text: '', files: [], sending: false, error: undefined });
+    setDraft(key, { text: '', files: [], sending: false, error: undefined, submission: undefined, submissionFor: undefined });
     if (!target.id) {
       // The new conversation replaces the sheet; its Back entry must not reopen it.
       if (history.state?.glassOverlay) {
@@ -131,24 +134,24 @@ export async function sendMessage(key: string, target: { id?: string; grounds?: 
     return fail('The message could not be sent');
   }
 }
-/** The note and toast for a message that did not reach the helm. */
+/** The composer's note for a message that did not reach the helm, when the server gave no reason. */
 export const MESSAGE_UNSENT = "Your message didn't go through. Try again.";
 
-/** Replace one pending message, by its submission id. */
-function updatePending(submission: string, patch: Partial<PendingMessage>): void {
-  setState({ pendingMessages: (getState().pendingMessages ?? []).map((m) => (m.submission === submission ? { ...m, ...patch } : m)) });
+/** The toast for a message that did not reach the helm: where it was going, and that clicking opens it. */
+export function messageUnsentToast(title: string | undefined): string {
+  return title
+    ? `Your message in “${toastTitle(title)}” didn't go through. Open it to try again.`
+    : "Your message to the helm didn't go through. Open it to try again.";
 }
 
-/** Deliver a pending message, then show the conversation that holds it, or mark it failed with Retry. */
+/** Deliver a pending message, then show the conversation that holds it. A failed one goes back to its draft. */
 async function deliverMessage(message: PendingMessage, token: string): Promise<void> {
   const payload = { ...message.target, text: message.text, files: message.files.map(({ name, data }) => ({ name, data })) };
   const outcome = await submit(message.kind, message.submission, payload, token, MESSAGE_UNSENT);
-  if (outcome.state === 'failed') {
-    updatePending(message.submission, { state: 'failed', reason: outcome.reason, retrySame: outcome.retrySame });
-    showToast(MESSAGE_UNSENT);
-    return;
-  }
-  updatePending(message.submission, { state: 'sent' });
+  if (outcome.state === 'failed') return unsent(message, outcome.reason, outcome.retrySame);
+  setState({
+    pendingMessages: (getState().pendingMessages ?? []).map((m) => (m.submission === message.submission ? { ...m, state: 'sent' } : m)),
+  });
   // The conversation reloads once the snapshot names its new revision. A failed read leaves it to the next poll.
   try {
     receive(await backend().snapshot());
@@ -158,29 +161,37 @@ async function deliverMessage(message: PendingMessage, token: string): Promise<v
 }
 
 /**
- * Send a failed message again. One that may have been recorded keeps its
- * id, so it is written once; a refused new conversation starts under a new
- * id, and the sheet follows it.
+ * A message that did not reach the helm leaves its conversation and goes
+ * back to the composer it came from, with the reason, ahead of anything
+ * typed since. A toast opens that conversation (or, for a new one, the
+ * message dialog) to send it again. Sent again unchanged, it keeps its id
+ * when it may have been recorded, so it is written once.
  */
-export function retryMessage(submission: string): void {
-  const message = getState().pendingMessages?.find((m) => m.submission === submission);
-  const token = getState().snapshot?.focusToken;
-  if (!message || message.state !== 'failed' || !token) return;
-  const id = message.retrySame ? message.submission : newSubmissionId();
-  const next: PendingMessage = {
-    ...message,
-    submission: id,
-    thread: message.kind === 'thread-start' ? id : message.thread,
-    state: 'sending',
-    reason: undefined,
-    retrySame: undefined,
-  };
-  setState({ pendingMessages: (getState().pendingMessages ?? []).map((m) => (m.submission === submission ? next : m)) });
-  if (next.thread !== message.thread && getState().threadSheet === message.thread) {
-    history.replaceState(history.state, '', `#thread/${encodeURIComponent(next.thread)}`);
-    routeThread(next.thread);
-  }
-  void deliverMessage(next, token);
+function unsent(message: PendingMessage, reason: string, retrySame: boolean): void {
+  setState({ pendingMessages: (getState().pendingMessages ?? []).filter((m) => m.submission !== message.submission) });
+  const typed = getState().drafts[message.draftKey];
+  const untouched = !typed || (!typed.text.trim() && typed.files.length === 0);
+  const text = untouched ? message.text : [message.text, typed.text].filter((t) => t.trim()).join('\n\n');
+  const files = untouched ? message.files : [...message.files, ...typed.files];
+  const keep = untouched && retrySame;
+  setDraft(message.draftKey, {
+    text,
+    files,
+    error: reason,
+    submission: keep ? message.submission : undefined,
+    submissionFor: keep ? submissionFingerprint({ target: message.target, text, files: files.map((f) => f.name) }) : undefined,
+  });
+  // A new conversation was never written: its sheet has nothing to show.
+  if (message.kind === 'thread-start' && getState().threadSheet === message.thread) closeThreadSheet();
+  const title = message.kind === 'thread-post' ? getState().snapshot?.threads?.find((t) => t.id === message.thread)?.title : undefined;
+  const grounds = message.draftKey.split(':')[1] || undefined;
+  showToast(messageUnsentToast(title), {
+    open: () => {
+      if (message.kind === 'thread-start') return openMessage(message.target.about, message.target.grounds ?? grounds);
+      setState({ focusComposer: message.thread });
+      openThread(message.thread);
+    },
+  });
 }
 
 /** Drop pending messages the conversation now shows. */

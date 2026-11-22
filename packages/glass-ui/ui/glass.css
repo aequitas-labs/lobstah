@@ -2210,6 +2210,20 @@ a.lob {
   flex: 1;
   min-width: 0;
 }
+/* A toast that opens its item: the message is the button. */
+.glass-toast.toast-action {
+  border-color: var(--bad);
+}
+.toast-open {
+  all: unset;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.toast-open:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
 .glass-toast .dx {
   flex: 0 0 auto;
 }
@@ -2222,6 +2236,11 @@ a.lob {
   top: 50%;
   transform: translateY(-50%);
   display: flex;
+}
+/* Its message can fill the width, so its close sits inside it. */
+.glass-toast.toast-action > .toast-close {
+  position: static;
+  transform: none;
 }
 @media (hover: none) and (pointer: coarse) {
   .glass-toast:not(.dalert) > .toast-close {

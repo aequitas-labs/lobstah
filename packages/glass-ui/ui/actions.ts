@@ -508,15 +508,25 @@ export function removeFile(key: string, index: number): void {
   setDraft(key, { files });
 }
 
-/** The card's note and toast when its answer did not reach the helm. */
+/** The card's note when its answer did not reach the helm, and the server gave no reason. */
 export const ANSWER_UNSENT = "Your answer didn't go through. Try again.";
+
+/** A title cut short enough for a toast on a phone. */
+export const toastTitle = (title: string): string => (title.length > 40 ? `${title.slice(0, 39)}…` : title);
+
+/** The toast for an answer that did not reach the helm: what was not sent, and that clicking opens it. */
+export function answerUnsentToast(title: string | undefined): string {
+  return title
+    ? `Your answer to “${toastTitle(title)}” didn't go through. Open it to try again.`
+    : "Your answer didn't go through. Open it to try again.";
+}
 
 /**
  * Send a card's answer: one same-origin POST to /requests with the page's
  * token, a `decision-answer` request. Where the source takes submissions
- * (submissions.ts), the card reads as answered at once, and returns to its
- * draft with Retry if delivery fails. Otherwise the server stores it before
- * the card changes. The helm acts on it.
+ * (submissions.ts), the card reads as answered at once. If delivery fails,
+ * the card is open again with its draft and the reason, and a toast opens
+ * it. Otherwise the server stores it before the card changes. The helm acts on it.
  */
 export async function sendAnswer(key: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
@@ -551,19 +561,18 @@ export async function sendAnswer(key: string): Promise<string | undefined> {
     setDraft(key, {
       sending: false,
       error: undefined,
-      failed: undefined,
       submission,
       submissionFor: fingerprint,
       sent: answerSummary({ option: draft.option, text, files: files.length }),
     });
     const open = getState().decisionModal;
     if (open?.key === key) navigateDecision(nextOpen(previous, currentCards(), getState().drafts, key).key, true);
+    const title = card ? (card.kind === 'decision' ? card.title : card.note) : undefined;
     void submit('decision-answer', submission, payload, token, ANSWER_UNSENT).then((outcome) => {
       if (outcome.state === 'applied') return setDraft(key, { submission: undefined });
-      setDraft(key, { sent: undefined, failed: true, error: outcome.reason, submission: outcome.retrySame ? submission : undefined });
-      // The modal moved on when it was sent: bring the card back, with its draft, the reason and Retry.
-      if (getState().decisionModal) navigateDecision(key, true);
-      showToast(ANSWER_UNSENT);
+      // The card is open again with its draft and the reason; the toast opens it.
+      setDraft(key, { sent: undefined, error: outcome.reason, submission: outcome.retrySame ? submission : undefined });
+      showToast(answerUnsentToast(title), { open: () => openDecision(key) });
     });
     return undefined;
   }

@@ -396,15 +396,20 @@ describe('glass: the decision modal', () => {
     await show(g, Q);
     await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
     await click(g, card(g, Q)!.querySelector('.dsend'));
-    // The modal moved on when it was sent, and comes back to the card when the send fails.
-    expect(card(g, Q)).toBeTruthy();
+    // The modal moved on when it was sent. A toast names the card and opens it.
+    expect(card(g, Q)).toBeUndefined();
+    expect(row(g, Q)!.className).not.toContain('answered');
+    expect(g.$('.dretry')).toBeNull();
+    const toast = g.$('.toast-action .toast-open')!;
+    expect(text(toast)).toBe('Your answer to “which port should the api bind?” didn\'t go through. Open it to try again.');
+    await click(g, toast);
+    expect(g.$('.toast-action')).toBeNull();
+    // The card, with its draft and the reason; Send sends it again.
     expect(text(card(g, Q)!.querySelector('.derr'))).toBe('no standing decision or question');
     expect((card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('8080');
-    expect(text(card(g, Q)!.querySelector('.dretry'))).toBe('Retry');
-    expect(row(g, Q)!.className).not.toContain('answered');
   });
 
-  it('a double click sends one answer; one the helm refuses after it was recorded comes back with Retry and its draft', async () => {
+  it('a double click sends one answer; one the helm refuses after it was recorded comes back with its draft through a toast', async () => {
     let status: { state: string; reason?: string } = { state: 'pending' };
     const g = await page(fleet(), {
       post: (_url, init) =>
@@ -420,12 +425,12 @@ describe('glass: the decision modal', () => {
     await g.settle();
     await g.settle();
     expect(answers(g)).toHaveLength(1);
-    // Delivery refused it: the modal is back on the card, with the reason, Retry, and the typed text.
-    expect(card(g, Q)).toBeTruthy();
+    // Delivery refused it: the toast opens the card, with the reason and the typed text.
+    await click(g, g.$('.toast-action .toast-open'));
     expect(text(card(g, Q)!.querySelector('.derr'))).toBe('This question has already been answered.');
     expect((card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('8080');
     status = { state: 'applied' };
-    await click(g, card(g, Q)!.querySelector('.dretry'));
+    await click(g, card(g, Q)!.querySelector('.dsend'));
     await g.settle();
     // A refused submission is not resent under its own id: the retry is a new one.
     const ids = answers(g).map((p) => (JSON.parse(p.body) as { payload: { submission: string } }).payload.submission);

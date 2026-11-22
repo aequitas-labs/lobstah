@@ -6,15 +6,7 @@ import { backend, fileUrl } from '../backend.js';
 import { getState, viewOf } from '../store.js';
 import type { PendingMessage } from '../store.js';
 import { openDecision } from '../actions.js';
-import {
-  MESSAGE_UNSENT,
-  closeThreadSheet,
-  markThreadResponseSeen,
-  openThread,
-  reopenConversation,
-  retryMessage,
-  settlePendingMessages,
-} from '../thread-actions.js';
+import { closeThreadSheet, markThreadResponseSeen, openThread, reopenConversation, settlePendingMessages } from '../thread-actions.js';
 import { safeHref } from '../../src/glass-markdown.js';
 import { ThreadComposer } from './thread-composer.js';
 import { Button } from './button.js';
@@ -309,14 +301,11 @@ const firstLine = (m: PendingMessage) => (m.text.split('\n')[0] || m.files[0]?.n
 const holdsSubmission = (view: ThreadView, submission: string) =>
   view.rounds.some((round) => round.entries.some((entry) => 'by' in entry && entry.by === 'person' && entry.submission === submission));
 /** Words for a sent message's state, after "You". */
-const PENDING_STATE: Record<PendingMessage['state'], string> = { sending: 'Sending', sent: 'Sent', failed: 'Not sent' };
-/** A message this page sent, before its conversation holds it: sending, sent, or not sent with its reason and Retry. */
+const PENDING_STATE: Record<PendingMessage['state'], string> = { sending: 'Sending', sent: 'Sent' };
+/** A message this page sent, before its conversation holds it. */
 function PendingEntry({ message }: { message: PendingMessage }) {
   return html`<article class=${`thread-entry thread-msg from-person pending-msg ${message.state}`} aria-busy=${message.state === 'sending'}>
-    <div class="thread-bubble"><p class="thread-meta">You · ${PENDING_STATE[message.state]}</p>${message.text && html`<div class="thread-text">${LinkedText(message.text)}</div>`}${message.files.map((f) => html`<span class="dchip">${f.name}</span>`)}${
-      message.state === 'failed' &&
-      html`<div class="dfoot"><span class="bad derr" role="alert">${message.reason ?? MESSAGE_UNSENT}</span><${Button} class="dretry" onClick=${() => retryMessage(message.submission)}>Retry<//></div>`
-    }</div>
+    <div class="thread-bubble"><p class="thread-meta">You · ${PENDING_STATE[message.state]}</p>${message.text && html`<div class="thread-text">${LinkedText(message.text)}</div>`}${message.files.map((f) => html`<span class="dchip">${f.name}</span>`)}</div>
   </article>`;
 }
 /** Status words that name a state other than the dispatch verb of the same name. */

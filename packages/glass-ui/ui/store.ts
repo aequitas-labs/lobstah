@@ -121,12 +121,10 @@ export interface DecisionDraft {
   error?: string;
   /** Set when the answer is sent: what the card says it sent. The page sets it at once and clears it if delivery fails. */
   sent?: string;
-  /** The submission this answer went out as, kept while a retry must reuse it (submissions.ts). */
+  /** The submission this answer or message went out as, kept while a resend must reuse it (submissions.ts). */
   submission?: string;
   /** The fingerprint of what `submission` carried: an edited draft goes out under a new id. */
   submissionFor?: string;
-  /** The last send failed: the draft is as it was, and the card offers Retry beside `error`. */
-  failed?: boolean;
 }
 
 /**
@@ -140,14 +138,13 @@ export interface PendingMessage {
   kind: 'thread-start' | 'thread-post';
   /** A new conversation's grounds and dispatch, as the message sheet chose them. */
   target: { id?: string; grounds?: string; about?: string };
+  /** The composer's draft key: a failed message goes back there. */
+  draftKey: string;
   text: string;
   files: DraftFile[];
   at: string;
-  /** `sending` until delivered; `sent` until the conversation shows it; `failed` with the reason and a Retry. */
-  state: 'sending' | 'sent' | 'failed';
-  reason?: string;
-  /** Whether a retry must reuse this submission id (it may have been recorded). */
-  retrySame?: boolean;
+  /** `sending` until delivered, then `sent` until the conversation shows it. A failed one leaves for its draft. */
+  state: 'sending' | 'sent';
 }
 
 let current: GlassState;
