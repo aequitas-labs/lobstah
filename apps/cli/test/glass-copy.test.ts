@@ -78,7 +78,11 @@ describe('the copy pass on the glass', () => {
     (refused.$$('.dmodal .dopt')[0] as HTMLElement).click();
     (refused.$('.dmodal .dsend') as HTMLElement).click();
     await refused.settle();
-    expect(text(refused.$('.dmodal .derr'))).toBe("Your answer didn't go through. Reload and try again.");
+    // The toast says what didn't go through and opens it.
+    expect(text(refused.$('.toast-action .toast-open'))).toBe("Your answer to “Which base?” didn't go through. Open it to try again.");
+    (refused.$('.toast-action .toast-open') as HTMLElement).click();
+    await refused.settle();
+    expect(text(refused.$('.dmodal .derr'))).toBe("Your answer didn't go through. Try again.");
 
     // Answering the last open decision leaves the "all answered" card.
     const one = withDecision('tok');

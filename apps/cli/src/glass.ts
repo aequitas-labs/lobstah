@@ -134,6 +134,18 @@ import { handleRunRequest, isRunRequestKind } from './run-routes.js';
 import { RunChallenges, hostedPasskeysFile, macPasswordGate, runPasskeyStatus } from './run-passkey.js';
 import { RunWindows } from './run-window.js';
 import { RunRegistry } from './run-exec.js';
+import { SUBMISSION_ID, SUBMISSION_KINDS, SubmissionRefused, attachmentLimit, checkSubmission, decisionAnswerRequest, pendingSubmissions, pruneSettledSubmissions, readSubmissionStatus, recordSubmission } from './glass-submissions.js';
+import type { SubmissionKind, SubmissionStatus } from './glass-submissions.js';
+
+/** The HTTP answer for a submission's state: 202 while it waits for delivery, 200 once applied, its refusal's status once failed. */
+export function submissionReply(status: SubmissionStatus): [number, { ok: boolean; submission: string; state: SubmissionStatus['state']; reason?: string; result?: SubmissionStatus['result'] }] {
+  const body = { submission: status.id, state: status.state };
+  if (status.state === 'pending') return [202, { ok: true, ...body }];
+  if (status.state === 'applied') return [200, { ok: true, ...body, ...(status.result ? { result: status.result } : {}) }];
+  return [status.status ?? 500, { ok: false, ...body, reason: status.reason ?? 'The request failed.' }];
+}
+import { startSubmissionDelivery } from './glass-delivery.js';
+import type { DeliveryRunner } from './glass-delivery.js';
 
 /**
  * The spyglass: a localhost dashboard over ~/.lobstah — the same
@@ -150,15 +162,6 @@ import { RunRegistry } from './run-exec.js';
  */
 
 const REPO_URL = 'https://github.com/aequitas-labs/lobstah';
-
-/** limits.attachmentMaxBytes; a config error falls back to the default. */
-function attachmentLimit(): number {
-  try {
-    return loadConfig().limits.attachmentMaxBytes;
-  } catch {
-    return DEFAULT_LIMITS.attachmentMaxBytes;
-  }
-}
 
 /**
  * The /requests body cap: room for the largest kind, an answer's files as
@@ -897,39 +900,6 @@ export function glassDispatchJson(id: string, snapshot?: (o: { local?: boolean }
 const DISPATCH_DETAIL_RE = /^\/data\/dispatch\/([A-Za-z0-9-]{1,64})$/;
 const OLDER_KINDS: readonly GlassOlderKind[] = ['dispatches', 'notices', 'prs'];
 
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
-
-/**
- * A `decision-answer` request's payload, shape-checked: the decision key
- * (or a raw question's `<lane>:<id>`), an option, text, and base64 files.
- * Content checks (the key, the option, sizes, types) are answerKey's,
- * shared with `man answer`.
- */
-function decisionAnswerRequest(raw: unknown): { key: string; option?: string; text?: string; uploads: Array<{ name: string; data: Buffer }> } {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new DecisionError('payload must be an object');
-  const body = raw as { key?: unknown; option?: unknown; text?: unknown; files?: unknown };
-  const key = typeof body.key === 'string' ? body.key : '';
-  if (!/^(decision:[a-f0-9]{8}|(work|chore):[A-Za-z0-9-]{1,64})$/.test(key)) throw new DecisionError('Unknown decision.', 404);
-  if (body.option !== undefined && typeof body.option !== 'string') throw new DecisionError('option must be a string');
-  if (body.text !== undefined && typeof body.text !== 'string') throw new DecisionError('text must be a string');
-  if (body.files !== undefined && !Array.isArray(body.files)) throw new DecisionError('files must be a list');
-  const files = (body.files ?? []) as unknown[];
-  if (files.length > ANSWER_FILES_MAX) throw new DecisionError(`an answer takes at most ${ANSWER_FILES_MAX} files`, 413);
-  const uploads = files.map((f) => {
-    const file = f as { name?: unknown; data?: unknown };
-    if (typeof file !== 'object' || file === null || typeof file.name !== 'string' || typeof file.data !== 'string' || !BASE64.test(file.data)) {
-      throw new DecisionError('each file needs a name and base64 data');
-    }
-    return { name: file.name, data: Buffer.from(file.data, 'base64') };
-  });
-  return {
-    key,
-    ...(body.option !== undefined ? { option: body.option as string } : {}),
-    ...(body.text !== undefined ? { text: body.text as string } : {}),
-    uploads,
-  };
-}
-
 /**
  * The page itself: built from apps/cli/glass (index.html and the TypeScript
  * under src/) and the shared packages/glass-ui (glass.css and the components
@@ -984,6 +954,8 @@ export function serveGlass(
     passkeysFile?: string;
     /** The runs this server starts (tests read them). */
     runs?: RunRegistry;
+    /** How recorded submissions are delivered: `lobstah glass deliver` by default (glass-delivery.ts). */
+    deliver?: DeliveryRunner;
   } = {},
 ): http.Server {
   const runChallenges = options.runChallenges ?? new RunChallenges();
@@ -994,6 +966,11 @@ export function serveGlass(
   const snapshot = options.snapshot ?? buildGlassSnapshot;
   // A caller's own snapshot function runs here; the default builds on the snapshot thread.
   const thread = options.snapshot ? undefined : startSnapshotThread();
+  // A delivered answer or message shows on the next poll.
+  const delivery = startSubmissionDelivery({ run: options.deliver, onSettled: () => thread?.invalidate() });
+  pruneSettledSubmissions();
+  // What an earlier glass recorded and did not deliver.
+  if (pendingSubmissions().length > 0) delivery.kick();
   const logged = new Set<string>();
   const focusToken = randomBytes(32).toString('hex');
   // In every ETag: a restarted glass (a new page token) never matches an old one.
@@ -1025,6 +1002,42 @@ export function serveGlass(
     return (
       isOwnHost(req.headers.host) &&
       req.headers.origin === `http://${req.headers.host}` &&
+      token.length === focusToken.length &&
+      timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
+    );
+  };
+  /**
+   * Record a page's answer, message or card view, and reply as soon as the
+   * record is on disk. `lobstah glass deliver` applies it after the reply
+   * (glass-submissions.ts); the page asks /api/submissions/<id> how it went.
+   * The same id sent again answers with the first record's state.
+   */
+  const submit = (kind: SubmissionKind, id: string, payload: unknown, reply: (status: number, result: unknown) => void): void => {
+    if (!SUBMISSION_ID.test(id)) return reply(400, { ok: false, reason: 'Reload the page and try again.' });
+    const known = readSubmissionStatus(id);
+    if (known) return reply(...submissionReply(known));
+    let checked: Record<string, unknown>;
+    try {
+      checked = checkSubmission(kind, payload);
+    } catch (error) {
+      const refused = error instanceof SubmissionRefused ? error : new SubmissionRefused('The request was refused.', 400);
+      return reply(refused.status, { ok: false, submission: id, state: 'failed', reason: refused.message });
+    }
+    recordSubmission({ id, kind, payload: checked, source: 'glass', at: new Date().toISOString() }).then(
+      ({ status }) => {
+        reply(...submissionReply(status));
+        delivery.kick();
+      },
+      () => reply(500, { ok: false, submission: id, state: 'failed', reason: kind === 'decision-answer' ? 'The answer could not be stored.' : 'The message could not be saved' }),
+    );
+  };
+  /** Same host, this page's token, and no other site's Origin: who may read a submission's state. */
+  const pageReader = (req: http.IncomingMessage): boolean => {
+    const supplied = req.headers['x-lobstah-token'];
+    const token = typeof supplied === 'string' ? supplied : '';
+    return (
+      isOwnHost(req.headers.host) &&
+      (req.headers.origin === undefined || req.headers.origin === `http://${req.headers.host}`) &&
       token.length === focusToken.length &&
       timingSafeEqual(Buffer.from(token), Buffer.from(focusToken))
     );
@@ -1131,6 +1144,11 @@ export function serveGlass(
         // The header counts only on a request this glass already authorized with its own page token.
         const source: AnswerSource = req.headers['x-lobstah-relay'] === 'wharf' ? 'wharf' : 'glass';
         if (kindMax !== undefined && size > kindMax) return reply(413, { ok: false, reason: 'The request is too large.' });
+        // This glass's own page names its answers, messages and card views: they are recorded and delivered after the reply.
+        const submission = (body.payload as { submission?: unknown } | null | undefined)?.submission;
+        if (source === 'glass' && typeof submission === 'string' && (SUBMISSION_KINDS as readonly unknown[]).includes(body.kind)) {
+          return submit(body.kind as SubmissionKind, submission, body.payload, reply);
+        }
         // One switch per kind: each kind validates and stores its own payload.
         switch (body?.kind) {
           case 'thread-seen':
@@ -1405,6 +1423,24 @@ export function serveGlass(
         }
       });
       req.on('error', () => reply(400, { ok: false, reason: 'The request failed.' }));
+      return;
+    }
+    if (req.url?.startsWith('/api/submissions/')) {
+      // A page asks how its answer, message or card view went. `?wait=<ms>` (up to 10 s) answers once it settles.
+      res.setHeader('cache-control', 'no-store');
+      req.resume();
+      const reply = (status: number, result: unknown) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      };
+      if (req.method !== 'GET') return reply(405, { ok: false, reason: 'GET required.' });
+      if (!pageReader(req)) return reply(403, { ok: false, reason: 'Request was not authorized.' });
+      const url = new URL(req.url, 'http://glass');
+      const id = url.pathname.slice('/api/submissions/'.length);
+      if (!SUBMISSION_ID.test(id)) return reply(404, { ok: false, reason: 'No such submission.' });
+      const waitMs = Math.max(0, Math.min(10_000, Number(url.searchParams.get('wait') ?? 0) || 0));
+      void delivery.settled(id, waitMs).then((status) => (status ? reply(...submissionReply(status)) : reply(404, { ok: false, reason: 'No such submission.' })));
       return;
     }
     if (req.url?.split('?')[0] === '/api/presence') {

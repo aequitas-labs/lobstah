@@ -4,8 +4,9 @@ import type { ComponentChildren } from 'preact';
 import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
 import { getState, viewOf } from '../store.js';
+import type { PendingMessage } from '../store.js';
 import { openDecision } from '../actions.js';
-import { closeThreadSheet, markThreadResponseSeen, openThread, reopenConversation } from '../thread-actions.js';
+import { closeThreadSheet, markThreadResponseSeen, openThread, reopenConversation, settlePendingMessages } from '../thread-actions.js';
 import { safeHref } from '../../src/glass-markdown.js';
 import { ThreadComposer } from './thread-composer.js';
 import { Button } from './button.js';
@@ -273,12 +274,39 @@ function usePinnedBottom(id: string, ready: boolean) {
 /** A conversation in the sheet over the Threads tab, as a report opens; Back returns to the list. */
 export function ThreadSheet({ id }: { id: string }) {
   const { view, error } = useThread(id);
-  const body = usePinnedBottom(id, !!view);
+  const sent = (getState().pendingMessages ?? []).filter((m) => m.thread === id);
+  useEffect(() => {
+    if (view) settlePendingMessages(view);
+  }, [view]);
+  // A message this page sent shows until the loaded conversation holds it.
+  const pending = view ? sent.filter((m) => !holdsSubmission(view, m.submission)) : sent;
+  const body = usePinnedBottom(id, !!view || pending.length > 0);
   // The snapshot already names it, so the bar has its title before the conversation loads.
-  const title = view?.title ?? getState().snapshot?.threads?.find((t) => t.id === id)?.title ?? 'Conversation';
+  const title =
+    view?.title ?? getState().snapshot?.threads?.find((t) => t.id === id)?.title ?? (pending[0] && firstLine(pending[0])) ?? 'Conversation';
+  const content = view
+    ? html`<${Conversation} view=${view} pending=${pending} />`
+    : pending.length > 0
+      ? html`<div class="thread-view"><${SectionHead} title=${title} page /><div class="thread-timeline">${pending.map((m) => html`<${PendingEntry} key=${m.submission} message=${m} />`)}</div></div>`
+      : error
+        ? html`<p role="status">${error}</p>`
+        : html`<p class="dim">Loading conversation</p>`;
   return html`<${Sheet} page=${id} title=${title} titleId="tsheet-title" cls="tsheet" onBack=${closeThreadSheet}>
-    <div class="thread-sheet-body" ref=${body}>${error && !view ? html`<p role="status">${error}</p>` : view ? html`<${Conversation} view=${view} />` : html`<p class="dim">Loading conversation</p>`}</div>
+    <div class="thread-sheet-body" ref=${body}>${content}</div>
   <//>`;
+}
+/** A new conversation's title, as the server will name it: the message's first line, or its first file. */
+const firstLine = (m: PendingMessage) => (m.text.split('\n')[0] || m.files[0]?.name || 'Attachment').slice(0, 200);
+/** Whether the conversation already holds the message this page sent as `submission`. */
+const holdsSubmission = (view: ThreadView, submission: string) =>
+  view.rounds.some((round) => round.entries.some((entry) => 'by' in entry && entry.by === 'person' && entry.submission === submission));
+/** Words for a sent message's state, after "You". */
+const PENDING_STATE: Record<PendingMessage['state'], string> = { sending: 'Sending', sent: 'Sent' };
+/** A message this page sent, before its conversation holds it. */
+function PendingEntry({ message }: { message: PendingMessage }) {
+  return html`<article class=${`thread-entry thread-msg from-person pending-msg ${message.state}`} aria-busy=${message.state === 'sending'}>
+    <div class="thread-bubble"><p class="thread-meta">You · ${PENDING_STATE[message.state]}</p>${message.text && html`<div class="thread-text">${LinkedText(message.text)}</div>`}${message.files.map((f) => html`<span class="dchip">${f.name}</span>`)}</div>
+  </article>`;
 }
 /** Status words that name a state other than the dispatch verb of the same name. */
 const TRACKED_STATUS: Record<string, WorkStateIconState> = {
@@ -319,11 +347,11 @@ function Tracked(view: ThreadView) {
     </section>`
   );
 }
-function Conversation({ view }: { view: ThreadView }) {
+function Conversation({ view, pending = [] }: { view: ThreadView; pending?: readonly PendingMessage[] }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
     ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}${Tracked(view)}
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
-    <${Timeline} view=${view} />
+    <${Timeline} view=${view} />${pending.length > 0 && html`<div class="thread-timeline">${pending.map((m) => html`<${PendingEntry} key=${m.submission} message=${m} />`)}</div>`}
     ${outcome(view)}<${SeenMark} view=${view} />
     ${view.state === 'resolved' ? html`<${Button} action=${() => reopenConversation(view.id)} done="Conversation reopened">Reopen<//>` : html`<${ThreadComposer} id=${view.id} />`}
   </div>`;

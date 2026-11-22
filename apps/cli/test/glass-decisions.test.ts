@@ -16,6 +16,8 @@ import { NOW, ago, emptyFleet, everyAttentionFleet } from './fixtures/glass-snap
 
 const KEY = 'decision:0a1b2c3d';
 const Q = 'work:bbbbbbbb-0000-4000-8000-000000000002';
+/** The id the page gives each answer it sends (submissions.ts). */
+const SUBMISSION = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 const DISPATCH = 'aaaaaaaa-0000-4000-8000-000000000001';
 
 function fleet(): GlassSnapshot {
@@ -241,7 +243,7 @@ describe('glass: the decision modal', () => {
     await key(g, '4', c);
     expect(answers(g)).toEqual([]);
     await click(g, [...c.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === option));
-    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option, files: [] } });
+    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option, files: [], submission: SUBMISSION } });
   });
 
   it('opening an already-read card still sends a guarded view so it can stop the pet', async () => {
@@ -331,7 +333,7 @@ describe('glass: the decision modal', () => {
     await show(g, Q);
     await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
     await click(g, card(g, Q)!.querySelector('.dsend'));
-    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: Q, text: '8080', files: [] } });
+    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: Q, text: '8080', files: [], submission: SUBMISSION } });
     // The next open one loads; the answered one left the order.
     expect(card(g, KEY)).toBeTruthy();
     expect(text(card(g, KEY)!.querySelector('.dpos'))).toBe('1 of 1');
@@ -339,7 +341,7 @@ describe('glass: the decision modal', () => {
     expect(text(row(g, Q)!.querySelector('.dsent'))).toBe('sent');
     await click(g, [...card(g, KEY)!.querySelectorAll('.dopt')].find((b) => text(b.querySelector('.dlabel')) === 'v2'));
     await click(g, card(g, KEY)!.querySelector('.dsend'));
-    expect(JSON.parse(answers(g)[1]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v2', files: [] } });
+    expect(JSON.parse(answers(g)[1]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v2', files: [], submission: SUBMISSION } });
     const done = g.$('.dmodal .ddone')!;
     expect(text(done)).toContain('All decisions answered');
     await click(g, done);
@@ -394,9 +396,47 @@ describe('glass: the decision modal', () => {
     await show(g, Q);
     await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
     await click(g, card(g, Q)!.querySelector('.dsend'));
-    expect(card(g, Q)).toBeTruthy();
+    // The modal moved on when it was sent. A toast names the card and opens it.
+    expect(card(g, Q)).toBeUndefined();
+    expect(row(g, Q)!.className).not.toContain('answered');
+    expect(g.$('.dretry')).toBeNull();
+    const toast = g.$('.toast-action .toast-open')!;
+    expect(text(toast)).toBe('Your answer to “which port should the api bind?” didn\'t go through. Open it to try again.');
+    await click(g, toast);
+    expect(g.$('.toast-action')).toBeNull();
+    // The card, with its draft and the reason; Send sends it again.
     expect(text(card(g, Q)!.querySelector('.derr'))).toBe('no standing decision or question');
     expect((card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('8080');
+  });
+
+  it('a double click sends one answer; one the helm refuses after it was recorded comes back with its draft through a toast', async () => {
+    let status: { state: string; reason?: string } = { state: 'pending' };
+    const g = await page(fleet(), {
+      post: (_url, init) =>
+        (JSON.parse(init.body) as { kind: string }).kind === 'decision-answer' ? { status: 202, body: { ok: true, state: 'pending' } } : ok(),
+      get: (url) => (url.startsWith('/api/submissions/') ? { status: 200, body: status } : undefined),
+    });
+    await show(g, Q);
+    await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
+    const send = card(g, Q)!.querySelector<HTMLElement>('.dsend')!;
+    send.click();
+    send.click();
+    status = { state: 'failed', reason: 'This question has already been answered.' };
+    await g.settle();
+    await g.settle();
+    expect(answers(g)).toHaveLength(1);
+    // Delivery refused it: the toast opens the card, with the reason and the typed text.
+    await click(g, g.$('.toast-action .toast-open'));
+    expect(text(card(g, Q)!.querySelector('.derr'))).toBe('This question has already been answered.');
+    expect((card(g, Q)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('8080');
+    status = { state: 'applied' };
+    await click(g, card(g, Q)!.querySelector('.dsend'));
+    await g.settle();
+    // A refused submission is not resent under its own id: the retry is a new one.
+    const ids = answers(g).map((p) => (JSON.parse(p.body) as { payload: { submission: string } }).payload.submission);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).not.toBe(ids[0]);
+    expect(text(row(g, Q)!.querySelector('.dsent'))).toBe('sent');
   });
 
   it('an empty answer is not sent', async () => {
@@ -564,7 +604,7 @@ describe('glass: decision hotkeys', () => {
     await press(g, { key: '1' }, g.$('.dmodal'));
     const ev = await press(g, { key: 'Enter' });
     expect(ev.defaultPrevented).toBe(true);
-    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v1', files: [] } });
+    expect(JSON.parse(answers(g)[0]!.body)).toEqual({ kind: 'decision-answer', payload: { key: KEY, option: 'v1', files: [], submission: SUBMISSION } });
     // The next open one loaded.
     expect(shown(g)).toBe(Q);
     // Esc in the text field leaves it first; the modal stays.
@@ -644,7 +684,7 @@ describe('glass: Ctrl+Enter sends from the answer box', () => {
     expect(answers(g)).toEqual([]);
   });
 
-  it('a held key repeats nothing, and a press while Send is busy sends nothing', async () => {
+  it('a held key repeats nothing, and a second press while the answer is on its way sends nothing', async () => {
     let release: () => void = () => {};
     const g = await page(fleet(), {
       ...on('Win32'),
@@ -652,17 +692,23 @@ describe('glass: Ctrl+Enter sends from the answer box', () => {
         (JSON.parse(init.body) as { kind: string }).kind === 'decision-answer' ? new Promise((done) => (release = () => done(ok()))) : ok(),
     });
     await show(g, Q);
-    await type(g, card(g, Q)!.querySelector('textarea')!, '8080');
+    const box = card(g, Q)!.querySelector('textarea')!;
+    await type(g, box, '8080');
     await press(g, Q, { ctrlKey: true, repeat: true });
     expect(answers(g)).toEqual([]);
-    await press(g, Q, { ctrlKey: true });
+    const W = g.window as unknown as { KeyboardEvent: typeof KeyboardEvent };
+    const enter = () => new W.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true });
+    // Two presses before the page renders again: the first marks the card answered, so the second sends nothing.
+    box.dispatchEvent(enter());
+    box.dispatchEvent(enter());
+    await g.settle();
     expect(answers(g)).toHaveLength(1);
-    // Send is disabled while the answer is on its way: the shortcut waits with it.
-    expect(card(g, Q)!.querySelector<HTMLButtonElement>('.dsend')!.disabled).toBe(true);
-    await press(g, Q, { ctrlKey: true });
-    expect(answers(g)).toHaveLength(1);
+    // The card reads as answered while the answer is still on its way, and the modal has moved on.
+    expect(text(row(g, Q)!.querySelector('.dsent'))).toBe('sent');
+    expect(card(g, Q)).toBeUndefined();
     release();
     await g.settle();
+    expect(answers(g)).toHaveLength(1);
   });
 
   it('an empty box gets the same answer as Send: nothing sent, and the same reason', async () => {

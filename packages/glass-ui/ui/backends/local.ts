@@ -32,6 +32,11 @@ export const localBackend: GlassBackend = {
       headers: { 'content-type': 'application/json', 'x-lobstah-token': token },
       body: JSON.stringify({ kind, payload }),
     }),
+  submission: (id, token, waitMs) =>
+    write(`/api/submissions/${encodeURIComponent(id)}?wait=${Math.round(waitMs)}`, {
+      cache: 'no-store',
+      headers: { 'x-lobstah-token': token },
+    }),
   focus: (trapId, token) =>
     write(`/api/focus/${encodeURIComponent(trapId)}`, { method: 'POST', headers: { 'x-lobstah-focus-token': token } }),
   presence: (page, visible, app) =>

@@ -748,6 +748,12 @@ export interface AnswerInput {
   by: AnswerSource;
   /** A wharf answer's receipt id. */
   receipt?: string;
+  /**
+   * The id of the `decision-answer` request that carries this answer. The
+   * glass passes its submission id, so a delivery retried after a crash finds
+   * the answer it already stored. A new id when unset.
+   */
+  request?: string;
   /** Per-file limit (limits.attachmentMaxBytes). */
   maxBytes: number;
   now?: Date;
@@ -823,7 +829,7 @@ function storeDecisionAnswer(input: AnswerInput, delivered = false): DecisionAns
   }
   const dir = decisionDir(input.key)!;
   const answeredAt = (input.now ?? new Date()).toISOString();
-  const request = newRequestId();
+  const request = input.request ?? newRequestId();
   const filesDir = requestFilesDir(request);
   // Where each file will be stored: two files of one name get -2, -3, ...
   const stored: Attachment[] = [];

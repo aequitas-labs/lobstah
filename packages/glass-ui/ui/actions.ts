@@ -23,6 +23,8 @@ import type { GlassState } from './store.js';
 import type { DecisionDraft, DraftFile } from './store.js';
 import { setDecisionBadge } from './app-badge.js';
 import { backend, can, type GlassVerdict } from './backend.js';
+import { newSubmissionId, submissionFingerprint, submit, takesSubmissions } from './submissions.js';
+import { showToast } from './components/toast.js';
 import { RUN_LINE_SEAL_INFO, RUN_SEAL_INFO, runInputsText, runLineSignedText } from '../../core/src/run-inputs.js';
 import type { RunInputValues, SealedInput } from '../../core/src/run-inputs.js';
 
@@ -326,7 +328,8 @@ export async function markViewed(key: string): Promise<void> {
   const token = state.snapshot?.focusToken;
   if (!token) return;
   try {
-    await backend().request('decision-viewed', { key }, token);
+    // As a submission, the view is recorded at once and its tend scan runs after the reply.
+    await backend().request('decision-viewed', { key, ...(takesSubmissions() ? { submission: newSubmissionId() } : {}) }, token);
   } catch {
     // The next view tries again on a fresh page; the count here already treats it as seen.
   }
@@ -505,9 +508,25 @@ export function removeFile(key: string, index: number): void {
   setDraft(key, { files });
 }
 
+/** The card's note when its answer did not reach the helm, and the server gave no reason. */
+export const ANSWER_UNSENT = "Your answer didn't go through. Try again.";
+
+/** A title cut short enough for a toast on a phone. */
+export const toastTitle = (title: string): string => (title.length > 40 ? `${title.slice(0, 39)}…` : title);
+
+/** The toast for an answer that did not reach the helm: what was not sent, and that clicking opens it. */
+export function answerUnsentToast(title: string | undefined): string {
+  return title
+    ? `Your answer to “${toastTitle(title)}” didn't go through. Open it to try again.`
+    : "Your answer didn't go through. Open it to try again.";
+}
+
 /**
  * Send a card's answer: one same-origin POST to /requests with the page's
- * token, a `decision-answer` request. The server stores it; the helm acts on it.
+ * token, a `decision-answer` request. Where the source takes submissions
+ * (submissions.ts), the card reads as answered at once. If delivery fails,
+ * the card is open again with its draft and the reason, and a toast opens
+ * it. Otherwise the server stores it before the card changes. The helm acts on it.
  */
 export async function sendAnswer(key: string): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
@@ -527,18 +546,39 @@ export async function sendAnswer(key: string): Promise<string | undefined> {
     setDraft(key, { error });
     return error;
   }
+  const payload = {
+    key,
+    ...(draft.option ? { option: draft.option } : {}),
+    ...(text.trim() ? { text } : {}),
+    files: files.map((f) => ({ name: f.name, data: f.data })),
+  };
+  if (takesSubmissions()) {
+    // The card reads as answered at once; delivery is followed in the background.
+    const fingerprint = submissionFingerprint(payload);
+    const submission = draft.submission && draft.submissionFor === fingerprint ? draft.submission : newSubmissionId();
+    const previous = modalOrder();
+    // Marked sent before anything else, so a second press sends nothing.
+    setDraft(key, {
+      sending: false,
+      error: undefined,
+      submission,
+      submissionFor: fingerprint,
+      sent: answerSummary({ option: draft.option, text, files: files.length }),
+    });
+    const open = getState().decisionModal;
+    if (open?.key === key) navigateDecision(nextOpen(previous, currentCards(), getState().drafts, key).key, true);
+    const title = card ? (card.kind === 'decision' ? card.title : card.note) : undefined;
+    void submit('decision-answer', submission, payload, token, ANSWER_UNSENT).then((outcome) => {
+      if (outcome.state === 'applied') return setDraft(key, { submission: undefined });
+      // The card is open again with its draft and the reason; the toast opens it.
+      setDraft(key, { sent: undefined, error: outcome.reason, submission: outcome.retrySame ? submission : undefined });
+      showToast(answerUnsentToast(title), { open: () => openDecision(key) });
+    });
+    return undefined;
+  }
   setDraft(key, { sending: true, error: undefined });
   try {
-    const response = await backend().request(
-      'decision-answer',
-      {
-        key,
-        ...(draft.option ? { option: draft.option } : {}),
-        ...(text.trim() ? { text } : {}),
-        files: files.map((f) => ({ name: f.name, data: f.data })),
-      },
-      token,
-    );
+    const response = await backend().request('decision-answer', payload, token);
     const result = response.body;
     if (!response.ok || !result.ok) {
       const error = result.reason ?? "Your answer didn't go through. Reload and try again.";

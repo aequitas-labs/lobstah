@@ -2,15 +2,23 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { html, type Children } from '../html.js';
 import { Button } from './button.js';
 
-type ToastMessage = { id: number; message: string };
-type ToastListener = (message: string) => void;
+/** What a toast can do when clicked: open the item it is about. */
+export interface ToastAction {
+  open: () => void;
+}
+type ToastMessage = { id: number; message: string; action?: ToastAction };
+type ToastListener = (message: string, action?: ToastAction) => void;
 
 const listeners = new Set<ToastListener>();
 let nextId = 0;
 
-/** Announce a completed action in the glass's shared, non-blocking toast area. */
-export function showToast(message: string): void {
-  for (const listener of listeners) listener(message);
+/**
+ * Announce a completed action in the glass's shared, non-blocking toast area.
+ * With an `action`, the whole message is a button that opens its item, and
+ * the toast stays until it is clicked or dismissed.
+ */
+export function showToast(message: string, action?: ToastAction): void {
+  for (const listener of listeners) listener(message, action);
 }
 
 /** Shared timing, touch dismissal and desktop close control for every toast. */
@@ -90,9 +98,9 @@ export function Toast({
 export function ToastHost({ children }: { children?: Children }): Children {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   useLayoutEffect(() => {
-    const receive = (message: string) => {
+    const receive = (message: string, action?: ToastAction) => {
       const id = ++nextId;
-      setToasts((current) => [...current, { id, message }]);
+      setToasts((current) => [...current, { id, message, ...(action ? { action } : {}) }]);
     };
     listeners.add(receive);
     return () => {
@@ -100,7 +108,14 @@ export function ToastHost({ children }: { children?: Children }): Children {
     };
   }, []);
   return html`<div class="glass-toasts">${children}</div><div class="glass-toasts toast-feedback-host"><div class="toast-feedback">${toasts.map(
-    (toast) =>
-      html`<${Toast} key=${toast.id} onDismiss=${() => setToasts((current) => current.filter((item) => item.id !== toast.id))}>${toast.message}<//>`,
+    (toast) => {
+      const dismiss = () => setToasts((current) => current.filter((item) => item.id !== toast.id));
+      return toast.action
+        ? html`<${Toast} key=${toast.id} class="toast-action" duration=${null} onDismiss=${dismiss}><button type="button" class="toast-open" onClick=${() => {
+            dismiss();
+            toast.action!.open();
+          }}>${toast.message}</button><//>`
+        : html`<${Toast} key=${toast.id} onDismiss=${dismiss}>${toast.message}<//>`;
+    },
   )}</div></div>`;
 }

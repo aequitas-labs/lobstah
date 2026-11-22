@@ -4199,6 +4199,12 @@ async function mainCli(): Promise<void> {
         );
         break;
       }
+      if (pos[0] === 'deliver') {
+        // The glass starts this after it records an answer or message: one JSON status line per settled submission.
+        const { deliverPending } = await import('./glass-submissions.js');
+        await deliverPending((status) => process.stdout.write(`${JSON.stringify(status)}\n`));
+        break;
+      }
       const port = requestedPort ?? glassPort();
       if (pos[0] === 'show') {
         const hash = pos[1] ?? '';

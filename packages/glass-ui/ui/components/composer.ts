@@ -93,8 +93,7 @@ export function Composer({
         (f, i) =>
           html`<span key=${f.name + i} class="dchip">${f.name}<${Button} variant="icon" class="dx" label="remove" disabled=${sending} onClick=${() => removeFile(key, i)}>×<//></span>`,
       )}
-      ${error && html`<span class="bad derr">${error}</span>`}
-    </div>`,
+      ${error && html`<span class="bad derr" role="alert">${error}</span>`}    </div>`,
   ];
 }
 

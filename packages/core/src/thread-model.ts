@@ -7,7 +7,8 @@ export type ThreadOutcomeKind = 'dispatched' | 'planned' | 'answered' | 'dropped
 export interface ThreadOutcome { kind: ThreadOutcomeKind; ref?: string; note: string; at: string }
 /** Entries keep the order they happened in; `at` is absent only on entries written before helm messages. */
 export type ThreadEntry =
-  | { by: 'person'; via: ThreadVia; text: string; attachments: Attachment[]; at?: string }
+  /** `submission`: the glass submission that wrote it, so a retried delivery adds it once and the page knows its own message. */
+  | { by: 'person'; via: ThreadVia; text: string; attachments: Attachment[]; at?: string; submission?: string }
   | { by: 'helm'; text: string; attachments: Attachment[]; at: string; seq: number }
   | { card: string }
   | { link: ThreadLinkKind; ref: string; text: string; at?: string }

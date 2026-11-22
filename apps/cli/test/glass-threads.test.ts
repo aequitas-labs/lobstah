@@ -12,7 +12,7 @@ const view = (): ThreadView => ({ ...summary(), text: 'How do we navigate?', att
 const pages: GlassDom[] = [];
 afterEach(async () => { for (const page of pages) await page.close(); pages.length = 0; });
 function fleet() { const d = emptyFleet(); d.focusToken = 'tok'; d.threads = [summary()]; d.answerLimits = { maxBytes: 1024, maxFiles: 8, textMax: 20000, extensions: ['.png', '.txt'] }; return d; }
-async function page(d: GlassSnapshot, options: Partial<GlassDomOptions> = {}) { const p = await loadGlass(GLASS_PAGE, d, { now: NOW, get: url => url === `/threads/${ID}` ? { status: 200, body: view() } : undefined, ...options, prepare: w => { Object.defineProperty(w, 'IntersectionObserver', { value: undefined, configurable: true }); options.prepare?.(w); } }); pages.push(p); return p; }
+async function page(d: GlassSnapshot, options: Partial<GlassDomOptions> = {}) { const p = await loadGlass(GLASS_PAGE, d, { now: NOW, get: url => url === `/threads/${ID}` ? { status: 200, body: view() } : url.startsWith('/threads/') ? { status: 404, body: { error: 'not found' } } : undefined, ...options, prepare: w => { Object.defineProperty(w, 'IntersectionObserver', { value: undefined, configurable: true }); options.prepare?.(w); } }); pages.push(p); return p; }
 async function click(g: GlassDom, selector: string) { (g.$(selector) as HTMLElement).click(); await g.settle(); }
 async function type(g: GlassDom, text: string, label = 'Your message') { const input = g.$(`textarea[aria-label="${label}"]`) as HTMLTextAreaElement; input.value = text; input.dispatchEvent(new g.window.Event('input', { bubbles: true })); await g.settle(); }
 it('opens one card composer from the message button and retains its draft after closing', async () => {
@@ -26,17 +26,64 @@ it('opens one card composer from the message button and retains its draft after 
   await click(g, '.dialog-close'); await click(g, '.message-fab');
   expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('Keep reviews in the bar');
 });
-it('keeps a failed send for retry and opens its stored conversation after success', async () => {
-  const d = fleet(); let tries = 0;
-  const g = await page(d, { post: (_url, req) => { const body = JSON.parse(req.body); if (body.kind !== 'thread-start') return { status: 404, body: {} }; return ++tries === 1 ? { status: 503, body: { ok: false, reason: 'Try again' } } : { status: 201, body: { ok: true, item: view() } }; } });
-  await click(g, '.message-fab'); await type(g, 'Where should Helm go?');
-  await click(g, '.dsend'); expect(g.$('.derr')?.textContent).toBe('Try again');
-  expect((g.$('textarea.danswer') as HTMLTextAreaElement).value).toBe('Where should Helm go?');
+it('shows a sent message at once; a failed one returns to its draft through a toast, and is written once when sent again', async () => {
+  const d = fleet(); let tries = 0; let started = ''; let delivered = false;
+  let fail: () => void = () => {};
+  const words = 'Where should Helm go?';
+  const stored = (): ThreadView => ({ ...view(), id: started, title: words, rounds: [{ at: AT, entries: [{ by: 'person', via: 'glass', text: words, attachments: [], at: AT, submission: started }] }] });
+  const g = await page(d, {
+    get: (url) => url.startsWith('/api/submissions/') ? { status: 200, body: { ok: true, state: 'applied' } }
+      // The conversation exists once the message is delivered.
+      : url === `/threads/${encodeURIComponent(started)}` ? (delivered ? { status: 200, body: stored() } : { status: 404, body: { error: 'not found' } }) : undefined,
+    post: (_url, req) => {
+      const body = JSON.parse(req.body);
+      if (body.kind !== 'thread-start') return { status: 404, body: {} };
+      started = body.payload.submission;
+      if (++tries === 1) return new Promise((done) => (fail = () => done({ status: 503, body: { ok: false, reason: 'Try again' } })));
+      // Recorded: the snapshot after delivery lists the new conversation.
+      delivered = true;
+      d.threads = [...(d.threads ?? []), { ...summary(), id: started, title: words, updatedAt: new Date(NOW + 1000).toISOString() }];
+      return { status: 202, body: { ok: true, state: 'pending', submission: started } };
+    },
+  });
+  await click(g, '.message-fab'); await type(g, words);
   await click(g, '.dsend');
-  expect(g.window.location.hash).toBe(`#thread/${ID}`);
+  // The conversation opens under the page's own id, with the message in it; the dialog is gone.
+  expect(g.window.location.hash).toBe(`#thread/${started}`);
   expect(g.$('.dialog-scrim')).toBeNull();
-  expect(g.$('.tsheet')?.textContent).toContain('Keep Reviews');
-  expect(JSON.parse(g.posts().at(-1)!.body)).toMatchObject({ kind: 'thread-start', payload: { text: 'Where should Helm go?', grounds: 'home' } });
+  expect(g.$('.tsheet .pending-msg .thread-meta')?.textContent).toBe('You · Sending');
+  expect(g.$('.tsheet .pending-msg .thread-text')?.textContent).toBe(words);
+  // The send fails: the never-written conversation closes, and a toast says what didn't go through.
+  fail(); await g.settle();
+  expect(g.$('.tsheet')).toBeNull();
+  expect(g.$('.dretry')).toBeNull();
+  const toast = g.$('.toast-action .toast-open')!;
+  expect(toast.textContent).toBe("Your message to the helm didn't go through. Open it to try again.");
+  // It opens the message dialog with the draft and the reason.
+  await click(g, '.toast-action .toast-open');
+  expect((g.$('textarea[aria-label="Your message"]') as HTMLTextAreaElement).value).toBe(words);
+  expect(g.$('[role="dialog"] .derr')?.textContent).toBe('Try again');
+  await click(g, '[role="dialog"] .dsend');
+  // Sent again under the same id, so it can be recorded only once.
+  const sent = g.posts().filter((p) => JSON.parse(p.body).kind === 'thread-start').map((p) => JSON.parse(p.body).payload);
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toMatchObject({ text: words, grounds: 'home', submission: sent[0].submission });
+  expect(g.$('.pending-msg')).toBeNull();
+  expect(g.$$('.tsheet .thread-msg.from-person .thread-text').map((el) => el.textContent)).toEqual([words]);
+});
+it('a reply that fails goes back to its conversation’s composer, and the toast opens that conversation', async () => {
+  const g = await page(fleet(), { hash: '#helm', post: (_url, req) => (JSON.parse(req.body).kind === 'thread-post' ? { status: 409, body: { ok: false, state: 'failed', reason: 'Reopen this conversation before adding to it' } } : { status: 200, body: { ok: true } }) });
+  await g.go(`#thread/${ID}`);
+  await type(g, 'Keep the old tab too', 'Add to this thread');
+  await click(g, '.tsheet .dsend');
+  expect(g.$('.pending-msg')).toBeNull();
+  expect(g.$('.toast-action .toast-open')?.textContent).toBe("Your message in “Navigation” didn't go through. Open it to try again.");
+  await g.go('#helm');
+  expect(g.$('.tsheet')).toBeNull();
+  await click(g, '.toast-action .toast-open');
+  expect(g.window.location.hash).toBe(`#thread/${ID}`);
+  expect((g.$('.tsheet textarea[aria-label="Add to this thread"]') as HTMLTextAreaElement).value).toBe('Keep the old tab too');
+  expect(g.$('.tsheet .derr')?.textContent).toBe('Reopen this conversation before adding to it');
 });
 it('shows current notes, cards, every round, chat provenance, and the long-thread hint', async () => {
   const g = await page(fleet(), { hash: `#thread/${ID}` });
@@ -513,7 +560,7 @@ it('shows linked cards inline, answers one from the thread, and keeps previous a
   const second = g.$$('.thread-card-entry')[1]!;
   (second.querySelector('.dopt') as HTMLElement).click(); await g.settle();
   (second.querySelector('.dsend') as HTMLElement).click(); await g.settle();
-  expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:0a1b2c3e', option: 'Yes', files: [] } });
+  expect(g.posts().map((p) => JSON.parse(p.body))).toContainEqual({ kind: 'decision-answer', payload: { key: 'decision:0a1b2c3e', option: 'Yes', files: [], submission: expect.stringMatching(/^[0-9a-f-]{36}$/) } });
   expect(g.$$('.thread-card-entry')[1]?.querySelector('.danswered')?.textContent).toContain('answered');
 });
 

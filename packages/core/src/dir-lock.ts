@@ -152,10 +152,17 @@ export function tryDirLock(lock: string, opts: { staleMs: number; now?: number }
   return 'held' in a ? a.held : undefined;
 }
 
+const LOCK_BUSY = Symbol('lobstah.lockBusy');
+
+/** Whether `err` is a `withDirLock` busy error: another live holder kept the lock past the wait. A later try may succeed. */
+export function isLockBusy(err: unknown): boolean {
+  return err instanceof Error && (err as Error & { [LOCK_BUSY]?: true })[LOCK_BUSY] === true;
+}
+
 /**
  * Wait up to `waitMs` for the lock, run `action` holding it, then release
  * it. A persistent Windows denial surfaces as itself at the deadline; a
- * held lock as `busy()`.
+ * held lock as `busy()`, marked so `isLockBusy` knows it.
  */
 export function withDirLock<T>(
   lock: string,
@@ -165,7 +172,10 @@ export function withDirLock<T>(
   const deadline = Date.now() + opts.waitMs;
   let a: Attempt;
   while (!('held' in (a = attempt(lock, opts.staleMs, Date.now())))) {
-    if (Date.now() >= deadline) throw a.error ?? opts.busy();
+    if (Date.now() >= deadline) {
+      if (a.error) throw a.error;
+      throw Object.assign(opts.busy(), { [LOCK_BUSY]: true });
+    }
     pause(opts.pauseMs ?? 10);
   }
   try {
