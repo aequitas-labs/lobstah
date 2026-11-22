@@ -168,21 +168,6 @@ export class MirrorState {
     this.sql.exec('DELETE FROM mirror_grounds WHERE boat=?', boat);
     for (const name of grounds) this.sql.exec('INSERT INTO mirror_grounds VALUES (?,?,?)', boat, identifier(name), at);
   }
-  /** Every grounds an unrevoked mirror boat runs locally. */
-  allGrounds(): string[] {
-    return this.sql.exec<{ grounds: string }>(`SELECT DISTINCT g.grounds FROM mirror_grounds g JOIN boats b ON b.id=g.boat
-      JOIN boat_permissions p ON p.boat=b.id WHERE b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY g.grounds`).toArray().map((r) => r.grounds);
-  }
-  /**
-   * The mirror boats that run a grounds locally, the most recent report
-   * first. Two boats may each have a grounds of the same name; `online`
-   * picks one whose socket is open before one whose socket is not.
-   */
-  boatsFor(grounds: string, online: (boat: string) => boolean): Array<{ id: string; name: string }> {
-    const rows = this.sql.exec<{ id: string; name: string }>(`SELECT b.id,b.name FROM mirror_grounds g JOIN boats b ON b.id=g.boat
-      JOIN boat_permissions p ON p.boat=b.id WHERE g.grounds=? AND b.revoked=0 AND EXISTS (SELECT 1 FROM json_each(p.permissions) WHERE value='mirror') ORDER BY g.at DESC`, grounds).toArray();
-    return [...rows.filter((r) => online(r.id)), ...rows.filter((r) => !online(r.id))];
-  }
   /** A write the wharf itself relays to one mirror boat; the caller pushes it once the transaction commits. */
   queueWrite(boat: string, write: { kind: MirrorWriteKind; payload: unknown }, by: string, now: number): WharfMirrorCall {
     requireThat(this.mirrorBoat(boat), 404, 'mirror boat not found');

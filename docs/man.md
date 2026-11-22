@@ -1217,6 +1217,19 @@ cannot hold two:
   digest also starts at the sign-on. A `--take` from a live helm keeps that
   helm's cursor, so nothing in flight is dropped.
 
+**One helm per person, on a mirrored Mac.** When `[glass].mirror` names a
+wharf, the helm is also the person's one helm on that wharf, and every Slack
+DM goes to it. `man helm` takes the wharf's helm seat for its session and
+grounds. A seat another session holds, on another Mac, this Mac or in the
+cloud, refuses the sign-on and names that session and its boat; `--take`
+takes it over. The daemon's mirror then renews the seat on its socket each
+minute while the local helm is live (the park's heartbeat), so a Mac that
+sleeps loses it within two minutes and later DMs queue on the wharf. If
+another helm takes the seat, the local helm stands down at the next renewal,
+and its next park says so. With the wharf away at sign-on, the sign-on stands and the
+daemon takes the seat when the wharf answers. A Mac with no mirror never
+calls the wharf, and keeps one helm per grounds.
+
 ## Soaking: a live session volunteers as a worker
 
 Workers are usually traps lobstah sets itself — fresh headless sessions in
@@ -1919,11 +1932,15 @@ last, marks the conversation unread in the glass, and stops its reminder. The
 person's next message wakes `man wait` as before. Use a card when you need an
 answer; use `man say` for everything else you would tell the person.
 
-A Slack message for a grounds this machine helms arrives the same way, through
-the wharf this machine mirrors to (`[glass].mirror`). Its event says `via:
-slack`. What the person adds in that Slack thread joins the conversation, and
-reopens it if it was resolved. Each helm response (triage, notes, a card,
-the outcome) goes back to the Slack thread.
+A Slack message arrives the same way while this machine's helm holds the
+wharf's seat, through the wharf it mirrors to (`[glass].mirror`), on the
+grounds the helm signed on for. A message sent while no helm held the seat
+waited on the wharf, for up to 7 days, and arrives when the helm signs on.
+Its event says `via: slack`. What the person adds in that Slack thread joins the conversation, and
+reopens it if it was resolved. Your words stay in the glass: Slack shows the
+person only a link. Each helm response (triage, notes, a card, the outcome)
+posts **Updated** with **Open in glass** in the Slack thread, and a dispatch
+you link to the conversation posts **Dispatch started** with its link.
 
 Record a chat that remains open with `man discuss "<title>" --said "<exchange>"`,
 or append it with `man discuss <id> --said "<exchange>"`. Tell the person it was

@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { decodeFrame, ensureLayout, listNotices, listThreads, loadConfig, noteThread, resolveGrounds, resolveThread, takeHelm, threadSummaries, triageThread } from '@lobstah/core';
+import { decodeFrame, ensureLayout, linkThreadDispatch, listNotices, listThreads, loadConfig, noteThread, resolveGrounds, resolveThread, takeHelm, threadSummaries, triageThread } from '@lobstah/core';
 import type { ClientSocketMessage, MirrorStatus, WharfMirrorCall } from '@lobstah/core';
 import { serveGlass } from '../src/glass.js';
 import { WharfMirror, loopbackGlass } from '../src/wharf-mirror.js';
@@ -52,7 +52,8 @@ const slackRequest = (extra: Record<string, unknown> = {}) => ({ request: REQUES
 const followUp = (text: string, source: string) => slackRequest({ followUp: { text, at: '2026-11-19T12:05:00.000Z', source } });
 const signOnHelm = () => takeHelm({ sessionId: 'helm-session', grounds: resolveGrounds(loadConfig(), 'home'), ttlMs: loadConfig().helm.ttlSecs * 1000 });
 const threads = () => listThreads('home');
-const replies = (wharf: FakeWharf) => wharf.updates.flatMap((u) => ('reply' in (u.update as object) ? [(u.update as { reply: string }).reply] : []));
+/** The thread updates the wharf heard: each one's sequence and the dispatches it named. */
+const changes = (wharf: FakeWharf) => wharf.updates.flatMap((u) => ('updated' in (u.update as object) ? [u.update as { updated: number; dispatches: string[] }] : []));
 
 beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-slack-threads-'));
@@ -98,7 +99,7 @@ describe('a Slack message relayed to this boat', () => {
     expect(wharf.answers.get('c1')?.body.state).toBe('delivered');
   });
 
-  it('sends each helm response back to the Slack thread once', async () => {
+  it('tells the wharf once each time the thread changes, and never what the helm said', async () => {
     signOnHelm();
     const wharf = new FakeWharf(), m = mirror(wharf);
     await m.onCall(relay('c1', slackRequest()));
@@ -111,17 +112,22 @@ describe('a Slack message relayed to this boat', () => {
     await m.read();
     await m.read();
     expect(wharf.updates.map((u) => u.id)).toEqual([REQUEST, REQUEST, REQUEST]);
-    expect(replies(wharf)).toEqual(['Discussion started', 'Decided\n• Retry the payment call\n\nStill open\n• Which region fails?', 'Fixed on main.']);
+    expect(changes(wharf)).toEqual([{ updated: 1, dispatches: [] }, { updated: 2, dispatches: [] }, { updated: 3, dispatches: [] }]);
+    expect(JSON.stringify(wharf.updates)).not.toMatch(/Discussion started|Retry the payment call|Which region fails|Fixed on main/);
     // A resolved conversation never counts as unread in the glass.
     expect(threadSummaries('home')[0]).toMatchObject({ waitingForHelm: false, unreadResponse: false });
   });
 
-  it('says where a dispatched thread went', async () => {
+  it('names the dispatches a thread started, linked or as its outcome, so Slack gets each one’s link', async () => {
     const wharf = new FakeWharf(), m = mirror(wharf);
     await m.onCall(relay('c1', slackRequest()));
-    resolveThread(threads()[0]!.id, 'dispatched:d-1', 'On it.');
+    const id = threads()[0]!.id;
+    linkThreadDispatch(id, 'fix-checkout', 'Fix the flaky checkout on Safari');
     await m.read();
-    expect(replies(wharf)).toEqual(['On it.\nDispatched as d-1.']);
+    resolveThread(id, 'dispatched:d-1', 'On it.');
+    await m.read();
+    expect(changes(wharf)).toEqual([{ updated: 1, dispatches: ['fix-checkout'] }, { updated: 2, dispatches: ['fix-checkout', 'd-1'] }]);
+    expect(JSON.stringify(wharf.updates)).not.toContain('On it.');
   });
 
   it('is one thread however often it is relayed, and what the person adds joins it once', async () => {
@@ -153,7 +159,7 @@ describe('a Slack message relayed to this boat', () => {
     expect(threadSummaries('home')[0]).toMatchObject({ id, waitingForHelm: true });
     // Reopening is no helm response: nothing more goes back until the helm answers.
     await m.read();
-    expect(replies(wharf)).toEqual(['Fixed on main.']);
+    expect(changes(wharf)).toEqual([{ updated: 1, dispatches: [] }]);
   });
 
   it('refuses a grounds this boat does not run locally', async () => {

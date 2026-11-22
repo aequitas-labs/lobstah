@@ -210,8 +210,8 @@ export class WharfBackend implements CoordinationBackend {
     await this.request('mirror/attention/acks', { boat, key, stateHash }, undefined, 'POST');
   }
   /** Take a call before running it, so it runs once. */
-  /** Tell the wharf where a Slack request it relayed stands on this boat, or send the helm's reply to its thread. */
-  async updateMirrorRequest(id: string, update: { state: 'delivered' } | { reply: string }): Promise<void> {
+  /** Tell the wharf where a Slack request it relayed stands on this boat, or that its thread changed and which dispatches it links. */
+  async updateMirrorRequest(id: string, update: { state: 'delivered' } | { updated: number; dispatches: string[] }): Promise<void> {
     await this.request(`mirror/requests/${encodeURIComponent(id)}`, update, undefined, 'POST');
   }
   async takeMirrorCall(id: string): Promise<void> {

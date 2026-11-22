@@ -1,7 +1,7 @@
 import { GLASS_CARD_FAMILIES } from '../../../packages/core/src/backend-model.js';
 import type {
   CardAnswerReceipt, DispatchView, GlassCard, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardItem, GlassCardLink, GlassCardRelay, GlassCardSource, GlassCardTerminal,
-  WharfAck, WharfDocument, WharfHumanRequest,
+  GlassReviewEvent, WharfAck, WharfDocument, WharfHumanRequest,
 } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
@@ -31,6 +31,8 @@ export function answerLabel(action: GlassCardAction, words?: string): string {
     case 'seen': return 'seen';
     case 'review-mute': return 'Mute this PR';
     case 'review-unmute': return 'Unmute';
+    case 'review-submit': return 'Submit review';
+    case 'review-approve': return 'Approve';
     default: return action.kind;
   }
 }
@@ -165,9 +167,10 @@ export function requestCard(r: WharfHumanRequest): ProjectedCard {
 }
 /**
  * A person's request for work, as its receipt: what was asked, and where it
- * stands, in canned words. Received is not running: only a dispatch is, and
- * the card then opens it. A reply from the helm asks the person, so it is
- * the one state that stands for attention.
+ * went, in canned words. It never carries the helm's words: the conversation
+ * is in the glass, and an update there is a new message in the thread
+ * (SlackOutbox.repost). Received is not running: only a dispatch is, and the
+ * card then opens it.
  */
 export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
   const waiting = r.state === 'queued' && r.waitingForHelm;
@@ -176,20 +179,19 @@ export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
     : boat?.state === 'offline' ? `${boat.name} is offline. Send this again when it’s back.`
     : boat?.state === 'refused' ? `${boat.name} couldn’t take this request. Send it again, or check the glass.`
     : r.state === 'expired' ? 'Expired before the helm took it'
-    : r.response ? `The helm replied: ${r.response}\nReply in this thread, or in the glass`
-    : r.state === 'received' ? 'Received · the helm has it'
     : boat?.state === 'queued' ? 'Queued — the helm will pick this up when it’s back'
-    : boat ? `Sent to ${boat.name}`
-    : waiting ? 'Received · waiting for the helm' : 'Received · queued for the helm';
+    : boat ? `Sent to ${[r.grounds, boat.name].filter(Boolean).join(' · ')}`
+    : r.state === 'received' ? 'Received · the helm has it'
+    : waiting ? 'Queued — the helm will pick this up when it’s back' : 'Received · queued for the helm';
   const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   return {
     family: 'request', key: r.id, sourceAt: r.at, ...(r.grounds ? { grounds: r.grounds } : {}),
-    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.response ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}:${boat?.state ?? ''}:${boat?.thread ?? ''}`,
+    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}:${boat?.state ?? ''}:${boat?.thread ?? ''}`,
     title: firstLine(r.text ?? '', 150) || 'Work request', summary: [stands, notes].filter(Boolean).join('\n'),
     // A mirror request opened a helm thread on its boat: the glass opens that thread.
     ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : boat?.thread ? { item: { kind: 'thread', id: boat.thread } } : {}),
-    quiet: !r.response || ended,
+    quiet: true,
     ...(ended ? { terminal: { state: r.state as 'fulfilled' | 'expired', at: r.state === 'expired' ? r.expiresAt : '', ...(r.outcome ? { outcome: r.outcome } : {}) } } : {}),
   };
 }
@@ -237,11 +239,21 @@ function cardLink(value: unknown): GlassCardLink {
   requireThat(parsed?.protocol === 'https:' && !parsed.username && !parsed.password, 400, 'card links must be https URLs');
   return { label: text(l.label, 75), url };
 }
-const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute'];
+const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'review-submit', 'review-approve'];
+const REVIEW_EVENTS: GlassReviewEvent[] = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
+/** The PR a review action posts on: a positive whole number. */
+const prNumber = (value: unknown): number => {
+  requireThat(Number.isSafeInteger(value) && (value as number) > 0, 400, 'a review action names its PR number'); return value as number;
+};
 function cardAction(value: unknown): GlassCardAction {
   const a = object(value);
   requireThat(ACTION_KINDS.includes(String(a.kind)), 400, 'unknown card action');
   if (a.kind === 'answer') return { kind: 'answer', option: text(a.option, 2000) };
+  if (a.kind === 'review-submit') {
+    requireThat(REVIEW_EVENTS.includes(a.event as GlassReviewEvent), 400, 'unknown review verdict');
+    return { kind: 'review-submit', event: a.event as GlassReviewEvent, pr: prNumber(a.pr) };
+  }
+  if (a.kind === 'review-approve') return { kind: 'review-approve', pr: prNumber(a.pr) };
   return { kind: a.kind } as GlassCardAction;
 }
 const TERMINAL_STATES = ['answered', 'withdrawn', 'resolved', 'landed', 'cancelled', 'expired', 'fulfilled'];
@@ -455,11 +467,11 @@ export class Cards {
       changed.push(this.store.setRelay(card, { ...card.relay, state: state === 'applied' ? 'applied' : state, at: new Date(now).toISOString(), ...(outcome ? { outcome } : {}) }));
     }
   }
-  /** A removed grounds binding stops pending Slack answers before a boat can take them. */
-  restrictSlackAnswers(person: string, linked: (grounds: string | undefined) => boolean, now: number): void {
+  /** Disconnecting Slack stops its pending answers before a boat can take them. */
+  refuseSlackAnswers(person: string, now: number): void {
     const changed: GlassCard[] = [];
     for (const row of this.sql.exec<{ card: number; data: string }>("SELECT card,data FROM card_answers WHERE json_extract(data,'$.state')='pending' AND json_extract(data,'$.by')=?", person).toArray()) {
-      if (!linked(this.store.get(`c${row.card}`)?.grounds)) this.settleReceipt(JSON.parse(row.data) as CardAnswerReceipt, row.card, 'refused', 'Slack no longer serves these grounds', now, changed);
+      this.settleReceipt(JSON.parse(row.data) as CardAnswerReceipt, row.card, 'refused', 'Slack was disconnected', now, changed);
     }
     if (changed.length) this.hooks.changed(changed, now);
   }
