@@ -574,8 +574,10 @@ it('lists reviews in their own tab, waiting ones first; a card opens the review 
   expect(g.text('#reviews')).toContain('acme/web#8 Add the thing');
   expect(g.text('#reviews').indexOf('#7 Add')).toBeLessThan(g.text('#reviews').indexOf('#8 Add'));
   // Boat actions stay behind the card menu; Open remains available on each card.
-  const buttons = Array.from(g.doc.querySelectorAll('#reviews button')).map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim());
+  const buttons = Array.from(g.doc.querySelectorAll('#reviews .gactions button')).map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim());
   expect(buttons).toEqual(['More actions', 'More actions']);
+  // Each card names its source with the GitHub logo.
+  expect(Array.from(g.doc.querySelectorAll('#reviews .srclogo')).map((b) => b.getAttribute('aria-label'))).toEqual(['GitHub', 'GitHub']);
   const reviewCards = Array.from(g.doc.querySelectorAll('#reviews .rv-card'));
   (reviewCards[0]!.querySelector('.gactions button[aria-label="More actions"]') as unknown as HTMLElement).click();
   await g.settle();
