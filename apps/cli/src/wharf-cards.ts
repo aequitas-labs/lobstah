@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { cardScopes, displayGrounds, listNotices, loadConfig, repoKey, standingDecisions, storageGrounds } from '@lobstah/core';
 import type { BackendScope, Config, DecisionMeta, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardLink, Notice, TendAttention } from '@lobstah/core';
-import { buildTendReport } from './tend.js';
 import { isHostedKey } from './hosted-view.js';
-import { applyWharfAnswers } from './wharf-answers.js';
+import { applyWharfAnswers, boatAttention, draftedReview } from './wharf-answers.js';
+import type { DraftedReview } from './wharf-answers.js';
 import { sendCommand } from './wharf-channel.js';
 
 /** The wharf takes at most this many cards from one boat. */
@@ -42,22 +42,35 @@ function permissionSummary(d: DecisionMeta): string {
   return [asked, who, always && `Allow always: ${always}`].filter(Boolean).join('\n');
 }
 
+const VERDICT: Record<DraftedReview['event'], string> = { APPROVE: 'Approve', REQUEST_CHANGES: 'Request changes', COMMENT: 'Comment' };
+/** What a drafted review posts: its verdict, how many comments, and the first lines of its body. */
+export function reviewSummary(d: DraftedReview): string {
+  const comments = d.comments === 0 ? 'no comments' : d.comments === 1 ? '1 comment' : `${d.comments} comments`;
+  const body = d.body.split('\n').filter((l) => l.trim()).slice(0, 3).join('\n');
+  return [`Ready to post: ${VERDICT[d.event]} · ${comments}`, body.length > 600 ? `${body.slice(0, 599)}…` : body].filter(Boolean).join('\n\n');
+}
+/** A drafted review's card posts it, and approves when the draft approves. "Approve anyway" over findings stays in the glass. */
+function reviewActions(d: DraftedReview): GlassCardAction[] {
+  return [{ kind: 'review-submit', event: d.event, pr: d.pr }, ...(d.event === 'APPROVE' ? [{ kind: 'review-approve' as const, pr: d.pr }] : [])];
+}
+
 /** A permission card's option as the card action it is. Any other option (a session's "Allow for 1h") keeps its exact words. */
 export function permissionAction(option: string): GlassCardAction {
   return option === 'Allow once' ? { kind: 'allow-once' } : option === 'Allow always' ? { kind: 'allow-always' } : option === 'No' ? { kind: 'deny' } : { kind: 'answer', option };
 }
 /** One local attention item as a card, or nothing when it is the wharf's own. */
-export function attentionCard(a: TendAttention, decision: DecisionMeta | undefined, grounds: string, now: number): GlassCardInput | undefined {
+export function attentionCard(a: TendAttention, decision: DecisionMeta | undefined, grounds: string, now: number, review?: DraftedReview): GlassCardInput | undefined {
   // A wharf item is already the wharf's card; a boat never restates it.
   if (isHostedKey(a.key) || a.wharf) return undefined;
   const permission = !!decision?.permission;
   const family: GlassCardFamily | undefined = a.kind.startsWith('pr:') ? 'pr' : permission ? 'permission' : FAMILY[a.kind];
   if (!family) return undefined;
+  const drafted = family === 'review' ? review : undefined;
   const actions: GlassCardAction[] = permission ? (decision!.options ?? []).map(permissionAction)
     : family === 'decision' ? [...(decision?.options ?? []).map((option): GlassCardAction => ({ kind: 'answer', option })), { kind: 'answer-text' }]
     : family === 'question' ? [{ kind: 'answer-text' }]
-    : a.acked || family === 'dispatch' ? [] : [{ kind: 'seen' }];
-  const summary = permission ? permissionSummary(decision!) : a.note && a.note.includes('\n') ? a.note : undefined;
+    : [...(drafted ? reviewActions(drafted) : []), ...(a.acked || family === 'dispatch' ? [] : [{ kind: 'seen' as const }])];
+  const summary = permission ? permissionSummary(decision!) : drafted ? reviewSummary(drafted) : a.note && a.note.includes('\n') ? a.note : undefined;
   return {
     family, key: a.key, stateHash: a.stateHash, sourceAt: iso(a.at ?? a.standingSince, now),
     title: firstLine(decision?.title ?? a.note ?? a.verb, 300) || a.kind, grounds,
@@ -98,7 +111,7 @@ export function boatCards(cfg: Pick<Config, 'grounds' | 'wharves' | 'repos' | 'g
   for (const a of attention) {
     const decision = a.kind === 'decision' ? byKey.get(a.key) : undefined;
     const scope = scopeOf(a.repo ?? decision?.repo, decision?.grounds);
-    const card = scope && attentionCard(a, decision, scope.grounds, now);
+    const card = scope && attentionCard(a, decision, scope.grounds, now, a.kind === 'review' ? draftedReview(a.key) : undefined);
     if (card) add(scope, card);
   }
   for (const n of notices) {
@@ -130,7 +143,7 @@ export async function publishBoatCards(now = Date.now(), log: (m: string) => voi
   const cfg = loadConfig();
   const scopes = cardScopes(cfg);
   if (!scopes.length) return;
-  const sets = boatCards(cfg, buildTendReport(now).attention, standingDecisions(), listNotices(20), now);
+  const sets = boatCards(cfg, boatAttention(cfg, now), standingDecisions(), listNotices(20), now);
   // Every wharf is stated, even with nothing: an empty set ends what it showed.
   const all = new Map<string, BoatCardSet>(scopes.map((s) => [s.wharf!, { wharf: s.wharf!, scope: s, cards: [] }]));
   for (const set of sets) all.set(set.wharf, set);

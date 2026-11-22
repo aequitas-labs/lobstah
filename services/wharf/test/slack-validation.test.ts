@@ -72,7 +72,7 @@ async function helm() {
   expect((await call('helm/take', { session: 'seat', take: true }, b.token, 'seat')).status).toBe(200);
   return b;
 }
-/** A boat's card names the grounds, so the wharf knows it as one a DM may go to. */
+/** A boat's card names the grounds: the wharf knows the grounds, and a DM still goes to the helm. */
 async function knownGrounds(grounds: string) {
   const reader = await boat(`${grounds}-boat`, ['read']);
   const card = { family: 'notice', key: `${grounds}-nightly`, grounds, title: `Nightly build passed on ${grounds}`, stateHash: '1', sourceAt: new Date().toISOString(), quiet: true };
@@ -191,12 +191,11 @@ it('the same signed press twice is one answer; a copied button from someone else
 });
 
 it('asked while the helm sleeps: the receipt says so; when a helm takes its seat it says queued, and one dispatch fulfills it', async () => {
-  await knownGrounds('away');
   const dm = JSON.stringify({ type: 'event_callback', team_id: 'T1', event_id: 'EvSleep', event: { type: 'message', channel_type: 'im', channel: 'D1', user: 'U1', ts: '1700000000.000100', text: 'Run the nightly cleanup' } });
   await send(await signed('/slack/events', dm)); await send(await signed('/slack/events', dm));
   await deliver();
   const receipt = () => posted.filter((p) => p.body.text?.startsWith('Request:')).at(-1)!;
-  expect(section(receipt())).toContain('Received · waiting for the helm');
+  expect(section(receipt())).toContain('Queued — the helm will pick this up when it’s back');
   const b = await helm();
   await deliver();
   expect(receipt().method).toBe('chat.update');
@@ -257,38 +256,18 @@ it('disconnecting stops queued deliveries, old buttons and pending boat answers'
   expect(posted).toHaveLength(sent);
 });
 
-it('routes a DM straight to the one grounds the wharf knows', async () => {
-  await knownGrounds('away');
+it('a DM goes to the helm on its seat’s grounds, however many grounds the wharf knows, and asks nothing', async () => {
+  await knownGrounds('away'); await knownGrounds('home');
+  const b = await boat('away-helm', ['work', 'helm']);
+  expect((await call('helm/take', { session: 'seat', grounds: 'away' }, b.token, 'seat')).status).toBe(200);
   const dm = JSON.stringify({ type: 'event_callback', team_id: 'T1', event_id: 'EvOne', event: { type: 'message', channel_type: 'im', channel: 'D1', user: 'U1', ts: '1700000000.000100', text: 'Investigate the build' } });
   expect((await send(await signed('/slack/events', dm))).status).toBe(200);
-  expect(await (await call('requests')).json()).toMatchObject([{ grounds: 'away', text: 'Investigate the build' }]);
-  expect(posted.some((p) => p.body.text.includes('Which grounds'))).toBe(false);
-});
-
-it('asks which of the grounds the wharf knows should handle an ambiguous DM before waking or dispatching', async () => {
-  await knownGrounds('away'); await knownGrounds('home');
-  const question = () => posted.filter((p) => p.body.text.includes('Which grounds'));
-  const message = async (ts: string, text: string, threadTs?: string) => send(await signed('/slack/events', JSON.stringify({ type: 'event_callback', team_id: 'T1', event_id: `Ev${ts.replace('.', '')}`, event: {
-    type: 'message', channel_type: 'im', channel: 'D1', user: 'U1', ts, text, ...(threadTs ? { thread_ts: threadTs } : {}),
-  } })));
-  const top = '1700000000.000100';
-  expect((await message(top, 'Investigate the build')).status).toBe(200);
-  expect(await (await call('requests')).json()).toEqual([]);
-  expect(await sql("SELECT kind FROM events WHERE kind='human-request'")).toEqual([]);
-  expect(question()).toHaveLength(1);
-  expect(question()[0]!.body.text).toContain('away, home');
-  await message(top, 'Investigate the build');
-  expect(question()).toHaveLength(1);
-  await message('1700000000.000200', 'private', top);
-  expect(await (await call('requests')).json()).toEqual([]);
-  await message('1700000000.000300', 'home', top);
-  await message('1700000000.000300', 'home', top);
   const requests = await (await call('requests')).json<WharfHumanRequest[]>();
-  expect(requests).toHaveLength(1);
-  expect(requests[0]).toMatchObject({ grounds: 'home', text: 'Investigate the build', kind: 'work' });
-  expect(requests[0]!.followUps).toBeUndefined();
-  const b = await helm();
+  expect(requests).toMatchObject([{ grounds: 'away', text: 'Investigate the build', kind: 'work' }]);
+  expect(await sql("SELECT kind FROM events WHERE kind='human-request'")).toHaveLength(1);
+  await deliver();
+  expect(posted.some((p) => p.body.text.includes('Which grounds'))).toBe(false);
   const dispatch = { id: 'selected-job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Investigate the build', request: requests[0]!.id };
-  expect((await call('dispatches', { ...dispatch, grounds: 'away' }, b.token, 'seat')).status).toBe(400);
-  expect((await call('dispatches', { ...dispatch, grounds: 'home' }, b.token, 'seat')).status).toBe(200);
+  expect((await call('dispatches', { ...dispatch, grounds: 'home' }, b.token, 'seat')).status).toBe(400);
+  expect((await call('dispatches', { ...dispatch, grounds: 'away' }, b.token, 'seat')).status).toBe(200);
 });

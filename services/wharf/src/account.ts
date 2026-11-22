@@ -10,10 +10,10 @@ import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
 import { Cards } from './cards.js';
 import { SlackOutbox } from './slack-outbox.js';
+import type { SlackKind } from './slack-outbox.js';
 import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
-import { routeSlackMessage } from './slack-routing.js';
 import { MirrorState, attentionJson, mirrorAnswerKey, mirrorFileKey, mirrorSchema, mirrorSnapshotKey, mirrorTables } from './mirror-state.js';
 import type { MirrorCleanup } from './mirror-state.js';
 import { MIRROR_SNAPSHOT_MAX_JSON_BYTES } from '../../../packages/core/src/backend-model.js';
@@ -30,6 +30,12 @@ type DispatchRow = { id: string; data: string; state: string; worker: string | n
 type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo?: string; seen: number; target?: import('../../../packages/core/src/configured-trap-model.js').ConfiguredTrapTarget };
 type StoredResult = { status: number; value: unknown };
+/**
+ * The person's one helm: its session, who holds it, the boat it runs on and
+ * its lease. `mirror` marks a Mac's own helm, which gets Slack DMs over its
+ * boat's socket and steers nothing on the wharf.
+ */
+type HelmSeat = { session: string; actor: string; until: number; remindSecs: number; grounds?: string; boat?: string; mirror?: true };
 /**
  * What a socket keeps across hibernation (well under the 16 KB attachment
  * limit): who it is, its credential's hash (never the secret), and the
@@ -388,15 +394,6 @@ export class Account extends DurableObject<Env> {
   /** Private binding only: deliver what is due now, and wait for it. */
   async deliverSlack(): Promise<void> { await this.outbox.drain(); }
   /**
-   * The grounds a Slack DM may go to: those this account's mirror boats run
-   * locally, and the wharf grounds its cards and dispatches name.
-   */
-  private knownGrounds(): string[] {
-    const names = new Set([...this.mirrorState.allGrounds(), ...this.cards.store.list(Date.now()).flatMap((card) => card.grounds ? [card.grounds] : [])]);
-    for (const row of this.ctx.storage.sql.exec<{ grounds: string | null }>("SELECT DISTINCT json_extract(data,'$.grounds') AS grounds FROM dispatches").toArray()) if (row.grounds) names.add(row.grounds);
-    return [...names].sort();
-  }
-  /**
    * The boat a card's Slack message names: the boat that published it, the
    * boat that claimed a wharf job, the boat a boat card is about, or else
    * the wharf.
@@ -406,7 +403,9 @@ export class Account extends DurableObject<Env> {
     if (card.source.startsWith('boat:')) return name(card.source.slice(5));
     const job = card.family === 'dispatch' || card.family === 'question' || card.family === 'landed'
       ? this.ctx.storage.sql.exec<{ boat: string | null }>('SELECT boat FROM dispatches WHERE id=?', card.key.split('@')[0]!).toArray()[0]?.boat : undefined;
-    return name(card.family === 'boat' ? card.key : job) ?? 'wharf';
+    // A Slack request sent to a Mac's helm names that Mac.
+    const mac = card.family === 'request' ? this.glass.workRequest(card.key)?.mirror?.boat : undefined;
+    return name(card.family === 'boat' ? card.key : job ?? mac) ?? 'wharf';
   }
   /** Private binding only: a person's Slack link as D1 now holds it, or none. Changes no card. */
   async linkSlack(person: string, link: SlackLink | null): Promise<void> {
@@ -417,21 +416,28 @@ export class Account extends DurableObject<Env> {
     });
     await this.afterChange();
   }
+  /** Private binding only: the kind groups a person's Slack gets, set first when given. Request receipts are always sent. */
+  async slackKinds(person: string, kinds?: SlackKind[]): Promise<SlackKind[]> {
+    if (kinds) {
+      const now = Date.now();
+      this.ctx.storage.transactionSync(() => this.outbox.setKinds(person, kinds, this.cards.store.list(now).filter((c) => !c.terminal), now));
+      await this.afterChange();
+    }
+    return this.outbox.kinds(person);
+  }
   /**
    * Private binding only: a verified DM message from this account's linked
    * person. It is recorded, and its receipt queued, before Slack hears back.
+   * It goes to whichever helm holds the seat: a Mac's over its socket, or
+   * the wharf's own. With no helm it waits for the next one.
    */
-  async slackMessage(person: string, message: SlackMessageIn): Promise<{ request?: string; ignored?: string; question?: { threadTs: string; grounds: string[] } }> {
+  async slackMessage(person: string, message: SlackMessageIn): Promise<{ request?: string; ignored?: string }> {
     let call: string | undefined;
     const result = this.ctx.storage.transactionSync(() => {
       requireThat(!this.get('deleted'), 410, 'account deleted');
       const now = Date.now(); this.expire(now); this.capacity();
-      const route = routeSlackMessage(this.ctx.storage.sql, person, message, this.knownGrounds(), now);
-      if (!('message' in route)) return route;
-      // A grounds a mirror boat runs locally is helmed on that boat: the request goes to its socket.
-      const online = (boat: string) => this.ctx.getWebSockets(`boat:${boat}`).length > 0;
-      const boat = this.mirrorState.boatsFor(route.grounds, online)[0];
-      const { relay, ...recorded } = this.glass.slackMessage(route.message, person, now, route.grounds, boat && { boat: boat.id, name: boat.name, online: online(boat.id) });
+      const mac = this.macHelm(now);
+      const { relay, ...recorded } = this.glass.slackMessage(message, person, now, mac?.grounds ?? (this.helmLive(now) ? this.seat(now)!.grounds : undefined), mac);
       if (relay) call = this.mirrorState.queueWrite(relay.boat, { kind: 'helm-request', payload: relay.payload }, 'wharf', now).id;
       this.cards.project(now);
       return recorded;
@@ -439,10 +445,6 @@ export class Account extends DurableObject<Env> {
     if (call) await this.pushCall(call);
     await this.afterChange();
     return result;
-  }
-  /** The routing question was posted; a replay need not post another one. */
-  async slackGroundsPrompted(person: string, channel: string, threadTs: string): Promise<void> {
-    this.ctx.storage.sql.exec('UPDATE slack_ground_requests SET prompted=1 WHERE person=? AND channel=? AND ts=?', person, channel, threadTs);
   }
   /**
    * Private binding only: the linked person pressed a button on a card's
@@ -528,7 +530,7 @@ export class Account extends DurableObject<Env> {
     // Request counts and the hosted glass's watch moved to memory; their old rows go (nothing to write once gone).
     ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
     this.threads = new Threads(ctx.storage.sql, { person: () => ctx.id.name ?? 'owner', remindMs: () => (JSON.parse(this.get('helm') ?? 'null')?.remindSecs ?? 900) * 1000, helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note) });
-    this.glass = new GlassState(ctx.storage.sql, { threadGrounds: () => { const h = JSON.parse(this.get('helm') ?? 'null'); return [...new Set([...(h?.grounds ? [h.grounds] : []), ...this.threads.summaries(Date.now()).map(t => t.grounds)])]; }, messageLimits: () => ({ maxBytes: Math.min(10 * 1024 * 1024, Number(this.env.MAX_FILE_BYTES)), maxFiles: 8, textMax: 20000, extensions: Object.keys(MESSAGE_FILE_TYPES) }), threads: (n) => this.threads.summaries(n), threadCheck: (id, g) => this.threads.checkCard(id, g), threadLink: (id, key, n) => this.threads.linkCard(id, key, n), helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
+    this.glass = new GlassState(ctx.storage.sql, { threadGrounds: () => { const h = JSON.parse(this.get('helm') ?? 'null'); return [...new Set([...(h?.grounds && !h.mirror ? [h.grounds] : []), ...this.threads.summaries(Date.now()).map(t => t.grounds)])]; }, messageLimits: () => ({ maxBytes: Math.min(10 * 1024 * 1024, Number(this.env.MAX_FILE_BYTES)), maxFiles: 8, textMax: 20000, extensions: Object.keys(MESSAGE_FILE_TYPES) }), threads: (n) => this.threads.summaries(n), threadCheck: (id, g) => this.threads.checkCard(id, g), threadLink: (id, key, n) => this.threads.linkCard(id, key, n), helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now), slackUpdate: (request, update, now) => this.outbox.repost(request, update, now) });
     this.cards = new Cards(ctx.storage.sql, {
       dispatches: () => ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches ORDER BY rowid DESC LIMIT 100').toArray().map((d) => this.view(d) as DispatchView),
@@ -557,7 +559,9 @@ export class Account extends DurableObject<Env> {
       // While an answer awaits its boat, or was applied, the card offers nothing more.
       controllable: (card) => {
         if (card.relay && (card.relay.state === 'awaiting boat' || card.relay.state === 'applied')) return [];
-        const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm'] : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen'];
+        // A boat's review card posts its drafted round from here, through that boat.
+        const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm']
+          : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', ...(card.family === 'review' ? ['review-submit', 'review-approve'] : [])];
         return card.actions.filter((a) => kinds.includes(a.kind));
       },
       boat: (card) => this.cardBoat(card),
@@ -600,7 +604,28 @@ export class Account extends DurableObject<Env> {
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
   }
-  private helmLive(now: number): boolean { return Number(JSON.parse(this.get('helm') ?? '{}').until) > now; }
+  /** The helm seat while its lease holds; none once it lapsed. */
+  private seat(now: number): HelmSeat | undefined {
+    const h = JSON.parse(this.get('helm') ?? 'null') as HelmSeat | null;
+    return h && h.until > now ? h : undefined;
+  }
+  /** Whether the wharf's own helm holds the seat. A Mac's helm steers its own boat, not the wharf. */
+  private helmLive(now: number): boolean { return !!this.seat(now) && !this.seat(now)!.mirror; }
+  /** The Mac whose own helm holds the seat, while its socket is open: Slack DMs go to it. */
+  private macHelm(now: number): { boat: string; name: string; grounds: string } | undefined {
+    const h = this.seat(now);
+    if (!h?.mirror || !h.grounds) return undefined;
+    const boat = h.actor.slice('boat:'.length);
+    return this.ctx.getWebSockets(`boat:${boat}`).length > 0 ? { boat, name: h.boat ?? boat, grounds: h.grounds } : undefined;
+  }
+  /** Slack requests that waited for a helm go to the Mac's helm holding the seat. Returns the calls to push once committed. */
+  private relayWaiting(now: number): string[] {
+    const mac = this.macHelm(now);
+    if (!mac) return [];
+    const calls = this.glass.relayWaiting(mac, now).map((relay) => this.mirrorState.queueWrite(relay.boat, { kind: 'helm-request', payload: relay.payload }, 'wharf', now).id);
+    if (calls.length) this.cards.project(now);
+    return calls;
+  }
   private set(key: string, value: string) { this.ctx.storage.sql.exec('INSERT OR REPLACE INTO meta VALUES (?,?)', key, value); }
   private dispatch(id: string): DispatchRow {
     const d = this.ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches WHERE id=?', id).toArray()[0];
@@ -702,7 +727,9 @@ export class Account extends DurableObject<Env> {
   }
   private authorize(c: Command, actor: Actor) {
     // Person sessions never fish, even if a caller retries a prior request.
-    const permission = requiredPermission(c.path, c.method);
+    // A Mac's own helm takes the seat under its boat's mirror grant.
+    const macSeat = c.path === 'helm/take' && c.method === 'POST' && typeof c.body === 'object' && c.body !== null && (c.body as { mirror?: unknown }).mirror === true;
+    const permission = macSeat ? 'mirror' : requiredPermission(c.path, c.method);
     if (permission === 'work' && actor.kind === 'person') throw new ApiError(403, 'enrol this machine as a boat with lobstah wharf login before signing on or claiming work');
     if (actor.kind !== 'dispatch' && permission) this.requirePermission(actor, permission);
     if (actor.kind === 'dispatch') requireThat(c.path.startsWith(`dispatches/${actor.id}/`) || c.path === `dispatches/${actor.id}`, 403, 'dispatch scope required');
@@ -804,18 +831,35 @@ export class Account extends DurableObject<Env> {
       return ok({ id: d.id, dispatch: JSON.parse(d.data), epoch, leaseUntil: new Date(now + LEASE_MS).toISOString() });
     }
     if (c.path === 'helm/take' && c.method === 'POST') {
-      this.requirePermission(actor, 'helm'); const session = identifier(b.session);
-      const previous = JSON.parse(this.get('helm') ?? 'null');
+      // A Mac's helm (`mirror`) was checked for its mirror grant; every other helm needs helm.
+      const mac = b.mirror === true;
+      if (!mac) this.requirePermission(actor, 'helm');
+      const session = identifier(b.session);
+      const previous = JSON.parse(this.get('helm') ?? 'null') as HelmSeat | null;
       if (b.remindSecs !== undefined) requireThat(typeof b.remindSecs === 'number' && Number.isSafeInteger(b.remindSecs) && b.remindSecs > 0, 400, 'Choose a positive reminder interval');
+      requireThat(!mac || b.grounds !== undefined, 400, 'a Mac’s helm names its grounds');
       const principal = `${actor.kind}:${actor.id}`;
-      requireThat(!previous || previous.session === session && previous.actor === principal || previous.until <= now || b.take === true, 409, 'helm held; explicit takeover required');
-      const h = { session, actor: principal, until: now + HELM_MS, remindSecs: b.remindSecs ?? previous?.remindSecs ?? 900, ...(b.grounds === undefined ? {} : { grounds: identifier(b.grounds) }) }; this.set('helm', JSON.stringify(h)); this.event('helm-taken'); return ok(h);
+      const same = !!previous && previous.session === session && previous.actor === principal && previous.until > now;
+      // A second helm is refused, naming the one that holds the seat.
+      if (previous && !same && previous.until > now && b.take !== true) {
+        return { status: 409, value: { error: `The helm is held by session ${previous.session.slice(0, 8)} on ${previous.boat ?? 'the wharf'}. Sign on with --take to take it over, or leave it.`,
+          holder: { session: previous.session, ...(previous.boat ? { boat: previous.boat } : {}) } } };
+      }
+      const boat = actor.kind === 'boat' ? this.ctx.storage.sql.exec<{ name: string }>('SELECT name FROM boats WHERE id=?', actor.id).toArray()[0]?.name : undefined;
+      const h: HelmSeat = { session, actor: principal, until: now + HELM_MS, remindSecs: (b.remindSecs as number | undefined) ?? previous?.remindSecs ?? 900,
+        ...(b.grounds === undefined ? {} : { grounds: identifier(b.grounds) }), ...(boat ? { boat } : {}), ...(mac ? { mirror: true as const } : {}) };
+      this.set('helm', JSON.stringify(h));
+      // A Mac's helm renews by taking again: only a new holder is news.
+      if (!(mac && same)) this.event('helm-taken');
+      const calls = this.relayWaiting(now);
+      if (calls.length) this.ctx.waitUntil(Promise.resolve().then(async () => { for (const id of calls) await this.pushCall(id); }));
+      return ok(h);
     }
     if (c.path === 'helm/renew' || c.path === 'helm/release') {
       requireThat(c.method === 'POST', 405, 'POST required'); this.helm(c, actor, now);
       const h = { session: c.session, actor: `${actor.kind}:${actor.id}`, until: c.path.endsWith('release') ? 0 : now + HELM_MS };
-      const previous = JSON.parse(this.get('helm') ?? 'null');
-      const renewed = { ...h, remindSecs: previous?.remindSecs ?? 900, ...(previous?.grounds ? { grounds: previous.grounds } : {}) };
+      const previous = JSON.parse(this.get('helm') ?? 'null') as HelmSeat | null;
+      const renewed = { ...h, remindSecs: previous?.remindSecs ?? 900, ...(previous?.grounds ? { grounds: previous.grounds } : {}), ...(previous?.boat ? { boat: previous.boat } : {}) };
       this.set('helm', JSON.stringify(renewed)); return ok(renewed);
     }
     if (c.path === 'boats' && c.method === 'GET') {
@@ -1087,6 +1131,8 @@ export class Account extends DurableObject<Env> {
    */
   private async catchUpBoat(socket: WebSocket, a: SocketAttachment) {
     if (this.boatHolds(a, 'mirror')) {
+      // A Mac whose helm holds the seat gets the Slack requests that waited while its socket was away.
+      if (this.seat(Date.now())?.actor === `boat:${a.actor.id}` && this.ctx.storage.transactionSync(() => this.relayWaiting(Date.now())).length) await this.afterChange();
       send(socket, { t: 'watch', on: this.glassWatching() });
       for (const call of this.mirrorState.queuedCalls(a.actor.id)) send(socket, { t: 'call', call });
     }

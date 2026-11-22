@@ -1,7 +1,7 @@
 import { GLASS_CARD_FAMILIES } from '../../../packages/core/src/backend-model.js';
 import type {
   CardAnswerReceipt, DispatchView, GlassCard, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardItem, GlassCardLink, GlassCardRelay, GlassCardSource, GlassCardTerminal,
-  WharfAck, WharfDocument, WharfHumanRequest,
+  GlassReviewEvent, WharfAck, WharfDocument, WharfHumanRequest,
 } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
@@ -31,6 +31,8 @@ export function answerLabel(action: GlassCardAction, words?: string): string {
     case 'seen': return 'seen';
     case 'review-mute': return 'Mute this PR';
     case 'review-unmute': return 'Unmute';
+    case 'review-submit': return 'Submit review';
+    case 'review-approve': return 'Approve';
     default: return action.kind;
   }
 }
@@ -180,7 +182,7 @@ export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
     : boat?.state === 'queued' ? 'Queued — the helm will pick this up when it’s back'
     : boat ? `Sent to ${[r.grounds, boat.name].filter(Boolean).join(' · ')}`
     : r.state === 'received' ? 'Received · the helm has it'
-    : waiting ? 'Received · waiting for the helm' : 'Received · queued for the helm';
+    : waiting ? 'Queued — the helm will pick this up when it’s back' : 'Received · queued for the helm';
   const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   return {
@@ -237,11 +239,21 @@ function cardLink(value: unknown): GlassCardLink {
   requireThat(parsed?.protocol === 'https:' && !parsed.username && !parsed.password, 400, 'card links must be https URLs');
   return { label: text(l.label, 75), url };
 }
-const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute'];
+const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'review-submit', 'review-approve'];
+const REVIEW_EVENTS: GlassReviewEvent[] = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
+/** The PR a review action posts on: a positive whole number. */
+const prNumber = (value: unknown): number => {
+  requireThat(Number.isSafeInteger(value) && (value as number) > 0, 400, 'a review action names its PR number'); return value as number;
+};
 function cardAction(value: unknown): GlassCardAction {
   const a = object(value);
   requireThat(ACTION_KINDS.includes(String(a.kind)), 400, 'unknown card action');
   if (a.kind === 'answer') return { kind: 'answer', option: text(a.option, 2000) };
+  if (a.kind === 'review-submit') {
+    requireThat(REVIEW_EVENTS.includes(a.event as GlassReviewEvent), 400, 'unknown review verdict');
+    return { kind: 'review-submit', event: a.event as GlassReviewEvent, pr: prNumber(a.pr) };
+  }
+  if (a.kind === 'review-approve') return { kind: 'review-approve', pr: prNumber(a.pr) };
   return { kind: a.kind } as GlassCardAction;
 }
 const TERMINAL_STATES = ['answered', 'withdrawn', 'resolved', 'landed', 'cancelled', 'expired', 'fulfilled'];
