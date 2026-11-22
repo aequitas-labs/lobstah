@@ -16,6 +16,17 @@ export function backendScopes(config: Pick<Config, 'grounds' | 'wharves' | 'repo
     return { kind: 'wharf', grounds, repos: g.repos, wharf: g.wharf, location };
   });
 }
+/**
+ * The grounds whose standing cards reach a wharf, each with the wharf they
+ * go to: a wharf grounds goes to its own wharf, and a local grounds to the
+ * wharf `[glass] mirror` names, under the mirror's one boat credential. A
+ * local grounds with no mirror has none. Only cards and their answers use
+ * this: a mirrored grounds' work stays local.
+ */
+export function cardScopes(config: Pick<Config, 'grounds' | 'wharves' | 'repos' | 'glass'>): Array<Extract<BackendScope, { kind: 'wharf' }>> {
+  const mirror = config.glass?.mirror, location = mirror ? config.wharves?.[mirror] : undefined;
+  return backendScopes(config).flatMap((s) => s.kind === 'wharf' ? [s] : location ? [{ kind: 'wharf' as const, grounds: s.grounds, repos: s.repos, wharf: mirror!, location }] : []);
+}
 export function backendScope(config: Pick<Config, 'grounds' | 'wharves' | 'repos'>, grounds = 'home'): BackendScope {
   const scopes = backendScopes(config); const scope = scopes.find((s) => s.grounds === displayGrounds(storageGrounds(grounds, config), config));
   if (!scope) throw new Error(`unknown grounds ${grounds}; choose ${scopes.map((s) => displayGrounds(s.grounds, config)).join(', ')}`);

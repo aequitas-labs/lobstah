@@ -142,7 +142,12 @@ export type GlassCardAction =
   | { kind: 'seen' }
   | { kind: 'message-helm' }
   | { kind: 'cancel' }
-  | { kind: 'review-dismiss' | 'review-mute' | 'review-unmute' };
+  | { kind: 'review-dismiss' | 'review-mute' | 'review-unmute' }
+  /** A boat's drafted review round: post it as drafted, or approve. Each names what it posts and where, for the confirm step. */
+  | { kind: 'review-submit'; event: GlassReviewEvent; pr: number }
+  | { kind: 'review-approve'; pr: number };
+/** The verdict a review post submits, as GitHub names it. */
+export type GlassReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 export interface GlassCardLink { label: string; url: string }
 /** A card that no longer stands: who or what ended it, and how. */
 export interface GlassCardTerminal {

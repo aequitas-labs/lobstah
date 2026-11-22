@@ -33,17 +33,29 @@ function logOutcome(method: string, outcome: SlackOutcome) {
   console.log(JSON.stringify({ slack: method, ok: outcome.kind === 'sent', outcome: outcome.kind, ...(reason ? { error: reason } : {}) }));
 }
 
+type SlackResult = { ok?: boolean; ts?: unknown; error?: unknown };
+/** A post or an edit lands as the message Slack names. */
+const messageTs = (result: SlackResult) => (result.ok && typeof result.ts === 'string' ? result.ts : undefined);
+
 /** Posts and edits one bot's messages. Holds the token for one call; never stores or logs it. */
 export class SlackApi {
   constructor(private token: string, private fetcher: typeof fetch = globalFetch, private base = API) {}
-  post(channel: string, message: SlackMessage, threadTs?: string): Promise<SlackOutcome> { return this.call('chat.postMessage', { channel, ...(threadTs ? { thread_ts: threadTs } : {}), ...message }); }
-  update(channel: string, ts: string, message: SlackMessage): Promise<SlackOutcome> { return this.call('chat.update', { channel, ts, ...message }); }
-  private async call(method: string, body: Record<string, unknown>): Promise<SlackOutcome> {
-    const outcome = await this.send(method, body);
+  post(channel: string, message: SlackMessage, threadTs?: string): Promise<SlackOutcome> { return this.call('chat.postMessage', { channel, ...(threadTs ? { thread_ts: threadTs } : {}), ...message }, messageTs); }
+  update(channel: string, ts: string, message: SlackMessage): Promise<SlackOutcome> { return this.call('chat.update', { channel, ts, ...message }, messageTs); }
+  /**
+   * Add the bot's reaction to one message. Slack's reply names no message,
+   * so `sent` carries the one reacted to; a reaction already there is done.
+   * An install without `reactions:write` is `refused` with `missing_scope`.
+   */
+  react(channel: string, ts: string, name: string): Promise<SlackOutcome> {
+    return this.call('reactions.add', { channel, timestamp: ts, name }, (result) => (result.ok || result.error === 'already_reacted' ? ts : undefined));
+  }
+  private async call(method: string, body: Record<string, unknown>, landed: (result: SlackResult) => string | undefined): Promise<SlackOutcome> {
+    const outcome = await this.send(method, body, landed);
     logOutcome(method, outcome);
     return outcome;
   }
-  private async send(method: string, body: Record<string, unknown>): Promise<SlackOutcome> {
+  private async send(method: string, body: Record<string, unknown>, landed: (result: SlackResult) => string | undefined): Promise<SlackOutcome> {
     let response: Response;
     try {
       response = await this.fetcher(this.base + method, {
@@ -61,9 +73,10 @@ export class SlackApi {
       return { kind: 'later', afterMs: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_WAIT_MS, reason: 'rate_limited' };
     }
     if (response.status >= 500) return { kind: 'unknown', reason: `http_${response.status}` };
-    let result: { ok?: boolean; ts?: unknown; error?: unknown };
+    let result: SlackResult;
     try { result = await response.json(); } catch { return { kind: 'unknown', reason: 'invalid_response' }; }
-    if (result.ok && typeof result.ts === 'string') return { kind: 'sent', ts: result.ts };
+    const ts = landed(result);
+    if (ts !== undefined) return { kind: 'sent', ts };
     const error = typeof result.error === 'string' ? result.error : 'unknown_error';
     if (error === 'ratelimited') return { kind: 'later', afterMs: DEFAULT_WAIT_MS, reason: error };
     if (GONE.has(error)) return { kind: 'gone' };

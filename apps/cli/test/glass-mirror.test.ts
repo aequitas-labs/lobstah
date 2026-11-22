@@ -65,7 +65,7 @@ afterEach(async () => {
 });
 
 /** The hosted glass on two mirror boats; `onBoat` is the boat whose glass answers the loopback probe, if any. */
-async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: number; boats?: Array<[typeof NORTH, 'n' | 's']>; relay?: (call: Hosted['relayed'][number]) => Response | Promise<Response> | undefined } = {}): Promise<Hosted> {
+async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: number; boats?: Array<[typeof NORTH, 'n' | 's']>; cards?: unknown[]; relay?: (call: Hosted['relayed'][number]) => Response | Promise<Response> | undefined } = {}): Promise<Hosted> {
   const window = new Window({
     url: 'https://glass.test/' + hash,
     width: 1280,
@@ -97,6 +97,8 @@ async function hosted(hash: string, opts: { onBoat?: typeof NORTH; southAt?: num
     }
     if (path === '/api/glass') return Response.json({ ...wharfAccount, requests: [], documents: [], workers: [] });
     if (path === '/api/glass/dispatches') return Response.json([]);
+    // The wharf's card store, holding what the boats restated.
+    if (path === '/api/glass/cards') return Response.json(opts.cards ?? []);
     if (path === '/api/glass/mirror' || path.startsWith('/api/glass/mirror?')) {
       return Response.json({ boats: boats.map(([b, tag]) => ({ boat: b.boat, name: b.name, etag: tag.repeat(64), bytes: 1, at: new Date(b === SOUTH && opts.southAt !== undefined ? opts.southAt : NOW - 5_000).toISOString(), snapshot: put(tag, b) })) });
     }
@@ -266,6 +268,17 @@ describe('two mirror boats in one fleet', () => {
     await d.settle();
     expect(d.relayed.filter((c) => c.write)).toEqual([]);
     expect(text(d.doc.querySelector('.dmodal'))).toContain('asleep');
+  });
+});
+
+describe('a mirrored boat’s standing card', () => {
+  it('is listed once on the deck while the wharf’s card store also holds it', async () => {
+    // What the boat restated for the same decision its snapshot shows standing.
+    const stored = { id: 'c1', source: 'boat:boat-north', family: 'decision', key: 'decision:n0000000', stateHash: 'n', revision: 1, sourceAt: new Date(NOW - 60_000).toISOString(),
+      observedAt: new Date(NOW - 60_000).toISOString(), title: 'n base?', grounds: 'home', links: [], actions: [{ kind: 'answer', option: 'main' }, { kind: 'answer', option: 'feature' }] };
+    const h = await hosted('#deck', { boats: [[NORTH, 'n']], cards: [stored] });
+    const deck = text(h.doc.querySelector('#page-deck'));
+    expect(deck.split('n base?').length - 1).toBe(1);
   });
 });
 

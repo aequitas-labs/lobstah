@@ -363,6 +363,20 @@ export function relieveHelm(sessionId: string): string[] {
   return relieved;
 }
 
+/**
+ * Another helm took the wharf's one seat (`by`, its session): this session
+ * steps down from every helm it holds here, and its next park tells it to
+ * stand down.
+ */
+export function standDownHelm(sessionId: string, by: string, now = Date.now()): string[] {
+  const relieved = relieveHelm(sessionId);
+  if (relieved.length > 0) {
+    const notice: RelievedNotice = { sessionId, grounds: relieved[0]!, by, at: new Date(now).toISOString() };
+    atomicWrite(path.join(relievedDir(), `${sessionId}.json`), JSON.stringify(notice, null, 2));
+  }
+  return relieved;
+}
+
 export function heartbeatHelm(sessionId: string, opts: { parked?: boolean } = {}): HelmRegistration | undefined {
   const seat = helmOf(sessionId);
   if (!seat) return undefined;

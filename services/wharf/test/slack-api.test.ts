@@ -28,6 +28,18 @@ it('logs each call’s method and outcome, never the token or the message', asyn
   for (const line of lines) expect(line).not.toMatch(/xoxb-secret-token|Ship it/);
 });
 
+it('reads a reaction’s reply, which names no message: done, already there, or refused without the scope', async () => {
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  const bodies: unknown[] = [];
+  const reply = (body: unknown) => async (_url: unknown, init?: RequestInit) => { bodies.push(JSON.parse(String(init?.body))); return Response.json(body); };
+  expect(await new SlackApi('xoxb-test', reply({ ok: true })).react('D1', '1700000000.000100', 'star')).toEqual({ kind: 'sent', ts: '1700000000.000100' });
+  expect(bodies).toEqual([{ channel: 'D1', timestamp: '1700000000.000100', name: 'star' }]);
+  expect(await new SlackApi('xoxb-test', reply({ ok: false, error: 'already_reacted' })).react('D1', '1.2', 'star')).toEqual({ kind: 'sent', ts: '1.2' });
+  expect(await new SlackApi('xoxb-test', reply({ ok: false, error: 'missing_scope', needed: 'reactions:write' })).react('D1', '1.2', 'star')).toEqual({ kind: 'refused', reason: 'missing_scope' });
+  // A post's reply must still name its message.
+  expect((await new SlackApi('xoxb-test', reply({ ok: true })).post('D1', message)).kind).toBe('later');
+});
+
 const card = (seq: number, title: string) => ({
   id: `c${seq}`, family: 'decision', title, grounds: 'home', summary: '', actions: [], links: [], revision: 1,
   observedAt: '2026-11-22T06:00:00.000Z', sourceAt: '2026-11-22T06:00:00.000Z',
@@ -51,7 +63,7 @@ it('a delivery that throws waits its backoff and the drain still sends the rest'
       controllable: () => [],
       pause: async () => {},
     });
-    outbox.link('p1', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: '2026-11-22T06:00:00.000Z', grounds: ['home'] }, [], Date.now());
+    outbox.link('p1', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: '2026-11-22T06:00:00.000Z' }, [], Date.now());
     sql.exec('INSERT INTO slack_deliveries(card,person,want,next_at) VALUES (1,?,1,0),(2,?,1,0)', 'p1', 'p1');
     const before = Date.now();
     await outbox.drain();

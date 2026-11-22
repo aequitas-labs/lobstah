@@ -42,7 +42,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 async function link() {
   // As a finished connect leaves it: the workspace's sealed bot token, and this person's link.
   await env.AUTH_DB.prepare('INSERT OR REPLACE INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test-only-not-a-real-token'), 'chat:write,im:write,im:history', 'a', '2026-10-30T00:00:00.000Z').run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt: '2026-10-30T00:00:00.000Z' });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: '2026-10-30T00:00:00.000Z' });
 }
 async function helm() {
   const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: 'helm-boat', permissions: ['work', 'helm'] }, key: `issue-${++sequence}` })));

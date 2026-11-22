@@ -1,7 +1,7 @@
 import { GLASS_CARD_FAMILIES } from '../../../packages/core/src/backend-model.js';
 import type {
   CardAnswerReceipt, DispatchView, GlassCard, GlassCardAction, GlassCardFamily, GlassCardInput, GlassCardItem, GlassCardLink, GlassCardRelay, GlassCardSource, GlassCardTerminal,
-  WharfAck, WharfDocument, WharfHumanRequest,
+  GlassReviewEvent, WharfAck, WharfDocument, WharfHumanRequest,
 } from '../../../packages/core/src/backend-model.js';
 import { identifier, object, requireThat, text } from './protocol.js';
 import type { Actor, Command } from './account.js';
@@ -10,12 +10,14 @@ import type { Actor, Command } from './account.js';
  * One row per card. `seq` names the card in links (`c<seq>`); source, family
  * and key are its identity, so a source restating an item finds its card.
  * `card_answers` holds each person's answer to a boat's card, for that boat.
+ * `card_sources` says when each boat last restated its set, to the hour.
  */
 export const cardSchema = `
   CREATE TABLE IF NOT EXISTS cards (seq INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, family TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(source,family,key));
   CREATE TABLE IF NOT EXISTS card_answers (id TEXT PRIMARY KEY, card INTEGER NOT NULL, source TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS card_sources (source TEXT PRIMARY KEY, at INTEGER NOT NULL);
 `;
-export const cardTables = ['cards', 'card_answers'];
+export const cardTables = ['cards', 'card_answers', 'card_sources'];
 /** An answer its boat has not taken in this long expires: an offline boat never applies a stale answer late. */
 export const ANSWER_RECEIPT_MS = 15 * 60_000;
 /** The answer a relayed action gives, in the words its card showed. */
@@ -29,11 +31,23 @@ export function answerLabel(action: GlassCardAction, words?: string): string {
     case 'seen': return 'seen';
     case 'review-mute': return 'Mute this PR';
     case 'review-unmute': return 'Unmute';
+    case 'review-submit': return 'Submit review';
+    case 'review-approve': return 'Approve';
     default: return action.kind;
   }
 }
 /** A card that ended is kept this long, so a projection of it can still close where it was shown. */
 export const ENDED_CARD_MS = 7 * 86400_000;
+/**
+ * A mirror boat's cards lapse when it has not restated them in this long:
+ * they end as expired, so their Slack messages close, and LAPSED_CLOSE_MS
+ * later they are deleted with their answers and Slack delivery. A wharf
+ * grounds' cards never lapse.
+ */
+export const MIRRORED_CARD_MS = 7 * 86400_000;
+export const LAPSED_CLOSE_MS = 3_600_000;
+/** How stale a source's restatement time may get before a restatement writes it again: one row an hour, not one per restatement. */
+const RESTATED_STEP_MS = 3_600_000;
 /** At most this many cards in one boat's published set. */
 export const BOAT_CARDS_MAX = 100;
 /** A worker or boat counts as online while it checked in within this window: the claim lease. */
@@ -153,9 +167,10 @@ export function requestCard(r: WharfHumanRequest): ProjectedCard {
 }
 /**
  * A person's request for work, as its receipt: what was asked, and where it
- * stands, in canned words. Received is not running: only a dispatch is, and
- * the card then opens it. A reply from the helm asks the person, so it is
- * the one state that stands for attention.
+ * went, in canned words. It never carries the helm's words: the conversation
+ * is in the glass, and an update there is a new message in the thread
+ * (SlackOutbox.repost). Received is not running: only a dispatch is, and the
+ * card then opens it.
  */
 export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
   const waiting = r.state === 'queued' && r.waitingForHelm;
@@ -164,20 +179,19 @@ export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
     : boat?.state === 'offline' ? `${boat.name} is offline. Send this again when it’s back.`
     : boat?.state === 'refused' ? `${boat.name} couldn’t take this request. Send it again, or check the glass.`
     : r.state === 'expired' ? 'Expired before the helm took it'
-    : r.response ? `The helm replied: ${r.response}\nReply in this thread, or in the glass`
-    : r.state === 'received' ? 'Received · the helm has it'
     : boat?.state === 'queued' ? 'Queued — the helm will pick this up when it’s back'
-    : boat ? `Sent to ${boat.name}`
-    : waiting ? 'Received · waiting for the helm' : 'Received · queued for the helm';
+    : boat ? `Sent to ${[r.grounds, boat.name].filter(Boolean).join(' · ')}`
+    : r.state === 'received' ? 'Received · the helm has it'
+    : waiting ? 'Queued — the helm will pick this up when it’s back' : 'Received · queued for the helm';
   const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   return {
     family: 'request', key: r.id, sourceAt: r.at, ...(r.grounds ? { grounds: r.grounds } : {}),
-    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.response ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}:${boat?.state ?? ''}:${boat?.thread ?? ''}`,
+    stateHash: `${r.state}:${r.dispatch ?? ''}:${r.followUps?.length ?? 0}:${waiting ? 'waiting' : ''}:${boat?.state ?? ''}:${boat?.thread ?? ''}`,
     title: firstLine(r.text ?? '', 150) || 'Work request', summary: [stands, notes].filter(Boolean).join('\n'),
     // A mirror request opened a helm thread on its boat: the glass opens that thread.
     ...(r.dispatch ? { item: { kind: 'job', id: r.dispatch } } : boat?.thread ? { item: { kind: 'thread', id: boat.thread } } : {}),
-    quiet: !r.response || ended,
+    quiet: true,
     ...(ended ? { terminal: { state: r.state as 'fulfilled' | 'expired', at: r.state === 'expired' ? r.expiresAt : '', ...(r.outcome ? { outcome: r.outcome } : {}) } } : {}),
   };
 }
@@ -225,11 +239,21 @@ function cardLink(value: unknown): GlassCardLink {
   requireThat(parsed?.protocol === 'https:' && !parsed.username && !parsed.password, 400, 'card links must be https URLs');
   return { label: text(l.label, 75), url };
 }
-const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute'];
+const ACTION_KINDS = ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', 'message-helm', 'cancel', 'review-dismiss', 'review-mute', 'review-unmute', 'review-submit', 'review-approve'];
+const REVIEW_EVENTS: GlassReviewEvent[] = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'];
+/** The PR a review action posts on: a positive whole number. */
+const prNumber = (value: unknown): number => {
+  requireThat(Number.isSafeInteger(value) && (value as number) > 0, 400, 'a review action names its PR number'); return value as number;
+};
 function cardAction(value: unknown): GlassCardAction {
   const a = object(value);
   requireThat(ACTION_KINDS.includes(String(a.kind)), 400, 'unknown card action');
   if (a.kind === 'answer') return { kind: 'answer', option: text(a.option, 2000) };
+  if (a.kind === 'review-submit') {
+    requireThat(REVIEW_EVENTS.includes(a.event as GlassReviewEvent), 400, 'unknown review verdict');
+    return { kind: 'review-submit', event: a.event as GlassReviewEvent, pr: prNumber(a.pr) };
+  }
+  if (a.kind === 'review-approve') return { kind: 'review-approve', pr: prNumber(a.pr) };
   return { kind: a.kind } as GlassCardAction;
 }
 const TERMINAL_STATES = ['answered', 'withdrawn', 'resolved', 'landed', 'cancelled', 'expired', 'fulfilled'];
@@ -342,6 +366,10 @@ type Hooks = {
   read: (actor: Actor) => void; publish: (actor: Actor) => void; changed: (cards: GlassCard[], now: number) => void;
   /** A person answered a boat's card: that boat (`boat:<id>`) is told to read its answers. */
   answered?: (source: GlassCardSource) => void;
+  /** Whether a source is a mirror boat, whose cards are a mirrored grounds' and lapse. */
+  mirrored?: (source: GlassCardSource) => boolean;
+  /** Cards deleted from the store (by seq): where they were shown forgets them. */
+  forgotten?: (cards: number[]) => void;
 };
 /** The account's card routes: read the cards, and a boat's restatement of its own. */
 export class Cards {
@@ -351,15 +379,55 @@ export class Cards {
   project(now: number): GlassCard[] {
     const changed = this.store.replace('wharf', wharfCards(this.records, now), now);
     this.expireAnswers(now, changed);
+    this.lapse(now, changed);
     if (changed.length) this.hooks.changed(changed, now);
     return changed;
   }
   /** Answers no boat took in time expire before anyone reads them: a boat is never handed a stale one. */
-  /** When the oldest answer still waiting for its boat expires; none when no answer waits. */
+  /** When the oldest answer still waiting for its boat expires, or a mirror boat's cards lapse or close; none when nothing waits. */
   nextExpiry(now: number): number | undefined {
     const row = this.sql.exec<{ at: string | null }>("SELECT min(json_extract(data,'$.at')) AS at FROM card_answers WHERE json_extract(data,'$.state')='pending'").toArray()[0];
-    if (!row?.at) return undefined;
-    return Math.max(Date.parse(row.at) + ANSWER_RECEIPT_MS, now);
+    const times = [...(row?.at ? [Date.parse(row.at) + ANSWER_RECEIPT_MS] : []), ...this.lapses(now)];
+    return times.length ? Math.max(Math.min(...times), now) : undefined;
+  }
+  /** The mirror boats that still have cards, and when each last restated them. */
+  private mirroredSources(): Array<{ source: GlassCardSource; at: number }> {
+    return this.sql.exec<{ source: GlassCardSource; at: number }>('SELECT s.source,s.at FROM card_sources s WHERE EXISTS (SELECT 1 FROM cards c WHERE c.source=s.source)').toArray()
+      .filter((s) => this.hooks.mirrored?.(s.source));
+  }
+  /** When each mirror boat's cards next move: they lapse, or, lapsed, the first to have ended closes. */
+  private lapses(now: number): number[] {
+    return this.mirroredSources().map(({ source, at }) => {
+      if (at + MIRRORED_CARD_MS > now) return at + MIRRORED_CARD_MS;
+      const ended = this.sql.exec<{ at: string | null }>("SELECT min(json_extract(data,'$.terminal.at')) AS at FROM cards WHERE source=?", source).one().at;
+      const close = Date.parse(ended ?? '') + LAPSED_CLOSE_MS;
+      return Number.isFinite(close) ? close : now;
+    });
+  }
+  /**
+   * A mirror boat that has not restated its cards in MIRRORED_CARD_MS: each
+   * standing card ends as expired, a new revision, so its Slack messages
+   * close; one ended LAPSED_CLOSE_MS ago is deleted with its answers and
+   * Slack delivery. Restating brings a card that still stands back.
+   */
+  private lapse(now: number, changed: GlassCard[]) {
+    const forgotten: number[] = [], iso = new Date(now).toISOString();
+    for (const { source, at } of this.mirroredSources()) {
+      if (at + MIRRORED_CARD_MS > now) continue;
+      for (const row of this.sql.exec<CardRow>('SELECT seq,data FROM cards WHERE source=?', source).toArray()) {
+        const card = JSON.parse(row.data) as GlassCard;
+        if (!card.terminal) {
+          const ended: GlassCard = { ...card, stateHash: `${card.stateHash}:expired`, revision: card.revision + 1, observedAt: iso, actions: [], terminal: { state: 'expired', at: iso } };
+          this.sql.exec('UPDATE cards SET data=? WHERE seq=?', JSON.stringify(ended), row.seq);
+          changed.push(ended);
+        } else if (!(now - Date.parse(card.terminal.at) < LAPSED_CLOSE_MS)) {
+          this.sql.exec('DELETE FROM cards WHERE seq=?', row.seq);
+          this.sql.exec('DELETE FROM card_answers WHERE card=?', row.seq);
+          forgotten.push(row.seq);
+        }
+      }
+    }
+    if (forgotten.length) this.hooks.forgotten?.(forgotten);
   }
   private expireAnswers(now: number, changed: GlassCard[]) {
     for (const row of this.sql.exec<{ id: string; card: number; data: string }>("SELECT id,card,data FROM card_answers WHERE json_extract(data,'$.state')='pending'").toArray()) {
@@ -399,11 +467,11 @@ export class Cards {
       changed.push(this.store.setRelay(card, { ...card.relay, state: state === 'applied' ? 'applied' : state, at: new Date(now).toISOString(), ...(outcome ? { outcome } : {}) }));
     }
   }
-  /** A removed grounds binding stops pending Slack answers before a boat can take them. */
-  restrictSlackAnswers(person: string, linked: (grounds: string | undefined) => boolean, now: number): void {
+  /** Disconnecting Slack stops its pending answers before a boat can take them. */
+  refuseSlackAnswers(person: string, now: number): void {
     const changed: GlassCard[] = [];
     for (const row of this.sql.exec<{ card: number; data: string }>("SELECT card,data FROM card_answers WHERE json_extract(data,'$.state')='pending' AND json_extract(data,'$.by')=?", person).toArray()) {
-      if (!linked(this.store.get(`c${row.card}`)?.grounds)) this.settleReceipt(JSON.parse(row.data) as CardAnswerReceipt, row.card, 'refused', 'Slack no longer serves these grounds', now, changed);
+      this.settleReceipt(JSON.parse(row.data) as CardAnswerReceipt, row.card, 'refused', 'Slack was disconnected', now, changed);
     }
     if (changed.length) this.hooks.changed(changed, now);
   }
@@ -425,6 +493,7 @@ export class Cards {
       const cards = b.cards.map(boatCardInput);
       requireThat(new Set(cards.map((x) => `${x.family}\n${x.key}`)).size === cards.length, 400, 'duplicate card');
       const changed = this.store.replace(`boat:${actor.id}`, cards, now);
+      this.sql.exec('INSERT INTO card_sources VALUES (?,?) ON CONFLICT(source) DO UPDATE SET at=excluded.at WHERE excluded.at-card_sources.at>=?', `boat:${actor.id}`, now, RESTATED_STEP_MS);
       if (changed.length) this.hooks.changed(changed, now);
       return { status: 200, value: { changed: changed.length } };
     }
