@@ -106,32 +106,34 @@ says. When the request's glass thread changes (the helm writes, adds a card
 or resolves it, or you reply in Slack), the thread gets a new message,
 **Updated**, with **Open in glass**. When the helm starts a dispatch for it,
 the message is **Dispatch started**, linking that dispatch.
-A request goes to a grounds the wharf knows. With one, it goes straight
-there. With several, the app first asks which one in that message's thread.
-Reply with a listed grounds name; no work is queued until that choice is
-made. With none yet, the message gets its ⭐ and nothing more.
+A person has one helm at a time, and a request goes to it. The helm holds
+the account's helm seat (below), and decides which grounds and boat run the
+work. Nothing asks you which grounds.
 
-The wharf knows two kinds of grounds, and a request goes to a different
-helm for each:
+- **A Mac's helm.** On a mirror boat, `lobstah man helm` takes the seat for
+  its session over the boat's credential, and the daemon renews it on the
+  boat's socket while that helm is live. A request goes over that socket and
+  opens a helm thread on the boat, on the grounds the helm signed on for.
+  The receipt says **Sent to home · chriss-macbook-pro**. What you add in the
+  Slack thread joins that helm thread.
+- **The wharf's helm.** A helm signed on to a wharf grounds (`lobstah wharf
+  login --grounds <name> --helm`) holds the seat on the wharf. A request
+  waits there for it, on that grounds.
+- **No helm.** With no helm on the seat, or a Mac's helm whose socket is
+  away, the receipt says **Queued — the helm will pick this up when it’s
+  back**. The request waits up to 7 days, then goes to whichever helm takes
+  the seat next, on a Mac or the wharf. A Mac that sleeps loses the seat
+  within two minutes, so later requests queue.
 
-- **Wharf grounds** are helmed on the wharf (`lobstah wharf login --grounds
-  <name> --helm`). The wharf knows those its cards and dispatches name. A
-  request waits on the wharf for that grounds' helm.
-- **Mirror grounds** stay on a mirror boat's own machine, helmed there by
-  `lobstah man helm`. Each mirror boat tells the wharf its local grounds when
-  its socket connects. A request goes over that
-  socket and opens a helm thread on the boat. What you add in the Slack
-  thread joins that helm thread. If no helm holds the grounds yet, the
-  receipt says it is queued, and the next helm that signs on there sees it.
-  Only when the boat has no socket open does the receipt say it is offline;
-  nothing is queued then, so send it again once the boat is back.
-  The grounds' standing cards reach Slack too, with their buttons, and your
-  answer is applied on the boat. If the boat stays offline for 7 days, its
-  cards close in Slack, leave the hosted glass's deck, and are deleted. They
-  come back when the boat does.
+A second helm, on another Mac, the same Mac or the wharf, is refused and
+told which session and boat hold the seat. Signing on with `--take` takes it
+over: later requests go to the new helm, a Mac's helm that lost it stands
+down, and requests the first helm already took stay in its glass threads.
 
-When two mirror boats run a grounds of the same name, a request goes to the
-one whose socket is open, or else to the one that reported it last.
+A mirror boat's standing cards reach Slack too, with their buttons, and your
+answer is applied on the boat. If the boat stays offline for 7 days, its
+cards close in Slack, leave the hosted glass's deck, and are deleted. They
+come back when the boat does.
 
 Work in `services/wharf`. R2 must be enabled on the account in the dashboard
 first. Secrets go in on standard input, never as arguments:
@@ -341,6 +343,7 @@ administration requires `admin`. A different live helm needs explicit takeover.
 | Scope | Route | Operation |
 | --- | --- | --- |
 | Person/helm boat | POST helm/take, helm/renew, helm/release | Exclusive, fenced helm session |
+| Mirror boat | POST helm/take with `mirror: true` | Its Mac's helm holds the seat; it gets Slack requests and steers nothing on the wharf |
 | Person admin | GET boats; POST boats/:id/revoke | List metadata, revoke |
 | Boat | POST workers/sign-on, workers/renew | Bind a logical worker to this boat |
 | Boat | POST claims | Atomically claim eligible dispatch; receive agent token |
@@ -533,10 +536,18 @@ each boat's latest snapshot and calls in transit, never a second record.
   holds open until the answer comes. No call is polled:
   `GET /api/glass/mirror/calls/:id` answers 410. An expired call (ten minutes
   unanswered) is never delivered again.
-- **Grounds and Slack requests.** On each connect, and when they change,
-  the boat sends its local grounds (`{"t":"grounds","grounds":[…]}`). A Slack
-  request for one of them becomes a `helm-request` write call to that boat,
-  which only the wharf makes: a person's call may not name that kind. The
+- **The helm seat and Slack requests.** A Mac's helm takes the seat with
+  `POST helm/take` `{ "session", "grounds", "mirror": true, "take"? }` under the
+  boat's mirror grant, over HTTP at sign-on and then as a socket `command`
+  each minute to renew it. Taking it again with the same session renews the
+  lease without an event. A seat another helm holds answers 409 with
+  `holder: { session, boat }`. While a Mac holds the seat and its socket is
+  open, a Slack request becomes a `helm-request` write call to that boat,
+  on the seat's grounds; requests that waited for a helm go to it when it
+  takes the seat or its socket resumes. The boat still sends its local
+  grounds on each connect (`{"t":"grounds","grounds":[…]}`); routing no
+  longer reads them. Only the wharf makes a `helm-request` call: a person's
+  call may not name that kind. The
   boat's answer says `queued` or `delivered`, and names the helm thread the
   request opened there (`thread`). The Slack message's Open in glass then
   goes to `#thread/<id>`, which the hosted glass reads from that boat. Later

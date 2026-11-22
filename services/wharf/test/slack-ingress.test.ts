@@ -64,14 +64,7 @@ beforeEach(async () => {
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
   await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
-  await knownGrounds('away');
 });
-/** A boat's card names the grounds, so the wharf knows it, and a DM goes straight to it. */
-async function knownGrounds(grounds: string) {
-  const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: `${grounds}-boat`, permissions: ['read'] }, key: `issue-${++sequence}` })));
-  const card = { family: 'notice', key: `${grounds}-nightly`, grounds, title: 'Nightly build passed', stateHash: '1', sourceAt: new Date().toISOString(), quiet: true };
-  expect((await call('cards', { cards: [card] }, (result.value as { token: string }).token)).status).toBe(200);
-}
 afterEach(() => { vi.restoreAllMocks(); });
 async function helm() {
   const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: 'helm-boat', permissions: ['work', 'helm'] }, key: `issue-${++sequence}` })));
@@ -105,7 +98,7 @@ it('a DM asks for work once: recorded, then a canned receipt in its thread; a re
   expect(receipts()).toHaveLength(1);
   expect(receipts()[0]).toMatchObject({ method: 'chat.postMessage', body: { channel: 'D1', thread_ts: '1700000000.000100' } });
   // Received is not running: no helm is live, so it says it waits.
-  expect(section(receipts()[0]!)).toContain('Received · waiting for the helm');
+  expect(section(receipts()[0]!)).toContain('Queued — the helm will pick this up when it’s back');
 });
 
 it('stars each message from the linked person within 5 seconds, a new DM and a thread reply alike, and no one else’s', async () => {

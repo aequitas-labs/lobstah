@@ -2873,7 +2873,13 @@ async function mainCli(): Promise<void> {
       // Undecidable leaves the helm's harness unrecorded, as before.
       const { harness } = detectHarness({ flag: opt('--harness'), sessionId });
       const identity = { harness, cwd: process.cwd(), host: os.hostname(), label: opt('--label'), window: captureWindow() };
-      const res = takeHelm({ sessionId, grounds, ttlMs: cfg.helm.ttlSecs * 1000, take: has('--take'), identity });
+      // A mirrored Mac's helm is the person's one helm: it takes the wharf's seat first, and a seat held elsewhere refuses.
+      // A grounds another session here holds refuses below, before the wharf hears of it.
+      const ttlMs = cfg.helm.ttlSecs * 1000;
+      const heldHere = !has('--take') && liveHelms(ttlMs).some((h) => h.grounds === grounds.name && h.sessionId !== sessionId);
+      const { takeMirrorSeat } = await import('./wharf-mirror.js');
+      const wharfSeat = heldHere ? undefined : await takeMirrorSeat(cfg, sessionId, displayGrounds(grounds.name, cfg), has('--take'));
+      const res = takeHelm({ sessionId, grounds, ttlMs, take: has('--take'), identity });
       if ('held' in res) {
         const ageSecs = Math.max(0, Math.round((Date.now() - (Date.parse(res.held.heartbeatAt) || 0)) / 1000));
         throw new Error(
@@ -2895,6 +2901,7 @@ async function mainCli(): Promise<void> {
             ? { took: `from session ${res.ok.tookFrom.sessionId.slice(0, 8)} — they stand down at their next turn` }
             : {}),
           ...(res.ok.wakesFrom ? { wakesFrom: `${res.ok.wakesFrom} (older notices are not wakes; \`lobstah man tend\` lists them)` } : {}),
+          ...(wharfSeat ? { slack: wharfSeat === 'taken' ? 'Slack DMs come to this helm' : 'Slack DMs come to this helm once the wharf answers' } : {}),
           note:
             res.ok.harness === 'claude'
               ? `arm \`lobstah man wait --session ${sessionId} --timeout 900\` as a background task`

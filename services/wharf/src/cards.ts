@@ -180,7 +180,7 @@ export function workRequestCard(r: WharfHumanRequest): ProjectedCard {
     : boat?.state === 'queued' ? 'Queued — the helm will pick this up when it’s back'
     : boat ? `Sent to ${[r.grounds, boat.name].filter(Boolean).join(' · ')}`
     : r.state === 'received' ? 'Received · the helm has it'
-    : waiting ? 'Received · waiting for the helm' : 'Received · queued for the helm';
+    : waiting ? 'Queued — the helm will pick this up when it’s back' : 'Received · queued for the helm';
   const notes = r.followUps?.length ? `${r.followUps.length} more in this thread` : '';
   const ended = r.state === 'fulfilled' || r.state === 'expired';
   return {
