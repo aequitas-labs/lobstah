@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.16 — 2026-11-21
+
+### Threads and reviews
+
+- The helm can start a thread and link cards, dispatches and a chat summary to
+  it. Standing cards can be answered inside the thread. (#596)
+- GitHub review cards show the GitHub logo beside the repo and PR context.
+  (#600)
+- New reviewer feedback gives PR repairs a fresh retry budget. (#599)
+
+### Traps and run cards
+
+- A trap waiting for an ume review uses its own ume project. (#597)
+- Parked Claude traps wake when their own background task finishes. (#601)
+- Run cards use the interpreter named by the script's shebang. (#594)
+- Run cards can find the repo when the glass runs a copy of the deployment
+  script. (#595)
+
 ## 0.8.15 — 2026-11-20
 
 ### Talking to the helm
