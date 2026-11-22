@@ -107,6 +107,50 @@ const passkeyOrigin = (ctx: RunRequestContext): RunReply | undefined =>
     ? undefined
     : refuse(409, `Passkeys work from ${ctx.origin.replace('127.0.0.1', RUN_RP_ID)}: open the glass there.`);
 
+/**
+ * Write one typed line into a card's live interactive run, or refuse it.
+ * From the Mac's own page a line comes plain. From the hosted glass it must
+ * be sealed to this boat, signed by the page key that started the run, and
+ * numbered, so the wharf can't read, forge or replay it.
+ */
+function deliverRunLine(key: string, p: Record<string, unknown>, relayed: boolean, runs: RunRegistry): RunReply {
+  if (!relayed) {
+    // A line only reaches the card's own live run, from the page that holds the token.
+    const refused = runs.sendLine(key, p.line, p.secret === true);
+    return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
+  }
+  const hosted = runs.relayedConsole(key);
+  if (!hosted) return refuse(409, 'That card has no run from the hosted glass waiting for a line.');
+  if (!hosted.lineKey) return refuse(403, 'Only the page that started this run can type into it.');
+  if (!isSealedInput(p.sealed)) return refuse(400, 'A line from the hosted glass must be sealed to the boat.');
+  if (p.attempt !== hosted.attempt || typeof p.seq !== 'number' || !Number.isSafeInteger(p.seq)) return refuse(403, 'That line is for another run.');
+  if (!pageKeySigned(hosted.lineKey, runLineSignedText(key, hosted.attempt, p.seq, p.secret === true, p.sealed), p.signature))
+    return refuse(403, "The line's signature does not verify.");
+  if (p.seq !== hosted.next) return refuse(409, 'That line was already sent, or one before it is missing.');
+  let line: string;
+  try {
+    line = openSealedInput(p.sealed, runSealKey().privateKey, RUN_LINE_SEAL_INFO);
+  } catch (err) {
+    if (err instanceof PasskeyError) return refuse(err.status, err.message);
+    throw err;
+  }
+  const refused = runs.sendLine(key, line, p.secret === true, p.seq);
+  return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
+}
+
+/**
+ * Record a line that didn't reach its run in the glass log, beside the run's
+ * started and finished lines: the card, the run's attempt id, where the line
+ * came from and why it was refused. Never the line itself.
+ */
+function logUndeliveredLine(key: string, runs: RunRegistry, relayed: boolean, reply: RunReply): void {
+  // The key came in the request: log it only when it is a card key, so a request can't write its own log line.
+  const card = /^decision:[a-f0-9]{8}$/.test(key) ? key : '(no such card)';
+  const attempt = runs.get(key)?.attempt.id ?? 'no run';
+  const from = relayed ? 'the hosted glass' : 'this Mac';
+  console.info(`Run ${card} line from ${from} not delivered (${attempt}): ${String(reply.body.reason ?? reply.status)}`);
+}
+
 /** Answer one run request. */
 export async function handleRunRequest(kind: RunRequestKind, payload: unknown, ctx: RunRequestContext): Promise<RunReply> {
   const relayed = ctx.relayed === true;
@@ -221,23 +265,9 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
       }
       case 'run-line': {
         const key = typeof p.key === 'string' ? p.key : '';
-        if (!relayed) {
-          // A line only reaches the card's own live run, from the page that holds the token.
-          const refused = ctx.runs.sendLine(key, p.line, p.secret === true);
-          return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
-        }
-        // From the hosted glass: sealed to this boat, signed by the page key that started the run, and numbered.
-        const hosted = ctx.runs.relayedConsole(key);
-        if (!hosted) return refuse(409, 'That card has no run from the hosted glass waiting for a line.');
-        if (!hosted.lineKey) return refuse(403, 'Only the page that started this run can type into it.');
-        if (!isSealedInput(p.sealed)) return refuse(400, 'A line from the hosted glass must be sealed to the boat.');
-        if (p.attempt !== hosted.attempt || typeof p.seq !== 'number' || !Number.isSafeInteger(p.seq)) return refuse(403, 'That line is for another run.');
-        if (!pageKeySigned(hosted.lineKey, runLineSignedText(key, hosted.attempt, p.seq, p.secret === true, p.sealed), p.signature))
-          return refuse(403, "The line's signature does not verify.");
-        if (p.seq !== hosted.next) return refuse(409, 'That line was already sent, or one before it is missing.');
-        const line = openSealedInput(p.sealed, runSealKey().privateKey, RUN_LINE_SEAL_INFO);
-        const refused = ctx.runs.sendLine(key, line, p.secret === true, p.seq);
-        return refused ? refuse(409, refused) : { status: 200, body: { ok: true } };
+        const reply = deliverRunLine(key, p, relayed, ctx.runs);
+        if (reply.status >= 400) logUndeliveredLine(key, ctx.runs, relayed, reply);
+        return reply;
       }
       case 'run-stop': {
         const refused = ctx.runs.stop(typeof p.key === 'string' ? p.key : '');

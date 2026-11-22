@@ -1039,11 +1039,24 @@ export function passkeysWorkHere(hosted = false): boolean {
 const runWindows = new Map<string, { key: CryptoKeyPair; id: string; until: number }>();
 
 /**
- * The page key that started each hosted run, by card key, and the next line's
- * number: the boat takes a line into that run only signed with this key. A
- * reload, another tab or another device has none.
+ * A run this page started on the hosted glass: what a line typed into it
+ * needs, kept from the moment Run was pressed so that sending a line never
+ * depends on the card still being in the snapshot.
  */
-const runLineKeys = new Map<string, { key: CryptoKey; seq: number }>();
+interface HostedRunConsole {
+  /** The page key that confirmed the Run: the boat takes a line into that run only signed with it. */
+  pageKey: CryptoKey;
+  /** The boat's public seal key from the card, which each line is sealed to; absent when the boat publishes none. */
+  boatSealKey: string | undefined;
+  /** The number the boat takes next. */
+  seq: number;
+}
+
+/**
+ * The hosted runs this page started, by card key. A reload, another tab or
+ * another device has none.
+ */
+const hostedRunConsoles = new Map<string, HostedRunConsole>();
 
 /** Minutes left in this page's window for a boat, or 0. */
 export function runWindowMinutes(boat = ''): number {
@@ -1192,7 +1205,7 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
   setRun(key, { busy: true, error: undefined, output: '', next: 0, result: undefined, id: undefined, ...(card ? { card } : {}) });
   const run = card?.kind === 'decision' ? card.run : undefined;
   const boat = run?.boat ?? '';
-  runLineKeys.delete(key);
+  hostedRunConsoles.delete(key);
   try {
     // On the hosted glass each secret is sealed to the boat's key here, so the wharf only ever relays sealed values.
     const sent: RunInputValues = {};
@@ -1238,7 +1251,7 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
         )
       ).body;
       if (!started.ok) return runFailure(key, started.reason ?? 'The run did not start.');
-      if (run.boat !== undefined) runLineKeys.set(key, { key: inWindow.key.privateKey, seq: 0 });
+      if (run.boat !== undefined) hostedRunConsoles.set(key, { pageKey: inWindow.key.privateKey, boatSealKey: run.sealKey, seq: 0 });
       void followRunCard(key);
       return undefined;
     }
@@ -1274,7 +1287,7 @@ export async function runRunCard(key: string, sha256: string, inputs: Record<str
     ).body as { ok: boolean; reason?: string; window?: string; windowUntil?: number };
     if (!started.ok) return runFailure(key, started.reason ?? 'The run did not start.');
     if (started.window && started.windowUntil) runWindows.set(boat, { key: windowKey, id: started.window, until: started.windowUntil });
-    if (run.boat !== undefined) runLineKeys.set(key, { key: windowKey.privateKey, seq: 0 });
+    if (run.boat !== undefined) hostedRunConsoles.set(key, { pageKey: windowKey.privateKey, boatSealKey: run.sealKey, seq: 0 });
     void followRunCard(key);
     return undefined;
   } catch (err) {
@@ -1386,28 +1399,33 @@ export async function dismissRunCard(key: string): Promise<string | undefined> {
 export async function sendRunLine(key: string, line: string, secret: boolean): Promise<string | undefined> {
   const token = getState().snapshot?.focusToken;
   if (!token) return 'This page has no token; reload it.';
-  const card = currentCards().find((c) => c.key === key);
+  // The card may have left the snapshot while its run waits; the run view keeps it as it was when Run was pressed.
+  const card = currentCards().find((c) => c.key === key) ?? getState().runs?.[key]?.card;
   const run = card?.kind === 'decision' ? card.run : undefined;
-  // On the hosted glass the line is sealed to the boat and signed with the page key that started the run, so the wharf can't read, forge or replay it.
-  const mine = run?.boat !== undefined ? runLineKeys.get(key) : undefined;
+  const hosted = hostedRunConsoles.get(key);
   try {
     let body: Record<string, unknown> = { key, line, secret };
-    if (run?.boat !== undefined) {
+    // On the hosted glass the line is sealed to the boat and signed with the page key that started the run, so the wharf can't read, forge or replay it.
+    // A run this page started there is hosted whatever the snapshot shows now: its line never goes in the clear.
+    if (hosted || run?.boat !== undefined) {
       const attempt = getState().runs?.[key]?.id;
-      if (!mine || !attempt) return 'Only the page that started this run can type into it. Type on the Mac, or Stop and run again.';
-      if (!run.sealKey) return 'This boat takes no sealed lines. Type on the Mac.';
-      const sealed = await sealInput(line, run.sealKey, RUN_LINE_SEAL_INFO);
+      if (!hosted || !attempt) return 'Only the page that started this run can type into it. Type on the Mac, or Stop and run again.';
+      if (!hosted.boatSealKey) return 'This boat takes no sealed lines. Type on the Mac.';
+      const sealed = await sealInput(line, hosted.boatSealKey, RUN_LINE_SEAL_INFO);
       const signature = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' },
-        mine.key,
-        new TextEncoder().encode(runLineSignedText(key, attempt, mine.seq, secret, sealed)),
+        hosted.pageKey,
+        new TextEncoder().encode(runLineSignedText(key, attempt, hosted.seq, secret, sealed)),
       );
-      body = { key, attempt, seq: mine.seq, secret, sealed, signature: b64url(signature) };
+      body = { key, attempt, seq: hosted.seq, secret, sealed, signature: b64url(signature) };
     }
     const res = (await backend().request<{ ok: boolean; reason?: string }>('run-line', body, token)).body;
-    if (res.ok && mine) mine.seq += 1;
-    return res.ok ? undefined : (res.reason ?? 'The line was not sent.');
+    if (res.ok && hosted) hosted.seq += 1;
+    return res.ok ? undefined : (res.reason ?? RUN_LINE_NOT_DELIVERED);
   } catch {
-    return 'The line was not sent.';
+    return RUN_LINE_NOT_DELIVERED;
   }
 }
+
+/** What the console says when a line's request fails with no reason from the run's Mac. */
+const RUN_LINE_NOT_DELIVERED = "Your answer didn't reach the run. Check your connection and press Enter to send it again.";

@@ -15,9 +15,13 @@
 #   leaves it there so the rollback command it prints runs from it.
 # - Wrangler uses its own stored login (`npx wrangler login`). No token here.
 # - Order: read the live version and the pending D1 migrations (read-only; a
-#   failed check stops the run), apply pending migrations (wrangler asks to
-#   confirm), deploy, then check health. It ends with the rollback command and
-#   exits non-zero when a health check fails.
+#   failed check stops the run), apply pending migrations, deploy, then check
+#   health. It ends with the rollback command and exits non-zero when a health
+#   check fails.
+# - Running the script is the go: it applies the migrations it listed without
+#   a second confirm. Wrangler 4's confirm answers its fallback (yes) itself
+#   when ci-info sees CI or stdin is not a terminal, and `d1 migrations apply`
+#   has no --yes flag; this keeps CI=1 and gives it no terminal for stdin.
 # - A var named by --set-var is read from stdin, never echoed or written to a
 #   file, and set with wrangler's --var on this deploy; keep_vars keeps it.
 set -euo pipefail
@@ -166,8 +170,8 @@ for f in migrations/*.sql; do
 done
 
 if [ -n "$NAMES" ]; then
-  echo "== Applying migrations:$NAMES (wrangler asks to confirm: answer y)"
-  env -u CI pnpm -s run wrangler d1 migrations apply "$DB" --remote
+  echo "== Applying migrations:$NAMES"
+  pnpm -s run wrangler d1 migrations apply "$DB" --remote </dev/null
 else
   echo "No migrations to apply."
 fi
