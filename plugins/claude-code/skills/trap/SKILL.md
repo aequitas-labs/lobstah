@@ -122,6 +122,8 @@ naming a dispatch id. Then:
   cannot run the await as a tracked background task.
 - Don't block on long-running processes: run servers and watchers in the
   background with a timeout.
+- Your own background task finishing wakes the Stop-hook park. Read its task
+  notification and continue; you do not need the helm to send a wake message.
 - After sign-on without an assignment, or after reporting done, failed,
   needs-decision, blocked, or paused, end your turn. After a working report,
   continue the task in the same turn; an acknowledgement or takeover note

@@ -3259,7 +3259,7 @@ async function mainCli(): Promise<void> {
         }
         if (trapReg) {
           // Both harnesses can wait in their Stop hook without starting a model turn on quiet deadlines.
-          await soakPark(trapReg.trapId, opt('--timeout'));
+          await soakPark(trapReg.trapId, opt('--timeout'), false, hook?.transcript_path);
           break;
         }
         /** Every open card at an emitted Stop; recording the listing paces the next card-only block. */
