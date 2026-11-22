@@ -1,16 +1,17 @@
 import { ApiError, requireThat } from './protocol.js';
-import { groundStatements, linkedGrounds, slackGrounds } from './slack-grounds.js';
 
 /** The Slack app's credentials. The client id is public config; the secrets are optional Worker secrets. */
 export type SlackEnv = Env & { SLACK_CLIENT_ID?: string; SLACK_CLIENT_SECRET?: string; SLACK_SIGNING_SECRET?: string };
-/** What the selected first release asks of Slack: post and edit in a person's DM with the app, and read what they write there. */
-export const SLACK_SCOPES = ['chat:write', 'im:write', 'im:history'] as const;
+/** What the app needs of Slack: post and edit in a person's DM with the app, and read what they write there. */
+const REQUIRED_SCOPES = ['chat:write', 'im:write', 'im:history'] as const;
+/** What it asks for: those, and the star it adds to each message it receives, which it can do without. */
+export const SLACK_SCOPES = [...REQUIRED_SCOPES, 'reactions:write'] as const;
 /** A connect state is good once, for ten minutes, for the browser session that asked for it. */
 const CONNECT_MS = 600_000;
 const API = 'https://slack.com/api/';
 
-/** One person's link, as the glass shows it and the account's outbox uses it. */
-export interface SlackLink { team: string; slackUser: string; channel: string; linkedAt: string; grounds: string[] }
+/** One person's link to their whole wharf, as the glass shows it and the account's outbox uses it. */
+export interface SlackLink { team: string; slackUser: string; channel: string; linkedAt: string }
 
 /** Whether this wharf has a Slack app to connect to. */
 export function slackConfigured(env: SlackEnv): boolean {
@@ -45,19 +46,15 @@ export async function installationToken(env: Env, team: string): Promise<string 
 
 /** A person's live link, if they have one. */
 export async function personLink(env: Env, person: string): Promise<SlackLink | undefined> {
-  const link = await env.AUTH_DB.prepare('SELECT team,slackUser,channel,linkedAt FROM slackLink WHERE person=? AND revokedAt IS NULL').bind(person).first<Omit<SlackLink, 'grounds'>>();
-  return link ? { ...link, grounds: await linkedGrounds(env, person) } : undefined;
+  return (await env.AUTH_DB.prepare('SELECT team,slackUser,channel,linkedAt FROM slackLink WHERE person=? AND revokedAt IS NULL').bind(person).first<SlackLink>()) ?? undefined;
 }
 /** Start connecting: a single-use state bound to this person and browser session, and where to send them. */
-export async function connectUrl(env: SlackEnv, glass: string, person: string, sessionId: string, selectedGrounds: unknown): Promise<string> {
+export async function connectUrl(env: SlackEnv, glass: string, person: string, sessionId: string): Promise<string> {
   requireThat(slackConfigured(env), 409, 'this wharf has no Slack app configured');
-  const grounds = slackGrounds(selectedGrounds);
   const state = base64(crypto.getRandomValues(new Uint8Array(24))).replace(/[+/=]/g, (c) => ({ '+': '-', '/': '_', '=': '' })[c]!);
   await env.AUTH_DB.batch([
-    env.AUTH_DB.prepare('DELETE FROM slackConnectGround WHERE state IN (SELECT state FROM slackConnect WHERE expiresAt<?)').bind(Date.now()),
     env.AUTH_DB.prepare('DELETE FROM slackConnect WHERE expiresAt<?').bind(Date.now()),
     env.AUTH_DB.prepare('INSERT INTO slackConnect VALUES (?,?,?,?)').bind(state, person, sessionId, Date.now() + CONNECT_MS),
-    ...grounds.map((name) => env.AUTH_DB.prepare('INSERT INTO slackConnectGround VALUES (?,?)').bind(state, name)),
   ]);
   const url = new URL('https://slack.com/oauth/v2/authorize');
   url.searchParams.set('client_id', env.SLACK_CLIENT_ID!); url.searchParams.set('scope', SLACK_SCOPES.join(','));
@@ -81,39 +78,31 @@ type OAuthAccess = { access_token?: string; token_type?: string; scope?: string;
  */
 export async function completeConnect(env: SlackEnv, glass: string, person: string, sessionId: string, code: string, state: string): Promise<SlackLink> {
   requireThat(slackConfigured(env), 409, 'this wharf has no Slack app configured');
-  // A replay must not remove the grounds while the winning callback is reading them.
-  const consumed = await env.AUTH_DB.batch([
-    env.AUTH_DB.prepare('SELECT grounds FROM slackConnectGround WHERE state=? ORDER BY grounds').bind(state),
-    env.AUTH_DB.prepare('DELETE FROM slackConnect WHERE state=? RETURNING person,sessionId,expiresAt').bind(state),
-    env.AUTH_DB.prepare('DELETE FROM slackConnectGround WHERE state=?').bind(state),
-  ]);
-  const claimed = consumed[1]!.results[0] as { person: string; sessionId: string; expiresAt: number } | undefined;
+  const claimed = await env.AUTH_DB.prepare('DELETE FROM slackConnect WHERE state=? RETURNING person,sessionId,expiresAt').bind(state).first<{ person: string; sessionId: string; expiresAt: number }>();
   requireThat(claimed && claimed.expiresAt > Date.now(), 400, 'this Slack connection expired or was already used; connect again from the glass');
   requireThat(claimed.person === person && claimed.sessionId === sessionId, 403, 'this Slack connection was started by another session');
-  const grounds = slackGrounds((consumed[0]!.results as Array<{ grounds: string }>).map((row) => row.grounds));
   const access = await slackCall<OAuthAccess>('oauth.v2.access', { client_id: env.SLACK_CLIENT_ID!, client_secret: env.SLACK_CLIENT_SECRET!, code, redirect_uri: redirectUri(glass) });
   requireThat(access.ok, 400, `Slack refused the connection: ${access.error ?? 'unknown error'}`);
   requireThat(!access.is_enterprise_install, 400, 'install the app in one workspace, not an enterprise organization');
   const team = access.team?.id, slackUser = access.authed_user?.id, token = access.access_token, granted = (access.scope ?? '').split(',');
   requireThat(team && slackUser && token && access.token_type === 'bot' && access.bot_user_id, 502, 'Slack returned an incomplete installation');
-  requireThat(SLACK_SCOPES.every((s) => granted.includes(s)), 400, `the app needs ${SLACK_SCOPES.join(', ')}`);
+  requireThat(REQUIRED_SCOPES.every((s) => granted.includes(s)), 400, `the app needs ${REQUIRED_SCOPES.join(', ')}`);
   const opened = await slackCall<{ channel?: { id?: string } }>('conversations.open', { users: slackUser }, token);
   requireThat(opened.ok && opened.channel?.id, 502, `Slack would not open your DM with the app: ${opened.error ?? 'no channel'}`);
   const owner = await env.AUTH_DB.prepare('SELECT person FROM slackLink WHERE team=? AND slackUser=? AND revokedAt IS NULL').bind(team, slackUser).first<{ person: string }>();
   requireThat(!owner || owner.person === person, 409, 'that Slack user is linked to another wharf account');
-  const link: SlackLink = { team, slackUser, channel: opened.channel.id, linkedAt: new Date().toISOString(), grounds };
+  const link: SlackLink = { team, slackUser, channel: opened.channel.id, linkedAt: new Date().toISOString() };
   await env.AUTH_DB.batch([
     env.AUTH_DB.prepare('INSERT OR REPLACE INTO slackInstallation VALUES (?,?,?,?,?,?)').bind(team, access.bot_user_id, await sealToken(env, token), granted.join(','), person, link.linkedAt),
     // One link per person: a new link replaces the old one.
     env.AUTH_DB.prepare('UPDATE slackLink SET revokedAt=? WHERE person=? AND revokedAt IS NULL').bind(link.linkedAt, person),
     env.AUTH_DB.prepare('INSERT OR REPLACE INTO slackLink VALUES (?,?,?,?,?,NULL)').bind(team, slackUser, person, link.channel, link.linkedAt),
-    ...groundStatements(env, person, grounds),
   ]);
   return link;
 }
 /** Unlink: nothing more is sent to that Slack user for this person, and their cards stay. */
 export async function disconnect(env: Env, person: string): Promise<void> {
-  await env.AUTH_DB.batch([env.AUTH_DB.prepare('UPDATE slackLink SET revokedAt=? WHERE person=? AND revokedAt IS NULL').bind(new Date().toISOString(), person), ...groundStatements(env, person, [])]);
+  await env.AUTH_DB.prepare('UPDATE slackLink SET revokedAt=? WHERE person=? AND revokedAt IS NULL').bind(new Date().toISOString(), person).run();
 }
 /** Turn an install error into the glass's message, never a stack trace. */
 export function connectError(e: unknown): string {

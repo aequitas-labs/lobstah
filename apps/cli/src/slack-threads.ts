@@ -1,13 +1,14 @@
-import { displayGrounds, liveHelms, markThreadRelay, postThread, relayedThread, reopenThread, startThread, storageGrounds, threadView, THREAD_CARD_READY, THREAD_NOTES_UPDATED, ThreadError, listThreads } from '@lobstah/core';
+import { displayGrounds, liveHelms, markThreadRelay, postThread, relayedThread, reopenThread, startThread, storageGrounds, ThreadError, listThreads } from '@lobstah/core';
 import type { Config, HelmThread } from '@lobstah/core';
 
 /**
  * Slack messages for this boat's own helm. A wharf this boat mirrors to
  * relays each one as a `helm-request` call: the first message of a Slack
  * thread opens a helm thread on its grounds, and what the person adds in
- * that Slack thread joins it. The helm answers with the thread verbs; the
- * daemon's mirror sends each new response back to the Slack thread, and
- * tells the wharf when a helm signs on for one that waited.
+ * that Slack thread joins it. The helm answers with the thread verbs, and
+ * the conversation stays in the glass: the daemon's mirror tells the wharf
+ * only that the thread changed, and which dispatches it started, so Slack
+ * gets a link. It also tells the wharf when a helm signs on for one that waited.
  */
 
 /** The grounds this machine helms itself, as the wharf names them: the ones not hosted on a wharf. */
@@ -61,30 +62,31 @@ export function takeSlackRequest(cfg: Config, payload: unknown, now = new Date()
   }
 }
 
-/** What a helm response says in Slack: the outcome, the notes, or the card waiting in the glass. */
-export function slackReply(item: HelmThread): string {
-  const o = item.state === 'resolved' ? item.outcome : undefined;
-  if (o) return o.kind === 'dispatched' ? `${o.note}\nDispatched as ${o.ref}.` : o.kind === 'planned' ? `${o.note}\nPlan: ${o.ref}` : o.note;
-  if (item.responseText === THREAD_NOTES_UPDATED) {
-    const list = (title: string, lines: string[]) => (lines.length ? `${title}\n${lines.map((l) => `• ${l}`).join('\n')}` : '');
-    return [list('Decided', item.notes.decided), list('Still open', item.notes.open)].filter(Boolean).join('\n\n') || THREAD_NOTES_UPDATED;
-  }
-  const card = threadView(item).cards.filter((c) => c.standing).at(-1);
-  if (card && item.responseText === THREAD_CARD_READY) return `A question is waiting for you in the glass: ${card.title}`;
-  return item.responseText ?? '';
+/** At most this many of a thread's dispatches go in one update, newest last. */
+const SYNC_DISPATCHES_MAX = 20;
+/** The dispatches a thread links to, linked or as its outcome, in the order they started. */
+function threadDispatches(item: HelmThread): string[] {
+  const linked = item.rounds.flatMap((round) => round.entries.flatMap((entry) => ('link' in entry && entry.link === 'dispatched' ? [entry.ref] : [])));
+  const outcome = item.outcome?.kind === 'dispatched' && item.outcome.ref ? [item.outcome.ref] : [];
+  return [...new Set([...linked, ...outcome])].slice(-SYNC_DISPATCHES_MAX);
 }
 
-/** What the wharf has yet to hear about one relayed thread: that its helm has it now, or the helm's newest response. */
+/**
+ * What the wharf has yet to hear about one relayed thread: that its helm has
+ * it now, or that it changed (`updated`, with the dispatches it links). It
+ * never carries what the helm said: Slack only gets a link to the glass.
+ */
 export interface SlackThreadSync {
   thread: string;
   request: string;
   delivered: boolean;
-  reply?: string;
-  /** The response sequence the reply shows. */
+  updated: boolean;
+  dispatches: string[];
+  /** The thread's update sequence this sync reports. */
   seq: number;
 }
 
-/** The relayed threads from this wharf the wharf must hear about again: a helm signed on since one queued, or the helm responded. */
+/** The relayed threads from this wharf the wharf must hear about again: a helm signed on since one queued, or the thread changed. */
 export function slackThreadsToSync(cfg: Config, wharf: string, now = Date.now()): SlackThreadSync[] {
   const out: SlackThreadSync[] = [];
   for (const item of listThreads()) {
@@ -92,8 +94,8 @@ export function slackThreadsToSync(cfg: Config, wharf: string, now = Date.now())
     if (relay?.wharf !== wharf) continue;
     const delivered = relay.told === 'queued' && item.state === 'open' && helmHolds(cfg, item.grounds, now);
     const seq = item.responseSeq ?? 0;
-    const reply = seq > (relay.sentSeq ?? 0) ? slackReply(item) : undefined;
-    if (delivered || reply) out.push({ thread: item.id, request: relay.request, delivered, ...(reply ? { reply } : {}), seq });
+    const updated = seq > (relay.sentSeq ?? 0);
+    if (delivered || updated) out.push({ thread: item.id, request: relay.request, delivered, updated, dispatches: updated ? threadDispatches(item) : [], seq });
   }
   return out;
 }

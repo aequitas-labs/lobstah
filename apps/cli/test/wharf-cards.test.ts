@@ -1,11 +1,12 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout } from '@lobstah/core';
+import { ensureLayout, readReview, writeReview } from '@lobstah/core';
 import type { Config, DecisionMeta, Notice, TendAttention } from '@lobstah/core';
 import { boatCards, BOAT_CARDS_MAX, CARDS_RESTATE_MS, CARDS_RETRY_MS } from '../src/wharf-cards.js';
 import { boatCardInput } from '../../../services/wharf/src/cards.js';
+import { draftReview, pushAfterDraft, REVIEW_KEY, reviewShown } from './review-draft.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
@@ -51,6 +52,23 @@ it('only cards of repos in a grounds bound to a wharf leave the boat, and each p
   expect(JSON.stringify(sets)).not.toContain('Pick a name');
 });
 
+it('a mirrored local grounds’ cards join the wharf grounds’ set on the mirror’s wharf; an unmirrored one’s stay here', () => {
+  const attention = [
+    item({ kind: 'decision', key: permission.key, note: permission.title, repo: 'remote' }),
+    item({ kind: 'decision', key: localAsk.key, note: localAsk.title, repo: 'local' }),
+  ];
+  const mirrored = { ...cfg, glass: { port: 4949, mirror: 'cloud' } } as Config;
+  const sets = boatCards(mirrored, attention, [permission, localAsk], [notice('n2', 'local')], NOW);
+  expect(sets.map((s) => s.wharf)).toEqual(['cloud']);
+  expect(sets[0]!.cards.map((c) => `${c.grounds}:${c.key}`).sort()).toEqual(['away:decision:grant1', 'home:decision:local', 'home:notice:n2']);
+  expect(boatCards(cfg, attention, [permission, localAsk], [notice('n2', 'local')], NOW)[0]!.cards.map((c) => c.grounds)).toEqual(['away']);
+  // The implicit home is `fleet` on disk: a helm's question with no repo still finds it.
+  const implicit = { repos: cfg.repos, grounds: {}, wharves: cfg.wharves, glass: { port: 4949, mirror: 'cloud' } } as unknown as Config;
+  const helmAsk: DecisionMeta = { ...localAsk, key: 'decision:helm', repo: undefined, grounds: 'fleet' };
+  const [home] = boatCards(implicit, [item({ kind: 'decision', key: helmAsk.key, note: helmAsk.title })], [helmAsk], [], NOW);
+  expect(home!.cards).toEqual([expect.objectContaining({ key: 'decision:helm', grounds: 'home' })]);
+});
+
 it('a set over the wharf’s limit keeps what asks for attention first', () => {
   const attention = Array.from({ length: BOAT_CARDS_MAX + 20 }, (_, i) =>
     item({ kind: 'dispatch-progress', key: `progress:work:${i}`, repo: 'remote', quiet: true, at: new Date(NOW - i * 1000).toISOString() }));
@@ -58,6 +76,42 @@ it('a set over the wharf’s limit keeps what asks for attention first', () => {
   const cards = boatCards(cfg, attention, [permission], [], NOW)[0]!.cards;
   expect(cards).toHaveLength(BOAT_CARDS_MAX);
   expect(cards[0]).toMatchObject({ family: 'permission' });
+});
+
+describe('a review card', () => {
+  const mirrored = { ...cfg, repos: { ...cfg.repos, web: { path: '/x/web' } }, grounds: { ...cfg.grounds, home: { repos: ['local', 'web'] } }, glass: { port: 4949, mirror: 'cloud' } } as Config;
+  const reviewCard = () => boatCards(mirrored, reviewShown(), [], [], NOW)[0]!.cards.find((c) => c.family === 'review')!;
+
+  it('with a drafted round offers Submit review with its verdict and PR, and says what it posts', () => {
+    draftReview('request_changes');
+    const card = reviewCard();
+    expect(card).toMatchObject({ grounds: 'home', key: REVIEW_KEY, links: [{ label: 'Open PR', url: 'https://github.com/acme/web/pull/42' }] });
+    expect(card.actions).toEqual([{ kind: 'review-submit', event: 'REQUEST_CHANGES', pr: 42 }, { kind: 'seen' }]);
+    expect(card.summary).toBe('Ready to post: Request changes · 2 comments\n\nThe retry loop reads well.\nOne blocker: a retry can charge twice.\nDetails inline.');
+    // What the boat sends is what the wharf accepts, field for field.
+    expect(boatCardInput(JSON.parse(JSON.stringify(card)))).toEqual(card);
+  });
+
+  it('offers Approve only while the draft’s verdict is approve', () => {
+    for (const verdict of ['request_changes', 'comment'] as const) {
+      draftReview(verdict);
+      expect(reviewCard().actions!.filter((a) => a.kind === 'review-approve')).toEqual([]);
+    }
+    draftReview('approve');
+    expect(reviewCard().actions).toEqual([{ kind: 'review-submit', event: 'APPROVE', pr: 42 }, { kind: 'review-approve', pr: 42 }, { kind: 'seen' }]);
+    expect(reviewCard().summary).toBe('Ready to post: Approve · no comments');
+  });
+
+  it('offers no post once the round is posted or the PR moved past its draft', () => {
+    draftReview('approve');
+    pushAfterDraft();
+    expect(reviewCard().actions).toEqual([{ kind: 'seen' }]);
+    draftReview('approve');
+    const item = readReview(REVIEW_KEY)!;
+    item.rounds[0]!.state = 'posted';
+    writeReview(item);
+    expect(reviewCard().actions).toEqual([{ kind: 'seen' }]);
+  });
 });
 
 let home: string;
@@ -106,4 +160,32 @@ it('the daemon restates a changed set, an unchanged one only now and then, and w
   fail = false;
   await publishBoatCards(NOW + 2 * CARDS_RESTATE_MS + 2_000 + CARDS_RETRY_MS + 15_000);
   expect(posts).toHaveLength(4);
+});
+
+it('with reviews on, a mirrored grounds’ drafted review is restated as its card', async () => {
+  fs.writeFileSync(path.join(home, 'config.toml'), `
+[repos.web]
+path = '${home.replaceAll('\\', '/')}'
+[wharves.cloud]
+url = 'https://wharf.invalid'
+account = 'person'
+tokenEnv = 'LOBSTAH_TEST_CARDS_TOKEN'
+[glass]
+mirror = 'cloud'
+[reviews]
+enabled = true
+`);
+  draftReview('approve');
+  const item = readReview(REVIEW_KEY)!;
+  item.rounds[0]!.notification = { kind: 'needs-you', at: new Date(NOW - 60_000).toISOString(), text: 'Draft ready (needs you): acme/web#42 · approve · 0 blocking' };
+  writeReview(item);
+  const posts: Array<{ cards: Array<{ family: string; actions: unknown[] }> }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/cards/answers')) return Response.json([]);
+    posts.push(JSON.parse(String(init.body)));
+    return Response.json({ changed: 1 });
+  }));
+  const { publishBoatCards } = await import('../src/wharf-cards.js');
+  await publishBoatCards(NOW);
+  expect(posts[0]!.cards.find((c) => c.family === 'review')).toMatchObject({ grounds: 'home', title: 'Draft ready (needs you): acme/web#42 · approve · 0 blocking', actions: [{ kind: 'review-submit' }, { kind: 'review-approve' }, { kind: 'seen' }] });
 });

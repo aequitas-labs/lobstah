@@ -1,7 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { BackendError, DecisionError, GrantError, backendScopes, lobstahHome, loadConfig, readDecision, readDecisionAnswer, uniqueTempPath, wharfFor } from '@lobstah/core';
-import type { BackendScope, CardAnswerReceipt, Config, TendAttention } from '@lobstah/core';
+import {
+  BackendError, DecisionError, GrantError, cardScopes, latestRound, lobstahHome, loadConfig, readDecision, readDecisionAnswer, readReview, readRoundDraft, reviewAttention,
+  unansweredReviewDecisions, uniqueTempPath, wharfFor,
+} from '@lobstah/core';
+import type { BackendScope, CardAnswerReceipt, Config, GlassReviewEvent, TendAttention } from '@lobstah/core';
+import { draftComments, postReview } from '@lobstah/pick';
 import { answerKey } from './decision-answer.js';
 import { applyPermissionAnswer } from './grants-cli.js';
 import { writeAck } from './acks.js';
@@ -14,6 +18,11 @@ export interface ReceiptOutcome { state: 'applied' | 'refused'; outcome: string 
 export const ANSWERS_CHECK_MS = 10_000;
 /** What a boat with `remoteAnswers = false` says to an Allow from its wharf. */
 export const ALLOW_HERE_ONLY = 'This boat takes Allow only in its own glass';
+/** What a boat with `remoteAnswers = false` says to a review post from its wharf. */
+export const REVIEWS_HERE_ONLY = 'This boat posts reviews only from its own glass';
+/** What a boat says to a review post when the PR or its draft moved since the button was shown. */
+export const REVIEW_CHANGED = 'The PR changed since this draft. Open it in the glass.';
+const CHANGED_SINCE = 'This card changed on its boat since; answer it as it stands now';
 
 type Ledger = { state: 'applying' | 'applied' | 'refused'; outcome?: string };
 /** This boat's record of each receipt it took: written before applying and after, so a receipt applies once across retries and restarts. */
@@ -66,7 +75,7 @@ export function applyReceipt(cfg: Pick<Config, 'wharfRemoteAnswers'>, wharf: str
   const grants = r.family === 'permission' && !!option?.startsWith('Allow');
   if (grants && cfg.wharfRemoteAnswers?.[wharf] === false) return finish('refused', ALLOW_HERE_ONLY);
   const item = attention.find((a) => a.key === r.key);
-  if (!item || item.stateHash !== r.stateHash) return finish('refused', 'This card changed on its boat since; answer it as it stands now');
+  if (!item || item.stateHash !== r.stateHash) return finish('refused', CHANGED_SINCE);
   writeLedger(file, { state: 'applying' });
   try {
     if (r.action.kind === 'seen') {
@@ -82,6 +91,55 @@ export function applyReceipt(cfg: Pick<Config, 'wharfRemoteAnswers'>, wharf: str
   }
 }
 
+/** A review round a person may post from the wharf, and what it posts: drafted, unposted, at the PR's head, with every decision answered. */
+export interface DraftedReview { round: string; event: GlassReviewEvent; pr: number; comments: number; body: string }
+export function draftedReview(key: string): DraftedReview | undefined {
+  const item = readReview(key);
+  const r = item && latestRound(item);
+  if (!item || !r || r.state !== 'drafted' || r.headSha !== item.pr.headSha) return undefined;
+  const draft = readRoundDraft(key, r.id);
+  if ('error' in draft || unansweredReviewDecisions({ ...r, decisions: draft.decisions }).length) return undefined;
+  // The verdict the local glass's button posts for this draft.
+  const event = draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT';
+  return { round: r.id, event, pr: item.pr.number, comments: draftComments(draft).length, body: draft.body };
+}
+
+/** This boat's items its cards stand on: tend's attention, and its review notifications while reviews are on. */
+export function boatAttention(cfg: Pick<Config, 'reviews'>, now: number): TendAttention[] {
+  return [...buildTendReport(now).attention, ...(cfg.reviews.enabled ? reviewAttention(now) : [])];
+}
+
+/**
+ * Post a drafted review a person confirmed in Slack, as the local glass's
+ * button would, with `by: slack`. It posts only the exact card state
+ * answered, only while the PR's head is still the draft's, only once, and
+ * never on a boat that keeps its answers to its own glass.
+ */
+export async function applyReviewPost(
+  cfg: Pick<Config, 'wharfRemoteAnswers'>, wharf: string, r: CardAnswerReceipt, attention: TendAttention[], post: typeof postReview = postReview,
+): Promise<ReceiptOutcome> {
+  const file = ledgerFile(wharf, r.id);
+  const prior = readLedger(file);
+  if (prior && prior.state !== 'applying') return { state: prior.state, outcome: prior.outcome ?? '' };
+  const finish = (state: ReceiptOutcome['state'], outcome: string): ReceiptOutcome => { writeLedger(file, { state, outcome }); return { state, outcome }; };
+  if (cfg.wharfRemoteAnswers?.[wharf] === false) return finish('refused', REVIEWS_HERE_ONLY);
+  // Posted before a crash, not yet recorded: the round says so.
+  const stored = readReview(r.key);
+  const round = stored && latestRound(stored);
+  if (prior?.state === 'applying' && round?.state === 'posted' && round.by === 'slack') return finish('applied', 'posted');
+  const item = attention.find((a) => a.key === r.key);
+  if (!item || item.stateHash !== r.stateHash) return finish('refused', CHANGED_SINCE);
+  const event = r.action.kind === 'review-approve' ? 'APPROVE' : r.action.kind === 'review-submit' ? r.action.event : undefined;
+  const draft = draftedReview(r.key);
+  if (!event || !draft || draft.event !== event) return finish('refused', REVIEW_CHANGED);
+  writeLedger(file, { state: 'applying' });
+  const out = await post(r.key, { by: 'slack', event });
+  if (out.posted) return finish('applied', 'posted');
+  // A push GitHub saw just before the post leaves the round stale: the person hears that the PR changed.
+  return finish('refused', draftedReview(r.key) ? out.why : REVIEW_CHANGED);
+}
+const postsReview = (r: CardAnswerReceipt) => r.action.kind === 'review-submit' || r.action.kind === 'review-approve';
+
 let checkedAt = 0;
 /**
  * The daemon's remote check: take the answers people gave this boat's cards
@@ -95,7 +153,8 @@ export async function applyWharfAnswers(now = Date.now(), log: (m: string) => vo
   if (timed) checkedAt = now;
   const cfg = loadConfig();
   const byWharf = new Map<string, Extract<BackendScope, { kind: 'wharf' }>>();
-  for (const s of backendScopes(cfg)) if (s.kind === 'wharf' && !byWharf.has(s.wharf!)) byWharf.set(s.wharf!, s);
+  // A mirrored grounds' cards are answered on its mirror's wharf.
+  for (const s of cardScopes(cfg)) if (!byWharf.has(s.wharf)) byWharf.set(s.wharf, s);
   let attention: TendAttention[] | undefined;
   let applied = 0;
   for (const [wharf, scope] of byWharf) {
@@ -112,8 +171,8 @@ export async function applyWharfAnswers(now = Date.now(), log: (m: string) => vo
       continue;
     }
     for (const r of Array.isArray(receipts) ? receipts : []) {
-      attention ??= buildTendReport(now).attention;
-      const outcome = applyReceipt(cfg, wharf, r, attention);
+      attention ??= boatAttention(cfg, now);
+      const outcome = postsReview(r) ? await applyReviewPost(cfg, wharf, r, attention) : applyReceipt(cfg, wharf, r, attention);
       if (outcome.state === 'applied') applied++;
       try {
         // The receipt's own id keys the report: a retried report is the same report.

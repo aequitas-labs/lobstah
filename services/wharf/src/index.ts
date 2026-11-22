@@ -8,7 +8,7 @@ import type { Command } from './account.js';
 export { Account };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     let cors: string | undefined;
     const respond = (response: Response) => {
       if (!cors) return response;
@@ -24,7 +24,7 @@ export default {
       if (api && request.headers.has('Cookie')) throw new ApiError(401, 'the API accepts bearer tokens, not cookies');
       if (!api && url.origin !== origins.glass) throw new ApiError(404, 'unknown wharf host');
       // Slack calls the API host with its own signature, never a bearer or a cookie.
-      if (api && url.pathname.startsWith('/slack/')) return await slackIngress(request, env);
+      if (api && url.pathname.startsWith('/slack/')) return await slackIngress(request, env, ctx);
       if (api && origin) cors = origins.glass;
       if (api && request.method === 'OPTIONS') return respond(new Response(null, { status: 204, headers: {
         'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key, X-Lobstah-Helm, X-File-Name',

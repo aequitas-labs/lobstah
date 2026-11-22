@@ -52,13 +52,15 @@ beforeEach(async () => {
     const url = input instanceof Request ? input.url : String(input);
     if (!url.startsWith('https://slack.com/api/')) return real(input, init);
     if (slackDown) return new Response('upstream error', { status: 503 });
+    // Each message's star is slack-ingress.test.ts's: these tests count messages.
+    if (url.endsWith('/reactions.add')) return Response.json({ ok: true });
     posted.push({ method: url.slice('https://slack.com/api/'.length), body: JSON.parse(String(init?.body)) });
     return Response.json({ ok: true, ts: `1800000000.${String(++n).padStart(6, '0')}` });
   });
   const linkedAt = '2026-10-30T00:00:00.000Z';
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 async function boat(name: string, permissions: string[]) {
@@ -69,6 +71,12 @@ async function helm() {
   const b = await boat(`helm-${++sequence}`, ['work', 'helm']);
   expect((await call('helm/take', { session: 'seat', take: true }, b.token, 'seat')).status).toBe(200);
   return b;
+}
+/** A boat's card names the grounds: the wharf knows the grounds, and a DM still goes to the helm. */
+async function knownGrounds(grounds: string) {
+  const reader = await boat(`${grounds}-boat`, ['read']);
+  const card = { family: 'notice', key: `${grounds}-nightly`, grounds, title: `Nightly build passed on ${grounds}`, stateHash: '1', sourceAt: new Date().toISOString(), quiet: true };
+  expect((await call('cards', { cards: [card] }, reader.token)).status).toBe(200);
 }
 async function decision(b: { token: string }, id: string) {
   await call('documents', { id, kind: 'decision', grounds: 'away', title: 'Keep the PR cache?', options: ['Keep the cache', 'Drop the cache'] }, b.token, 'seat');
@@ -187,7 +195,7 @@ it('asked while the helm sleeps: the receipt says so; when a helm takes its seat
   await send(await signed('/slack/events', dm)); await send(await signed('/slack/events', dm));
   await deliver();
   const receipt = () => posted.filter((p) => p.body.text?.startsWith('Request:')).at(-1)!;
-  expect(section(receipt())).toContain('Received · waiting for the helm');
+  expect(section(receipt())).toContain('Queued — the helm will pick this up when it’s back');
   const b = await helm();
   await deliver();
   expect(receipt().method).toBe('chat.update');
@@ -199,24 +207,24 @@ it('asked while the helm sleeps: the receipt says so; when a helm takes its seat
   expect(section(receipt())).toContain('Dispatched as nightly');
 });
 
-it('delivers decisions and PR watches only for the link’s chosen grounds', async () => {
+it('sends the linked person one DM for each card from every boat and wharf grounds on the account', { timeout: 30_000 }, async () => {
   const b = await helm();
   for (const grounds of ['away', 'home']) {
-    expect((await call('documents', { id: `${grounds}-decision`, kind: 'decision', grounds, title: `${grounds} decision`, options: ['Yes'] }, b.token, 'seat')).status).toBe(200);
+    expect((await call('documents', { id: `${grounds}-decision`, kind: 'decision', grounds, title: `Ship the ${grounds} build?`, options: ['Yes'] }, b.token, 'seat')).status).toBe(200);
     await call(`documents/${grounds}-decision/publish`, {}, b.token, 'seat');
   }
   const sourceAt = new Date().toISOString();
   expect((await call('cards', { cards: [
-    { family: 'pr', key: 'away-pr', grounds: 'away', title: 'Allowed PR watch', stateHash: 'open', sourceAt, actions: [{ kind: 'seen' }] },
-    { family: 'pr', key: 'home-pr', grounds: 'home', title: 'Unbound PR watch', stateHash: 'open', sourceAt, actions: [{ kind: 'seen' }] },
-    { family: 'notice', key: 'unknown', title: 'Unassigned notice', stateHash: 'standing', sourceAt },
+    { family: 'pr', key: 'away-pr', grounds: 'away', title: 'PR #412 on away', stateHash: 'open', sourceAt, actions: [{ kind: 'seen' }] },
+    { family: 'pr', key: 'home-pr', grounds: 'home', title: 'PR #418 on home', stateHash: 'open', sourceAt, actions: [{ kind: 'seen' }] },
+    { family: 'notice', key: 'unknown', title: 'Disk almost full', stateHash: 'standing', sourceAt },
   ] }, b.token, 'seat')).status).toBe(200);
-  await deliver();
-  const deliveries = await sql('SELECT c.data FROM slack_deliveries d JOIN cards c ON c.seq=d.card');
-  expect(deliveries.length).toBeGreaterThanOrEqual(2);
-  expect(deliveries.every((row) => JSON.parse(String(row.data)).grounds === 'away')).toBe(true);
-  expect(posted.some((message) => message.body.text.includes('Allowed PR watch'))).toBe(true);
-  expect(posted.some((message) => message.body.text.includes('Unbound PR watch') || message.body.text.includes('home decision') || message.body.text.includes('Unassigned notice'))).toBe(false);
+  const fisher = await boat('fisher', ['read']);
+  expect((await call('cards', { cards: [{ family: 'permission', key: 'fisher-deploy', grounds: 'home', title: 'Allow wrangler deploy', stateHash: 'ask', sourceAt, actions: [{ kind: 'allow-once' }] }] }, fisher.token)).status).toBe(200);
+  await deliver(); await deliver();
+  const titles = ['Ship the away build?', 'Ship the home build?', 'PR #412 on away', 'PR #418 on home', 'Disk almost full', 'Allow wrangler deploy'];
+  for (const title of titles) expect(posted.filter((m) => m.method === 'chat.postMessage' && m.body.text.includes(title)), title).toHaveLength(1);
+  expect(posted.every((m) => m.body.channel === 'D1')).toBe(true);
 });
 
 it('keeps a dispatch’s document on its owning grounds', async () => {
@@ -227,7 +235,7 @@ it('keeps a dispatch’s document on its owning grounds', async () => {
   expect(await (await call('documents/owned-question')).json()).toMatchObject({ grounds: 'away' });
 });
 
-it('rebinding stops queued deliveries, old buttons and pending boat answers for removed grounds', async () => {
+it('disconnecting stops queued deliveries, old buttons and pending boat answers', async () => {
   const b = await helm();
   const permission = { family: 'permission', key: 'permission-away', grounds: 'away', title: 'Allow deployment', stateHash: 'ask', sourceAt: new Date().toISOString(), actions: [{ kind: 'allow-once' }] };
   expect((await call('cards', { cards: [permission] }, b.token, 'seat')).status).toBe(200);
@@ -235,44 +243,31 @@ it('rebinding stops queued deliveries, old buttons and pending boat answers for 
   const handle = (await sql("SELECT handle FROM slack_actions WHERE action=?", JSON.stringify({ kind: 'allow-once' })))[0]!.handle as string;
   await press(handle);
   expect(await (await call('cards/answers', undefined, b.token)).json()).toHaveLength(1);
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: new Date().toISOString(), grounds: ['home'] });
+  // Disconnect, as the glass does it: D1 first, then the account.
+  await env.AUTH_DB.prepare('UPDATE slackLink SET revokedAt=? WHERE person=?').bind(new Date().toISOString(), 'a').run();
+  await env.ACCOUNTS.getByName('a').linkSlack('a', null);
   await press(handle);
   expect(await (await call('cards/answers', undefined, b.token)).json()).toEqual([]);
-  expect(await sql("SELECT json_extract(data,'$.state') AS state FROM card_answers")).toEqual([{ state: 'refused' }]);
+  expect(await sql("SELECT json_extract(data,'$.state') AS state, json_extract(data,'$.outcome') AS outcome FROM card_answers")).toEqual([{ state: 'refused', outcome: 'Slack was disconnected' }]);
+  expect(await sql('SELECT * FROM slack_actions')).toEqual([]);
   const sent = posted.length;
   await call('cards', { cards: [{ ...permission, stateHash: 'ask-again' }] }, b.token, 'seat');
   await deliver();
   expect(posted).toHaveLength(sent);
-  expect(await sql('SELECT * FROM slack_deliveries')).toEqual([]);
 });
 
-it('asks which linked grounds should handle an ambiguous DM before waking or dispatching', async () => {
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: new Date().toISOString(), grounds: ['away', 'home'] });
-  const message = async (ts: string, text: string, threadTs?: string) => send(await signed('/slack/events', JSON.stringify({ type: 'event_callback', team_id: 'T1', event_id: `Ev${ts.replace('.', '')}`, event: {
-    type: 'message', channel_type: 'im', channel: 'D1', user: 'U1', ts, text, ...(threadTs ? { thread_ts: threadTs } : {}),
-  } })));
-  const top = '1700000000.000100';
-  expect((await message(top, 'Investigate the build')).status).toBe(200);
-  expect(await (await call('requests')).json()).toEqual([]);
-  expect(await sql("SELECT kind FROM events WHERE kind='human-request'")).toEqual([]);
-  expect(posted.at(-1)!.body.text).toContain('Which grounds');
-  expect(posted.at(-1)!.body.text).toContain('away, home');
-  const prompts = posted.length;
-  await message(top, 'Investigate the build');
-  expect(posted).toHaveLength(prompts);
-  await message('1700000000.000200', 'private', top);
-  expect(await (await call('requests')).json()).toEqual([]);
-  await message('1700000000.000300', 'home', top);
-  await message('1700000000.000300', 'home', top);
+it('a DM goes to the helm on its seat’s grounds, however many grounds the wharf knows, and asks nothing', async () => {
+  await knownGrounds('away'); await knownGrounds('home');
+  const b = await boat('away-helm', ['work', 'helm']);
+  expect((await call('helm/take', { session: 'seat', grounds: 'away' }, b.token, 'seat')).status).toBe(200);
+  const dm = JSON.stringify({ type: 'event_callback', team_id: 'T1', event_id: 'EvOne', event: { type: 'message', channel_type: 'im', channel: 'D1', user: 'U1', ts: '1700000000.000100', text: 'Investigate the build' } });
+  expect((await send(await signed('/slack/events', dm))).status).toBe(200);
   const requests = await (await call('requests')).json<WharfHumanRequest[]>();
-  expect(requests).toHaveLength(1);
-  expect(requests[0]).toMatchObject({ grounds: 'home', text: 'Investigate the build', kind: 'work' });
-  expect(requests[0]!.followUps).toBeUndefined();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt: new Date().toISOString(), grounds: ['away'] });
-  await message('1700000000.000400', 'A follow-up after removing home', top);
-  expect((await (await call('requests')).json<WharfHumanRequest[]>())[0]!.followUps).toBeUndefined();
-  const b = await helm();
+  expect(requests).toMatchObject([{ grounds: 'away', text: 'Investigate the build', kind: 'work' }]);
+  expect(await sql("SELECT kind FROM events WHERE kind='human-request'")).toHaveLength(1);
+  await deliver();
+  expect(posted.some((p) => p.body.text.includes('Which grounds'))).toBe(false);
   const dispatch = { id: 'selected-job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Investigate the build', request: requests[0]!.id };
-  expect((await call('dispatches', { ...dispatch, grounds: 'away' }, b.token, 'seat')).status).toBe(400);
-  expect((await call('dispatches', { ...dispatch, grounds: 'home' }, b.token, 'seat')).status).toBe(200);
+  expect((await call('dispatches', { ...dispatch, grounds: 'home' }, b.token, 'seat')).status).toBe(400);
+  expect((await call('dispatches', { ...dispatch, grounds: 'away' }, b.token, 'seat')).status).toBe(200);
 });

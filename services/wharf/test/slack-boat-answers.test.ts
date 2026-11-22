@@ -47,7 +47,7 @@ beforeEach(async () => {
   const linkedAt = '2026-10-30T00:00:00.000Z';
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 async function boat(name: string, permissions: string[]) {
@@ -112,6 +112,48 @@ it('a refused or expired answer says why, and the card can be answered again', a
   expect(await (await call('cards/answers', undefined, fisher.token)).json()).toEqual([]);
   await deliver();
   expect(context()).toContain('No expired: its boat did not take it in time; answer again');
+});
+
+const review = (actions: unknown[], family = 'review') => ({ family, key: 'review:acme/web#42', stateHash: 'drafted-1', sourceAt: '2026-10-30T12:00:00.000Z',
+  title: 'Draft ready (needs you): acme/web#42 · approve · 0 blocking', summary: 'Ready to post: Approve · no comments', grounds: 'home',
+  links: [{ label: 'Open PR', url: 'https://github.com/acme/web/pull/42' }], actions });
+const reviewButtons = (family = 'Review') => Object.fromEntries(posted.filter((p) => p.body.text.startsWith(`${family}:`)).at(-1)!.body.blocks
+  .filter((b) => b.type === 'actions').flatMap((b) => b.elements as Array<Element & { confirm?: unknown }>).map((e) => [e.text.text, e]));
+const confirm = (verdict: string) => ({
+  title: { type: 'plain_text', text: 'Submit this review to GitHub?' }, text: { type: 'plain_text', text: `It posts ${verdict} on PR #42 as you.` },
+  confirm: { type: 'plain_text', text: 'Submit' }, deny: { type: 'plain_text', text: 'Cancel' },
+});
+
+it('a boat’s drafted review offers Submit review and Approve in Slack, each behind a confirm dialog, and a press is a receipt for that boat', async () => {
+  const fisher = await boat('fisher', ['mirror', 'read']);
+  expect((await call('cards', { cards: [review([{ kind: 'review-submit', event: 'APPROVE', pr: 42 }, { kind: 'review-approve', pr: 42 }, { kind: 'seen' }])] }, fisher.token)).status).toBe(200);
+  await deliver();
+  const shown = reviewButtons();
+  expect(Object.keys(shown)).toEqual(['Submit review', 'Approve', 'Open in glass', 'Open PR']);
+  expect(shown['Submit review']!.confirm).toEqual(confirm('Approve'));
+  expect(shown.Approve!.confirm).toEqual(confirm('Approve'));
+  expect(shown['Open in glass']!.confirm).toBeUndefined();
+  await press(shown['Submit review']!.value!);
+  const [receipt] = await (await call('cards/answers', undefined, fisher.token)).json<CardAnswerReceipt[]>();
+  expect(receipt).toMatchObject({ family: 'review', key: 'review:acme/web#42', stateHash: 'drafted-1', action: { kind: 'review-submit', event: 'APPROVE', pr: 42 }, state: 'pending' });
+  await deliver();
+  expect((posted.filter((p) => p.body.text.startsWith('Review:')).at(-1)!.body.blocks.find((b) => b.type === 'context')!.elements![0] as { text: string }).text)
+    .toContain('Submit review recorded · awaiting its boat');
+});
+
+it('a request-changes draft offers no Approve, and only a boat’s review card posts from Slack', async () => {
+  const fisher = await boat('fisher', ['mirror', 'read']);
+  expect((await call('cards', { cards: [review([{ kind: 'review-submit', event: 'REQUEST_CHANGES', pr: 42 }, { kind: 'seen' }])] }, fisher.token)).status).toBe(200);
+  await deliver();
+  expect(Object.keys(reviewButtons())).toEqual(['Submit review', 'Open in glass', 'Open PR']);
+  expect(reviewButtons()['Submit review']!.confirm).toEqual(confirm('Request changes'));
+  // The same actions on a card of another family are not offered.
+  expect((await call('cards', { cards: [review([{ kind: 'review-submit', event: 'APPROVE', pr: 42 }, { kind: 'review-approve', pr: 42 }], 'pr')] }, fisher.token)).status).toBe(200);
+  await deliver();
+  expect(Object.keys(reviewButtons('PR'))).toEqual(['Open in glass', 'Open PR']);
+  // A review action names a known verdict and its PR.
+  expect((await call('cards', { cards: [review([{ kind: 'review-submit', event: 'MERGE', pr: 42 }])] }, fisher.token)).status).toBe(400);
+  expect((await call('cards', { cards: [review([{ kind: 'review-approve' }])] }, fisher.token)).status).toBe(400);
 });
 
 it('tells the card’s boat on its socket to read its answers, and no other boat', async () => {

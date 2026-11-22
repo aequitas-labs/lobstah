@@ -139,6 +139,32 @@ export function openChannel(scope: Scope): WharfChannel | undefined {
   return channel;
 }
 
+/**
+ * The mirror's socket as the daemon's channel for its wharf account and
+ * credential, so a mirrored grounds' cards and answers ride the socket the
+ * mirror already holds, never an HTTP poll. `socket` builds the mirror's
+ * socket around the channel's handlers. Undefined, and nothing built, when
+ * there is no credential or a channel for it is open already.
+ */
+export function adoptChannel(scope: Scope, socket: (on: { message: (m: ServerSocketMessage) => void; state: (open: boolean) => void }) => ChannelSocket): WharfChannel | undefined {
+  let credential: string;
+  try {
+    credential = wharfCredential(scope);
+  } catch {
+    return undefined;
+  }
+  const key = credential ? channelKey(scope, credential) : undefined;
+  if (!key || channels.has(key)) return undefined;
+  const channel = new WharfChannel(socket);
+  channels.set(key, channel);
+  return channel;
+}
+
+/** Stop using a channel: the mirror stopping closes the socket it lent. */
+export function dropChannel(channel: WharfChannel): void {
+  for (const [key, held] of channels) if (held === channel) channels.delete(key);
+}
+
 /** The channel already open for a scope, if the daemon opened one. A one-shot command has none. */
 export function channelFor(scope: Scope): WharfChannel | undefined {
   try {
