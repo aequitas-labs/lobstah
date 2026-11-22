@@ -34,8 +34,8 @@ export type FetchLike = (url: string, init: { method: string; headers: Record<st
 
 export type PostResult = { posted: true; reviewId: string; by: string } | { posted: false; why: string };
 
-/** Who asked for the post: the CLI, a glass button, or automatic publishing. */
-export type PostBy = 'cli' | 'auto' | 'glass';
+/** Who asked for the post: the CLI, a glass button, a confirmed Slack button, or automatic publishing. */
+export type PostBy = 'cli' | 'auto' | 'glass' | 'slack';
 
 type Opts = { token?: () => string; fetch?: FetchLike; now?: number };
 
@@ -127,7 +127,7 @@ function sameFinding(left: ReviewComment, right: ReviewComment): boolean {
 }
 
 /** Keep one marked blocker for a duplicated finding; unrelated points at the same line survive. */
-function draftComments(draft: { comments: ReviewComment[]; blocking: ReviewComment[] }): ReviewComment[] {
+export function draftComments(draft: { comments: ReviewComment[]; blocking: ReviewComment[] }): ReviewComment[] {
   return [
     ...draft.comments.filter(comment => !draft.blocking.some(blocker => sameFinding(comment, blocker))),
     ...draft.blocking.filter((blocker, index) => !draft.blocking.slice(0, index).some(previous => sameFinding(previous, blocker)))
@@ -402,10 +402,11 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   const event = opts.event ?? (opts.by === 'auto' && draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT');
   if (!['COMMENT', 'REQUEST_CHANGES', 'APPROVE'].includes(event)) return { posted: false, why: 'invalid review event' };
   const expected = draft.verdict === 'approve' ? 'APPROVE' : draft.blocking.length ? 'REQUEST_CHANGES' : 'COMMENT';
-  if (opts.by === 'glass' && event !== expected) return { posted: false, why: 'the action does not match the draft verdict' };
+  // A person's button posts the verdict it showed, never another.
+  if ((opts.by === 'glass' || opts.by === 'slack') && event !== expected) return { posted: false, why: 'the action does not match the draft verdict' };
   if (opts.by === 'auto' && !['APPROVE', 'REQUEST_CHANGES'].includes(event)) return { posted: false, why: 'automatic posting is only available for approve and request-changes verdicts' };
   if (opts.by === 'auto' && event !== expected) return { posted: false, why: 'automatic posting must follow the draft verdict' };
-  if (event === 'APPROVE' && (!['glass', 'auto'].includes(opts.by) || draft.verdict !== 'approve' || draft.blocking.length)) return { posted: false, why: 'approval requires an approve verdict with no blocking findings' };
+  if (event === 'APPROVE' && (!['glass', 'slack', 'auto'].includes(opts.by) || draft.verdict !== 'approve' || draft.blocking.length)) return { posted: false, why: 'approval requires an approve verdict with no blocking findings' };
   if (event === 'REQUEST_CHANGES' && !draft.blocking.length) return { posted: false, why: 'request changes requires blocking findings' };
   if (opts.by === 'auto') {
     const identity = loadConfig().reviews.identity?.toLowerCase();

@@ -559,7 +559,9 @@ export class Account extends DurableObject<Env> {
       // While an answer awaits its boat, or was applied, the card offers nothing more.
       controllable: (card) => {
         if (card.relay && (card.relay.state === 'awaiting boat' || card.relay.state === 'applied')) return [];
-        const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm'] : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen'];
+        // A boat's review card posts its drafted round from here, through that boat.
+        const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm']
+          : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', ...(card.family === 'review' ? ['review-submit', 'review-approve'] : [])];
         return card.actions.filter((a) => kinds.includes(a.kind));
       },
       boat: (card) => this.cardBoat(card),

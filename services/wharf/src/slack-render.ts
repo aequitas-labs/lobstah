@@ -1,4 +1,4 @@
-import type { GlassCard, GlassCardAction } from '../../../packages/core/src/backend-model.js';
+import type { GlassCard, GlassCardAction, GlassReviewEvent } from '../../../packages/core/src/backend-model.js';
 
 /** Slack's own limits, and the plan's tighter budget inside them. */
 export const SLACK_BUDGET = {
@@ -17,7 +17,14 @@ export type SlackBlock =
   | { type: 'header'; text: { type: 'plain_text'; text: string; emoji: false } }
   | { type: 'context'; elements: Array<{ type: 'mrkdwn'; text: string }> }
   | { type: 'section'; text: { type: 'mrkdwn'; text: string } }
-  | { type: 'actions'; elements: Array<{ type: 'button'; text: { type: 'plain_text'; text: string; emoji: false }; action_id: string; url?: string; value?: string }> };
+  | { type: 'actions'; elements: Array<{ type: 'button'; text: { type: 'plain_text'; text: string; emoji: false }; action_id: string; url?: string; value?: string; confirm?: SlackConfirm }> };
+/** Slack's own confirm dialog on a button: nothing is sent until the person confirms. */
+export interface SlackConfirm {
+  title: { type: 'plain_text'; text: string };
+  text: { type: 'plain_text' | 'mrkdwn'; text: string };
+  confirm: { type: 'plain_text'; text: string };
+  deny: { type: 'plain_text'; text: string };
+}
 /** A chat.postMessage or chat.update body, less its channel and timestamp. */
 export interface SlackMessage {
   text: string;
@@ -105,11 +112,25 @@ function controlLabel(action: GlassCardAction, optionNumber: number): string {
     case 'message-helm': return 'Message the helm…';
     case 'review-mute': return 'Mute this PR';
     case 'review-unmute': return 'Unmute';
+    case 'review-submit': return 'Submit review';
+    case 'review-approve': return 'Approve';
     default: return action.kind;
   }
 }
+const VERDICT: Record<GlassReviewEvent, string> = { APPROVE: 'Approve', REQUEST_CHANGES: 'Request changes', COMMENT: 'Comment' };
+/** A review post goes to GitHub as the person: its button asks first, naming the verdict and the PR. */
+function confirmFor(action: GlassCardAction): SlackConfirm | undefined {
+  if (action.kind !== 'review-submit' && action.kind !== 'review-approve') return undefined;
+  const verdict = VERDICT[action.kind === 'review-approve' ? 'APPROVE' : action.event];
+  return {
+    title: { type: 'plain_text', text: 'Submit this review to GitHub?' },
+    text: { type: 'plain_text', text: `It posts ${verdict} on PR #${action.pr} as you.` },
+    confirm: { type: 'plain_text', text: 'Submit' },
+    deny: { type: 'plain_text', text: 'Cancel' },
+  };
+}
 type Button = Extract<SlackBlock, { type: 'actions' }>['elements'][number];
-const button = (label: string, action: string, fields: { url?: string; value?: string }): Button =>
+const button = (label: string, action: string, fields: { url?: string; value?: string; confirm?: SlackConfirm }): Button =>
   ({ type: 'button', text: { type: 'plain_text', text: clip(label, SLACK_BUDGET.buttonLabel), emoji: false }, action_id: action, ...fields });
 
 /** What a repost says: canned words only, never the helm's. */
@@ -159,7 +180,10 @@ export function renderCard(card: GlassCard, glassOrigin: string, controls: CardC
   const seen = live.find((c) => c.action.kind === 'seen');
   const pressed = live.filter((c) => c.action.kind !== 'seen');
   let option = 0;
-  const answers = pressed.map((c, i) => button(controlLabel(c.action, c.action.kind === 'answer' ? ++option : 0), `card-action-${i}`, { value: c.handle }));
+  const answers = pressed.map((c, i) => {
+    const confirm = confirmFor(c.action);
+    return button(controlLabel(c.action, c.action.kind === 'answer' ? ++option : 0), `card-action-${i}`, { value: c.handle, ...(confirm ? { confirm } : {}) });
+  });
   const links = [
     button(card.terminal || pressed.length || !ask.length ? 'Open in glass' : 'Answer in glass', 'open-card', { url: open, ...(seen ? { value: seen.handle } : {}) }),
     ...card.links.slice(0, SLACK_BUDGET.linkButtons).map((l, i) => button(l.label, `open-link-${i}`, { url: l.url })),
