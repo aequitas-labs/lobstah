@@ -611,3 +611,18 @@ it('shows linked cards inline, answers one from the thread, and keeps previous a
   expect(g.$$('.thread-card-entry')[1]?.querySelector('.danswered')?.textContent).toContain('answered');
 });
 
+
+it('keeps the new-decision alert away while Threads is open, the list or a conversation, and brings it back on leaving', async () => {
+  const d = fleet(), detail = helmThread(d);
+  const g = await page(d, { hash: '#prs', get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
+  expect(g.$('.dalert .dalert-open')?.textContent).toContain('2 new decisions');
+  await g.go('#helm');
+  expect(g.$('.dalert')).toBeNull();
+  await click(g, `#helm [data-thread="${ID}"] .dopen`);
+  expect(g.$('.tsheet')).not.toBeNull();
+  expect(g.$('.dalert')).toBeNull();
+  await click(g, '.tsheet .rback');
+  expect(g.$('.dalert')).toBeNull();
+  await g.go('#prs');
+  expect(g.$('.dalert .dalert-open')?.textContent).toContain('2 new decisions');
+});

@@ -423,7 +423,8 @@ export function DecisionModal({
 }
 
 /**
- * The new-decision alert, on every tab: a count of unread decisions, polite
+ * The new-decision alert, on every tab but Threads (the list or an open
+ * conversation, where cards show inline): a count of unread decisions, polite
  * to screen readers, never taking focus or closing another modal. Its layer
  * (`--layer-alert`) sits below every modal and backdrop, so an open modal
  * covers it and it shows again when the modal closes. A click opens the
