@@ -362,6 +362,141 @@ describe('orphaned addressed bait', () => {
   });
 });
 
+describe('trap availability notices', () => {
+  function availableNotices(): ReturnType<typeof listNotices> {
+    return listNotices(100).filter((notice) => notice.kind === 'trap-available');
+  }
+
+  function claimDispatch(reg: TrapRegistration, id: string): TrapRegistration {
+    enqueue({ id, repo: reg.repo, brief: 'work', for: `wt:${reg.trapId}` });
+    expect(claimBait(reg)?.id).toBe(id);
+    return readTrap(reg.trapId)!;
+  }
+
+  it('announces an idle sign-on once across repeated parks and sign-ons', () => {
+    const reg = trap('s1', 'web');
+    heartbeatTrap(reg.trapId, { parked: true });
+    trap('s1', 'web');
+    heartbeatTrap(reg.trapId, { parked: true });
+    heartbeatTrap(reg.trapId, { active: true });
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(1);
+  });
+
+  it.each(['working', 'paused', 'needs-decision', 'blocked'] as const)(
+    'never announces a trap parking between turns with a %s claim', (verb) => {
+      const reg = claimDispatch(trap('s1', 'web'), 'catch');
+      appendStatus('catch', 'work', verb, 'still assigned');
+      heartbeatTrap(reg.trapId, { parked: true });
+      heartbeatTrap(reg.trapId, { parked: true });
+      expect(availableNotices()).toHaveLength(0);
+    },
+  );
+
+  it('does not announce a new trap with queued work addressed to it', () => {
+    const reg = trap('s1', 'web');
+    enqueue({ id: 'catch', repo: 'web', brief: 'work', for: `wt:${reg.trapId}` });
+    heartbeatTrap(reg.trapId, { parked: true });
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(0);
+  });
+
+  it.each(['done', 'failed'] as const)('announces once after %s, then again only after another catch', (verb) => {
+    const reg = trap('s1', 'web');
+    heartbeatTrap(reg.trapId, { parked: true });
+    claimDispatch(reg, 'first');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(1);
+    appendStatus('first', 'work', verb, 'finished');
+    heartbeatTrap(reg.trapId, { parked: true });
+    heartbeatTrap(reg.trapId, { parked: true, claimed: null });
+    expect(availableNotices()).toHaveLength(2);
+    claimDispatch(readTrap(reg.trapId)!, 'second');
+    appendStatus('second', 'work', verb, 'finished');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(3);
+  });
+
+  it('does not announce a replacement session holding an unfinished claim', () => {
+    const reg = claimDispatch(trap('s1', 'web'), 'catch');
+    const restarted = signOnTrap({ sessionId: 's2', harness: 'codex', repo: 'web', worktree: reg.worktree,
+      cwd: reg.worktree, ttlMs: TTL_MS, now: Date.now() + TTL_MS + 60_000 });
+    expect('ok' in restarted && restarted.ok.claimed).toBe('catch');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(0);
+    appendStatus('catch', 'work', 'done', 'finished');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(1);
+  });
+
+  it('keeps a free period announced across a session restart', () => {
+    const reg = trap('s1', 'web');
+    heartbeatTrap(reg.trapId, { parked: true });
+    signOnTrap({ sessionId: 's2', harness: 'codex', repo: 'web', worktree: reg.worktree,
+      cwd: reg.worktree, ttlMs: TTL_MS, now: Date.now() + TTL_MS + 60_000 });
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(1);
+  });
+
+  it('keeps a swapped trap quiet while its catch is queued for the replacement session', () => {
+    const reg = claimDispatch(trap('s1', 'web'), 'catch');
+    stowTrap(reg.trapId);
+    releaseCatch(reg);
+    signOnTrap({ sessionId: 's2', harness: 'codex', repo: 'web', worktree: reg.worktree,
+      cwd: reg.worktree, ttlMs: TTL_MS });
+    heartbeatTrap(reg.trapId, { parked: true });
+    claimBait(readTrap(reg.trapId)!);
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(0);
+  });
+
+  it('announces after a released catch leaves no assignment at the trap', () => {
+    const reg = trap('s1', 'web');
+    enqueue({ id: 'catch', repo: 'web', brief: 'work' });
+    claimBait(reg);
+    releaseCatch(readTrap(reg.trapId)!);
+    heartbeatTrap(reg.trapId, { parked: true, claimed: null });
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(1);
+  });
+
+  it('announces after cancellation is finalized, while a cancellation request alone keeps the claim busy', () => {
+    const reg = claimDispatch(trap('s1', 'web'), 'catch');
+    requestCancel('catch', 'work');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(0);
+    releaseCatch(reg);
+    heartbeatTrap(reg.trapId, { parked: true });
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(1);
+  });
+
+  it('waits for all reserved work before announcing availability', () => {
+    const reg = claimDispatch(trap('s1', 'web'), 'first');
+    enqueue({ id: 'next', repo: 'web', brief: 'work', for: `wt:${reg.trapId}` }, 'chore');
+    appendStatus('first', 'work', 'done', 'finished');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(0);
+    expect(claimBait(readTrap(reg.trapId)!)?.id).toBe('next');
+    appendStatus('next', 'chore', 'done', 'finished');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(1);
+  });
+
+  it('does not quiet later free periods as part of the startup batch', () => {
+    const reg = trap('s1', 'web');
+    signOnTrap({ sessionId: 's1', harness: 'claude', repo: 'web', worktree: reg.worktree,
+      cwd: reg.worktree, ttlMs: TTL_MS, batch: 'batch' });
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()[0]?.quiet).toBe(true);
+    claimDispatch(readTrap(reg.trapId)!, 'catch');
+    appendStatus('catch', 'work', 'done', 'finished');
+    heartbeatTrap(reg.trapId, { parked: true });
+    expect(availableNotices()).toHaveLength(2);
+    expect(availableNotices()[1]?.quiet).toBeUndefined();
+  });
+});
+
 describe('releaseCatch and the ghost-trap sweep', () => {
   function caughtTrap(sessionId: string, baitId: string): TrapRegistration {
     enqueue({ id: baitId, repo: 'web', brief: 'x' });

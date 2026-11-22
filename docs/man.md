@@ -1659,8 +1659,11 @@ timeout still awaiting sign-on or first park), `skipped` (live,
 starting, or unresolved, with why), or `failed` (with why). One trap failing
 does not stop the others, and the command exits 1 when any failed.
 
-**Notices.** A trap's start wakes the helm once: `trap-available`, when the
-trap is listening. Its reservation (`trap-starting`), sign-on
+**Notices.** A listening trap wakes the helm with `trap-available` once per
+free period: after an idle start or after its work finishes or is released.
+Active claims and queued work addressed to the trap keep it busy. Parking,
+re-signing, and restarting do not repeat the notice while it stays free.
+Its reservation (`trap-starting`), sign-on
 (`trap-signed-on`), and sign-off (`trap-stowed`) are quiet: tend, the
 digest's `traps` table, and the glass show them. A ghost sweep of an idle
 trap is quiet the same way; a ghost sweep of a trap that held a catch wakes.
