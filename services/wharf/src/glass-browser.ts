@@ -7,6 +7,8 @@ import type { SessionHint } from './glass-page.js';
 import { glassInstall } from './glass-install.js';
 import { completeConnect, connectError, connectUrl, disconnect, personLink, slackConfigured } from './slack-install.js';
 import type { SlackEnv } from './slack-install.js';
+import { SLACK_KINDS } from './slack-outbox.js';
+import type { SlackKind } from './slack-outbox.js';
 
 /**
  * A report's own page, `/report/<key>`, with the key percent-encoded as the
@@ -71,17 +73,29 @@ type Person = { id: string; sessionId: string };
 /** The person's Slack link to their wharf: see it, start connecting, or disconnect. Writes are same-origin only. */
 async function slackRoute(request: Request, env: SlackEnv, route: string, person: Person): Promise<Response> {
   const json = (value: unknown) => Response.json(value, { headers: { 'Cache-Control': 'no-store' } });
+  const account = env.ACCOUNTS.getByName(person.id);
   if (route === 'slack' && request.method === 'GET') {
-    const link = await personLink(env, person.id);
-    return json({ configured: slackConfigured(env), ...(link ? { link: { team: link.team, slackUser: link.slackUser, linkedAt: link.linkedAt } } : {}) });
+    const [link, kinds] = await Promise.all([personLink(env, person.id), account.slackKinds(person.id)]);
+    return json({ configured: slackConfigured(env), kinds, ...(link ? { link: { team: link.team, slackUser: link.slackUser, linkedAt: link.linkedAt } } : {}) });
   }
-  requireThat(request.method === 'POST' && ['slack/connect', 'slack/disconnect'].includes(route), 404, 'browser action not available');
+  requireThat(request.method === 'POST' && ['slack/connect', 'slack/disconnect', 'slack/kinds'].includes(route), 404, 'browser action not available');
   const { glass } = authOrigins(env);
   requireThat(request.headers.get('Origin') === glass, 403, 'same-origin browser action required');
   if (route === 'slack/connect') return json({ url: await connectUrl(env, glass, person.id, person.sessionId) });
+  if (route === 'slack/kinds') return json({ kinds: await account.slackKinds(person.id, await slackKinds(request)) });
   await disconnect(env, person.id);
-  await env.ACCOUNTS.getByName(person.id).linkSlack(person.id, null);
+  await account.linkSlack(person.id, null);
   return json({});
+}
+/** The kind groups a Save names, each one known, or a 400 before anything changes. */
+async function slackKinds(request: Request): Promise<SlackKind[]> {
+  let body: unknown;
+  try { body = JSON.parse(new TextDecoder().decode(await boundedBody(request))); }
+  catch (e) { if (e instanceof ApiError) throw e; throw new ApiError(400, 'invalid JSON'); }
+  const kinds = object(body).kinds;
+  requireThat(Array.isArray(kinds) && kinds.length <= SLACK_KINDS.length, 400, 'kinds must be a list of card kinds');
+  for (const kind of kinds) requireThat(SLACK_KINDS.includes(kind as SlackKind), 400, `Unknown card kind: ${String(kind).slice(0, 40)}`);
+  return [...new Set(kinds as SlackKind[])];
 }
 /** Slack sends the person back here. Linked or not, they land on the boat list, with any reason. */
 async function slackConnected(env: SlackEnv, url: URL, person: Person): Promise<Response> {

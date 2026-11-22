@@ -10,6 +10,7 @@ import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
 import { Cards } from './cards.js';
 import { SlackOutbox } from './slack-outbox.js';
+import type { SlackKind } from './slack-outbox.js';
 import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
@@ -414,6 +415,15 @@ export class Account extends DurableObject<Env> {
       if (!link) this.cards.refuseSlackAnswers(person, now);
     });
     await this.afterChange();
+  }
+  /** Private binding only: the kind groups a person's Slack gets, set first when given. Request receipts are always sent. */
+  async slackKinds(person: string, kinds?: SlackKind[]): Promise<SlackKind[]> {
+    if (kinds) {
+      const now = Date.now();
+      this.ctx.storage.transactionSync(() => this.outbox.setKinds(person, kinds, this.cards.store.list(now).filter((c) => !c.terminal), now));
+      await this.afterChange();
+    }
+    return this.outbox.kinds(person);
   }
   /**
    * Private binding only: a verified DM message from this account's linked

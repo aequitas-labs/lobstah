@@ -93,6 +93,15 @@ the boat that claimed a wharf job, or `wharf` for the wharf's own cards. A
 link made when links had a grounds list keeps working after migration
 `0004_slack_link_wharf.sql`, in the same DM, with no new install.
 
+Under the link, **Send to Slack** lists five groups of cards: decisions and
+questions, permissions, PRs and reviews, jobs and reports, and notices
+(traps and boats too). All are on until you turn some off and **Save**. A
+group that is off sends nothing more, and a card of it still waiting to go
+out is dropped; its messages already in Slack stay as they are. Turning a
+group back on sends its standing cards, editing the messages it already
+has. A request's receipt and its **Updated** and **Dispatch started**
+messages always come.
+
 For asking for work from Slack, also set Event Subscriptions' Request URL to
 `https://api.lobstah.dev/slack/events` with the bot event `message.im`, set
 Interactivity's Request URL to `https://api.lobstah.dev/slack/interactions`,

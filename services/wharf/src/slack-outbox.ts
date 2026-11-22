@@ -1,4 +1,4 @@
-import type { GlassCard, GlassCardAction } from '../../../packages/core/src/backend-model.js';
+import type { GlassCard, GlassCardAction, GlassCardFamily } from '../../../packages/core/src/backend-model.js';
 import { digest } from './protocol.js';
 import { renderCard, renderRepost } from './slack-render.js';
 import type { CardControl } from './slack-render.js';
@@ -8,18 +8,22 @@ import type { SlackOutcome } from './slack-api.js';
 /**
  * `slack_links`: whose private chat with the app shows their cards, by wharf
  * person; a live link gets every card on the account, from every boat and
- * grounds. `slack_deliveries`: one row per card and person. `want` counts the
- * card's changes; `sent` is the count the last successful post or edit
- * showed, so a delivery is due while `want > sent`. `ts` is the message
- * that card lives in, edited in place from then on.
+ * grounds, in the kind groups it keeps on. `slack_deliveries`: one row per
+ * card and person. `want` counts the card's changes; `sent` is the count the
+ * last successful post or edit showed, so a delivery is due while
+ * `want > sent`. `ts` is the message that card lives in, edited in place
+ * from then on.
  * `slack_reposts`: the new messages a Slack request's thread is owed when
  * its glass thread changes, one row per request and kind: `update` (`seq`
  * is the newest boat update heard), or `dispatch:<id>`, once per dispatch.
  * They hold no message text: each post is a canned line and a glass link.
+ * `slack_link_kinds`: the kind groups a person turned off; with none, every
+ * kind is sent, so a group added later starts on.
  */
 export const slackSchema = `
   CREATE TABLE IF NOT EXISTS slack_links (person TEXT PRIMARY KEY, team TEXT NOT NULL, user TEXT NOT NULL, channel TEXT NOT NULL, linked_at TEXT NOT NULL, revoked_at TEXT);
   DROP TABLE IF EXISTS slack_link_grounds;
+  CREATE TABLE IF NOT EXISTS slack_link_kinds (person TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(person, kind));
   CREATE TABLE IF NOT EXISTS slack_deliveries (card INTEGER NOT NULL, person TEXT NOT NULL, want INTEGER NOT NULL, sent INTEGER NOT NULL DEFAULT 0, ts TEXT, sent_hash TEXT,
     attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, error TEXT, PRIMARY KEY(card, person));
   CREATE TABLE IF NOT EXISTS slack_actions (handle TEXT PRIMARY KEY, person TEXT NOT NULL, card INTEGER NOT NULL, revision INTEGER NOT NULL, action TEXT NOT NULL, expires INTEGER NOT NULL);
@@ -27,7 +31,16 @@ export const slackSchema = `
   CREATE TABLE IF NOT EXISTS slack_reposts (request TEXT NOT NULL, key TEXT NOT NULL, want INTEGER NOT NULL, sent INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, error TEXT, PRIMARY KEY(request, key));
 `;
-export const slackTables = ['slack_links', 'slack_deliveries', 'slack_actions', 'slack_reposts'];
+export const slackTables = ['slack_links', 'slack_link_kinds', 'slack_deliveries', 'slack_actions', 'slack_reposts'];
+/** The groups of card kinds a person can turn off for Slack. */
+export const SLACK_KINDS = ['decisions', 'permissions', 'prs', 'jobs', 'notices'] as const;
+export type SlackKind = (typeof SLACK_KINDS)[number];
+/** Each card family's group. A request's receipt answers the person's own DM, so it has none and is always sent. */
+const KIND_OF: Record<Exclude<GlassCardFamily, 'request'>, SlackKind> = {
+  decision: 'decisions', question: 'decisions', permission: 'permissions', pr: 'prs', review: 'prs', stack: 'prs',
+  dispatch: 'jobs', landed: 'jobs', report: 'jobs', notice: 'notices', trap: 'notices', boat: 'notices',
+};
+const kindOf = (card: GlassCard): SlackKind | undefined => (card.family === 'request' ? undefined : KIND_OF[card.family]);
 /** A sent repost is kept past its request's seven days, so a late duplicate of it still finds it. */
 const REPOST_KEEP_MS = 8 * 86400_000;
 /** A button's handle is good this long: past it, the click asks the person to open the card again. */
@@ -84,7 +97,7 @@ const backoff = (attempts: number) => Math.min(5_000 * 2 ** attempts, 600_000);
 export class SlackOutbox {
   private running?: Promise<void>;
   constructor(private sql: SqlStorage, private deps: OutboxDeps) {}
-  /** Whether the person's link is live: it serves every card on the account, whatever its grounds or boat. */
+  /** Whether the person's link is live: it serves every card on the account in the kind groups they keep on, whatever its grounds or boat. */
   serves(person: string): boolean {
     return this.sql.exec('SELECT 1 FROM slack_links WHERE person=? AND revoked_at IS NULL', person).toArray().length > 0;
   }
@@ -96,7 +109,11 @@ export class SlackOutbox {
   mark(cards: GlassCard[], now: number, only?: string) {
     const people = this.sql.exec<{ person: string }>('SELECT person FROM slack_links WHERE revoked_at IS NULL').toArray().filter((p) => !only || p.person === only);
     if (!people.length) return;
+    const off = new Map<string, Set<string>>();
+    for (const row of this.sql.exec<{ person: string; kind: string }>('SELECT person, kind FROM slack_link_kinds').toArray()) off.set(row.person, (off.get(row.person) ?? new Set()).add(row.kind));
     for (const card of cards) for (const { person } of people) {
+      const kind = kindOf(card);
+      if (kind && off.get(person)?.has(kind)) continue;
       const seq = seqOf(card);
       const updated = this.sql.exec(`UPDATE slack_deliveries SET want=want+1, next_at=CASE WHEN next_at=? THEN next_at ELSE min(next_at,?) END WHERE card=? AND person=?`, NEVER, now, seq, person).rowsWritten;
       if (!updated && !card.terminal) this.sql.exec('INSERT INTO slack_deliveries(card,person,want,next_at) VALUES (?,?,1,?)', seq, person, now);
@@ -116,6 +133,42 @@ export class SlackOutbox {
     this.sql.exec('UPDATE slack_reposts SET next_at=?, error=NULL, attempts=0 WHERE want>sent', now);
     this.sql.exec('INSERT OR REPLACE INTO slack_links VALUES (?,?,?,?,?,NULL)', person, link.team, link.slackUser, link.channel, link.linkedAt);
     this.mark(standing, now, person);
+  }
+  /** The kind groups a person's Slack gets. */
+  kinds(person: string): SlackKind[] {
+    const off = new Set(this.sql.exec<{ kind: string }>('SELECT kind FROM slack_link_kinds WHERE person=?', person).toArray().map((r) => r.kind));
+    return SLACK_KINDS.filter((kind) => !off.has(kind));
+  }
+  /** Whether a person's Slack gets this card: its group is on, or it is a request's receipt. */
+  private wants(person: string, card: GlassCard): boolean {
+    const kind = kindOf(card);
+    return !kind || !this.sql.exec('SELECT 1 FROM slack_link_kinds WHERE person=? AND kind=?', person, kind).toArray().length;
+  }
+  /**
+   * Set the kind groups a person's Slack gets. A group turned off drops what
+   * was waiting to go out; its messages already in Slack stay as they are. A
+   * group turned on shows its standing cards, as linking does.
+   */
+  setKinds(person: string, on: SlackKind[], standing: GlassCard[], now: number) {
+    const before = this.kinds(person);
+    this.sql.exec('DELETE FROM slack_link_kinds WHERE person=?', person);
+    for (const kind of SLACK_KINDS) if (!on.includes(kind)) this.sql.exec('INSERT INTO slack_link_kinds VALUES (?,?)', person, kind);
+    const pending = this.sql.exec<Delivery>('SELECT * FROM slack_deliveries WHERE person=? AND want>sent', person).toArray();
+    for (const job of pending) {
+      const card = this.deps.card(job.card);
+      if (card && !this.wants(person, card)) this.drop(job);
+    }
+    const added = on.filter((kind) => !before.includes(kind));
+    this.mark(standing.filter((card) => added.includes(kindOf(card)!)), now, person);
+  }
+  /**
+   * A delivery its person no longer wants. One never posted goes; one whose
+   * message is in Slack keeps it, settled, so turning the group on again
+   * edits that message instead of posting another.
+   */
+  private drop(job: Delivery) {
+    if (job.ts) this.settle(job, { sent: job.want, error: null });
+    else this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person);
   }
   /**
    * The buttons a person's message of a card carries: one opaque handle per
@@ -159,7 +212,7 @@ export class SlackOutbox {
   }
   /** Show a person's card again, whatever their message of it last said. */
   refresh(person: string, card: GlassCard, now: number) {
-    if (!this.serves(person)) return;
+    if (!this.serves(person) || !this.wants(person, card)) return;
     this.sql.exec('UPDATE slack_deliveries SET want=want+1, next_at=min(next_at,?) WHERE card=? AND person=? AND next_at<>?', now, seqOf(card), person, NEVER);
   }
   /**
@@ -255,6 +308,7 @@ export class SlackOutbox {
     const card = this.deps.card(job.card);
     if (!card) { this.sql.exec('DELETE FROM slack_deliveries WHERE card=? AND person=?', job.card, job.person); return false; }
     if (!link || link.revoked_at) { this.settle(job, { next_at: NEVER, error: 'unlinked' }); return false; }
+    if (!this.wants(job.person, card)) { this.drop(job); return false; }
     // Not posted yet and already ended: there is nothing left to show or close.
     if (!job.ts && card.terminal) { this.settle(job, { sent: job.want, error: null }); return false; }
     const token = await this.deps.token(link.team);
@@ -263,8 +317,8 @@ export class SlackOutbox {
     const hash = await digest(JSON.stringify(message));
     if (job.ts && hash === job.sent_hash) { this.settle(job, { sent: job.want, error: null }); return false; }
     await this.spaced(link.channel, last);
-    // Unlinking or relinking may happen while fetching the installation or waiting for Slack's rate limit.
-    if (!this.serves(job.person)) return false;
+    // Unlinking, relinking or turning the card's group off may happen while fetching the installation or waiting for Slack's rate limit.
+    if (!this.serves(job.person) || !this.wants(job.person, card)) return false;
     const currentLink = this.sql.exec<Link>('SELECT * FROM slack_links WHERE person=?', job.person).toArray()[0];
     if (!currentLink || currentLink.channel !== link.channel || currentLink.team !== link.team || currentLink.user !== link.user) return false;
     if (!this.deps.card(job.card)) return false;
