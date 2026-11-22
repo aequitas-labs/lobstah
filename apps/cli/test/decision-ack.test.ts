@@ -20,12 +20,14 @@ import {
   prepareRunCard,
   readDecisionAck,
   readDecisionAnswer,
+  readRequest,
   recordHelmPass,
   relieveHelm,
   takeHelm,
 } from '@lobstah/core';
 import type { AskOptions, DecisionMeta } from '@lobstah/core';
 import { glassDecisions } from '../src/decisions.js';
+import { RunRegistry } from '../src/run-exec.js';
 import { wakeIndex } from '../src/wait-wakes.js';
 import { decisionCards, openDecisionOrder } from '../../../packages/glass-ui/src/glass-diff.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -120,13 +122,21 @@ describe('the hand-off state', () => {
     expect(awaitingAckDecisions()).toEqual([]);
   });
 
-  it('run cards and answers delivered to a worker inbox need no helm ack', () => {
+  it('declining a run card answers it and awaits the helm ack', () => {
+    enqueue({ id: dispatchId, repo: 'web', brief: 'Run the check' });
+    claimNext('work');
+    appendStatus(dispatchId, 'work', 'needs-decision', 'Run this check?');
     const scriptFile = path.join(home, 'check.sh');
     fs.writeFileSync(scriptFile, 'echo ok\n');
-    const run = askCard('Run the check', { run: prepareRunCard({ scriptFile, cwd: home }), options: ['Decline'] });
+    const run = askCard('Run the check', { run: prepareRunCard({ scriptFile, cwd: home }), options: ['Decline'], dispatch: dispatchId, lane: 'work', repo: 'web' });
     answerDecision({ key: run.key, option: 'Decline', by: 'glass', maxBytes: 1024 });
-    expect(decisionHandoff(run.key)).toBeUndefined();
+    expect(readDecisionAnswer(run.key)).toMatchObject({ option: 'Decline', awaitsAck: true });
+    expect(decisionHandoff(run.key)?.state).toBe('answered');
+    ackDecision(run.key, { note: 'Cancelled the check' });
+    expect(decisionHandoff(run.key)?.state).toBe('acked');
+  });
 
+  it('answers delivered to a worker inbox need no helm ack', () => {
     enqueue({ id: dispatchId, repo: 'web', brief: 'Pick a schema' });
     claimNext('work');
     appendStatus(dispatchId, 'work', 'needs-decision', 'v1 or v2?');
@@ -137,6 +147,30 @@ describe('the hand-off state', () => {
 });
 
 describe('the helm acks', () => {
+  it.skipIf(process.platform === 'win32').each([0, 3, 124])('a run exiting %i answers the card, is ackable and leaves the open views', async (exitCode) => {
+    const scriptFile = path.join(home, 'run.sh');
+    fs.writeFileSync(scriptFile, `printf 'run output\\n'\n${exitCode === 124 ? 'sleep 30' : `exit ${exitCode}`}\n`);
+    const card = askCard('Run the check', { run: prepareRunCard({ scriptFile, cwd: home, output: 'scrubbed', timeout: '1' }), options: ['Decline'] });
+    const runs = new RunRegistry();
+    await runs.start(card as DecisionMeta & { run: NonNullable<DecisionMeta['run']> }, [], '', 'test-passkey');
+    const answer = readDecisionAnswer(card.key)!;
+    expect(answer).toMatchObject({ awaitsAck: true, run: { state: exitCode === 0 ? 'succeeded' : 'failed', exitCode, tail: 'run output' } });
+    expect(readRequest(answer.request)?.payload).toMatchObject({ run: answer.run, text: answer.text });
+    expect(stop()).toContain('answered-cards[1]');
+    expect(stop()).not.toContain('open-cards');
+    const tend = lobstah(['man', 'tend']);
+    expect(tend.stdout).toContain('answered-cards[1]');
+    expect(tend.stdout).not.toContain('open-cards');
+    expect(openDecisionOrder(decisionCards([], glassDecisions()), () => false)).toEqual([]);
+
+    const ack = lobstah(['man', 'ack', card.key, 'Handled the run result', '--session', sessionId]);
+    expect(ack.status, ack.stderr).toBe(0);
+    expect(stop()).toBe('');
+    expect(lobstah(['man', 'tend']).stdout).not.toContain('answered-cards');
+    expect(glassDecisions().find((d) => d.key === card.key)?.handoff?.state).toBe('acked');
+    expect(glassDecisions(handoffDecisions(Date.now() + ACK_CLEAR_MS))).toEqual([]);
+  }, 30_000);
+
   it('man ack records the note; the Stop hook blocks on the answer until then, and man report never acks', () => {
     const card = askCard('Ship 0.9?', { options: ['Ship', 'Hold'] });
     answerDecision({ key: card.key, option: 'Ship', text: 'after the docs land', by: 'glass', maxBytes: 1024 });

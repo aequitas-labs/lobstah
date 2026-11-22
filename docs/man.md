@@ -882,10 +882,10 @@ the same rule.
   <key>` (note `Withdrawn`), and `lobstah send <target> --for-decision <key>
   "<instruction>"` once the message is delivered (note `Sent to <id>: <first
   line>`).
-- **Which answers await the ack.** Only a plain helm card answered while a
+- **Which answers await the ack.** Plain helm cards and run cards answered while a
   live helm holds its grounds (or its repo, or any grounds for a card with
   neither). With no helm, an answer behaves as before: the card leaves at
-  once, and nothing blocks. Run cards, permission cards, permission
+  once, and nothing blocks. Permission cards, permission
   proposals and app-start cards keep their own lifecycle. A card framing a
   worker's question (see **Attention** and the Stop block below) delivers
   its answer to that worker's inbox, so it needs no ack: the worker acts on
@@ -929,6 +929,12 @@ scrubbed output to the helm. `exit` returns only the exit code. The output
 reads as a terminal showed it: redrawn lines, spinners and answered prompts
 collapse to their final text, and no escape code remains. The card in the
 glass keeps the colors, and the run's `output.log` keeps the raw stream.
+
+A finished run answers its card with the run state, exit code and permitted
+output, including failures, timeouts and stopped runs. Decline answers the
+card too. The helm acts on the answer, then uses `man ack` to close the
+handoff. A running command has no answer to ack. To run a command again,
+offer a new card.
 
 From the phone: a Mac that mirrors to a hosted glass runs its cards from
 there too. Run `lobstah run passkey add --hosted` on the Mac, open the link it

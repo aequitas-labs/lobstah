@@ -9,6 +9,7 @@ import {
   RunCardError,
   ScriptInterpreterMissing,
   appendRunAudit,
+  answerDecision,
   decisionDir,
   harnessProcessAlive,
   lobstahHome,
@@ -27,7 +28,7 @@ import {
   writeRequest,
   writeRunAttempt,
 } from '@lobstah/core';
-import type { DecisionMeta, HarnessProcess, RunAttempt, RunCard, RunResult } from '@lobstah/core';
+import type { DecisionAnswerPayload, DecisionMeta, HarnessProcess, RunAttempt, RunCard, RunResult } from '@lobstah/core';
 export type { RunResult } from '@lobstah/core';
 
 /**
@@ -41,7 +42,7 @@ export type { RunResult } from '@lobstah/core';
  * argv (`ps` shows it) or the environment (`ps -E` shows it), never a file
  * or a log. Both output streams pass through the scrubber before any byte
  * leaves this process. Each attempt is saved, and its outcome wakes the
- * helm. The card remains available for retry until the person dismisses it.
+ * helm. A terminal outcome answers the card and awaits the helm's ack.
  */
 
 /** The answer keeps this much of the scrubbed output's tail. */
@@ -186,29 +187,32 @@ interface RunConsole {
   relayed?: { attempt: string; lineKey?: string; next: number };
 }
 
-/** Deliver an outcome independently of whether its card still stands. Exit-mode output stays local. */
-function notifyRunOutcome(meta: DecisionMeta & { run: RunCard }, attempt: RunAttempt, output: string): void {
-  const result = attempt.result!;
-  writeRequest(
-    'decision-answer',
-    {
-      key: meta.key,
-      title: meta.title,
-      dispatch: meta.dispatch,
-      lane: meta.lane,
-      repo: meta.repo,
-      grounds: meta.grounds,
-      text: runAnswerText(meta.run, result, output),
-      attachments: [],
-      run: {
-        id: attempt.id,
-        state: attempt.state,
-        exitCode: result.exitCode,
-        tail: meta.run.output === 'exit' ? '' : runOutputTail(terminalText(output)).slice(-RUN_ANSWER_OUTPUT_MAX),
-      },
+/** Store the terminal answer before waking the helm. Withdrawn cards still deliver their outcome. */
+function recordRunOutcome(meta: DecisionMeta & { run: RunCard }, attempt: RunAttempt, output: string): void {
+  const result = attempt.result;
+  if (!result || attempt.state === 'running') throw new Error('A running command has no terminal answer.');
+  const payload: DecisionAnswerPayload = {
+    key: meta.key,
+    title: meta.title,
+    dispatch: meta.dispatch,
+    lane: meta.lane,
+    repo: meta.repo,
+    grounds: meta.grounds,
+    text: runAnswerText(meta.run, result, output),
+    attachments: [],
+    run: {
+      id: attempt.id,
+      state: attempt.state,
+      exitCode: result.exitCode,
+      tail: meta.run.output === 'exit' ? '' : runOutputTail(terminalText(output)).slice(-RUN_ANSWER_OUTPUT_MAX),
     },
-    'glass',
-  );
+  };
+  if (readDecision(meta.key)) {
+    answerDecision({ key: meta.key, text: payload.text, run: payload.run, by: 'glass', maxBytes: 0 });
+  } else {
+    // Withdrawal moves the card out of the decision lifecycle while its command may still finish.
+    writeRequest('decision-answer', payload as unknown as Record<string, unknown>, 'glass');
+  }
 }
 
 /** Serialize start and restart recovery so two glass processes cannot claim the same card. */
@@ -318,7 +322,7 @@ export class RunRegistry {
         live.attempt.outputChars = live.dropped + live.output.length;
         try {
           writeRunAttempt(live.attempt, live.output);
-          notifyRunOutcome(meta as DecisionMeta & { run: RunCard }, live.attempt, live.output);
+          recordRunOutcome(meta as DecisionMeta & { run: RunCard }, live.attempt, live.output);
         } catch (error) {
           console.error(`Run ${live.key}: interrupted result could not be saved`, error);
         }
@@ -575,7 +579,7 @@ export class RunRegistry {
         persist();
         console.info(`Run ${meta.key} ${attempt.state} (exit ${result.exitCode}).`);
         try {
-          notifyRunOutcome(meta, attempt, all);
+          recordRunOutcome(meta, attempt, all);
         } catch (error) {
           console.error(`Run ${meta.key}: the helm could not be notified`, error);
         }

@@ -13,6 +13,7 @@ import { ReportError, attachSources, linkAttachedImages } from './reports.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import { newRequestId, readRequest, requestFilesDir, requestsDir, writeRequest } from './requests.js';
 import type { DecisionAnswerPayload } from './requests.js';
+import type { RunDecisionOutcome } from './run-history.js';
 import type { Attachment, Lane, StatusEntry } from './types.js';
 import { runScriptFile, type RunCard } from './run-cards.js';
 import { withDirLock } from './dir-lock.js';
@@ -146,6 +147,8 @@ export interface DecisionAnswer {
   /** The chosen option label, when one was chosen. */
   option?: string;
   text?: string;
+  /** A run card's terminal state, exit code and scrubbed output. */
+  run?: RunDecisionOutcome;
   /** The human's files, stored in the request's directory. */
   attachments: Attachment[];
   answeredAt: string;
@@ -178,6 +181,7 @@ interface AnswerMarker {
   request: string;
   option?: string;
   text?: string;
+  run?: RunDecisionOutcome;
   attachments?: Attachment[];
   answeredAt: string;
   by: AnswerSource;
@@ -305,6 +309,7 @@ export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
       request: marker.request,
       ...(marker.option !== undefined ? { option: marker.option } : {}),
       ...(marker.text !== undefined ? { text: marker.text } : {}),
+      ...(marker.run ? { run: marker.run } : {}),
       attachments: marker.attachments,
       answeredAt: marker.answeredAt,
       by: marker.by,
@@ -318,6 +323,7 @@ export function readDecisionAnswer(key: string): DecisionAnswer | undefined {
     request: marker.request,
     ...(p?.option !== undefined ? { option: p.option } : {}),
     ...(p?.text !== undefined ? { text: p.text } : {}),
+    ...(p?.run ? { run: p.run } : {}),
     attachments: p?.attachments ?? [],
     answeredAt: marker.answeredAt,
     by: marker.by,
@@ -393,14 +399,14 @@ export function ackDecision(key: string, opts: { note?: string; by?: DecisionAck
 }
 
 /**
- * Whether an answer to this card awaits the helm's ack. Only a plain helm
- * card does: run, permission, proposal and app-start cards have their own
+ * Whether an answer to this card awaits the helm's ack. Plain helm cards
+ * and run cards do: permission, proposal and app-start cards have their own
  * lifecycle, and an answer delivered to a worker's inbox is the worker's to
  * act on. With no live helm on the card's grounds, nobody would ack it, so
  * it behaves as before: answered, and gone.
  */
 function answerAwaitsAck(meta: DecisionMeta, delivered: boolean): boolean {
-  if (delivered || meta.askedBy !== 'helm' || meta.run || meta.permission || meta.permissionsProposal || meta.appStart) return false;
+  if (delivered || meta.askedBy !== 'helm' || meta.permission || meta.permissionsProposal || meta.appStart) return false;
   const cfg = loadConfig();
   const live = liveHelms(cfg.helm.ttlSecs * 1000);
   if (meta.grounds) {
@@ -741,6 +747,8 @@ export interface AnswerInput {
   key: string;
   option?: string;
   text?: string;
+  /** Set by the run executor after the command reaches a terminal state. */
+  run?: RunDecisionOutcome;
   /** Files on disk (`man answer --attach`). */
   attach?: string[];
   /** Files the glass uploaded. */
@@ -767,7 +775,7 @@ export function answerDecision(input: AnswerInput): DecisionAnswer {
   const since = decision?.questionAt ?? (question && decision!.askedAt >= question.at ? question.at : undefined);
   // A retained card can outlive its worker question. Store that answer without
   // delivering it to a newer question or resuming finished work. Prior answers still win.
-  if (decision?.dispatch && since && (question?.at === since || answeredAt(decision.dispatch, lane, since))) {
+  if (!decision?.run && decision?.dispatch && since && (question?.at === since || answeredAt(decision.dispatch, lane, since))) {
     const result = commitQuestionAnswer(decision.dispatch, lane, since, () => {
       const answer = storeDecisionAnswer(input, true);
       return { value: answer, text: [answer.option, answer.text, ...answer.attachments.map((file) => `${file.name}: ${file.path}`)].filter(Boolean).join('\n\n'), from: input.by, attachments: answer.attachments };
@@ -791,7 +799,8 @@ function storeDecisionAnswer(input: AnswerInput, delivered = false): DecisionAns
     );
   }
   const text = input.text?.trim() ? input.text.replace(/\r\n/g, '\n').trim() : undefined;
-  if (text !== undefined && text.length > ANSWER_TEXT_MAX) throw new DecisionError(`the answer text exceeds ${ANSWER_TEXT_MAX} characters`, 413);
+  // The executor bounds run output before escaping code fences; that formatting can exceed the prose limit.
+  if (!input.run && text !== undefined && text.length > ANSWER_TEXT_MAX) throw new DecisionError(`the answer text exceeds ${ANSWER_TEXT_MAX} characters`, 413);
   const files: Array<{ name: string; read: () => Buffer }> = [];
   for (const file of input.attach ?? []) {
     let stat: fs.Stats;
@@ -840,6 +849,7 @@ function storeDecisionAnswer(input: AnswerInput, delivered = false): DecisionAns
     request,
     ...(option !== undefined ? { option } : {}),
     ...(text !== undefined ? { text } : {}),
+    ...(input.run ? { run: input.run } : {}),
     attachments: stored,
     answeredAt,
     by: input.by,
@@ -863,8 +873,10 @@ function storeDecisionAnswer(input: AnswerInput, delivered = false): DecisionAns
       ...(meta.dispatch ? { dispatch: meta.dispatch } : {}),
       ...(meta.lane ? { lane: meta.lane } : {}),
       ...(meta.repo ? { repo: meta.repo } : {}),
+      ...(meta.grounds ? { grounds: meta.grounds } : {}),
       ...(option !== undefined ? { option } : {}),
       ...(text !== undefined ? { text } : {}),
+      ...(input.run ? { run: input.run } : {}),
       attachments: stored,
     };
     writeRequest('decision-answer', payload as unknown as Record<string, unknown>, input.by, { id: request });

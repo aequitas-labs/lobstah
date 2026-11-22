@@ -1,4 +1,5 @@
 import type { AnswerSource } from './decisions.js';
+import type { RunDecisionOutcome } from './run-history.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -38,8 +39,8 @@ export interface DecisionAnswerPayload {
   grounds?: string;
   option?: string;
   text?: string;
-  /** A completed run keeps its card available for retry until dismissed. */
-  run?: { id: string; state: import('./run-history.js').RunState; exitCode: number; tail: string };
+  /** The terminal outcome that answers a run card. */
+  run?: RunDecisionOutcome;
   attachments: Array<{ name: string; path: string; bytes: number; type: string }>;
 }
 
