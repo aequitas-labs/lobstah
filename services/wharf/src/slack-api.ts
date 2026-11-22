@@ -21,15 +21,32 @@ const API = 'https://slack.com/api/';
 /** One minute, unless Slack names its own wait. */
 const DEFAULT_WAIT_MS = 60_000;
 
+/**
+ * workerd refuses the native fetch when it is called as another object's
+ * method ("Illegal invocation"), so the default calls it on its own.
+ */
+const globalFetch: typeof fetch = (input, init) => fetch(input, init);
+
+/** One log line per call: the method and how it came out, never the token or the message. */
+function logOutcome(method: string, outcome: SlackOutcome) {
+  const reason = outcome.kind === 'later' || outcome.kind === 'refused' || outcome.kind === 'unknown' ? outcome.reason : undefined;
+  console.log(JSON.stringify({ slack: method, ok: outcome.kind === 'sent', outcome: outcome.kind, ...(reason ? { error: reason } : {}) }));
+}
+
 /** Posts and edits one bot's messages. Holds the token for one call; never stores or logs it. */
 export class SlackApi {
-  constructor(private token: string, private fetcher: typeof fetch = fetch) {}
+  constructor(private token: string, private fetcher: typeof fetch = globalFetch, private base = API) {}
   post(channel: string, message: SlackMessage, threadTs?: string): Promise<SlackOutcome> { return this.call('chat.postMessage', { channel, ...(threadTs ? { thread_ts: threadTs } : {}), ...message }); }
   update(channel: string, ts: string, message: SlackMessage): Promise<SlackOutcome> { return this.call('chat.update', { channel, ts, ...message }); }
   private async call(method: string, body: Record<string, unknown>): Promise<SlackOutcome> {
+    const outcome = await this.send(method, body);
+    logOutcome(method, outcome);
+    return outcome;
+  }
+  private async send(method: string, body: Record<string, unknown>): Promise<SlackOutcome> {
     let response: Response;
     try {
-      response = await this.fetcher(API + method, {
+      response = await this.fetcher(this.base + method, {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(body),

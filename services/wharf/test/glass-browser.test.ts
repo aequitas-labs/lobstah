@@ -52,11 +52,12 @@ it('serves the same bundled look on the glass host only, with nonce CSP and no c
   // Besides the wharf, only a boat's glass on loopback: the mirror probe and ↗ Open.
   expect(page.headers.get('content-security-policy')).toContain("connect-src 'self' http://127.0.0.1:*;");
   expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
-  // Avatars and rendered PR descriptions load only from these GitHub image hosts.
+  // Avatars, PR evidence and rendered PR descriptions load only from these GitHub image hosts.
   const imagePolicy = page.headers.get('content-security-policy')?.split(';').find(directive => directive.trim().startsWith('img-src '));
   expect(imagePolicy?.trim().split(/\s+/).slice(1)).toEqual([
     "'self'", 'blob:', 'data:',
     'https://avatars.githubusercontent.com',
+    'https://raw.githubusercontent.com',
     'https://user-images.githubusercontent.com',
     'https://github.com',
     'https://private-user-images.githubusercontent.com',

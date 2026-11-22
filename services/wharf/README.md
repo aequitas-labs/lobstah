@@ -33,6 +33,14 @@ command), and deploy with `pnpm --filter @lobstah/wharf run deploy`. Both refuse
 without the local file or with a placeholder in it, and the deploy refuses when
 the live Worker has no `GITHUB_CLIENT_ID`. Neither prints an id.
 
+Workers Logs are on for the Worker's own log lines; request logs stay off. Each
+Slack Web API call logs one JSON line with its method, whether it succeeded, and
+Slack's error code or the exception name, for example
+`{"slack":"chat.update","ok":false,"outcome":"refused","error":"channel_not_found"}`.
+A delivery that fails before it reaches Slack logs `"slack":"delivery"` with its
+card number. No line holds a token or message text. Read them in the dashboard's
+Workers Logs, or live with `pnpm --filter @lobstah/wharf run wrangler tail`.
+
 | Name | Kind | Value or source |
 | --- | --- | --- |
 | `GLASS_ORIGIN` | var | `https://glass.lobstah.dev`: the browser, cookie sessions |

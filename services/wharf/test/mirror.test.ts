@@ -366,6 +366,24 @@ describe('the boat socket', () => {
     north.socket.close(); tab.socket.close();
   });
 
+  it('serves a decision attachment to an image’s src when its boat answers on the socket', async () => {
+    const boat = await enrol('north', ['mirror', 'read']);
+    const north = await boatSocket(boat);
+    const path = '/decision/decision%3A13ff2951/files/units-page-light.png';
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    // The URL the hosted glass puts in the <img>: one GET, cookie only, no Origin.
+    const read = browser(`mirror/read?boat=${boat.id}&path=${encodeURIComponent(path)}`);
+    const call = await pushed(north, (m) => m.t === 'call' && 'read' in m.call && m.call.read === path);
+    if (call.t !== 'call') throw new Error('expected a call');
+    north.socket.send(encodeFrame({ t: 'answer', id: call.call.id, status: 200, contentType: 'image/png' }, png));
+    const response = await read;
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/png');
+    expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'none'; sandbox");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(png);
+    north.socket.close();
+  });
+
   it('refuses a snapshot frame that carries the page token, and pushes nothing', async () => {
     const boat = await enrol('north', ['mirror', 'read']);
     const north = await boatSocket(boat);

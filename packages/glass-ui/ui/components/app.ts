@@ -110,6 +110,8 @@ export function App({ state }: { state: GlassState }) {
   // The glass's own settings open in a Dialog (a sheet on a phone), not the overlay's modal.
   const settingsOpen = state.modal?.type === 'settings';
   const helm = state.modal?.type === 'helm' ? d?.helms.find((helm) => helm.grounds === state.modal!.key) : undefined;
+  // Threads (the list or one conversation) show their own cards inline, so the new-decision alert stays away until you leave.
+  const inThreads = tab === 'helm' || !!state.threadSheet;
   const onOverlay = (e: Event) => {
     if (e.target === e.currentTarget) closeModal();
   };
@@ -139,6 +141,6 @@ export function App({ state }: { state: GlassState }) {
     html`<div id="overlay" class=${state.modal && d && !settingsOpen ? 'open' + (helm ? ' dialog-overlay' : '') : d ? '' : undefined} onClick=${onOverlay}>${helm ? html`<${Dialog} id="modalbox" title=${helm.man} icon="⛵ " cls="helm-dialog" onClose=${closeModal}><${HelmBody} helm=${helm} /><//>` : html`<div class=${'modal' + (['pr', 'review', 'dispatch', 'trap'].includes(state.modal?.type ?? '') ? ' view-modal' : '')} id="modalbox"><${Modal} key=${state.modal ? state.modal.type + ':' + state.modal.key : 'closed'} snapshot=${d} modal=${state.modal} prefs=${state.prefs} detail=${state.detail} /></div>`}</div>`,
     d &&
       html`<${DecisionModal} open=${state.decisionModal} order=${modalOrder()} drafts=${state.drafts} extensions=${d.answerLimits?.extensions ?? []} />`,
-    html`<${ToastHost}>${d && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`}<//>`,
+    html`<${ToastHost}>${d && !inThreads && html`<${DecisionAlert} unread=${unread} dismissed=${state.alertDismissed} />`}<//>`,
   ];
 }

@@ -107,8 +107,23 @@ function bracketed(s: string, i: number): { text: string; target: string; end: n
   return { text: s.slice(i + 1, close), target, end: paren + 1 };
 }
 
-/** Inline marks; `autolink` false inside a link's own text, so links never nest. */
-export function parseInline(s: string, autolink = true): MdInline[] {
+/**
+ * What a single newline inside a paragraph means. `markdown`: a space, as in
+ * a report, unless the line ends in two spaces or a backslash. `typed`: a line
+ * break, as in a chat message, where people break lines on purpose.
+ */
+export type LineBreaks = 'markdown' | 'typed';
+
+/** How a Markdown body is read. */
+export interface MarkdownOptions {
+  lineBreaks: LineBreaks;
+}
+
+/**
+ * Inline marks; `autolink` false inside a link's own text, so links never
+ * nest. `lineBreaks` says what a single newline is (see LineBreaks).
+ */
+export function parseInline(s: string, autolink = true, lineBreaks: LineBreaks = 'markdown'): MdInline[] {
   const out: MdInline[] = [];
   let text = '';
   const flush = () => {
@@ -145,7 +160,7 @@ export function parseInline(s: string, autolink = true): MdInline[] {
       const b = bracketed(s, i);
       if (b) {
         flush();
-        out.push({ t: 'a', href: b.target, c: parseInline(b.text, false) });
+        out.push({ t: 'a', href: b.target, c: parseInline(b.text, false, lineBreaks) });
         i = b.end;
         continue;
       }
@@ -163,7 +178,7 @@ export function parseInline(s: string, autolink = true): MdInline[] {
       const end = s.indexOf(ch + ch, i + 2);
       if (end > i + 2) {
         flush();
-        out.push({ t: 'b', c: parseInline(s.slice(i + 2, end), autolink) });
+        out.push({ t: 'b', c: parseInline(s.slice(i + 2, end), autolink, lineBreaks) });
         i = end + 2;
         continue;
       }
@@ -173,13 +188,13 @@ export function parseInline(s: string, autolink = true): MdInline[] {
       while ((end = s.indexOf(ch, end)) > 0 && (s[end + 1] === ch || (ch === '_' && /\w/.test(s[end + 1] ?? '')))) end += 2;
       if (end > i + 1 && s[i + 1] !== ' ') {
         flush();
-        out.push({ t: 'i', c: parseInline(s.slice(i + 1, end), autolink) });
+        out.push({ t: 'i', c: parseInline(s.slice(i + 1, end), autolink, lineBreaks) });
         i = end + 1;
         continue;
       }
     }
     if (ch === '\n') {
-      if (/ {2,}$/.test(text) || text.endsWith('\\')) {
+      if (lineBreaks === 'typed' || / {2,}$/.test(text) || text.endsWith('\\')) {
         text = text.replace(/( {2,}|\\)$/, '');
         flush();
         out.push({ t: 'br' });
@@ -226,7 +241,7 @@ function cells(line: string): string[] {
 const startsBlock = (line: string) =>
   FENCE.test(line) || HEADING.test(line) || HR.test(line) || BULLET.test(line) || ORDERED.test(line) || QUOTE.test(line);
 
-function parseBlocks(markdown: string): MdBlock[] {
+function parseBlocks(markdown: string, lineBreaks: LineBreaks): MdBlock[] {
   const lines = markdown.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
   const out: MdBlock[] = [];
   let i = 0;
@@ -263,7 +278,7 @@ function parseBlocks(markdown: string): MdBlock[] {
         body.push(QUOTE.exec(lines[i]!)?.[1] ?? lines[i]!);
         i++;
       }
-      out.push({ t: 'quote', c: parseBlocks(body.join('\n')) });
+      out.push({ t: 'quote', c: parseBlocks(body.join('\n'), lineBreaks) });
       continue;
     }
     const bullet = BULLET.exec(line);
@@ -303,13 +318,13 @@ function parseBlocks(markdown: string): MdBlock[] {
       }
       out.push({ t: 'list', ordered: isOrdered, start: isOrdered ? Number(ordered![2]) : 1, items: items.map((body) => {
         const task = /^\[([ xX])\](?:\s+(.*)|$)/.exec(body[0]!);
-        if (!task) return parseBlocks(body.join('\n'));
+        if (!task) return parseBlocks(body.join('\n'), lineBreaks);
         body[0] = task[2] ?? '';
-        const content = parseBlocks(body.join('\n'));
+        const content = parseBlocks(body.join('\n'), lineBreaks);
         const first = content[0];
         const inline = first?.t === 'p' ? first.c : parseInline(body[0]);
         return [{ t: 'task' as const, id: '', text: inlineText(inline), checked: task[1]!.toLowerCase() === 'x', c: inline },
-          ...(first?.t === 'p' ? content.slice(1) : parseBlocks(body.slice(1).join('\n')))];
+          ...(first?.t === 'p' ? content.slice(1) : parseBlocks(body.slice(1).join('\n'), lineBreaks))];
       }) });
       continue;
     }
@@ -335,7 +350,7 @@ function parseBlocks(markdown: string): MdBlock[] {
       i++;
       continue;
     }
-    out.push({ t: 'p', c: parseInline(para.join('\n')) });
+    out.push({ t: 'p', c: parseInline(para.join('\n'), true, lineBreaks) });
   }
   return out;
 }
@@ -373,8 +388,8 @@ export function markdownImageSources(blocks: MdBlock[]): string[] {
 }
 
 /** Parse Markdown and assign each task its document index and a short text hash. */
-export function parseMarkdown(markdown: string): MdBlock[] {
-  const blocks = parseBlocks(markdown);
+export function parseMarkdown(markdown: string, options: MarkdownOptions = { lineBreaks: 'markdown' }): MdBlock[] {
+  const blocks = parseBlocks(markdown, options.lineBreaks);
   markdownTasks(blocks).forEach((item, index) => {
     let hash = 2166136261;
     for (let offset = 0; offset < item.text.length; offset++) hash = Math.imul(hash ^ item.text.charCodeAt(offset), 16777619);

@@ -5,7 +5,8 @@ import { html } from '../html.js';
 import { backend, fileUrl } from '../backend.js';
 import { getState, viewOf } from '../store.js';
 import type { PendingMessage } from '../store.js';
-import { openDecision } from '../actions.js';
+import { openDecision, openLightbox } from '../actions.js';
+import { MarkdownElements } from './markdown.js';
 import { closeThreadSheet, markThreadResponseSeen, openThread, reopenConversation, settlePendingMessages } from '../thread-actions.js';
 import { safeHref } from '../../src/glass-markdown.js';
 import { ThreadComposer } from './thread-composer.js';
@@ -203,6 +204,18 @@ function Files({ view, files }: { view: ThreadView; files: readonly ThreadAttach
   const owner = { kind: 'thread' as const, id: view.id };
   return html`<div class="dfiles">${files.map((a) => (/\.(png|jpe?g|webp|gif)$/i.test(a.name) ? ImageThumb(fileUrl(owner, a.name), a.name, 'dimg') : html`<a href=${fileUrl(owner, a.name)} download=${a.name}>${a.name}</a>`))}</div>`;
 }
+/**
+ * A message's words as the glass's safe Markdown (bold, lists, code, links),
+ * each newline kept as typed. Raw HTML stays text. An image it names by a bare
+ * filename is one of the conversation's files; a remote image shows as a link.
+ * Before the conversation holds the message (`thread` absent), an image shows
+ * as its alt text.
+ */
+function MessageText({ text, thread }: { text: string; thread?: string }) {
+  const image = (name: string, alt: string): ComponentChildren =>
+    thread ? ImageThumb(fileUrl({ kind: 'thread', id: thread }, name), alt, 'mdimg') : alt;
+  return html`<div class="thread-text mdpage"><${MarkdownElements} text=${text} image=${image} lineBreaks="typed" glassLinks copyCode openImage=${openLightbox} /></div>`;
+}
 const SYSTEM_EVENT: Record<string, string> = { thread: 'Discussion started', bait: 'Bait received' };
 /** One entry of the conversation: the person on the right, the helm beside its wheel on the left. */
 function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: string }) {
@@ -215,7 +228,7 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
       : card.standing
         ? html`<${InlineDecisionAnswer} cardKey=${card.key} />`
         : html`<p class="dim">Closed card</p>`;
-    return html`<article class="thread-entry thread-card-entry"><${WorkIcon} kind="card" />${card.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} onClick=${() => openDecision(card.key)}>${card.title}<//>${answer}${card.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
+    return html`<article class="thread-entry thread-card-entry"><${WorkIcon} kind="card" />${card.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} class="thread-card-title" onClick=${() => openDecision(card.key)}>${card.title}<//>${answer}${card.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
   }
   if ('link' in entry)
     return html`<div class="thread-entry thread-system"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} /></div>`;
@@ -223,9 +236,9 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
     return html`<p class="thread-entry thread-system dim">${entry.event === 'tracked' ? entry.text : (SYSTEM_EVENT[entry.kind] ?? 'Classified')} · ${Age(at)} ago</p>`;
   if (entry.by === 'helm') {
     const unread = entry.seq > (view.seenThrough ?? 0);
-    return html`<article class=${'thread-entry thread-msg from-helm' + (unread ? ' unread' : '')}><span class="thread-avatar" aria-hidden="true">${HelmIcon}</span><div class="thread-bubble"><p class="thread-meta">Helm · ${Age(at)} ago${unread && html` · <span class="thread-new">New</span>`}</p>${entry.text && html`<div class="thread-text">${LinkedText(entry.text)}</div>`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
+    return html`<article class=${'thread-entry thread-msg from-helm' + (unread ? ' unread' : '')}><span class="thread-avatar" aria-hidden="true">${HelmIcon}</span><div class="thread-bubble"><p class="thread-meta">Helm · ${Age(at)} ago${unread && html` · <span class="thread-new">New</span>`}</p>${entry.text && html`<${MessageText} text=${entry.text} thread=${view.id} />`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
   }
-  return html`<article class="thread-entry thread-msg from-person"><div class="thread-bubble"><p class="thread-meta">You${entry.via === 'chat' ? ' · in chat' : entry.via === 'slack' ? ' · in Slack' : ''} · ${Age(at)} ago</p>${entry.text && html`<div class="thread-text">${LinkedText(entry.text)}</div>`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
+  return html`<article class="thread-entry thread-msg from-person"><div class="thread-bubble"><p class="thread-meta">You${entry.via === 'chat' ? ' · in chat' : entry.via === 'slack' ? ' · in Slack' : ''} · ${Age(at)} ago</p>${entry.text && html`<${MessageText} text=${entry.text} thread=${view.id} />`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
 }
 /** The conversation as one chat: rounds stay in the stored thread for the helm, but the reader sees only the messages. */
 function Timeline({ view }: { view: ThreadView }) {
@@ -305,7 +318,7 @@ const PENDING_STATE: Record<PendingMessage['state'], string> = { sending: 'Sendi
 /** A message this page sent, before its conversation holds it. */
 function PendingEntry({ message }: { message: PendingMessage }) {
   return html`<article class=${`thread-entry thread-msg from-person pending-msg ${message.state}`} aria-busy=${message.state === 'sending'}>
-    <div class="thread-bubble"><p class="thread-meta">You · ${PENDING_STATE[message.state]}</p>${message.text && html`<div class="thread-text">${LinkedText(message.text)}</div>`}${message.files.map((f) => html`<span class="dchip">${f.name}</span>`)}</div>
+    <div class="thread-bubble"><p class="thread-meta">You · ${PENDING_STATE[message.state]}</p>${message.text && html`<${MessageText} text=${message.text} />`}${message.files.map((f) => html`<span class="dchip">${f.name}</span>`)}</div>
   </article>`;
 }
 /** Status words that name a state other than the dispatch verb of the same name. */
