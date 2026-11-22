@@ -10,6 +10,7 @@ import { personSessionLive } from './auth.js';
 import { GlassState, glassSchema, glassTables } from './glass-state.js';
 import { Cards } from './cards.js';
 import { SlackOutbox } from './slack-outbox.js';
+import type { SlackKind } from './slack-outbox.js';
 import { installationToken } from './slack-install.js';
 import type { SlackLink } from './slack-install.js';
 import type { SlackMessageIn } from './slack-ingress.js';
@@ -415,6 +416,15 @@ export class Account extends DurableObject<Env> {
     });
     await this.afterChange();
   }
+  /** Private binding only: the kind groups a person's Slack gets, set first when given. Request receipts are always sent. */
+  async slackKinds(person: string, kinds?: SlackKind[]): Promise<SlackKind[]> {
+    if (kinds) {
+      const now = Date.now();
+      this.ctx.storage.transactionSync(() => this.outbox.setKinds(person, kinds, this.cards.store.list(now).filter((c) => !c.terminal), now));
+      await this.afterChange();
+    }
+    return this.outbox.kinds(person);
+  }
   /**
    * Private binding only: a verified DM message from this account's linked
    * person. It is recorded, and its receipt queued, before Slack hears back.
@@ -549,7 +559,9 @@ export class Account extends DurableObject<Env> {
       // While an answer awaits its boat, or was applied, the card offers nothing more.
       controllable: (card) => {
         if (card.relay && (card.relay.state === 'awaiting boat' || card.relay.state === 'applied')) return [];
-        const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm'] : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen'];
+        // A boat's review card posts its drafted round from here, through that boat.
+        const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm']
+          : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen', ...(card.family === 'review' ? ['review-submit', 'review-approve'] : [])];
         return card.actions.filter((a) => kinds.includes(a.kind));
       },
       boat: (card) => this.cardBoat(card),

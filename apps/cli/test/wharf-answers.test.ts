@@ -1,11 +1,14 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensureLayout, listGrants, readDecisionAnswer, standingDecisions, unhandled } from '@lobstah/core';
+import { ensureLayout, latestRound, listGrants, readDecisionAnswer, readReview, standingDecisions, unhandled } from '@lobstah/core';
 import type { CardAnswerReceipt, DecisionMeta, TendAttention } from '@lobstah/core';
+import { postReview } from '@lobstah/pick';
 import { askPermission } from '../src/grants-cli.js';
-import { applyReceipt, ALLOW_HERE_ONLY } from '../src/wharf-answers.js';
+import { applyReceipt, applyReviewPost, ALLOW_HERE_ONLY, REVIEW_CHANGED, REVIEWS_HERE_ONLY } from '../src/wharf-answers.js';
+import { draftReview, github, HEAD, pushAfterDraft, REVIEW_KEY, reviewShown } from './review-draft.js';
+import type { Call } from './review-draft.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -92,4 +95,70 @@ it('Allow always through the wharf grants exactly what a glass click grants, sco
   const wharfGrant = listGrants().grants.find((g) => g.by.startsWith('wharf:'))!;
   expect(glassGrant.by).toBe('glass');
   expect(scope(wharfGrant as unknown as Record<string, unknown>)).toEqual(scope(glassGrant as unknown as Record<string, unknown>));
+});
+
+describe('a drafted review posted from Slack', () => {
+  const reviewReceipt = (action: CardAnswerReceipt['action'], stateHash = reviewShown()[0]!.stateHash): CardAnswerReceipt => ({
+    id: `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`, family: 'review', key: REVIEW_KEY, stateHash, revision: 1,
+    action, by: 'person-a', at: new Date().toISOString(), state: 'pending',
+  });
+  /** postReview against a fake GitHub whose PR head is `head`. */
+  const poster = (calls: Call[], head?: string): typeof postReview => (key, opts) => postReview(key, { ...opts, token: () => 'token', fetch: github(calls, head) });
+  const posts = (calls: Call[]) => calls.filter((c) => c.method === 'POST');
+
+  it('a confirmed Submit review at the draft’s head posts the draft’s verdict once, by slack', async () => {
+    draftReview('request_changes');
+    const shownNow = reviewShown(), calls: Call[] = [];
+    const r = reviewReceipt({ kind: 'review-submit', event: 'REQUEST_CHANGES', pr: 42 });
+    expect(await applyReviewPost(on, 'cloud', r, shownNow, poster(calls))).toEqual({ state: 'applied', outcome: 'posted' });
+    expect(posts(calls)).toEqual([expect.objectContaining({ url: 'https://api.github.com/repos/acme/web/pulls/42/reviews', body: expect.objectContaining({ event: 'REQUEST_CHANGES', commit_id: HEAD }) })]);
+    expect(latestRound(readReview(REVIEW_KEY)!)).toMatchObject({ state: 'posted', by: 'slack', postedEvent: 'REQUEST_CHANGES' });
+    // The same receipt again, and a second tap on the same message, post nothing more.
+    expect(await applyReviewPost(on, 'cloud', r, shownNow, poster(calls))).toEqual({ state: 'applied', outcome: 'posted' });
+    expect(await applyReviewPost(on, 'cloud', reviewReceipt(r.action, r.stateHash), shownNow, poster(calls))).toEqual({ state: 'refused', outcome: REVIEW_CHANGED });
+    expect(posts(calls)).toHaveLength(1);
+  });
+
+  it('Approve on an approve draft approves the PR, by slack', async () => {
+    draftReview('approve');
+    const calls: Call[] = [];
+    expect(await applyReviewPost(on, 'cloud', reviewReceipt({ kind: 'review-approve', pr: 42 }), reviewShown(), poster(calls))).toEqual({ state: 'applied', outcome: 'posted' });
+    expect(posts(calls).map((c) => c.body!.event)).toEqual(['APPROVE']);
+    expect(latestRound(readReview(REVIEW_KEY)!)).toMatchObject({ state: 'posted', by: 'slack', postedEvent: 'APPROVE' });
+  });
+
+  it('a PR head that moved past the draft’s head refuses the post and posts nothing', async () => {
+    draftReview('request_changes');
+    const r = reviewReceipt({ kind: 'review-submit', event: 'REQUEST_CHANGES', pr: 42 });
+    // The boat saw the push: the card's state is unchanged, but its head is not the draft's.
+    pushAfterDraft();
+    const seen: Call[] = [];
+    expect(await applyReviewPost(on, 'cloud', r, reviewShown(), poster(seen))).toEqual({ state: 'refused', outcome: REVIEW_CHANGED });
+    expect(seen).toEqual([]);
+    // The push reached GitHub only: the head check just before the post refuses it.
+    draftReview('request_changes');
+    expect(readReview(REVIEW_KEY)!.pr.headSha).toBe(HEAD);
+    const live: Call[] = [];
+    expect(await applyReviewPost(on, 'cloud', reviewReceipt(r.action), reviewShown(), poster(live, 'ccccccc3'))).toEqual({ state: 'refused', outcome: REVIEW_CHANGED });
+    expect(posts(live)).toEqual([]);
+    expect(latestRound(readReview(REVIEW_KEY)!)).toMatchObject({ state: 'stale' });
+  });
+
+  it('a boat with remoteAnswers = false refuses review posts from the wharf', async () => {
+    draftReview('approve');
+    const calls: Call[] = [];
+    for (const action of [{ kind: 'review-submit', event: 'APPROVE', pr: 42 }, { kind: 'review-approve', pr: 42 }] as const) {
+      expect(await applyReviewPost(off, 'cloud', reviewReceipt(action), reviewShown(), poster(calls))).toEqual({ state: 'refused', outcome: REVIEWS_HERE_ONLY });
+    }
+    expect(calls).toEqual([]);
+    expect(latestRound(readReview(REVIEW_KEY)!)).toMatchObject({ state: 'drafted' });
+  });
+
+  it('a button whose verdict is no longer the draft’s, or a card state that moved, posts nothing', async () => {
+    draftReview('request_changes');
+    const calls: Call[] = [];
+    expect(await applyReviewPost(on, 'cloud', reviewReceipt({ kind: 'review-approve', pr: 42 }), reviewShown(), poster(calls))).toEqual({ state: 'refused', outcome: REVIEW_CHANGED });
+    expect(await applyReviewPost(on, 'cloud', reviewReceipt({ kind: 'review-submit', event: 'REQUEST_CHANGES', pr: 42 }, 'an-older-state'), reviewShown(), poster(calls))).toMatchObject({ state: 'refused' });
+    expect(calls).toEqual([]);
+  });
 });

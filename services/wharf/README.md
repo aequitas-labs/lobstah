@@ -93,6 +93,15 @@ the boat that claimed a wharf job, or `wharf` for the wharf's own cards. A
 link made when links had a grounds list keeps working after migration
 `0004_slack_link_wharf.sql`, in the same DM, with no new install.
 
+Under the link, **Send to Slack** lists five groups of cards: decisions and
+questions, permissions, PRs and reviews, jobs and reports, and notices
+(traps and boats too). All are on until you turn some off and **Save**. A
+group that is off sends nothing more, and a card of it still waiting to go
+out is dropped; its messages already in Slack stay as they are. Turning a
+group back on sends its standing cards, editing the messages it already
+has. A request's receipt and its **Updated** and **Dispatch started**
+messages always come.
+
 For asking for work from Slack, also set Event Subscriptions' Request URL to
 `https://api.lobstah.dev/slack/events` with the bot event `message.im`, set
 Interactivity's Request URL to `https://api.lobstah.dev/slack/interactions`,
@@ -134,6 +143,16 @@ A mirror boat's standing cards reach Slack too, with their buttons, and your
 answer is applied on the boat. If the boat stays offline for 7 days, its
 cards close in Slack, leave the hosted glass's deck, and are deleted. They
 come back when the boat does.
+
+A boat's review card with a drafted round says what it will post (the
+verdict, the number of comments and the first lines of the body) and offers
+**Submit review**, plus **Approve** when the draft approves. Each asks first
+in Slack's confirm dialog, "Submit this review to GitHub? It posts Approve on
+PR #42 as you.", and sends nothing until you press **Submit**. The boat posts
+the draft as you, with `by: slack` in the review log, at most once, and only
+while the PR's head is still the draft's; otherwise it answers "The PR changed
+since this draft. Open it in the glass." **Approve anyway** over findings is
+in the glass only.
 
 Work in `services/wharf`. R2 must be enabled on the account in the dashboard
 first. Secrets go in on standard input, never as arguments:
@@ -196,8 +215,8 @@ A person's answer to one of this boat's cards from Slack or the hosted glass
 reaches the boat as a verified receipt, applied only to the exact card state
 answered and only once. Allow once and Allow always from the wharf write the
 same grant a click in the local glass would; `remoteAnswers = false` in this
-block keeps Allow to the local glass only, while No, decision answers and seen
-still arrive.
+block keeps Allow and review posts to the local glass only, while No, decision
+answers and seen still arrive.
 
 A repo belongs to one grounds, and with no `[grounds.*]` configured every repo
 sits in the implicit `home` grounds. Configuring any grounds replaces it, so
@@ -453,7 +472,7 @@ delivers Slack, and sets the next one. With nothing due there is no alarm, so
 an idle account costs nothing. Native tests evict the DO with a connected
 socket, then resume it, ping it while it hibernates, and run the alarm.
 Report evidence is data, not hosted executable HTML. No GitHub polling or worker
-execution is moved into this service; a review is staged, dismissed, muted or unmuted by the boat that published it and sent from the review tool, never by the wharf.
+execution is moved into this service; a review is staged, dismissed, muted or unmuted by the boat that published it and sent from the review tool, or posted by its boat when a person confirms it in Slack, never by the wharf.
 
 Files are immutable by idempotency key and dispatch- or document-scoped, including report
 Markdown and images. Downloads force octet-stream, attachment disposition,

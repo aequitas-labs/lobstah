@@ -7,6 +7,8 @@ import { sealToken } from '../src/slack-install.js';
 import { slackSchema } from '../src/slack-outbox.js';
 import { authFixtures, SLACK_MIGRATIONS, slackMigrations } from './auth-fixture.js';
 let cookie: string, account: string, token: string, sequence = 0;
+/** Every kind group Slack sends, all on until the person turns some off. */
+const ALL_KINDS = ['decisions', 'permissions', 'prs', 'jobs', 'notices'];
 const cookies = (r: Response) => r.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
 const browser = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST', headers: Record<string, string> = {}) => SELF.fetch(`https://glass.test/api/glass${path ? '/' + path : ''}`, {
   method, headers: { Cookie: cookie, Origin: 'https://glass.test', 'Idempotency-Key': `browser-${++sequence}`, ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -97,7 +99,7 @@ it('requires its cookie, not an API bearer, and derives the account rather than 
 it('links this person’s own Slack to their wharf once per connect, with no grounds to choose, shows their standing cards there, and disconnects', async () => {
   await job();
   // The Slack row has nothing to choose: Connect Slack links the whole wharf.
-  expect(await (await browser('slack')).json()).toEqual({ configured: true });
+  expect(await (await browser('slack')).json()).toEqual({ configured: true, kinds: ALL_KINDS });
   expect((await browser('slack/grounds', { grounds: ['away'] })).status).toBe(404);
   expect((await browser('slack/connect', {}, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
   const start = new URL((await (await browser('slack/connect', {})).json<{ url: string }>()).url);
@@ -125,7 +127,7 @@ it('links this person’s own Slack to their wharf once per connect, with no gro
     expect(callbacks.filter((response) => response.headers.get('Location')?.includes('slack_error='))).toHaveLength(1);
     const back = accepted[0]!;
     expect(back.status).toBe(302); expect(back.headers.get('Location')).toBe('https://glass.test/#boats');
-    expect(await (await browser('slack')).json()).toEqual({ configured: true, link: { team: 'T9', slackUser: 'U9', linkedAt: expect.any(String) } });
+    expect(await (await browser('slack')).json()).toEqual({ configured: true, kinds: ALL_KINDS, link: { team: 'T9', slackUser: 'U9', linkedAt: expect.any(String) } });
     // The token is sealed at rest, never stored as sent.
     const stored = await env.AUTH_DB.prepare('SELECT botToken FROM slackInstallation WHERE team=?').bind('T9').first<{ botToken: string }>();
     expect(stored!.botToken).toMatch(/^v1\./); expect(stored!.botToken).not.toContain('xoxb-installed');
@@ -136,7 +138,7 @@ it('links this person’s own Slack to their wharf once per connect, with no gro
     const again = await SELF.fetch(`https://glass.test/api/slack/oauth?code=granted&state=${state}`, { redirect: 'manual', headers: { Cookie: cookie } });
     expect(new URL(again.headers.get('Location')!).searchParams.get('slack_error')).toContain('expired or was already used');
     expect((await browser('slack/disconnect', {})).status).toBe(200);
-    expect(await (await browser('slack')).json()).toEqual({ configured: true });
+    expect(await (await browser('slack')).json()).toEqual({ configured: true, kinds: ALL_KINDS });
     expect(await sql(`SELECT revoked_at IS NOT NULL AS revoked FROM slack_links WHERE person='${account}'`)).toEqual([{ revoked: 1 }]);
   } finally { outbound.mockRestore(); }
 });
@@ -161,7 +163,7 @@ it('keeps a link that had a grounds list live through the migration, in the same
   expect(tables.results.map((t) => t.name)).toEqual(['slackConnect', 'slackInstallation', 'slackLink']);
   expect(await sql("SELECT name FROM sqlite_master WHERE name='slack_link_grounds'")).toEqual([]);
   expect(await env.AUTH_DB.prepare('SELECT team,slackUser,person,channel,linkedAt,revokedAt FROM slackLink').all()).toMatchObject({ results: [{ team: 'T1', slackUser: 'U1', person: account, channel: 'D1', linkedAt, revokedAt: null }] });
-  expect(await (await browser('slack')).json()).toEqual({ configured: true, link: { team: 'T1', slackUser: 'U1', linkedAt } });
+  expect(await (await browser('slack')).json()).toEqual({ configured: true, kinds: ALL_KINDS, link: { team: 'T1', slackUser: 'U1', linkedAt } });
   const posted: Array<{ method: string; channel?: string; text: string }> = [];
   const real = globalThis.fetch;
   const outbound = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -181,6 +183,32 @@ it('keeps a link that had a grounds list live through the migration, in the same
     expect(posted.map((p) => p.method)).not.toContain('oauth.v2.access');
     expect(posted.map((p) => p.method)).not.toContain('conversations.open');
   } finally { outbound.mockRestore(); }
+});
+it('sk-route: sets the kinds Slack sends only from the glass page, and only to known kinds; any other try is refused and changes nothing', async () => {
+  const kinds = async () => (await (await browser('slack')).json<{ kinds: string[] }>()).kinds;
+  const refused = [
+    [await browser('slack/kinds', { kinds: ['decisions'] }, 'POST', { Origin: 'https://evil.test' }), 403],
+    [await SELF.fetch('https://glass.test/api/glass/slack/kinds', { method: 'POST', headers: { Cookie: cookie }, body: JSON.stringify({ kinds: ['decisions'] }) }), 403],
+    [await browser('slack/kinds', { kinds: ['decisions', 'requests'] }), 400],
+    [await browser('slack/kinds', { kinds: ['decisions', 'decision'] }), 400],
+    [await browser('slack/kinds', { kinds: [{ kind: 'decisions' }] }), 400],
+    [await browser('slack/kinds', { kinds: 'decisions' }), 400],
+    [await browser('slack/kinds', {}), 400],
+    [await browser('slack/kinds', [ 'decisions' ]), 400],
+  ] as const;
+  for (const [response, status] of refused) expect(response.status).toBe(status);
+  expect(await (await browser('slack/kinds', { kinds: ['requests'] })).json()).toEqual({ error: 'Unknown card kind: requests' });
+  expect(await kinds()).toEqual(ALL_KINDS);
+  expect(await sql('SELECT * FROM slack_link_kinds')).toEqual([]);
+  // The glass's own Save: the groups left on.
+  const saved = await browser('slack/kinds', { kinds: ['decisions', 'prs', 'notices'] });
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toEqual({ kinds: ['decisions', 'prs', 'notices'] });
+  expect(await kinds()).toEqual(['decisions', 'prs', 'notices']);
+  // A refused try after that leaves the saved choice as it was.
+  expect((await browser('slack/kinds', { kinds: ['jobs', 'reviews'] })).status).toBe(400);
+  expect((await browser('slack/kinds', { kinds: ALL_KINDS }, 'POST', { Origin: 'https://evil.test' })).status).toBe(403);
+  expect(await kinds()).toEqual(['decisions', 'prs', 'notices']);
 });
 it('reads cards with the glass cookie, by list or by id, and nothing else under cards', async () => {
   await job();

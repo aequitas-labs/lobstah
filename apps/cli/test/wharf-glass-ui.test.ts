@@ -663,13 +663,21 @@ it('offers Connect Slack on the boat list with no grounds to choose', async () =
   expect(slack.textContent).not.toContain('Save grounds');
 });
 
-it('shows a linked Slack with when it was linked and Disconnect Slack, and no grounds', async () => {
+it('shows a linked Slack with when it was linked, the kinds it sends with Save, and Disconnect Slack, and no grounds', async () => {
   const g = await page('/#boats', false, {
-    slack: { configured: true, link: { team: 'T1', slackUser: 'U1', linkedAt: '2026-11-22T05:05:55Z' } },
+    slack: { configured: true, kinds: ['decisions', 'permissions', 'prs'], link: { team: 'T1', slackUser: 'U1', linkedAt: '2026-11-22T05:05:55Z' } },
   });
   const slack = g.doc.querySelector('#slack-heading')!.parentElement!;
   expect(slack.textContent).toContain('Linked · ');
-  expect(slack.querySelectorAll('fieldset, input[type=checkbox]')).toHaveLength(0);
+  expect(slack.querySelector('legend')!.textContent).toBe('Send to Slack');
+  const boxes = Array.from(slack.querySelectorAll('label')).map((l) => [l.textContent, (l.querySelector('input') as HTMLInputElement).checked]);
+  expect(boxes).toEqual([['Decisions and questions', true], ['Permissions', true], ['PRs and reviews', true], ['Jobs and reports', false], ['Notices', false]]);
   expect((g.find('button', 'Disconnect Slack') as HTMLButtonElement).disabled).toBe(false);
   expect(slack.textContent).not.toContain('Save grounds');
+  // Save waits for a change, then sends the groups left on.
+  expect((g.find('button', 'Save') as HTMLButtonElement).disabled).toBe(true);
+  (g.find('label', 'Permissions')!.querySelector('input') as HTMLInputElement).click();
+  await g.settle();
+  await g.click('button', 'Save');
+  expect(g.writes).toContainEqual(expect.objectContaining({ path: '/api/glass/slack/kinds', method: 'POST', body: { kinds: ['decisions', 'prs'] } }));
 });
