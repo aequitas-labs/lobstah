@@ -62,9 +62,11 @@ async function boatSocket(boat: Boat, grounds: string[]): Promise<BoatSocket> {
   socket.addEventListener('message', (e) => { if (typeof e.data === 'string' && e.data !== 'pong') received.push(JSON.parse(e.data)); });
   socket.send(JSON.stringify({ t: 'grounds', grounds }));
   // The grounds are kept once the account has read the message.
-  await until(async () => (await env.ACCOUNTS.getByName('a').slackGrounds()).some((g) => grounds.includes(g)));
+  await until(async () => (await knownGrounds()).some((g) => grounds.includes(g)));
   return { socket, received };
 }
+/** The grounds a DM may go to, as the account now knows them. */
+const knownGrounds = () => runInDurableObject(env.ACCOUNTS.getByName('a'), (instance: Account) => (instance as unknown as { knownGrounds(): string[] }).knownGrounds());
 async function until(check: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise((r) => setTimeout(r, 10)); }
   throw new Error('condition never held');
@@ -103,17 +105,17 @@ beforeEach(async () => {
   await env.AUTH_DB.prepare('DELETE FROM slackInstallation').run();
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
-it('offers the grounds each mirror boat runs locally in the Slack picker, until the boat is revoked', async () => {
-  expect(await env.ACCOUNTS.getByName('a').slackGrounds()).toEqual([]);
+it('routes DMs over the grounds each mirror boat runs locally, until the boat is revoked', async () => {
+  expect(await knownGrounds()).toEqual([]);
   const north = await enrol('north');
   await boatSocket(north, ['away', 'home']);
-  expect(await env.ACCOUNTS.getByName('a').slackGrounds()).toEqual(['away', 'home']);
+  expect(await knownGrounds()).toEqual(['away', 'home']);
   expect((await call(`boats/${north.id}/revoke`, {})).status).toBe(200);
-  expect(await env.ACCOUNTS.getByName('a').slackGrounds()).toEqual([]);
+  expect(await knownGrounds()).toEqual([]);
 });
 
 it('relays a DM to the boat’s helm, says it is queued while no helm holds the grounds, and updates when a helm signs on', async () => {

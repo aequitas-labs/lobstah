@@ -63,8 +63,15 @@ beforeEach(async () => {
   const linkedAt = '2026-10-30T00:00:00.000Z';
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['away'], linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
+  await knownGrounds('away');
 });
+/** A boat's card names the grounds, so the wharf knows it, and a DM goes straight to it. */
+async function knownGrounds(grounds: string) {
+  const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: `${grounds}-boat`, permissions: ['read'] }, key: `issue-${++sequence}` })));
+  const card = { family: 'notice', key: `${grounds}-nightly`, grounds, title: 'Nightly build passed', stateHash: '1', sourceAt: new Date().toISOString(), quiet: true };
+  expect((await call('cards', { cards: [card] }, (result.value as { token: string }).token)).status).toBe(200);
+}
 afterEach(() => { vi.restoreAllMocks(); });
 async function helm() {
   const result = JSON.parse(await env.ACCOUNTS.getByName('a').handle(JSON.stringify({ account: 'a', helm: true, personId: 'a', token: person, method: 'POST', path: 'boats', body: { name: 'helm-boat', permissions: ['work', 'helm'] }, key: `issue-${++sequence}` })));

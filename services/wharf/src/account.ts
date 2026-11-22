@@ -388,21 +388,32 @@ export class Account extends DurableObject<Env> {
   /** Private binding only: deliver what is due now, and wait for it. */
   async deliverSlack(): Promise<void> { await this.outbox.drain(); }
   /**
-   * The grounds the signed-in link picker offers: those this account's
-   * mirror boats run locally, and the wharf grounds its cards and dispatches
-   * name.
+   * The grounds a Slack DM may go to: those this account's mirror boats run
+   * locally, and the wharf grounds its cards and dispatches name.
    */
-  async slackGrounds(): Promise<string[]> {
+  private knownGrounds(): string[] {
     const names = new Set([...this.mirrorState.allGrounds(), ...this.cards.store.list(Date.now()).flatMap((card) => card.grounds ? [card.grounds] : [])]);
     for (const row of this.ctx.storage.sql.exec<{ grounds: string | null }>("SELECT DISTINCT json_extract(data,'$.grounds') AS grounds FROM dispatches").toArray()) if (row.grounds) names.add(row.grounds);
     return [...names].sort();
+  }
+  /**
+   * The boat a card's Slack message names: the boat that published it, the
+   * boat that claimed a wharf job, the boat a boat card is about, or else
+   * the wharf.
+   */
+  private cardBoat(card: GlassCard): string | undefined {
+    const name = (id: string | null | undefined) => (id ? this.ctx.storage.sql.exec<{ name: string }>('SELECT name FROM boats WHERE id=?', id).toArray()[0]?.name : undefined);
+    if (card.source.startsWith('boat:')) return name(card.source.slice(5));
+    const job = card.family === 'dispatch' || card.family === 'question' || card.family === 'landed'
+      ? this.ctx.storage.sql.exec<{ boat: string | null }>('SELECT boat FROM dispatches WHERE id=?', card.key.split('@')[0]!).toArray()[0]?.boat : undefined;
+    return name(card.family === 'boat' ? card.key : job) ?? 'wharf';
   }
   /** Private binding only: a person's Slack link as D1 now holds it, or none. Changes no card. */
   async linkSlack(person: string, link: SlackLink | null): Promise<void> {
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
       this.outbox.link(person, link, this.cards.store.list(now).filter((c) => !c.terminal), now);
-      this.cards.restrictSlackAnswers(person, (grounds) => this.outbox.serves(person, grounds), now);
+      if (!link) this.cards.refuseSlackAnswers(person, now);
     });
     await this.afterChange();
   }
@@ -415,7 +426,7 @@ export class Account extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() => {
       requireThat(!this.get('deleted'), 410, 'account deleted');
       const now = Date.now(); this.expire(now); this.capacity();
-      const route = routeSlackMessage(this.ctx.storage.sql, person, message, this.outbox.grounds(person), now);
+      const route = routeSlackMessage(this.ctx.storage.sql, person, message, this.knownGrounds(), now);
       if (!('message' in route)) return route;
       // A grounds a mirror boat runs locally is helmed on that boat: the request goes to its socket.
       const online = (boat: string) => this.ctx.getWebSockets(`boat:${boat}`).length > 0;
@@ -549,6 +560,7 @@ export class Account extends DurableObject<Env> {
         const kinds = card.source === 'wharf' ? ['answer', 'answer-text', 'seen', 'message-helm'] : ['answer', 'answer-text', 'allow-once', 'allow-always', 'deny', 'seen'];
         return card.actions.filter((a) => kinds.includes(a.kind));
       },
+      boat: (card) => this.cardBoat(card),
       // A work request's receipt replies in the thread of the message that asked, in that same DM.
       thread: (card, channel) => {
         const origin = card.source === 'wharf' && card.family === 'request' ? this.glass.requestOrigin(card.key) : undefined;

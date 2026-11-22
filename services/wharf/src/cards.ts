@@ -455,11 +455,11 @@ export class Cards {
       changed.push(this.store.setRelay(card, { ...card.relay, state: state === 'applied' ? 'applied' : state, at: new Date(now).toISOString(), ...(outcome ? { outcome } : {}) }));
     }
   }
-  /** A removed grounds binding stops pending Slack answers before a boat can take them. */
-  restrictSlackAnswers(person: string, linked: (grounds: string | undefined) => boolean, now: number): void {
+  /** Disconnecting Slack stops its pending answers before a boat can take them. */
+  refuseSlackAnswers(person: string, now: number): void {
     const changed: GlassCard[] = [];
     for (const row of this.sql.exec<{ card: number; data: string }>("SELECT card,data FROM card_answers WHERE json_extract(data,'$.state')='pending' AND json_extract(data,'$.by')=?", person).toArray()) {
-      if (!linked(this.store.get(`c${row.card}`)?.grounds)) this.settleReceipt(JSON.parse(row.data) as CardAnswerReceipt, row.card, 'refused', 'Slack no longer serves these grounds', now, changed);
+      this.settleReceipt(JSON.parse(row.data) as CardAnswerReceipt, row.card, 'refused', 'Slack was disconnected', now, changed);
     }
     if (changed.length) this.hooks.changed(changed, now);
   }

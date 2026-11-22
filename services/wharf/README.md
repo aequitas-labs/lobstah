@@ -85,10 +85,13 @@ and links no one but the person who connected. An app installed before
 `reactions:write` keeps working without the star on each message; adding the
 scope means installing again, which **Connect Slack** does.
 
-Choose the grounds the link serves before connecting. The picker selects the
-only available grounds; with several, choose explicitly. Cards, PR watches,
-requests and answers use only that binding. Change it with **Save grounds**
-on the boat list. Existing unbound links send nothing until grounds are chosen.
+A link is to the person's whole wharf; there are no grounds to choose. Every
+boat and every grounds on it sends its standing cards to the linked person's
+DM, one message per card. Each card's context line names its grounds and its
+boat, as in `Decision · home · chriss-macbook-pro`: the boat that stated it,
+the boat that claimed a wharf job, or `wharf` for the wharf's own cards. A
+link made when links had a grounds list keeps working after migration
+`0004_slack_link_wharf.sql`, in the same DM, with no new install.
 
 For asking for work from Slack, also set Event Subscriptions' Request URL to
 `https://api.lobstah.dev/slack/events` with the bot event `message.im`, set
@@ -103,19 +106,20 @@ says. When the request's glass thread changes (the helm writes, adds a card
 or resolves it, or you reply in Slack), the thread gets a new message,
 **Updated**, with **Open in glass**. When the helm starts a dispatch for it,
 the message is **Dispatch started**, linking that dispatch.
-If the link serves several grounds, the app first asks which one in that
-message's thread. Reply with a listed grounds name; no work is queued until
-that choice is made.
+A request goes to a grounds the wharf knows. With one, it goes straight
+there. With several, the app first asks which one in that message's thread.
+Reply with a listed grounds name; no work is queued until that choice is
+made. With none yet, the message gets its ⭐ and nothing more.
 
-The picker offers two kinds of grounds, and a request goes to a different
+The wharf knows two kinds of grounds, and a request goes to a different
 helm for each:
 
 - **Wharf grounds** are helmed on the wharf (`lobstah wharf login --grounds
-  <name> --helm`). The picker lists those its cards and dispatches name. A
+  <name> --helm`). The wharf knows those its cards and dispatches name. A
   request waits on the wharf for that grounds' helm.
 - **Mirror grounds** stay on a mirror boat's own machine, helmed there by
   `lobstah man helm`. Each mirror boat tells the wharf its local grounds when
-  its socket connects, and the picker lists them. A request goes over that
+  its socket connects. A request goes over that
   socket and opens a helm thread on the boat. What you add in the Slack
   thread joins that helm thread. If no helm holds the grounds yet, the
   receipt says it is queued, and the next helm that signs on there sees it.

@@ -135,12 +135,13 @@ export function renderRepost(kind: keyof typeof REPOSTED, title: string, url: st
  * A standing card names what it asks; with controls it can be answered
  * here, without them in the glass. An ended card shows how it ended and
  * offers nothing. Opening the card from here is seeing it, when it asks to
- * be seen.
+ * be seen. Its context line names its grounds and its boat, since one link
+ * gets the cards of every boat and grounds on the wharf.
  */
-export function renderCard(card: GlassCard, glassOrigin: string, controls: CardControl[] = []): SlackMessage {
+export function renderCard(card: GlassCard, glassOrigin: string, controls: CardControl[] = [], boat?: string): SlackMessage {
   const title = clip(card.title.replace(/\s+/g, ' ').trim() || FAMILY_LABEL[card.family], SLACK_BUDGET.title);
   const context = clip(
-    [FAMILY_LABEL[card.family], card.grounds && slackEscape(card.grounds), standing(card), relayed(card), !card.terminal && slackTime(card.sourceAt)].filter(Boolean).join(' · '),
+    [FAMILY_LABEL[card.family], card.grounds && slackEscape(card.grounds), boat && slackEscape(boat), standing(card), relayed(card), !card.terminal && slackTime(card.sourceAt)].filter(Boolean).join(' · '),
     SLACK_BUDGET.context,
   );
   // An answer awaiting its boat, or applied there, leaves nothing to ask.

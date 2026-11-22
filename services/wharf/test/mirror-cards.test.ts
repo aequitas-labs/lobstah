@@ -61,7 +61,7 @@ beforeEach(async () => {
   await env.AUTH_DB.prepare('DELETE FROM slackLink').run();
   await env.AUTH_DB.prepare('INSERT INTO slackInstallation VALUES (?,?,?,?,?,?)').bind('T1', 'B1', await sealToken(env, 'xoxb-test'), 'chat:write,im:write,im:history', 'a', linkedAt).run();
   await env.AUTH_DB.prepare('INSERT INTO slackLink VALUES (?,?,?,?,?,NULL)').bind('T1', 'U1', 'a', 'D1', linkedAt).run();
-  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', grounds: ['home', 'away'], linkedAt });
+  await env.ACCOUNTS.getByName('a').linkSlack('a', { team: 'T1', slackUser: 'U1', channel: 'D1', linkedAt });
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -100,6 +100,23 @@ it('a mirror boat’s standing card for home reaches the person linked to home a
   expect(context(dm)).toContain('home');
   expect(Object.keys(buttons(dm))).toEqual(['Allow once', 'Allow always', 'No', 'Open in glass']);
   expect(await storeCard('decision:home1')).toMatchObject({ source: `boat:${mac.id}`, grounds: 'home', revision: 1 });
+});
+
+it('names each card’s grounds and boat on its Slack context line: the boat that stated it, the boat that claimed a wharf job, or the wharf', async () => {
+  const mac = await boat('chriss-macbook-pro', ['mirror', 'read']);
+  const decision = { family: 'decision', key: 'decision:home2', stateHash: 'asked-1', sourceAt: '2026-11-20T12:00:00.000Z', title: 'Keep the PR cache across restarts?', grounds: 'home', actions: [{ kind: 'answer', option: 'Keep it' }] };
+  expect((await call('cards', { cards: [decision] }, mac.token)).status).toBe(200);
+  const fisher = await boat('fisher', ['work', 'helm']);
+  expect((await call('helm/take', { session: 'helm' }, fisher.token)).status).toBe(200);
+  await call('documents', { id: 'away-choice', kind: 'decision', grounds: 'away', title: 'Ship the away build?', options: ['Ship it'] }, fisher.token);
+  await call('documents/away-choice/publish', {}, fisher.token);
+  await call('dispatches', { id: 'checkout', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Fix the flaky checkout' }, fisher.token);
+  await call('workers/sign-on', { worker: 'worker', grounds: 'away', repo: 'repo', repoRemote: 'github.com/test/repo' }, fisher.token);
+  expect((await call('claims', { worker: 'worker' }, fisher.token)).status).toBe(200);
+  await deliver(); await deliver();
+  expect(context(latest('Decision: Keep the PR cache')!)).toMatch(/^Decision · home · chriss-macbook-pro · Waiting for you/);
+  expect(context(latest('Decision: Ship the away build?')!)).toMatch(/^Decision · away · wharf · Waiting for you/);
+  expect(context(latest('Job: Fix the flaky checkout')!)).toMatch(/^Job · away · fisher · /);
 });
 
 it('an answer from Slack becomes one receipt that only the mirror boat reads and settles', async () => {
