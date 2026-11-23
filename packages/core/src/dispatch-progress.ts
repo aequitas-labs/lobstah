@@ -10,7 +10,7 @@ import { idleWorkingTrap } from './trap-turn.js';
 import { readStatusLog } from './status.js';
 import { readActivity, ageLabel } from './activity.js';
 import { lastEventAt } from './events.js';
-import { slotUsage } from './slots.js';
+import { isFinished, isParked, isTrapCatch, slotUsage } from './slots.js';
 import { poolWaits } from './pools.js';
 import { lastHeavyRunEnd, liveHeavyTickets } from './heavy.js';
 import { readHold, holdReason } from './disk.js';
@@ -79,6 +79,15 @@ export function progressNotice(n: { kind: string }): boolean {
   return n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working';
 }
 
+/** Every chore slot is held by an unfinished, uncancelled headless chore with no stalled notice. */
+function allChoreSlotsProgressing(cfg: Config, progress: readonly DispatchProgress[]): boolean {
+  if (cfg.limits.choreConcurrent <= 0) return false;
+  const holders: string[] = activeIds('chore').filter((id) =>
+    !isFinished(id, 'chore') && !isParked(id, 'chore') && !isTrapCatch(id, 'chore'));
+  const stalled: Set<string> = new Set(progress.filter((item) => item.lane === 'chore' && item.state === 'stalled').map((item) => item.id));
+  return holders.length >= cfg.limits.choreConcurrent && holders.every((id) => !cancelRequested(id, 'chore') && !stalled.has(id));
+}
+
 /** Current attention, after Codex recovery; the daemon can also request conditions eligible for recovery. */
 export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), opts: { includeRecoverableCodex?: boolean } = {}): DispatchProgress[] {
   const out: DispatchProgress[] = [];
@@ -132,7 +141,9 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), o
         text: `stalled ${id}: no activity or note for ${ageLabel(ageSecs * 1000)} (last activity/note ${since}); last note: ${last?.note ?? '(none)'}. Check the worker with lobstah status ${id}; resolve or cancel and re-dispatch.` });
     }
   }
-  return out;
+  return allChoreSlotsProgressing(cfg, out)
+    ? out.filter((item) => item.lane !== 'chore' || item.state !== 'queued-too-long')
+    : out;
 }
 
 /** First wake at the threshold; reminders at +15m, +45m, +105m, … . */
