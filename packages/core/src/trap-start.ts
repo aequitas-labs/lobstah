@@ -27,6 +27,8 @@ export interface TrapReservation {
   reservedAt: string;
   /** Sign-on is due by this time. Past it, the reservation fails. */
   deadline: string;
+  /** When the throw opened the trap's terminal: its sign-on window counts from here, not from `reservedAt`. */
+  launchedAt?: string;
   /** Set when the deadline passed unredeemed. A failed reservation can still be redeemed. */
   failedAt?: string;
   reason?: string;
@@ -260,6 +262,39 @@ export function rememberReservationWindow(ticket: string, window: WindowRef | un
   if (!reservation) return false;
   if (window) writeReservation({ ...reservation, window });
   return true;
+}
+
+/** Why a reservation's sign-on window moved. */
+export type ReservationRenewal =
+  /** The throw opened the trap's terminal at `at`: a window of `startSecs` starts then, after the checkout was prepared. */
+  | { kind: 'launched'; at: number; startSecs: number }
+  /** The machine slept while the throw waited: the window moves on by the time it was asleep. */
+  | { kind: 'slept'; asleepMs: number };
+
+/**
+ * Move a pending reservation's sign-on deadline so its window counts only
+ * time a launched session could have used to sign on: not the checkout
+ * preparation before its terminal opened (a fetch, the repo's setup), and
+ * not time the machine spent asleep. A failure the expiry pass recorded
+ * meanwhile is cleared, because the start is still under way. Returns the
+ * renewed reservation, or undefined when it is gone (redeemed or withdrawn).
+ */
+export function renewReservationDeadline(trapId: string, renewal: ReservationRenewal): TrapReservation | undefined {
+  const current = readReservation(trapId);
+  if (!current) return undefined;
+  const { failedAt: _failedAt, reason: _reason, ...pending } = current;
+  const deadline = renewal.kind === 'launched'
+    ? renewal.at + renewal.startSecs * 1000
+    : (Date.parse(current.deadline) || Date.now()) + renewal.asleepMs;
+  const renewed: TrapReservation = {
+    ...pending,
+    deadline: new Date(deadline).toISOString(),
+    ...(renewal.kind === 'launched' ? { launchedAt: new Date(renewal.at).toISOString() } : {}),
+  };
+  // A sign-on that redeemed the ticket meanwhile removed the file: never write it back.
+  if (readReservation(trapId)?.ticketHash !== current.ticketHash) return undefined;
+  writeReservation(renewed);
+  return renewed;
 }
 
 /** The reservation a ticket proves, or undefined for a malformed, unknown, or wrong ticket. */

@@ -1618,7 +1618,9 @@ launched twice. Otherwise:
 4. It returns when the trap has signed on and parked, and prints whether it
    resumed or started cold, and why. Codex uses `[soak].codexStartSecs`
    (default 600 seconds); other harnesses use 180 seconds. `--timeout`
-   overrides either. A Codex timeout keeps its ticket and reservation for
+   overrides either. The wait counts from when the terminal opens, so
+   fetching and the repo's `setup` don't use it up, and time the machine
+   spends asleep doesn't count. A Codex timeout keeps its ticket and reservation for
    late sign-on; other harnesses withdraw the reservation and post
    `trap-start-failed`. Late first park announces the trap as available.
 
