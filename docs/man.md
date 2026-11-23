@@ -308,10 +308,10 @@ Which commands register a watch. Only these write points register one:
   watched is not registered again.
 - `lobstah report <id> paused --waiting-on pr|review` registers the watch
   for the dispatch's own PR. A `--link` to another PR registers nothing; the
-  daemon reads that PR while the dispatch waits on it. After the dispatch
-  stops waiting, the daemon still reads that PR every 10 minutes until it
-  merges or closes, so its record never stays open after the PR ends. The
-  same holds for any open PR record with no watch.
+  daemon reads that PR while the dispatch waits on it. Once the dispatch
+  reports anything else or ends, nothing reads that PR, so its last state
+  stops standing as attention. `lobstah watch rm <pr key>` on a PR with no
+  watch removes its record when nothing waits on it.
 - `lobstah soak beat` registers the watch for a trap's PR from its first
   push. At most once a minute, it reads the trap's branch. When the branch
   is not trunk, has an upstream, and its head commit is newer than the

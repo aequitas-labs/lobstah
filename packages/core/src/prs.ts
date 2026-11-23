@@ -57,6 +57,13 @@ export interface PrRecord extends PrEvidence {
   mergeRequest?: PrMergeRequest;
   /** "Merge stack when green" for the stack this PR is the bottom of (pr-merge.ts StackMergeRequest). */
   stackMergeRequest?: StackMergeRequest;
+  /**
+   * The dispatch whose `paused --waiting-on pr|review --link` last read this
+   * PR, when the PR is not that dispatch's own. Such a read registers no
+   * watch, so once the dispatch stops waiting nothing reads the PR again
+   * (apps/cli/src/pr-waits.ts isAbandonedWaitRecord).
+   */
+  waitedOnBy?: string;
 }
 
 export interface RepairStreak {

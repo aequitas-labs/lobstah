@@ -97,6 +97,7 @@ import type {
   Lane,
   MergeView,
   PrEvidence,
+  PrRecord,
   TendAttention,
   TendAttentionKind,
   PoolView,
@@ -115,6 +116,7 @@ import { livenessView } from './liveness-view.js';
 import { dispatchUsageLimit } from '@lobstah/core';
 import { deriveGlassPrs } from './glass-prs.js';
 import { refreshMissingDispatchPrs } from './pr-watch.js';
+import { currentlyWaitedPrKeys, isAbandonedWaitRecord } from './pr-waits.js';
 import { liveRepairer, repairChores, waitingRepairs } from './pr-repair.js';
 import type { RepairChore } from './pr-repair.js';
 import type { GlassStack } from './glass-prs.js';
@@ -397,6 +399,17 @@ function evidencePrs(): Array<{ id: string; lane: Lane; pr: PrEvidence }> {
 const dispatchLane = (id: string): Lane | undefined =>
   (['work', 'chore'] as Lane[]).find((l) => fs.existsSync(path.join(laneDirs(l).state, `${id}.status`)));
 
+/** One observed PR and the dispatch it attaches to (its own key when none). */
+interface ObservedPr {
+  id: string;
+  lane: Lane;
+  pr: PrEvidence;
+  /** A dispatch on disk owns it. */
+  dispatch: boolean;
+  /** The PR record it came from; absent for older dispatch evidence with no record. */
+  record?: PrRecord;
+}
+
 /**
  * Observed PRs — the pr: watch's observations, never a forge call. Read
  * order: PR records first (core prs.ts: every observation, man-owned or
@@ -405,14 +418,16 @@ const dispatchLane = (id: string): Lane | undefined =>
  * human's PR, or a culled chain) is keyed by the PR itself: no chain, so
  * nothing puts it on the hook.
  */
-function observedPrs(records = readPrs(), legacy = evidencePrs()): Array<{ id: string; lane: Lane; pr: PrEvidence; dispatch: boolean }> {
-  const out: Array<{ id: string; lane: Lane; pr: PrEvidence; dispatch: boolean }> = [];
+function observedPrs(records = readPrs(), legacy = evidencePrs()): ObservedPr[] {
+  const out: ObservedPr[] = [];
   const seen = new Set<string>();
   for (const r of records) {
     seen.add(r.url);
     const owner = [...r.dispatches].reverse().find((id) => dispatchLane(id) !== undefined);
     out.push(
-      owner ? { id: owner, lane: dispatchLane(owner)!, pr: r, dispatch: true } : { id: r.key, lane: 'work', pr: r, dispatch: false },
+      owner
+        ? { id: owner, lane: dispatchLane(owner)!, pr: r, dispatch: true, record: r }
+        : { id: r.key, lane: 'work', pr: r, dispatch: false, record: r },
     );
   }
   for (const e of legacy) if (!seen.has(e.pr.url)) out.push({ ...e, dispatch: true });
@@ -430,7 +445,10 @@ function prAttention(now: number, observed = observedPrs(), cfg = loadConfig()):
     readySettleSecs: cfg.readySettleSecs, now,
   }));
   const epochs = readStackEpochs();
-  for (const { id, lane, pr, dispatch } of observed) {
+  const waited = currentlyWaitedPrKeys();
+  for (const { id, lane, pr, dispatch, record } of observed) {
+    // A record a finished wait left behind is read by nothing: its last state is not standing evidence.
+    if (record && isAbandonedWaitRecord(record, waited)) continue;
     const kinds = prKinds(pr, { readySettleSecs: cfg.readySettleSecs, now });
     if (kinds.length === 0) continue;
     const ref = parsePrRef(pr.url);
