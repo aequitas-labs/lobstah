@@ -512,15 +512,34 @@ export function runPrCheck(refArg: string, cursor: string | undefined, forId: st
   return JSON.stringify({ cursor: out.cursor, events, ...(out.done ? { done: true } : {}), ...(error ? { error } : {}) });
 }
 
+/** What `lobstah watch rm` did for a PR. */
+export interface PrWatchRemoval {
+  /** A watch existed and was removed. */
+  removed: boolean;
+  /** The PR's state from the read made when no watch existed but its record was still OPEN. */
+  state?: PrRecord['state'];
+  /** Why the read failed, so the record may be out of date. */
+  stale?: string;
+}
+
 /**
  * `lobstah watch rm` on a `pr:` watch: one last read records the PR's
  * current state before the polls stop, so a PR that closed since its last
  * poll is not left OPEN. A failed read still removes the watch; `stale`
- * says why the record may be out of date.
+ * says why the record may be out of date. With no watch to remove, a record
+ * still OPEN is read once all the same: a record whose observer went away
+ * (see observeUnwatchedPrRecords) is what `watch rm` is run to clear.
  */
-export function removePrWatch(ref: PrRef, view: (ref: PrRef) => GhPrView = ghPrView): { removed: boolean; stale?: string } {
+export function removePrWatch(ref: PrRef, view: (ref: PrRef) => GhPrView = ghPrView): PrWatchRemoval {
   const w = readWatch(ref.key);
-  if (!w) return { removed: false };
+  if (!w) {
+    if (readPr(ref.key)?.state !== 'OPEN') return { removed: false };
+    try {
+      return { removed: false, state: observePr(ref, view(ref)).state };
+    } catch (err) {
+      return { removed: false, stale: err instanceof Error ? err.message : String(err) };
+    }
+  }
   let stale: string | undefined;
   try {
     const owner = w.owner.startsWith('dispatch:') ? w.owner.slice('dispatch:'.length) : undefined;

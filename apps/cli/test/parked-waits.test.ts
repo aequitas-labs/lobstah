@@ -12,7 +12,9 @@ import {
   ensureLayout,
   laneDirs,
   addWatch,
+  listNotices,
   mergeEvidence,
+  parsePrRef,
   prRecordFile,
   readPr,
   readEvidence,
@@ -28,7 +30,8 @@ import { tick } from '@lobstah/supervisor';
 import type { ActiveState } from '@lobstah/supervisor';
 import { cliCuller } from '../src/auto-cull.js';
 import { runDoctor } from '../src/doctor.js';
-import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches } from '../src/pr-waits.js';
+import { finishResolvedWaits, observeUnwatchedPrRecords, observeWaitedPrs, registerWaitWatches } from '../src/pr-waits.js';
+import { addPrWatch, observePr, removePrWatch } from '../src/pr-watch.js';
 import { daemonStatus } from '../src/restart.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -317,6 +320,91 @@ describe('a parked dispatch releases on whichever PR lobstah knows for it', () =
     expect(person.status).toBe(2);
     expect(person.stdout).toContain('report needs-decision');
     expect(person.stdout).not.toContain('warning');
+  });
+});
+
+describe('an open PR record whose observer went away still reaches its end', () => {
+  const LINKED = 'https://github.com/o/r/pull/8';
+  const KEY = 'pr:o/r#8';
+  const MINUTE = 60_000;
+  /** A green, mergeable PR (it stands as pr:ready once settled), or the same PR merged. */
+  const ghView = (state: 'OPEN' | 'MERGED', asked: string[] = []) => (ref: PrRef): GhPrView => {
+    asked.push(ref.key);
+    return {
+      state,
+      isDraft: false,
+      title: 'Fix the api-core tests',
+      headRefOid: 'a'.repeat(40),
+      mergeStateStatus: state === 'OPEN' ? 'CLEAN' : 'UNKNOWN',
+      reviewDecision: '',
+      statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      ...(state === 'MERGED' ? { mergedAt: new Date(now + 40 * MINUTE).toISOString() } : {}),
+    } as GhPrView;
+  };
+  const readyItems = (at: number) => buildTendReport(at).attention.filter((a) => a.kind === 'pr:ready' && a.key === KEY);
+
+  it('homebase #3047: a pause on another PR, re-reported as external, then the PR merges', () => {
+    // 22:33:07 — the worker parks on a PR that is not its own: lobstah reads it, registers no watch.
+    parked('d1', { waitingOn: 'pr', link: LINKED, noPr: true });
+    expect(registerWaitWatches('d1', 'work', verbOf('d1')!)).toEqual([]);
+    expect(observeWaitedPrs({ now, view: ghView('OPEN') })).toEqual([KEY]);
+    expect(readWatch(KEY)).toBeUndefined();
+    // 22:33:13 — it re-reports the same wait as external: nothing waits on the PR any more.
+    appendStatus('d1', 'work', 'paused', 'waiting on the merge', undefined, { waitingOn: 'external', link: LINKED });
+    // 23:13 — the PR merges on GitHub. The waited-PR pass no longer reads it.
+    expect(observeWaitedPrs({ now: now + 40 * MINUTE, view: ghView('MERGED') })).toEqual([]);
+    // Before this fix nothing read it again: the record stayed OPEN and pr:ready stood for days.
+    expect(readPr(KEY)?.state).toBe('OPEN');
+    expect(readyItems(now + 40 * MINUTE)).toHaveLength(1);
+    // The unwatched-record pass reads it and records the merge.
+    expect(observeUnwatchedPrRecords({ now: now + 40 * MINUTE, view: ghView('MERGED') })).toEqual([KEY]);
+    expect(readPr(KEY)?.state).toBe('MERGED');
+    expect(readyItems(now + 41 * MINUTE)).toEqual([]);
+    expect(listNotices(50).filter((n) => n.kind === 'pr-merged').map((n) => n.text)).toEqual([
+      expect.stringContaining('#8'),
+    ]);
+    // A merged record is never read again.
+    const asked: string[] = [];
+    expect(observeUnwatchedPrRecords({ now: now + 2 * 60 * MINUTE, view: ghView('MERGED', asked) })).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  it('reads an unwatched open record at most once per interval', () => {
+    observePr(parsePrRef(LINKED)!, ghView('OPEN')(parsePrRef(LINKED)!), { now: new Date(now) });
+    const asked: string[] = [];
+    expect(observeUnwatchedPrRecords({ now: now + 9 * MINUTE, view: ghView('OPEN', asked) })).toEqual([]);
+    expect(observeUnwatchedPrRecords({ now: now + 10 * MINUTE, view: ghView('OPEN', asked) })).toEqual([KEY]);
+    expect(observeUnwatchedPrRecords({ now: now + 15 * MINUTE, view: ghView('OPEN', asked) })).toEqual([]);
+    expect(asked).toEqual([KEY]);
+  });
+
+  it('leaves a record its watch keeps current to the watch', () => {
+    prRecord('OPEN', [], LINKED);
+    addPrWatch(parsePrRef(LINKED)!);
+    const asked: string[] = [];
+    expect(observeUnwatchedPrRecords({ now: now + 60 * MINUTE, view: ghView('MERGED', asked) })).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  it('keeps the record when GitHub cannot be read, and tries again next pass', () => {
+    prRecord('OPEN', [], LINKED);
+    const fail = (): GhPrView => {
+      throw new Error('error connecting to api.github.com');
+    };
+    expect(observeUnwatchedPrRecords({ now: now + 60 * MINUTE, view: fail })).toEqual([]);
+    expect(readPr(KEY)?.state).toBe('OPEN');
+    expect(observeUnwatchedPrRecords({ now: now + 61 * MINUTE, view: ghView('MERGED') })).toEqual([KEY]);
+    expect(readPr(KEY)?.state).toBe('MERGED');
+  });
+
+  it('watch rm on a PR with no watch reads a record still OPEN', () => {
+    prRecord('OPEN', [], LINKED);
+    expect(removePrWatch(parsePrRef(LINKED)!, ghView('MERGED'))).toEqual({ removed: false, state: 'MERGED' });
+    expect(readPr(KEY)?.state).toBe('MERGED');
+    // Nothing open to refresh: no read.
+    const asked: string[] = [];
+    expect(removePrWatch(parsePrRef(LINKED)!, ghView('MERGED', asked))).toEqual({ removed: false });
+    expect(asked).toEqual([]);
   });
 });
 

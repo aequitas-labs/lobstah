@@ -304,7 +304,7 @@ import {
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
 import { mergeRequestedPrs, mergeRequestedStacks } from './pr-merge.js';
 import { createRunCleanup } from './run-cleanup.js';
-import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
+import { finishResolvedWaits, observeUnwatchedPrRecords, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys, wakeIndex } from './wait-wakes.js';
@@ -4148,6 +4148,8 @@ async function mainCli(): Promise<void> {
           prWatches: (now, log) => {
             syncPrWatches(now);
             observeWaitedPrs({ everySecs: pollSecs(), now });
+            // An open record whose observer went away still reaches its merge or close.
+            observeUnwatchedPrRecords({ now });
             // Before the cull pass: a merged PR's release needs the chain finished.
             finishResolvedWaits(log);
             deliverPrRepairs(log, loadConfig().watch.maxForksPerCycle);
@@ -4445,9 +4447,9 @@ async function mainCli(): Promise<void> {
         if (!key) throw new Error('watch rm requires a key');
         const prRef = parsePrRef(key);
         if (prRef) {
-          const { removed, stale } = removePrWatch(prRef);
-          console.log(toonKV({ key: prRef.key, removed }));
-          if (stale) console.log(`warning: could not refresh ${prRef.key} before removing its watch; its record may be stale (${stale})`);
+          const { removed, state, stale } = removePrWatch(prRef);
+          console.log(toonKV({ key: prRef.key, removed, ...(state ? { state } : {}) }));
+          if (stale) console.log(`warning: could not refresh ${prRef.key}${removed ? ' before removing its watch' : ''}; its record may be stale (${stale})`);
           break;
         }
         console.log(toonKV({ key, removed: removeWatch(key) }));

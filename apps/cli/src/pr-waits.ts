@@ -13,9 +13,10 @@ import {
   quietWait,
   readEvidence,
   readPr,
+  readPrs,
   readStatusLog,
 } from '@lobstah/core';
-import type { GhPrView, Lane, PrRef, StatusEntry, Watch } from '@lobstah/core';
+import type { GhPrView, Lane, PrRecord, PrRef, StatusEntry, Watch } from '@lobstah/core';
 import { autoRegisterPrWatch, observePr } from './pr-watch.js';
 
 /** The waits a PR resolves: `paused --waiting-on pr` and `paused --waiting-on review`. */
@@ -96,16 +97,7 @@ export function observeWaitedPrs(opts: { everySecs?: number; now?: number; view?
   const observed: string[] = [];
   let daemonWatched: Set<string>;
   try {
-    daemonWatched = new Set(
-      listWatches()
-        .filter(
-          (w) =>
-            !w.done &&
-            (isPrPresetWatch(w) ||
-              (w.key.startsWith('pr:') && w.owner.startsWith('dispatch:') && laneOf(w.owner.slice('dispatch:'.length)))),
-        )
-        .map((w) => w.key),
-    );
+    daemonWatched = daemonWatchedPrKeys();
   } catch {
     return observed;
   }
@@ -140,6 +132,73 @@ export function observeWaitedPrs(opts: { everySecs?: number; now?: number; view?
       } catch {
         // An unreadable dispatch is skipped.
       }
+    }
+  }
+  return observed;
+}
+
+/**
+ * The PR keys a daemon pass already observes: shipped PR watches (the
+ * repository batch reads them whatever their owner) and `pr:` watches a live
+ * dispatch owns (observeDispatchPrWatches). A finished watch observes nothing.
+ */
+function daemonWatchedPrKeys(): Set<string> {
+  return new Set(
+    listWatches()
+      .filter(
+        (w) =>
+          !w.done &&
+          (isPrPresetWatch(w) ||
+            (w.key.startsWith('pr:') && w.owner.startsWith('dispatch:') && laneOf(w.owner.slice('dispatch:'.length)))),
+      )
+      .map((w) => w.key),
+  );
+}
+
+/**
+ * How often an open PR record that nothing else observes is read again.
+ * Slower than a watch: such a record only needs to reach its end state,
+ * and each read is one GitHub request per PR.
+ */
+export const UNWATCHED_PR_OBSERVE_SECS = 10 * 60;
+
+/**
+ * Observe each open PR record that no watch and no parked dispatch keeps
+ * current, until it merges or closes. A record can outlive the observer that
+ * wrote it: `paused --waiting-on pr --link <PR>` reads a PR that is not the
+ * dispatch's own and registers no watch for it, and once the dispatch reports
+ * anything else nothing reads that PR again. Its record then stays OPEN after
+ * the PR merges, and tend shows its last state (such as pr:ready) for good.
+ * This pass runs after observeWaitedPrs, so a PR a parked dispatch still
+ * waits on was read this pass and is skipped as fresh. A record observed less
+ * than `everySecs` ago is not read. Returns the PR keys it read. Never throws.
+ */
+export function observeUnwatchedPrRecords(
+  opts: { everySecs?: number; now?: number; view?: (ref: PrRef) => GhPrView } = {},
+): string[] {
+  const now = opts.now ?? Date.now();
+  const everyMs = (opts.everySecs ?? UNWATCHED_PR_OBSERVE_SECS) * 1000;
+  const view = opts.view ?? ghPrView;
+  const observed: string[] = [];
+  let daemonWatched: Set<string>;
+  let records: PrRecord[];
+  try {
+    daemonWatched = daemonWatchedPrKeys();
+    records = readPrs();
+  } catch {
+    return observed;
+  }
+  for (const record of records) {
+    if (record.state !== 'OPEN' || daemonWatched.has(record.key)) continue;
+    if (now - Date.parse(record.observedAt) < everyMs) continue;
+    if (!opts.view && githubBlockedUntil(now)) break;
+    const ref = parsePrRef(record.key);
+    if (!ref) continue;
+    try {
+      observePr(ref, view(ref), { now: new Date(now) });
+      observed.push(ref.key);
+    } catch {
+      // gh missing, unauthenticated, or forbidden: the next pass tries again.
     }
   }
   return observed;
