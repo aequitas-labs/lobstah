@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.8.17 — 2026-11-23
+
+### Slack
+
+- Cards from a grounds on the Mac that mirrors to a wharf now reach the wharf
+  and Slack, and can be answered there. (#608)
+- Slack messages post again. Card messages, receipts and the grounds question
+  had failed before they left the wharf. (#609)
+- Each Slack message gets a ⭐ at once, and lobstah answers only with links to
+  the glass. (#610)
+- Slack links to the person on their wharf, with no grounds list. Cards from
+  every boat and grounds on the account arrive, each naming its grounds and
+  boat. (#612)
+- A person has one helm at a time, on the Mac or the wharf, and every Slack DM
+  goes to it. (#613)
+- The glass's Slack row has a Send to Slack choice of which kinds of card
+  arrive. (#614)
+- A review card in Slack can submit a drafted review, or approve it when the
+  draft approves, after Slack asks you to confirm. (#615)
+
+### The glass
+
+- Answering a card or messaging the helm shows as done at the click, even when
+  the machine is busy. If delivery fails, a toast opens the card or thread with
+  your draft to send again. (#604)
+- Helm messages in a thread render as Markdown, long card titles wrap, and the
+  new decisions alert stays hidden on the Threads page. (#606)
+- The hosted glass shows PR evidence images from raw.githubusercontent.com.
+  (#607)
+- A line typed into an interactive run from the hosted glass reaches the
+  script. (#616)
+
+### Traps, run cards and the wharf
+
+- A trap announces that it is free once per free period, and stays quiet while
+  it holds work. (#603)
+- A finished run card records its outcome as an answer the helm acknowledges,
+  and leaves the open-card lists. (#611)
+- The wharf deploy script applies the migrations it lists after one confirm.
+  (#616)
+- `lobstah wharf login` keeps waiting for approval instead of failing after
+  about 2.5 minutes. (#617)
+
 ## 0.8.16 — 2026-11-21
 
 ### Threads and reviews
