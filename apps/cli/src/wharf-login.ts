@@ -127,7 +127,8 @@ export async function wharfLogin(scope: WharfScope, action: string, opts: Option
       if (process.env[scope.location.tokenEnv]) console.log(`Unset ${scope.location.tokenEnv} to use the saved login; environment credentials take precedence.`);
       console.log(JSON.stringify({ loggedIn: true, boat: { id: result.data.id, name: result.data.name, permissions: result.data.permissions } })); return;
     }
-    if (result.data.error === 'slow_down') interval += 5;
+    // A rate-limited poll (429) is busy, not refused: wait longer and ask again.
+    if (result.data.error === 'slow_down' || result.status === 429) interval += 5;
     else if (result.data.error !== 'authorization_pending') throw new Error('boat approval refused, expired, or invalid; nothing was saved');
     await new Promise((resolve) => setTimeout(resolve, Math.min(interval * 1000, Math.max(0, deadline - Date.now()))));
   }

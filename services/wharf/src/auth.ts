@@ -25,6 +25,29 @@ function githubClientId(env: Env): string {
   if (!env.GITHUB_CLIENT_ID) throw new Error('GITHUB_CLIENT_ID is not set on this Worker; set it once in the dashboard or with `wrangler secret put GITHUB_CLIENT_ID`.');
   return env.GITHUB_CLIENT_ID;
 }
+/**
+ * The header that carries the client's address on Cloudflare. Workers receive no
+ * `x-forwarded-for`, which is all Better Auth reads by default, so without this every
+ * client shared one rate-limit bucket per route.
+ */
+const CLIENT_IP_HEADERS: string[] = ['cf-connecting-ip'];
+/** One Better Auth rate-limit rule: at most `max` requests in a window of `window` seconds. */
+type RateLimitRule = { window: number; max: number };
+/**
+ * Rate-limit overrides for the boat device flow, keyed by Better Auth route.
+ *
+ * Better Auth's window restarts only after a full window with no requests, so a client
+ * polling every five seconds reaches 30 requests in 2.5 minutes and is refused until it
+ * stops. Device logins wait up to 30 minutes for approval, so a count limit refuses them.
+ */
+const DEVICE_RATE_LIMITS: Record<string, RateLimitRule | false> = {
+  // The device grant limits polling itself: a poll sooner than the code's interval gets
+  // `slow_down`, and device codes are random secrets that cannot be guessed.
+  '/wharf/token': false,
+  // Better Auth allows 5 approval pages per 30 minutes, to stop people guessing user codes.
+  // The wharf opens a code only for its signed-in, invited owner, so guessing gets nothing.
+  '/device': { window: 60, max: 30 },
+};
 export function wharfAuth(env: Env) {
   const { glass } = authOrigins(env);
   return betterAuth({
@@ -40,8 +63,8 @@ export function wharfAuth(env: Env) {
     },
     account: { storeStateStrategy: 'database', encryptOAuthTokens: true, accountLinking: { enabled: false } },
     session: { cookieCache: { enabled: false } },
-    advanced: { crossSubDomainCookies: { enabled: false } },
-    rateLimit: { enabled: true, storage: 'database', window: 60, max: 30 },
+    advanced: { crossSubDomainCookies: { enabled: false }, ipAddress: { ipAddressHeaders: CLIENT_IP_HEADERS } },
+    rateLimit: { enabled: true, storage: 'database', window: 60, max: 30, customRules: DEVICE_RATE_LIMITS },
     plugins: [bearer(), ...boatDevice(env, glass)],
     logger: { disabled: true },
   });
