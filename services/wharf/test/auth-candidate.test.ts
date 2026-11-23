@@ -246,3 +246,32 @@ it('uses the branded glass shell for auth entry and errors while callbacks keep 
   expect(callback.headers.get('location')).toContain('/api/auth/error?error=state_not_found');
   expect((await SELF.fetch('https://state.test/v1/auth/error')).status).toBe(404);
 });
+
+it('a device login keeps polling and its approval pages keep opening past Better Auth’s default limits', async () => {
+  await authFixtures();
+  const code = await device('patient-boat', 'helm');
+  // 40 polls, each after the code's interval: more than Better Auth's 30-per-minute default allows.
+  for (let poll = 0; poll < 40; poll++) {
+    await env.AUTH_DB.prepare('UPDATE deviceCode SET lastPolledAt=NULL WHERE userCode=?').bind(code.user_code).run();
+    const response = await redeem(code);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: 'authorization_pending' });
+  }
+  // Six approval pages in a row: more than the device plugin's 5-per-30-minutes default allows.
+  for (let page = 0; page < 5; page++) expect((await inspect(await device(`page-boat-${page}`))).status).toBe(200);
+  expect((await inspect(code)).status).toBe(200);
+  expect((await approve(code, 'patient-boat', ['work', 'helm'], ['work', 'helm'])).status).toBe(200);
+  await env.AUTH_DB.prepare('UPDATE deviceCode SET lastPolledAt=NULL WHERE userCode=?').bind(code.user_code).run();
+  expect((await redeem(code)).status).toBe(200);
+});
+
+it('counts requests per client address, not in one bucket shared by every client', async () => {
+  await authFixtures();
+  for (const address of ['203.0.113.7', '198.51.100.9']) {
+    const response = await SELF.fetch('https://state.test/v1/auth/device/code', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': address }, body: JSON.stringify({ client_id: 'lobstah-cli', account: 'a', name: 'addressed' }) });
+    expect(response.status).toBe(200);
+  }
+  const buckets = await env.AUTH_DB.prepare("SELECT key FROM rateLimit WHERE key LIKE '%|/device/code' ORDER BY key").all<{ key: string }>();
+  expect(buckets.results.map((row) => row.key)).toEqual(['198.51.100.9|/device/code', '203.0.113.7|/device/code']);
+});

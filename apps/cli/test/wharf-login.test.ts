@@ -97,6 +97,17 @@ it('a timed-out or refused approval saves nothing and pending polling honors its
   await expect(wharfLogin(scope, 'login', opts({ '--name': 'laptop' }))).rejects.toThrow('refused'); expect(wharfCredential(scope)).toBe('');
 });
 
+it('a rate-limited poll waits longer and keeps polling instead of reporting a refusal', async () => {
+  vi.useFakeTimers(); vi.spyOn(console, 'log').mockImplementation(() => {});
+  const busy = () => Response.json({ message: 'Too many requests. Please try again later.' }, { status: 429 });
+  const transport = vi.fn().mockResolvedValueOnce(Response.json(code)).mockResolvedValueOnce(busy()).mockResolvedValueOnce(busy())
+    .mockResolvedValueOnce(Response.json(issued()));
+  vi.stubGlobal('fetch', transport);
+  const login = wharfLogin(scope, 'login', opts({ '--name': 'laptop' }));
+  await vi.runAllTimersAsync(); await login;
+  expect(transport).toHaveBeenCalledTimes(4); expect(wharfCredential(scope)).toBe(token);
+});
+
 it('job subprocesses get only their dispatch token, never fall back to stored boats, and cannot log in', async () => {
   saveWharfCredential(scope, token);
   const config = loadConfig(); config.wharves = { cloud: scope.location };
