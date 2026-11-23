@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { appendStatus, claimNext, dispatchProgress, dispatchQueueReason, enqueue, ensureLayout,
-  laneDirs, listNotices, loadConfig, noticeDispatchProgress, noticeStands, unseenNotices, writeActivity, touchEvents, requeue, queuedAt } from '../src/index.js';
+  laneDirs, listNotices, loadConfig, noticeDispatchProgress, noticeStands, unseenNotices, writeActivity, touchEvents, requeue, queuedAt, requestCancel } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -69,6 +69,122 @@ it('recognizes a silent headless launch and clears on a fresh event', () => {
   expect(dispatchProgress()[0]?.state).toBe('stalled');
   touchEvents('headless', 'work');
   expect(dispatchProgress()).toHaveLength(0);
+});
+
+it.each([1, 2])('keeps chores quiet while all %i chore slots are progressing', (choreConcurrent: number) => {
+  const cfg = loadConfig();
+  cfg.limits.choreConcurrent = choreConcurrent;
+  for (let slot = 0; slot < choreConcurrent; slot++) {
+    const id = `review-${slot}`;
+    enqueue({ id, repo: 'r', brief: 'review a PR' }, 'chore');
+    claimNext('chore');
+    appendStatus(id, 'chore', 'working', 'reading the diff');
+  }
+  for (const id of ['queued-review', 'queued-repair']) {
+    enqueue({ id, repo: 'r', brief: 'review or repair a PR' }, 'chore');
+  }
+  advance(cfg.helm.queuedNoticeSecs);
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([]);
+  noticeDispatchProgress(Date.now(), cfg);
+  expect(listNotices()).toEqual([]);
+});
+
+it('restores queued chore notices when one holder stalls and clears them when activity resumes', () => {
+  const cfg = loadConfig();
+  cfg.limits.choreConcurrent = 2;
+  for (const id of ['silent-review', 'busy-review']) {
+    enqueue({ id, repo: 'r', brief: 'review a PR' }, 'chore');
+    claimNext('chore');
+    appendStatus(id, 'chore', 'working', 'reading the diff');
+  }
+  for (const id of ['queued-review', 'queued-repair']) {
+    enqueue({ id, repo: 'r', brief: 'review or repair a PR' }, 'chore');
+  }
+  advance(cfg.helm.stalledNoticeSecs);
+  touchEvents('busy-review', 'chore');
+  expect(dispatchProgress(Date.now(), cfg)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'silent-review', state: 'stalled' }),
+    expect.objectContaining({ id: 'queued-review', state: 'queued-too-long' }),
+    expect.objectContaining({ id: 'queued-repair', state: 'queued-too-long' }),
+  ]));
+  noticeDispatchProgress(Date.now(), cfg);
+  const notices = listNotices();
+  expect(notices).toHaveLength(3);
+  expect(notices.every((notice) => noticeStands(notice))).toBe(true);
+  touchEvents('silent-review', 'chore');
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([]);
+  expect(notices.every((notice) => !noticeStands(notice))).toBe(true);
+});
+
+it('still reports queued work while healthy chores and work hold every headless slot', () => {
+  const cfg = loadConfig();
+  cfg.limits.choreConcurrent = 1;
+  cfg.limits.maxConcurrent = 1;
+  for (const lane of ['work', 'chore'] as const) {
+    enqueue({ id: `active-${lane}`, repo: 'r', brief: 'active dispatch' }, lane);
+    claimNext(lane);
+    appendStatus(`active-${lane}`, lane, 'working');
+    enqueue({ id: `queued-${lane}`, repo: 'r', brief: 'waiting dispatch' }, lane);
+  }
+  advance(cfg.helm.queuedNoticeSecs);
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([
+    expect.objectContaining({ id: 'queued-work', lane: 'work', state: 'queued-too-long' }),
+  ]);
+});
+
+it.each([0, 1])('reports a queued chore when %i of two chore slots are occupied', (occupied: number) => {
+  const cfg = loadConfig();
+  cfg.limits.choreConcurrent = 2;
+  for (let slot = 0; slot < occupied; slot++) {
+    enqueue({ id: `review-${slot}`, repo: 'r', brief: 'review a PR' }, 'chore');
+    claimNext('chore');
+    appendStatus(`review-${slot}`, 'chore', 'working');
+  }
+  enqueue({ id: 'queued-review', repo: 'r', brief: 'review a PR' }, 'chore');
+  advance(cfg.helm.queuedNoticeSecs);
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([
+    expect.objectContaining({ id: 'queued-review', state: 'queued-too-long' }),
+  ]);
+});
+
+it('reports queued chores when chore slots are disabled', () => {
+  const cfg = loadConfig();
+  cfg.limits.choreConcurrent = 0;
+  enqueue({ id: 'queued-review', repo: 'r', brief: 'review a PR' }, 'chore');
+  advance(cfg.helm.queuedNoticeSecs);
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([
+    expect.objectContaining({ id: 'queued-review', state: 'queued-too-long' }),
+  ]);
+});
+
+it('does not count an interactive chore catch as an occupied headless slot', () => {
+  const cfg = loadConfig();
+  cfg.limits.choreConcurrent = 1;
+  enqueue({ id: 'trap-review', repo: 'r', brief: 'review a PR' }, 'chore');
+  claimNext('chore');
+  fs.writeFileSync(path.join(laneDirs('chore').active, 'trap-review', 'claim.json'),
+    JSON.stringify({ by: 'wt:reviewer', at: new Date().toISOString() }));
+  appendStatus('trap-review', 'chore', 'working');
+  enqueue({ id: 'queued-review', repo: 'r', brief: 'review a PR' }, 'chore');
+  advance(cfg.helm.queuedNoticeSecs);
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([
+    expect.objectContaining({ id: 'queued-review', state: 'queued-too-long' }),
+  ]);
+});
+
+it.each(['cancelled', 'done', 'failed', 'paused'] as const)('does not suppress queued chores behind a %s chore', (state) => {
+  const cfg = loadConfig();
+  cfg.limits.choreConcurrent = 1;
+  enqueue({ id: 'review', repo: 'r', brief: 'review a PR' }, 'chore');
+  claimNext('chore');
+  appendStatus('review', 'chore', 'working');
+  if (state === 'cancelled') requestCancel('review', 'chore');
+  else appendStatus('review', 'chore', state);
+  enqueue({ id: 'queued-review', repo: 'r', brief: 'review a PR' }, 'chore');
+  advance(cfg.helm.queuedNoticeSecs);
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([
+    expect.objectContaining({ id: 'queued-review', state: 'queued-too-long' }),
+  ]);
 });
 
 it('explains busy/absent traps, headless capacity and unknown repos without changing routing', () => {
