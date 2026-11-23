@@ -136,7 +136,9 @@ function ConsoleLine({ cardKey, onSent }: { cardKey: string; onSent: (secret: st
     setShown(false);
     const refused = await sendRunLine(cardKey, text, masked);
     setError(refused);
-    if (!refused && masked && text) onSent(text);
+    // A line that didn't reach the run comes back to the field, so Enter sends it again.
+    if (refused) setLine(text);
+    else if (masked && text) onSent(text);
   };
   return html`<div class="runconsole">
     <div class="runprompt"><span aria-hidden="true">›</span><input
