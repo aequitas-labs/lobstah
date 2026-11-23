@@ -11,6 +11,7 @@ import {
   readReservation,
   readTrap,
   rememberTrapPane,
+  renewReservationDeadline,
   readTrapAnchor,
   reserveTrap,
   configPermissionMode,
@@ -293,11 +294,55 @@ export interface ThrowOptions {
   stopStaleWriters?: typeof stopStaleCodexWriters;
   /** Test seam: reads and keys the trap's tmux pane; production uses lobstah's tmux server. */
   tmux?: TmuxRunner;
+  /** Test seam: the clock the sign-on window is measured by; production uses Date.now. */
+  now?: () => number;
 }
 
 /** Explicit CLI timeout wins; Codex gets time for plugin and model startup. */
 export function startTimeoutSecs(opts: Pick<ThrowOptions, 'cfg' | 'timeoutSecs'>, harness: string): number {
   return opts.timeoutSecs ?? (harness === 'codex' ? opts.cfg.soak.codexStartSecs : DEFAULT_TRAP_START_SECS);
+}
+
+/** A gap between two sign-on polls longer than this crossed a machine sleep (as the runner's wall clock counts it). */
+export const SIGN_ON_SLEEP_GAP_MS = 60_000;
+
+/** What one sign-on poll found about the window. */
+export interface SignOnPoll {
+  /** The window's awake time is used up. */
+  expired: boolean;
+  /** How long the machine slept since the previous poll; 0 when it stayed awake. */
+  asleepMs: number;
+}
+
+/**
+ * A throw's sign-on window, in awake time. It starts when the trap's
+ * terminal opens, so preparing the checkout (a fetch, the repo's setup)
+ * never uses it up. A poll that comes more than SIGN_ON_SLEEP_GAP_MS after
+ * the previous one crossed a machine sleep, so it adds one poll interval at
+ * most: a laptop closed mid-start wakes to the rest of its window, not to a
+ * failed start whose terminal only just opened.
+ */
+export class SignOnClock {
+  private waitedMs = 0;
+  private lastPollAt: number;
+
+  constructor(
+    private readonly windowMs: number,
+    private readonly pollMs: number,
+    private readonly now: () => number = Date.now,
+  ) {
+    this.lastPollAt = now();
+  }
+
+  /** Count the time since the previous poll. */
+  poll(): SignOnPoll {
+    const at = this.now();
+    const stepMs = Math.max(0, at - this.lastPollAt);
+    this.lastPollAt = at;
+    const slept = stepMs > SIGN_ON_SLEEP_GAP_MS;
+    this.waitedMs += slept ? Math.min(stepMs, this.pollMs) : stepMs;
+    return { expired: this.waitedMs >= this.windowMs, asleepMs: slept ? stepMs - Math.min(stepMs, this.pollMs) : 0 };
+  }
 }
 
 /** A throw that launched but did not come back in time. */
@@ -368,7 +413,12 @@ export function codexScreenNote(screen: string, threadId: string | undefined, ho
   return undefined;
 }
 
-/** Open the command, then wait until the trap signed on after `started` and parked. */
+/**
+ * Open the command, then wait until the trap signed on after `started` and
+ * parked. The sign-on window is measured in awake time from the moment the
+ * terminal opened (see SignOnClock), and the reservation's deadline moves
+ * with it, so neither slow preparation nor a sleeping machine fails a start.
+ */
 async function launchAndWait(
   opts: ThrowOptions,
   w: { trapId: string; name?: string; label: string; repo?: string; sessionId?: string; retry: string; ticket: string; command: StartCommand; adapter: TerminalAdapter; started: number; launched: Omit<Launched, 'command' | 'mode' | 'timeoutSecs'> },
@@ -403,7 +453,10 @@ async function launchAndWait(
   opts.onLaunch?.({ ...w.launched, command, mode: w.command.mode, timeoutSecs, ...(folderTrust ? { folderTrust } : {}) });
   // Other plugins' new or changed hooks: Esc at Codex's review, or a notice that it waits for a person.
   const reviewWatch = pluginReviewWatch(review, { label: w.label, trapId: w.trapId, repo: w.repo, pane: opened?.tmuxPane, run: opts.tmux, started: w.started });
-  const deadline = w.started + timeoutSecs * 1000;
+  // The window starts now that the terminal is open, and the reservation's deadline with it.
+  const pollMs = opts.pollMs ?? 500;
+  const clock = new SignOnClock(timeoutSecs * 1000, pollMs, opts.now);
+  renewReservationDeadline(w.trapId, { kind: 'launched', at: (opts.now ?? Date.now)(), startSecs: timeoutSecs });
   for (;;) {
     const reg = readTrap(w.trapId);
     const fresh = reg !== undefined && Date.parse(reg.signedOnAt) >= w.started - 1000;
@@ -418,7 +471,10 @@ async function launchAndWait(
         seconds: Math.round((Date.now() - w.started) / 1000),
       };
     }
-    if (Date.now() >= deadline) {
+    const { expired, asleepMs } = clock.poll();
+    // Asleep, no session could sign on: the reservation stays due for the awake time left.
+    if (asleepMs > 0) renewReservationDeadline(w.trapId, { kind: 'slept', asleepMs });
+    if (expired) {
       // A tmux pane can be read: say what its screen shows.
       const screen = opened ? await tmuxPaneTail(opened.tmuxPane, undefined, opts.tmux) : undefined;
       const note = screen && w.launched.harness === 'codex' ? codexScreenNote(screen, readTrap(w.trapId)?.sessionId ?? w.sessionId) : undefined;
@@ -433,7 +489,7 @@ async function launchAndWait(
       throw new ThrowTimeoutError(`${w.label} did not sign on within ${timeoutSecs}s; its reservation is withdrawn and the roster is unchanged${shows}`);
     }
     await reviewWatch.tick();
-    await sleep(opts.pollMs ?? 500);
+    await sleep(pollMs);
   }
 }
 

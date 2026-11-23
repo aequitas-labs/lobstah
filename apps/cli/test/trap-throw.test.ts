@@ -31,7 +31,7 @@ import {
   type ThrowPlanRow,
   type TrapRegistration,
 } from '@lobstah/core';
-import { freshProfile, harnessCommand, launchShellText, nextStartMode, onCodexServer, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
+import { freshProfile, harnessCommand, launchShellText, nextStartMode, onCodexServer, SIGN_ON_SLEEP_GAP_MS, SignOnClock, startCommand, startMode, startTimeoutSecs, launchedText, throwTrap, trapForRepo, throwNew, ThrowTimeoutError, type StartCommand, type TerminalAdapter, type TerminalLaunch } from '../src/throw.js';
 import { trapRows } from '../src/trap-list.js';
 import { buildGlassSnapshot } from '../src/glass.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -124,6 +124,26 @@ function fakeTerminal(session: string, seen: TerminalLaunch[], waitOut: string[]
   });
 }
 const idle = (seen: TerminalLaunch[]) => (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => void seen.push(l) });
+
+/**
+ * A terminal whose session starts after the terminal opens, as a real one
+ * does: `beforeSignOn` runs first, then the session redeems the ticket and
+ * parks once, while the throw is already waiting.
+ */
+function laterTerminal(session: string, seen: TerminalLaunch[], beforeSignOn?: () => void): (app: 'terminal' | 'iterm') => TerminalAdapter {
+  return (app) => ({
+    app,
+    async launch(launch) {
+      seen.push(launch);
+      setTimeout(() => {
+        beforeSignOn?.();
+        const ticket = /--ticket (\S+)/.exec(launch.argv.at(-1)!)![1]!;
+        lobstah(launch.cwd, 'soak', '--ticket', ticket, '--session', session, '--harness', launch.argv[0]!);
+        lobstah(launch.cwd, 'soak', '--session', session, '--wait', '--timeout', '0');
+      }, 100);
+    },
+  });
+}
 
 describe('man throw <name>', () => {
   processTest('a fresh throw skips saved history even on the same harness', async () => {
@@ -337,6 +357,37 @@ describe('man throw <name>', () => {
     expect(lobstah(reg.worktree, 'soak', '--ticket', ticket, '--session', OTHER, '--harness', 'claude').status).not.toBe(0);
   });
 
+  processTest('a setup that outlasts the sign-on window leaves the whole window to the session once its terminal opens', async () => {
+    const reg = stowedTrap();
+    stow(reg, true);
+    // The setup changed since the checkout last ran it (a lockfile change: pnpm install), so the throw runs it first.
+    const script = path.join(tmp, 'setup-slow.cjs');
+    fs.writeFileSync(script, 'setTimeout(() => {}, 4000);\n');
+    fs.appendFileSync(path.join(home, 'config.toml'), `setup = ['node "${script}"']\n`);
+    const seen: TerminalLaunch[] = [];
+    const result = await throwTrap({ address: 'amber-gull', cfg: loadConfig(), adapter: laterTerminal(OTHER, seen), pollMs: 50, timeoutSecs: 3 });
+    expect(result.seconds).toBeGreaterThanOrEqual(4);
+    expect(only()).toMatchObject({ trapId: reg.trapId, sessionId: OTHER, firstParkedAt: expect.any(String) });
+    expect(listNotices().some((n) => n.kind === 'trap-start-failed' && n.refId === reg.trapId)).toBe(false);
+  });
+
+  processTest('time the machine sleeps while a throw waits does not use up the sign-on window', async () => {
+    const reg = stowedTrap();
+    stow(reg, true);
+    // The lid closes right after the terminal opens, for an hour.
+    let asleepMs = 0;
+    const now = () => Date.now() + asleepMs;
+    let deadlineAtSignOn = 0;
+    const seen: TerminalLaunch[] = [];
+    const adapter = laterTerminal(OTHER, seen, () => { deadlineAtSignOn = Date.parse(readReservation(reg.trapId)!.deadline); });
+    // The sleep starts once the throw is waiting: before its next poll, and before the session signs on.
+    const asleep = (app: 'terminal' | 'iterm'): TerminalAdapter => ({ app, launch: async (l) => { await adapter(app).launch(l); setTimeout(() => { asleepMs = 3_600_000; }, 0); } });
+    const result = await throwTrap({ address: 'amber-gull', cfg: loadConfig(), adapter: asleep, pollMs: 50, timeoutSecs: 30, now });
+    expect(result.registration).toMatchObject({ trapId: reg.trapId, sessionId: OTHER });
+    // The reservation stayed due for the awake time left, an hour later on the wall clock.
+    expect(deadlineAtSignOn - Date.now()).toBeGreaterThan(3_500_000);
+  });
+
   processTest('a failed setup names the command and what it printed in the start-failed notice', async () => {
     const reg = stowedTrap();
     stow(reg, true);
@@ -363,7 +414,9 @@ describe('man throw <name>', () => {
     expect(launchText).toContain('up to 1s');
     expect(seen[0]!.argv).toContain('check_for_update_on_startup=false');
     const held = readReservation(reg.trapId)!;
-    expect(Date.parse(held.deadline) - Date.parse(held.reservedAt)).toBe(1000);
+    // The window counts from the terminal opening, not from the reservation.
+    expect(Date.parse(held.deadline) - Date.parse(held.launchedAt!)).toBe(1000);
+    expect(Date.parse(held.launchedAt!)).toBeGreaterThanOrEqual(Date.parse(held.reservedAt));
     await expect(throwTrap({ address: 'amber-gull', cfg, adapter: idle(seen) })).rejects.toThrow(TrapStartingError);
     expect(seen).toHaveLength(1);
     expireReservations(Date.parse(held.deadline) + 1);
@@ -385,6 +438,22 @@ describe('man throw <name>', () => {
     expect(readReservation(reg.trapId)).toBeUndefined();
     setRosterProfile(reg.trapId, { terminal: 'iterm' });
     expect(planThrow(loadConfig(), { names: ['amber-gull'] })[0]).toMatchObject({ terminal: 'iterm', terminalFrom: 'profile' });
+  });
+});
+
+describe('the sign-on clock', () => {
+  it('counts awake time only: a poll that crossed a machine sleep adds one poll interval', () => {
+    let at = 0;
+    const clock = new SignOnClock(1000, 100, () => at);
+    for (let i = 0; i < 5; i++) {
+      at += 100;
+      expect(clock.poll()).toEqual({ expired: false, asleepMs: 0 });
+    }
+    at += 2 * 3_600_000;
+    expect(clock.poll()).toEqual({ expired: false, asleepMs: 2 * 3_600_000 - 100 });
+    // A slow poll under load is not a sleep: all of it counts.
+    at += SIGN_ON_SLEEP_GAP_MS - 1;
+    expect(clock.poll()).toEqual({ expired: true, asleepMs: 0 });
   });
 });
 

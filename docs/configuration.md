@@ -239,7 +239,7 @@ send a continuation.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `codexStartSecs` | `600` | Seconds a Codex throw waits for sign-on and first park. Positive whole number; `man throw --timeout` overrides it. Other harnesses default to 180 seconds. A Codex timeout keeps its ticket valid for late sign-on and fences a duplicate launch; `stow --wt <trap>` withdraws it before retrying. |
+| `codexStartSecs` | `600` | Seconds a Codex throw waits for sign-on and first park, counted from when its terminal opens and not while the machine sleeps. Positive whole number; `man throw --timeout` overrides it. Other harnesses default to 180 seconds. A Codex timeout keeps its ticket valid for late sign-on and fences a duplicate launch; `stow --wt <trap>` withdraws it before retrying. |
 | `swapOnLimit` | `false` | Automatically move a limited repo trap's current catch to the other available harness in the same worktree, preserving its brief, progress and unread inbox. The old writer must stop first. Without this setting, use `lobstah swap <id> --harness codex` or wait for the provider's reset. |
 | `idleStowMins` | `60` | After this many minutes parked with no dispatch or messages, sign off normally, keep the worktree, and end the harness session. Paused dispatches keep their session. Quiet soak deadlines renew without waking the model. `0` disables auto-stow. Nonnegative whole number. |
 | `deferSecs` | `90` | A soaking session whose park heartbeat is this fresh holds unaddressed matching bait — the daemon waits instead of spawning. Addressed bait (`--for session:<id>`) waits regardless, until the registration is gone. |

@@ -14,6 +14,7 @@ import {
   noticeOrphanedBait,
   readReservation,
   readTrapAnchor,
+  renewReservationDeadline,
   reservationByAddress,
   reservationForTicket,
   reserveTrap,
@@ -104,6 +105,25 @@ describe('trap reservations', () => {
     expect(readReservation(reservation.trapId)).toBeUndefined();
     noticeOrphanedBait();
     expect(listNotices(50).some((n) => n.kind === 'bait-orphaned')).toBe(true);
+  });
+
+  it('restarts the sign-on window when the terminal opens and moves it on by time asleep, clearing an interim failure', () => {
+    const { reservation, ticket } = reserveTrap({ repo: 'r', name: 'amber-gull', startSecs: 180, now: T0 });
+    // The checkout took ten minutes to prepare: the expiry pass failed the reservation meanwhile.
+    expect(expireReservations(T0 + 600_000).map((r) => r.trapId)).toEqual([reservation.trapId]);
+    const launched = renewReservationDeadline(reservation.trapId, { kind: 'launched', at: T0 + 600_000, startSecs: 180 });
+    expect(launched).toMatchObject({ launchedAt: new Date(T0 + 600_000).toISOString(), deadline: new Date(T0 + 780_000).toISOString() });
+    expect(launched?.failedAt).toBeUndefined();
+    expect(launched?.reason).toBeUndefined();
+    expect(expireReservations(T0 + 700_000)).toEqual([]);
+    // Then the machine slept for half an hour.
+    expect(renewReservationDeadline(reservation.trapId, { kind: 'slept', asleepMs: 1_800_000 })?.deadline).toBe(new Date(T0 + 2_580_000).toISOString());
+    expect(expireReservations(T0 + 2_500_000)).toEqual([]);
+    expect(reservationForTicket(ticket)?.trapId).toBe(reservation.trapId);
+    // Redeemed or withdrawn, nothing is written back.
+    dropReservation(reservation.trapId);
+    expect(renewReservationDeadline(reservation.trapId, { kind: 'launched', at: T0, startSecs: 180 })).toBeUndefined();
+    expect(readReservation(reservation.trapId)).toBeUndefined();
   });
 
   it('signs on as the reserved id and name, and refuses a worktree anchoring another trap', () => {
