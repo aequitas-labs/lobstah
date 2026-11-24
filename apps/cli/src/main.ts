@@ -2122,7 +2122,7 @@ async function mainCli(): Promise<void> {
         if (!key) throw new UsageError(`reviews ${pos[0]} requires a review key\n\n${usageFor('reviews')!}`);
         acknowledgeReview(key);
         if (pos[0] === 'redraft') {
-          const why = await redraftReviewRound(key);
+          const why = await redraftReviewRound(key, { newRound: has('--new') });
           if (why) throw new Error(why);
           console.log(toonKV({ key, state: 'requested', next: 'the next lobstah pick cycle starts a draft job' }));
         } else if (pos[0] === 'dismiss') {

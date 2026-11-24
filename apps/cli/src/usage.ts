@@ -112,8 +112,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   reports: { flags: { '--json': {} } },
   reviews: {
     subverbs: ['ls', 'redraft', 'post', 'dismiss'],
-    flags: { '--json': {}, '--all': {}, '--stale': {} },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'] },
+    flags: { '--json': {}, '--all': {}, '--stale': {}, '--new': {} },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'], '--new': ['redraft'] },
     positionals: '[<key>]',
   },
   todo: {
@@ -434,7 +434,8 @@ acked. \`lobstah attention ack <key>\` acks one.`,
   reviews: `PRs that ask for your review ([reviews]), newest round each; --all adds closed rounds.
 A draft is staged on the PR as your pending review: edit and send it in your review tool.
 post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
-pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
+pending draft; redraft re-drafts a stale or failed round. Use redraft <key> --new
+to start a fresh round after dismissing a review. lobstah never approves.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,
