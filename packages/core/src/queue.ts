@@ -1,4 +1,4 @@
-import { readSessionClaim, trapBySession, trapSessionLiveness, releaseCatch } from './soak.js';
+import { readSessionClaim, readTrap, trapSessionLiveness, releaseCatch } from './soak.js';
 import { stageAssistance } from './assistance.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -200,8 +200,8 @@ export function requestCancel(id: string, lane: Lane): boolean {
     /* the tickets clear once their processes end */
   }
   const claim = readSessionClaim(id, lane);
-  const trap = claim ? trapBySession(claim.sessionId) : undefined;
-  if (trap?.claimed === id && trapSessionLiveness(trap) === 'dead') {
+  const trap = claim?.by.startsWith('wt:') ? readTrap(claim.by.slice(3)) : undefined;
+  if (trap?.sessionId === claim?.sessionId && trap?.claimed === id && trapSessionLiveness(trap) === 'dead') {
     return releaseCatch(trap).finalized === id;
   }
   return false;

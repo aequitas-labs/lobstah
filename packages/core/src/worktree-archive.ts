@@ -11,12 +11,48 @@ export interface WorktreeArchive {
   directory?: string;
 }
 
+/** Inventory used to restore an archived checkout into an empty directory. */
+export interface WorktreeArchiveManifest {
+  version: 1;
+  /** Commit to use for the recovered checkout's detached HEAD. */
+  head: string;
+  /** Original checkout location, for identifying the saved work. */
+  worktree: string;
+  /** Indexed and untracked paths, including tracked deletions. */
+  files: string[];
+  /** Paths copied into files/; missing indexed paths stay deleted on recovery. */
+  present: string[];
+}
+
 /** Git state needed to continue a merge, rebase, cherry-pick or revert. */
 const OPERATION_FILES: readonly string[] = [
   'index', 'HEAD', 'ORIG_HEAD', 'MERGE_HEAD', 'MERGE_MSG', 'MERGE_MODE',
-  'AUTO_MERGE', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'REBASE_HEAD',
+  'AUTO_MERGE', 'MERGE_AUTOSTASH', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'REBASE_HEAD',
   'rebase-merge', 'rebase-apply', 'sequencer',
 ];
+
+/** Compare saved bytes and file kinds without following symbolic links. */
+function matchesArchive(source: string, saved: string): boolean {
+  const stat = (file: string): fs.Stats | undefined => {
+    try { return fs.lstatSync(file); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  };
+  const original = stat(source);
+  const snapshot = stat(saved);
+  if (!original || !snapshot) return original === snapshot;
+  if (original.mode !== snapshot.mode) return false;
+  if (original.isSymbolicLink()) return snapshot.isSymbolicLink() && fs.readlinkSync(source) === fs.readlinkSync(saved);
+  if (original.isDirectory()) {
+    if (!snapshot.isDirectory()) return false;
+    const names = fs.readdirSync(source).sort();
+    if (JSON.stringify(names) !== JSON.stringify(fs.readdirSync(saved).sort())) return false;
+    return names.every((name) => matchesArchive(path.join(source, name), path.join(saved, name)));
+  }
+  return original.isFile() && snapshot.isFile() && fs.readFileSync(source).equals(fs.readFileSync(saved));
+}
 
 /**
  * Save uncommitted work before a checkout is removed. The archive contains
@@ -36,11 +72,11 @@ export function archiveWorktree(dir: string, owner: string): WorktreeArchive {
     const operation = OPERATION_FILES.slice(2).some((name) => fs.existsSync(path.join(own, name)));
     if (!operation && !status.split('\0').some((entry) => entry && entry !== '?? .lobstah-trap')) return { saved: true };
     const common = git('rev-parse', '--path-format=absolute', '--git-common-dir').trim();
-    const root = path.join(common, 'lobstah', 'archives', encodeURIComponent(owner));
+    const root = path.join(common, 'lobstah', 'archives', encodeURIComponent(owner).replace(/\./g, '%2E'));
     fs.mkdirSync(root, { recursive: true });
     const name = `${Date.now()}-${randomUUID()}`;
     temporary = path.join(root, `.${name}`);
-    fs.mkdirSync(temporary);
+    fs.mkdirSync(temporary, { mode: 0o700 });
     const head = git('rev-parse', '--verify', 'HEAD').trim();
     const index = git('ls-files', '--stage', '-z');
     const changes = git('diff', '--no-ext-diff', '--binary', 'HEAD');
@@ -62,16 +98,17 @@ export function archiveWorktree(dir: string, owner: string): WorktreeArchive {
       present.push(file);
     }
     fs.mkdirSync(path.join(temporary, 'git'));
-    for (const name of [...OPERATION_FILES, ...fs.readdirSync(own).filter((file) => file.startsWith('sharedindex.'))]) {
+    const gitFiles = [...OPERATION_FILES, ...fs.readdirSync(own).filter((file) => file.startsWith('sharedindex.'))];
+    for (const name of gitFiles) {
       const source = path.join(own, name);
-      if (fs.existsSync(source)) fs.cpSync(source, path.join(temporary, 'git', name), { recursive: true, dereference: false });
+      if (fs.existsSync(source)) fs.cpSync(source, path.join(temporary, 'git', name), { recursive: true, dereference: false, verbatimSymlinks: true });
     }
     const objects = new Set([head, ...index.split('\0').flatMap((entry) => {
       const match = /^\d+ ([a-f0-9]+) [0-3]\t/.exec(entry);
       return match ? [match[1]!] : [];
     })]);
-    for (const name of ['ORIG_HEAD', 'MERGE_HEAD', 'AUTO_MERGE', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'REBASE_HEAD']) {
-      const file = path.join(own, name);
+    for (const name of ['ORIG_HEAD', 'MERGE_HEAD', 'AUTO_MERGE', 'MERGE_AUTOSTASH', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'REBASE_HEAD', 'rebase-merge/autostash', 'rebase-apply/autostash']) {
+      const file = path.join(temporary, 'git', name);
       if (fs.existsSync(file)) for (const object of fs.readFileSync(file, 'utf8').trim().split(/\s+/)) {
         if (/^[a-f0-9]{40,64}$/.test(object)) objects.add(object);
       }
@@ -82,17 +119,13 @@ export function archiveWorktree(dir: string, owner: string): WorktreeArchive {
     });
     fs.writeFileSync(path.join(temporary, 'objects.pack'), pack);
     fs.writeFileSync(path.join(temporary, 'index-info'), index);
-    fs.writeFileSync(path.join(temporary, 'manifest.json'), JSON.stringify({ head, files, present, worktree: dir }, null, 2));
+    const manifest: WorktreeArchiveManifest = { version: 1, head, files, present, worktree: dir };
+    fs.writeFileSync(path.join(temporary, 'manifest.json'), JSON.stringify(manifest, null, 2));
     // Refuse removal if a concurrent writer changed either side of the snapshot.
-    if (status !== git('status', '--porcelain=v1', '-z', '--untracked-files=all') ||
+    if (head !== git('rev-parse', '--verify', 'HEAD').trim() || status !== git('status', '--porcelain=v1', '-z', '--untracked-files=all') ||
         index !== git('ls-files', '--stage', '-z') || changes !== git('diff', '--no-ext-diff', '--binary', 'HEAD')) return { saved: false };
-    for (const file of present) {
-      const source = path.join(dir, file);
-      const target = path.join(temporary, 'files', file);
-      if (fs.lstatSync(source).isSymbolicLink()) {
-        if (fs.readlinkSync(source) !== fs.readlinkSync(target)) return { saved: false };
-      } else if (!fs.readFileSync(source).equals(fs.readFileSync(target))) return { saved: false };
-    }
+    if (!gitFiles.every((name) => matchesArchive(path.join(own, name), path.join(temporary!, 'git', name)))) return { saved: false };
+    if (!present.every((file) => matchesArchive(path.join(dir, file), path.join(temporary!, 'files', file)))) return { saved: false };
     const directory = path.join(root, name);
     fs.renameSync(temporary, directory);
     temporary = undefined;
@@ -100,6 +133,9 @@ export function archiveWorktree(dir: string, owner: string): WorktreeArchive {
   } catch {
     return { saved: false };
   } finally {
-    if (temporary) fs.rmSync(temporary, { recursive: true, force: true });
+    if (temporary) {
+      try { fs.rmSync(temporary, { recursive: true, force: true }); }
+      catch { /* An incomplete hidden archive never authorizes removal. */ }
+    }
   }
 }

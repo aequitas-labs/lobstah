@@ -18,6 +18,7 @@ beforeEach(() => {
   fs.mkdirSync(repo);
   git(repo, 'init', '-q', '-b', 'main');
   fs.writeFileSync(path.join(repo, 'conflict'), 'base\n');
+  fs.writeFileSync(path.join(repo, 'stash-file'), 'base stash file\n');
   git(repo, 'add', '.');
   git(repo, 'commit', '-qm', 'base');
 });
@@ -32,7 +33,9 @@ it('recovers staged, unstaged, untracked and conflicted work after checkout remo
   git(repo, 'worktree', 'add', '-qb', 'work', checkout);
   fs.writeFileSync(path.join(checkout, 'conflict'), 'ours\n');
   git(checkout, 'commit', '-qam', 'ours');
-  expect(() => git(checkout, 'merge', 'other')).toThrow();
+  fs.writeFileSync(path.join(checkout, 'stash-file'), 'work saved by merge autostash');
+  expect(() => git(checkout, 'merge', '--autostash', 'other')).toThrow();
+  const autostash = git(checkout, 'rev-parse', '--verify', 'MERGE_AUTOSTASH');
   fs.writeFileSync(path.join(checkout, 'staged'), 'staged content');
   git(checkout, 'add', 'staged');
   fs.writeFileSync(path.join(checkout, 'staged'), 'unstaged content');
@@ -60,6 +63,7 @@ it('recovers staged, unstaged, untracked and conflicted work after checkout remo
   expect(fs.readFileSync(path.join(recovered, 'staged'), 'utf8')).toBe('unstaged content');
   expect(fs.readFileSync(path.join(recovered, 'untracked'), 'utf8')).toBe('untracked content');
   expect(git(recovered, 'cat-file', '-t', 'MERGE_HEAD')).toBe('commit');
+  expect(git(recovered, 'show', `${autostash}:stash-file`)).toBe('work saved by merge autostash');
   expect(git(recovered, 'ls-files', '--unmerged').split('\n')).toHaveLength(3);
 });
 
@@ -72,4 +76,22 @@ it('keeps the checkout when its archive cannot be written', () => {
   expect(archiveWorktree(checkout, 'trap-id').saved).toBe(false);
   expect(removeGhostWorktree(checkout).removed).toBe(false);
   expect(fs.readFileSync(path.join(checkout, 'conflict'), 'utf8')).toBe('unsaved');
+});
+
+
+it('packs a rebase autostash that is not reachable from HEAD or the index', () => {
+  fs.writeFileSync(path.join(repo, 'stash-file'), 'work saved before rebase');
+  const autostash = git(repo, 'stash', 'create');
+  git(repo, 'reset', '--hard', 'HEAD');
+  const state = path.join(repo, '.git', 'rebase-merge');
+  fs.mkdirSync(state);
+  fs.writeFileSync(path.join(state, 'autostash'), autostash + '\n');
+  const archived = archiveWorktree(repo, 'rebasing-trap');
+  expect(archived.saved).toBe(true);
+  const recovered = path.join(root, 'recovered');
+  fs.mkdirSync(recovered);
+  git(recovered, 'init', '-q');
+  execFileSync('git', ['index-pack', '--stdin'], { cwd: recovered, input: fs.readFileSync(path.join(archived.directory!, 'objects.pack')), stdio: ['pipe', 'pipe', 'pipe'] });
+  expect(git(recovered, 'show', `${autostash}:stash-file`)).toBe('work saved before rebase');
+  expect(fs.readFileSync(path.join(archived.directory!, 'git', 'rebase-merge', 'autostash'), 'utf8')).toBe(autostash + '\n');
 });

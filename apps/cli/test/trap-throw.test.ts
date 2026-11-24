@@ -23,10 +23,12 @@ import {
   readSessionClaim,
   readTrap,
   readTrapAnchor,
+  statusPath,
   setRosterProfile,
   trapLabel,
   TrapStartingError,
   type Config,
+  type StatusEntry,
   type RosterEntry,
   type ThrowPlanRow,
   type TrapRegistration,
@@ -160,16 +162,15 @@ describe('man throw <name>', () => {
     fs.writeFileSync(path.join(home, 'soaking', `${reg.trapId}.json`), JSON.stringify({ ...registration,
       heartbeatAt: stale, harnessProcess: { pid: process.pid, startedAt: 'old process' } }));
     // The claim report must also be quiet before recovery is allowed.
-    // Resolve the status path through core so this follows the queue layout.
-    const { statusPath } = await import('@lobstah/core');
     const status = statusPath('aaaaaaaa-bbbb-4ccc-8ddd-000000000002', 'work');
-    fs.writeFileSync(status, fs.readFileSync(status, 'utf8').split('\n').filter(Boolean).map((line) => JSON.stringify({ ...JSON.parse(line), at: stale })).join('\n') + '\n');
+    fs.writeFileSync(status, fs.readFileSync(status, 'utf8').split('\n').filter(Boolean).map((line) => JSON.stringify({ ...(JSON.parse(line) as StatusEntry), at: stale })).join('\n') + '\n');
     const seen: TerminalLaunch[] = [];
     const result = await throwTrap({ address: 'amber-gull', cfg: loadConfig(), adapter: fakeTerminal(SESSION, seen), pollMs: 50, timeoutSecs: 30 });
     expect(result).toMatchObject({ action: 'resume', checkout: 'kept', registration: { trapId: reg.trapId, sessionId: SESSION, worktree: reg.worktree } });
     expect(git(reg.worktree, 'show', ':f.txt')).toBe('unfinished work');
     expect(fs.readFileSync(path.join(reg.worktree, 'f.txt'), 'utf8')).toBe('more unfinished work');
     expect(seen[0]!.argv.slice(0, 3)).toEqual(['claude', '--resume', SESSION]);
+    expect(readSessionClaim('aaaaaaaa-bbbb-4ccc-8ddd-000000000002', 'work')).toMatchObject({ by: `wt:${reg.trapId}`, sessionId: SESSION });
   });
 
   processTest('a fresh throw skips saved history even on the same harness', async () => {

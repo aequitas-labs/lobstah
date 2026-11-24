@@ -942,14 +942,25 @@ export function pauseExpiry(entry: StatusEntry, pausedTtlMs: number): number {
   return Number.isNaN(until) ? msOf(entry.at) + pausedTtlMs : until;
 }
 
+/** Process evidence for the session currently manning a trap. */
+export type TrapSessionLiveness = 'alive' | 'dead' | 'unknown';
+
 /** Whether the trap's own session has a process, or lacks enough evidence to tell. */
-export function trapSessionLiveness(reg: TrapRegistration): 'alive' | 'dead' | 'unknown' {
+export function trapSessionLiveness(reg: TrapRegistration): TrapSessionLiveness {
   if (reg.harnessProcess) return harnessProcessAlive(reg.harnessProcess) ? 'alive' : 'dead';
   if (reg.harness === 'claude' && reg.configured?.surface !== 'claude-desktop') {
     const processes = readClaudeProcesses();
     if (processes !== undefined) return processes.some((process) => process.sessionId === reg.sessionId) ? 'alive' : 'dead';
   }
   return 'unknown';
+}
+
+/** Limit a reconciliation pass without changing the usual ghost timeout rules. */
+export interface GhostSweepOptions {
+  /** Reconcile confirmed process deaths even while unknown sessions have resume grace. */
+  deadOnly?: boolean;
+  /** A named throw only reconciles the trap it is about to resume. */
+  trapId?: string;
 }
 
 /**
@@ -971,7 +982,7 @@ export function trapSessionLiveness(reg: TrapRegistration): 'alive' | 'dead' | '
  * instead need at most two quiet minutes, even if they never parked or the
  * daemon just resumed. Their checkout is always kept for session recovery.
  */
-export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 86400_000, options: { deadOnly?: boolean; trapId?: string } = {}): GhostSweepAction[] {
+export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 86400_000, options: GhostSweepOptions = {}): GhostSweepAction[] {
   const actions: GhostSweepAction[] = [];
   for (const reg of listTraps()) {
     if (options.trapId && options.trapId !== reg.trapId) continue;
