@@ -9,6 +9,7 @@ import { lobstahHome } from './paths.js';
 import { validReviewTool } from './pr-review.js';
 import { parseReviews } from './reviews.js';
 import { validCacheGlob } from './cache-paths.js';
+import { validIgnoreDirtyPath } from './cleanup-paths.js';
 import type { ReviewsConfig } from './reviews.js';
 
 export interface HarnessPermissionDefaults {
@@ -99,6 +100,8 @@ export interface RepoConfig {
    * for reuse by a follow-up (build output, caches, scratch notes).
    */
   scratch?: string[];
+  /** Regenerated files or directories whose tracked and untracked changes do not prevent cleanup. */
+  ignoreDirty?: string[];
   /** Override the headless runner's remote-preservation policies. */
   pushEarly?: boolean;
   draftPr?: boolean;
@@ -805,6 +808,8 @@ export function loadConfig(): Config {
     // Cache globs are deletion inputs: reject traversal and non-string lists before loading the repo.
     if (r.cacheDirs !== undefined && (!Array.isArray(r.cacheDirs) || r.cacheDirs.some((glob) => typeof glob !== 'string' || !validCacheGlob(glob))))
       throw new Error(`[repos.${key}].cacheDirs must be relative globs inside the worktree, without .. or absolute paths`);
+    if (r.ignoreDirty !== undefined && (!Array.isArray(r.ignoreDirty) || r.ignoreDirty.some((file) => typeof file !== 'string' || !validIgnoreDirtyPath(file))))
+      throw new Error(`[repos.${key}].ignoreDirty must be a list of repo-relative files or directories, without globs, .. or Git metadata`);
     if (r.traps !== undefined && (typeof r.traps !== 'number' || !Number.isSafeInteger(r.traps) || r.traps < 0)) {
       throw new Error(`[repos.${key}].traps must be a non-negative whole number`);
     }
@@ -821,6 +826,7 @@ export function loadConfig(): Config {
       harness: parseHarness(r.harness, `[repos.${key}.harness]`),
       pickup: r.pickup === undefined ? undefined : Boolean(r.pickup),
       scratch: Array.isArray(r.scratch) ? r.scratch.map(String) : undefined,
+      ignoreDirty: r.ignoreDirty as string[] | undefined,
       pushEarly: r.pushEarly === undefined ? undefined : Boolean(r.pushEarly),
       draftPr: r.draftPr === undefined ? undefined : Boolean(r.draftPr),
       checkpointOnStop: r.checkpointOnStop === undefined ? undefined : Boolean(r.checkpointOnStop),

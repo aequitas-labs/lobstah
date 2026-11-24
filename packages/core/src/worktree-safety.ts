@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { cleanupModifiedFiles } from './cleanup-worktree.js';
 
 function git(dir: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
@@ -13,19 +14,12 @@ export interface WorktreeSafety {
   reason?: string;
 }
 
-/** Fail closed. The only ignored file is an untracked trap anchor. */
+/** Fail closed; tooling scratch files and configured regenerated paths do not protect cleanup. */
 export function inspectTrapWorktree(dir: string): WorktreeSafety {
   const result: WorktreeSafety = { branch: 'unknown' };
   try {
     result.branch = git(dir, 'symbolic-ref', '--short', 'HEAD').trim();
-    const records = git(dir, 'status', '--porcelain', '-z', '--untracked-files=all').split('\0');
-    let modified = 0;
-    for (let i = 0; i < records.length; i++) {
-      const record = records[i]!;
-      if (!record) continue;
-      if (record !== '?? .lobstah-trap') modified++;
-      if (/^[RC]|^.[RC]/.test(record)) i++; // rename/copy has a second path
-    }
+    const modified = cleanupModifiedFiles(dir);
     result.modifiedFiles = modified;
     let upstream: string | undefined;
     try { upstream = git(dir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}').trim(); } catch { /* no upstream */ }
@@ -127,7 +121,8 @@ export function removeGhostWorktree(dir: string): WorktreeSafety & { removed: bo
     const own = git(dir, 'rev-parse', '--path-format=absolute', '--git-dir').trim();
     if (common === own) return { ...safety, removed: false, reason: 'not a linked worktree' };
     if (fs.existsSync(anchor)) { saved = fs.readFileSync(anchor); fs.unlinkSync(anchor); }
-    git(path.dirname(common), '--git-dir', common, 'worktree', 'remove', dir);
+    // Safety above permits only disposable changes; Git still sees those as dirty.
+    git(path.dirname(common), '--git-dir', common, 'worktree', 'remove', '--force', dir);
     return { ...safety, removed: true, ...(revision ? { revision } : {}) };
   } catch {
     if (saved && fs.existsSync(dir)) fs.writeFileSync(anchor, saved);

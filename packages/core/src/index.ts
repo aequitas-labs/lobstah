@@ -80,6 +80,7 @@ export * from './cache-cleanup.js';
 export * from './cache-paths.js';
 export * from './worktrees.js';
 export * from './worktree-safety.js';
+export { cleanupModifiedFiles } from './cleanup-worktree.js';
 export * from './roster.js';
 export * from './throw-plan.js';
 export * from './trap-availability.js';

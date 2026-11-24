@@ -36,6 +36,7 @@ import {
   worktreesDir,
   readTrapAnchor,
   inspectTrapWorktree,
+  cleanupModifiedFiles,
   removeGhostWorktree,
   foldCatches,
   recordRosterRevision,
@@ -122,7 +123,7 @@ function worktreeSafetyReason(dir: string, heads: readonly string[] = []): strin
     cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000,
   }).trim();
   try {
-    if (git('status', '--porcelain', '--untracked-files=all')) return 'dirty';
+    if (cleanupModifiedFiles(dir)) return 'dirty';
     const published = heads.filter((head) => /^[a-f0-9]{40,64}$/i.test(head));
     const count = git('rev-list', '--count', 'HEAD', '--not', '--remotes', ...published);
     return count === '0' ? undefined : 'unpushed';
@@ -453,14 +454,14 @@ export function removeWorktree(id: string, dir: string, reviewWait = false): voi
     return; // Never fall through to force removal of a trap checkout.
   }
   if (reviewWait || reviewWorktreeUsers().has(id) || !worktreeUsage().newest.has(id)) {
-    // Recheck reviews and orphans at removal. Git must refuse newly dirty
-    // work; never force or fall through to recursive removal when it does.
+    // Recheck reviews and orphans at removal; only disposable changes may remain.
+    // Never fall through to recursive removal when verification fails.
     try {
       const waiting = reviewWait ? reviewWaitWorktrees().find((item) => item.owner === id) : undefined;
       if (reviewWait && !waiting) return;
       if (worktreeSafetyReason(dir, waiting?.heads)) return;
       const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      execFileSync('git', ['--git-dir', common, 'worktree', 'remove', dir], { stdio: 'ignore' });
+      execFileSync('git', ['--git-dir', common, 'worktree', 'remove', '--force', dir], { stdio: 'ignore' });
     } catch { /* leave it for the next cleanup attempt */ }
     return;
   }
