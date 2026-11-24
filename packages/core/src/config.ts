@@ -409,6 +409,8 @@ export interface HelmConfig {
   timezone?: string;
   /** Queued age before lack of a claim needs attention; 0 disables. */
   queuedNoticeSecs: number;
+  /** Maximum quiet wait behind progressing chore slots; 0 disables this escalation. */
+  choreQueuedNoticeSecs: number;
   /** Silence since both activity and note before stalled attention; 0 disables. */
   stalledNoticeSecs: number;
   /** Explicit idle transition with a working report before attention; 0 disables. */
@@ -691,6 +693,7 @@ export const DEFAULT_SOAK: SoakConfig = {
 export const DEFAULT_HELM: HelmConfig = {
   chat: 'full',
   queuedNoticeSecs: 180,
+  choreQueuedNoticeSecs: 1800,
   stalledNoticeSecs: 1200,
   idleWorkingNoticeSecs: 60,
   ttlSecs: 1800,
@@ -789,7 +792,7 @@ export function loadConfig(): Config {
     try { new Intl.DateTimeFormat('en', { timeZone: helm.timezone }); }
     catch { throw new Error('[helm].timezone must be an IANA timezone'); }
   }
-  for (const key of ['queuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs', 'todoStaleDays'] as const) {
+  for (const key of ['queuedNoticeSecs', 'choreQueuedNoticeSecs', 'stalledNoticeSecs', 'idleWorkingNoticeSecs', 'todoStaleDays'] as const) {
     if (typeof helm[key] !== 'number' || !Number.isFinite(helm[key]) || helm[key] < 0) {
       throw new Error(`[helm].${key} must be a non-negative number in ${configPath()}`);
     }

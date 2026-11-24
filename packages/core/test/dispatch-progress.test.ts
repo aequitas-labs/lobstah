@@ -219,9 +219,97 @@ it('starts a fresh queue age when a long-running catch is requeued, preserving i
   expect(dispatchProgress()[0]?.state).toBe('queued-too-long');
 });
 
-it.each(['queuedNoticeSecs', 'stalledNoticeSecs'])('validates %s instead of silently disabling notices', (key) => {
+it.each(['queuedNoticeSecs', 'choreQueuedNoticeSecs', 'stalledNoticeSecs'])('validates %s instead of silently disabling notices', (key) => {
   for (const value of ['-1', '"soon"', 'true', 'inf', 'nan']) {
     fs.writeFileSync(path.join(home, 'config.toml'), `[helm]\n${key} = ${value}\n`);
     expect(() => loadConfig()).toThrow(`${key} must be a non-negative number`);
   }
+});
+
+/** A live runner keeps producing events while another chore waits for its slot. */
+function queueBehindLiveChore(): void {
+  enqueue({ id: 'holder', repo: 'r', brief: 'review a PR' }, 'chore');
+  claimNext('chore');
+  appendStatus('holder', 'chore', 'working');
+  fs.writeFileSync(path.join(laneDirs('chore').active, 'holder', 'runner.json'),
+    JSON.stringify({ startedAt: new Date().toISOString(), pid: process.pid }));
+  enqueue({ id: 'waiting', repo: 'r', brief: 'review another PR' }, 'chore');
+}
+
+it('escalates a progressing chore queue at 30 minutes with its holder and age', () => {
+  queueBehindLiveChore();
+  advance(1799);
+  touchEvents('holder', 'chore');
+  expect(dispatchProgress()).toEqual([]);
+  advance(1);
+  const notice = dispatchProgress()[0]!;
+  expect(notice.thresholdSecs).toBe(1800);
+  expect(notice.text).toContain('holder (30m old)');
+  expect(notice.text).toContain('Check or cancel the slot holder');
+  expect(notice.text).not.toContain('re-address');
+  noticeDispatchProgress();
+  expect(noticeStands(listNotices()[0]!)).toBe(true);
+  claimNext('chore');
+  expect(noticeStands(listNotices()[0]!)).toBe(false);
+});
+
+it('honors the configured long chore wait and allows disabling it', () => {
+  fs.appendFileSync(path.join(home, 'config.toml'), '\n[helm]\nchoreQueuedNoticeSecs = 600\n');
+  queueBehindLiveChore();
+  advance(599);
+  expect(dispatchProgress()).toEqual([]);
+  advance(1);
+  expect(dispatchProgress()[0]?.thresholdSecs).toBe(600);
+  const cfg = loadConfig();
+  cfg.helm.choreQueuedNoticeSecs = 0;
+  advance(3600);
+  touchEvents('holder', 'chore');
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([]);
+});
+
+it('reports a dead slot holder even when its last activity is recent', () => {
+  queueBehindLiveChore();
+  advance(180);
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+    throw Object.assign(new Error('No such process'), { code: 'ESRCH' });
+  });
+  try {
+    expect(dispatchProgress()[0]?.text).toContain('holder (3m old, dead)');
+    noticeDispatchProgress();
+    expect(noticeStands(listNotices()[0]!)).toBe(true);
+  } finally { kill.mockRestore(); }
+  expect(dispatchProgress()).toEqual([]);
+  expect(noticeStands(listNotices()[0]!)).toBe(false);
+});
+
+it('names the stalled holder and gives a chore remedy', () => {
+  queueBehindLiveChore();
+  advance(1200);
+  const queued = dispatchProgress().find((item) => item.id === 'waiting')!;
+  expect(queued.text).toContain('holder (20m old, stalled');
+  expect(queued.text).toContain('Check or cancel the slot holder');
+  expect(queued.text).not.toContain('trap');
+  const stalled = dispatchProgress().find((item) => item.id === 'holder')!;
+  expect(stalled.text).toContain('Check the chore with lobstah status holder, or cancel it.');
+  expect(stalled.text).not.toContain('re-dispatch');
+});
+
+it('does not hide an addressed chore behind unrelated healthy capacity', () => {
+  queueBehindLiveChore();
+  enqueue({ id: 'addressed', repo: 'r', brief: 'review', for: 'wt:absent' }, 'chore');
+  advance(180);
+  expect(dispatchProgress()).toEqual([
+    expect.objectContaining({ id: 'addressed', text: expect.stringContaining('not signed on') }),
+  ]);
+  expect(dispatchProgress()[0]?.text).not.toContain('re-address');
+});
+
+it('does not call a holder dead when process access is denied', () => {
+  queueBehindLiveChore();
+  advance(180);
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+    throw Object.assign(new Error('Permission denied'), { code: 'EPERM' });
+  });
+  try { expect(dispatchProgress()).toEqual([]); }
+  finally { kill.mockRestore(); }
 });

@@ -16,7 +16,7 @@ import { lastHeavyRunEnd, liveHeavyTickets } from './heavy.js';
 import { readHold, holdReason } from './disk.js';
 import { postNotice } from './notices.js';
 import { trapCapacityReason } from './trap-availability.js';
-import type { Descriptor, Lane } from './types.js';
+import type { Descriptor, Lane, RunnerInfo } from './types.js';
 import { dispatchUsageLimit, trapUsageLimit } from './usage-limits.js';
 
 /** Observational only: never reroute sticky work or acquire a worker slot. */
@@ -79,13 +79,29 @@ export function progressNotice(n: { kind: string }): boolean {
   return n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working';
 }
 
-/** Every chore slot is held by an unfinished, uncancelled headless chore with no stalled notice. */
-function allChoreSlotsProgressing(cfg: Config, progress: readonly DispatchProgress[]): boolean {
-  if (cfg.limits.choreConcurrent <= 0) return false;
-  const holders: string[] = activeIds('chore').filter((id) =>
-    !isFinished(id, 'chore') && !isParked(id, 'chore') && !isTrapCatch(id, 'chore'));
-  const stalled: Set<string> = new Set(progress.filter((item) => item.lane === 'chore' && item.state === 'stalled').map((item) => item.id));
-  return holders.length >= cfg.limits.choreConcurrent && holders.every((id) => !cancelRequested(id, 'chore') && !stalled.has(id));
+/** One headless chore holding capacity, with the evidence needed to explain its wait. */
+interface ChoreSlotHolder {
+  id: string;
+  ageSecs: number;
+  dead: boolean;
+}
+
+/** Read slot holders without treating an unknown or inaccessible process as dead. */
+function choreSlotHolders(now: number): ChoreSlotHolder[] {
+  return activeIds('chore').filter((id) =>
+    !isFinished(id, 'chore') && !isParked(id, 'chore') && !isTrapCatch(id, 'chore')).map((id): ChoreSlotHolder => {
+    let runner: Partial<RunnerInfo> | undefined;
+    try { runner = JSON.parse(fs.readFileSync(path.join(laneDirs('chore').active, id, 'runner.json'), 'utf8')) as Partial<RunnerInfo>; }
+    catch { /* A claim can precede the runner file. */ }
+    let dead: boolean = false;
+    const pid: number | undefined = runner?.pid;
+    if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+      try { process.kill(pid, 0); }
+      catch (error) { dead = (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+    }
+    const started: number = Date.parse(runner?.startedAt ?? readSessionClaim(id, 'chore')?.at ?? readStatusLog(id, 'chore')[0]?.at ?? '');
+    return { id, ageSecs: Number.isFinite(started) ? Math.max(0, (now - started) / 1000) : 0, dead };
+  });
 }
 
 /** Current attention, after Codex recovery; the daemon can also request conditions eligible for recovery. */
@@ -98,9 +114,11 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), o
       if (!d || !since) continue;
       const ageSecs = (now - Date.parse(since)) / 1000;
       if (cfg.helm.queuedNoticeSecs <= 0 || ageSecs < cfg.helm.queuedNoticeSecs) continue;
+      const reason: string = dispatchQueueReason(d, lane, cfg, now);
+      const remedy: string = lane === 'chore' ? 'Check or cancel the chore.' : 'Cancel and re-dispatch unaddressed, or cancel and re-address to another trap.';
       out.push({ id, lane, repo: d.repo, state: 'queued-too-long', since, ageSecs,
         thresholdSecs: cfg.helm.queuedNoticeSecs, stateHash: `queued:${since}`,
-        text: `queued-too-long ${id} (${ageLabel(ageSecs * 1000)}): ${dispatchQueueReason(d, lane, cfg, now)}. Cancel and re-dispatch unaddressed, or cancel and re-address to another trap.` });
+        text: `queued-too-long ${id} (${ageLabel(ageSecs * 1000)}): ${reason}. ${remedy}` });
     }
     for (const id of activeIds(lane)) {
       if (dispatchUsageLimit(id, lane)) continue; // A provider quota is already explained by the fleet limit notice.
@@ -138,12 +156,27 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), o
       const since = new Date(signal).toISOString();
       out.push({ id, lane, repo: d.repo, state: 'stalled', since, ageSecs,
         thresholdSecs: cfg.helm.stalledNoticeSecs, stateHash: `stalled:${since}`,
-        text: `stalled ${id}: no activity or note for ${ageLabel(ageSecs * 1000)} (last activity/note ${since}); last note: ${last?.note ?? '(none)'}. Check the worker with lobstah status ${id}; resolve or cancel and re-dispatch.` });
+        text: `stalled ${id}: no activity or note for ${ageLabel(ageSecs * 1000)} (last activity/note ${since}); last note: ${last?.note ?? '(none)'}. ${lane === 'chore' ? `Check the chore with lobstah status ${id}, or cancel it.` : `Check the worker with lobstah status ${id}; resolve or cancel and re-dispatch.`}` });
     }
   }
-  return allChoreSlotsProgressing(cfg, out)
-    ? out.filter((item) => item.lane !== 'chore' || item.state !== 'queued-too-long')
-    : out;
+  const holders: ChoreSlotHolder[] = choreSlotHolders(now);
+  return out.flatMap((item): DispatchProgress[] => {
+    if (item.lane !== 'chore' || item.state !== 'queued-too-long') return [item];
+    const descriptor: Descriptor | undefined = storedDescriptor(item.id, 'chore');
+    if (!descriptor || descriptor.for || descriptor.target || descriptor.trapAny || !descriptor.repo ||
+        !cfg.repos[descriptor.repo] || poolWaits(descriptor, cfg) ||
+        cfg.limits.choreConcurrent <= 0 || holders.length < cfg.limits.choreConcurrent) return [item];
+    const unhealthy: ChoreSlotHolder[] = holders.filter((holder) => holder.dead || cancelRequested(holder.id, 'chore') ||
+      out.some((progress) => progress.id === holder.id && progress.lane === 'chore' && progress.state === 'stalled'));
+    const thresholdSecs: number = unhealthy.length > 0 ? cfg.helm.queuedNoticeSecs : cfg.helm.choreQueuedNoticeSecs;
+    if (thresholdSecs <= 0 || item.ageSecs < thresholdSecs) return [];
+    const details: string = (unhealthy.length > 0 ? unhealthy : holders).map((holder) => {
+      const condition: string = holder.dead ? ', dead' : cancelRequested(holder.id, 'chore') ? ', cancelling' : unhealthy.includes(holder) ? ', stalled' : '';
+      return `${holder.id} (${ageLabel(holder.ageSecs * 1000)} old${condition})`;
+    }).join(', ');
+    return [{ ...item, thresholdSecs,
+      text: `queued-too-long ${item.id} (${ageLabel(item.ageSecs * 1000)}): waiting on chore slot holder ${details}. Check or cancel the slot holder.` }];
+  });
 }
 
 /** First wake at the threshold; reminders at +15m, +45m, +105m, … . */
