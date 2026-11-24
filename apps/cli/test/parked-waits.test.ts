@@ -13,6 +13,7 @@ import {
   laneDirs,
   addWatch,
   mergeEvidence,
+  parsePrRef,
   prRecordFile,
   readPr,
   readEvidence,
@@ -28,7 +29,8 @@ import { tick } from '@lobstah/supervisor';
 import type { ActiveState } from '@lobstah/supervisor';
 import { cliCuller } from '../src/auto-cull.js';
 import { runDoctor } from '../src/doctor.js';
-import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches } from '../src/pr-waits.js';
+import { clearUntrackedPrRecord, finishResolvedWaits, observeWaitedPrs, registerWaitWatches } from '../src/pr-waits.js';
+import { addPrWatch, observePr } from '../src/pr-watch.js';
 import { daemonStatus } from '../src/restart.js';
 import { buildTendReport, renderTend } from '../src/tend.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -317,6 +319,82 @@ describe('a parked dispatch releases on whichever PR lobstah knows for it', () =
     expect(person.status).toBe(2);
     expect(person.stdout).toContain('report needs-decision');
     expect(person.stdout).not.toContain('warning');
+  });
+});
+
+describe('an untracked PR record stops standing once nothing reads it', () => {
+  const LINKED = 'https://github.com/o/r/pull/8';
+  const KEY = 'pr:o/r#8';
+  const MINUTE = 60_000;
+  const cli = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+  const watchRm = (key: string) =>
+    spawnSync(process.execPath, [cli, 'watch', 'rm', key], { env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8' });
+  /** A green, mergeable open PR: it stands as pr:ready once settled. */
+  const greenView = (): GhPrView =>
+    ({
+      state: 'OPEN',
+      isDraft: false,
+      title: 'Fix the api-core tests',
+      headRefOid: 'a'.repeat(40),
+      mergeStateStatus: 'CLEAN',
+      reviewDecision: '',
+      statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    }) as GhPrView;
+  const readyItems = (at: number) => buildTendReport(at).attention.filter((a) => a.kind === 'pr:ready' && a.key === KEY);
+
+  it('homebase #3047: a pause on another PR, then re-reported as external', () => {
+    // 22:33:07: the worker parks on a PR that is not its own. lobstah reads it and registers no watch.
+    parked('d1', { waitingOn: 'pr', link: LINKED, noPr: true });
+    expect(registerWaitWatches('d1', 'work', verbOf('d1')!)).toEqual([]);
+    expect(observeWaitedPrs({ now, view: () => greenView() })).toEqual([KEY]);
+    expect(readWatch(KEY)).toBeUndefined();
+    expect(readPr(KEY)?.waitedOnBy).toBe('d1');
+    // While the dispatch waits on it, the PR is read and its ready state stands.
+    expect(readyItems(now + 20 * MINUTE)).toHaveLength(1);
+    // 22:33:13: it re-reports the wait as external. Nothing waits on the PR or reads it again.
+    appendStatus('d1', 'work', 'paused', 'waiting on the merge', undefined, { waitingOn: 'external', link: LINKED });
+    expect(observeWaitedPrs({ now: now + 20 * MINUTE, view: () => greenView() })).toEqual([]);
+    // The record still says OPEN (the PR merged unseen), but it no longer stands as attention.
+    expect(readPr(KEY)?.state).toBe('OPEN');
+    expect(readyItems(now + 4 * 24 * 60 * MINUTE)).toEqual([]);
+    // watch rm on the key clears the record, though there is no watch to remove.
+    const rm = watchRm(KEY);
+    expect(rm.status, rm.stderr).toBe(0);
+    expect(rm.stdout).toContain('removed: false');
+    expect(rm.stdout).toContain('recordCleared: true');
+    expect(readPr(KEY)).toBeUndefined();
+  });
+
+  it('a record stops standing when the dispatch that waited on it ends', () => {
+    parked('d1', { waitingOn: 'review', link: LINKED, noPr: true });
+    observeWaitedPrs({ now, view: () => greenView() });
+    expect(readyItems(now + 20 * MINUTE)).toHaveLength(1);
+    appendStatus('d1', 'work', 'done', 'landed');
+    expect(readyItems(now + 20 * MINUTE)).toEqual([]);
+  });
+
+  it('a record its watch keeps current still stands', () => {
+    parked('d1', { waitingOn: 'pr', link: LINKED, noPr: true });
+    observeWaitedPrs({ now, view: () => greenView() });
+    addPrWatch(parsePrRef(LINKED)!);
+    appendStatus('d1', 'work', 'working');
+    expect(readyItems(now + 20 * MINUTE)).toHaveLength(1);
+  });
+
+  it('a record no wait read still stands without a watch', () => {
+    observePr(parsePrRef(LINKED)!, greenView(), { now: new Date(now) });
+    expect(readyItems(now + 20 * MINUTE)).toHaveLength(1);
+  });
+
+  it('watch rm leaves a record that a dispatch still waits on, and an ended one', () => {
+    parked('d1', { waitingOn: 'pr', link: LINKED, noPr: true });
+    observeWaitedPrs({ now, view: () => greenView() });
+    expect(clearUntrackedPrRecord(KEY)).toBe(false);
+    expect(readPr(KEY)?.state).toBe('OPEN');
+    prRecord('MERGED', [], LINKED);
+    appendStatus('d1', 'work', 'working');
+    expect(clearUntrackedPrRecord(KEY)).toBe(false);
+    expect(readPr(KEY)?.state).toBe('MERGED');
   });
 });
 

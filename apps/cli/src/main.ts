@@ -304,7 +304,7 @@ import {
 import { deliverPrRepairs, holdCancelledRepair, recordPushFailure, recordReportedGates, stampRepairerBeat } from './pr-repair.js';
 import { mergeRequestedPrs, mergeRequestedStacks } from './pr-merge.js';
 import { createRunCleanup } from './run-cleanup.js';
-import { finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
+import { clearUntrackedPrRecord, finishResolvedWaits, observeWaitedPrs, registerWaitWatches, waitWarning } from './pr-waits.js';
 import { dispatchPrDiscovery, recordDispatchPrs } from './pr-stack.js';
 import { canon, inspectSoakSite, readHookStdin } from './soak-site.js';
 import { digestWakeKeys, helmWakeKeys, wakeIndex } from './wait-wakes.js';
@@ -4446,7 +4446,9 @@ async function mainCli(): Promise<void> {
         const prRef = parsePrRef(key);
         if (prRef) {
           const { removed, stale } = removePrWatch(prRef);
-          console.log(toonKV({ key: prRef.key, removed }));
+          // No watch, and nothing waits on it: the record is what stands, so it goes.
+          const recordCleared = !removed && clearUntrackedPrRecord(prRef.key);
+          console.log(toonKV({ key: prRef.key, removed, ...(recordCleared ? { recordCleared } : {}) }));
           if (stale) console.log(`warning: could not refresh ${prRef.key} before removing its watch; its record may be stale (${stale})`);
           break;
         }

@@ -14,8 +14,12 @@ import {
   readEvidence,
   readPr,
   readStatusLog,
+  readWatch,
+  removePr,
+  withPrLock,
+  writePr,
 } from '@lobstah/core';
-import type { GhPrView, Lane, PrRef, StatusEntry, Watch } from '@lobstah/core';
+import type { GhPrView, Lane, PrRecord, PrRef, StatusEntry, Watch } from '@lobstah/core';
 import { autoRegisterPrWatch, observePr } from './pr-watch.js';
 
 /** The waits a PR resolves: `paused --waiting-on pr` and `paused --waiting-on review`. */
@@ -132,6 +136,7 @@ export function observeWaitedPrs(opts: { everySecs?: number; now?: number; view?
           try {
             // Stamp the dispatch only when the PR is its own, not another PR it links.
             observePr(ref, view(ref), { ...(own.has(ref.key) ? { dispatchId: id } : {}), now: new Date(now) });
+            if (!own.has(ref.key)) markWaitedOn(ref.key, id);
             observed.push(ref.key);
           } catch {
             // gh missing, unauthenticated, or forbidden: the next pass tries again.
@@ -143,6 +148,75 @@ export function observeWaitedPrs(opts: { everySecs?: number; now?: number; view?
     }
   }
   return observed;
+}
+
+/**
+ * The PR keys some parked dispatch waits on right now: an active dispatch
+ * whose last report is `paused --waiting-on pr|review`, through waitedPrs.
+ * A dispatch that reported anything since, or ended, waits on nothing.
+ * Never throws: an unreadable dispatch is skipped.
+ */
+export function currentlyWaitedPrKeys(): Set<string> {
+  const keys = new Set<string>();
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    let ids: string[];
+    try {
+      ids = activeIds(lane);
+    } catch {
+      continue;
+    }
+    for (const id of ids) {
+      try {
+        const last = readStatusLog(id, lane).at(-1);
+        if (last?.verb !== 'paused' || !last.waitingOn || !PR_WAITS.has(last.waitingOn)) continue;
+        for (const ref of waitedPrs(id, lane, last)) keys.add(ref.key);
+      } catch {
+        // An unreadable dispatch is skipped.
+      }
+    }
+  }
+  return keys;
+}
+
+/** Record on a PR that is not the dispatch's own which parked dispatch's wait read it (PrRecord.waitedOnBy). */
+function markWaitedOn(key: string, dispatchId: string): void {
+  withPrLock(key, () => {
+    const record = readPr(key);
+    if (record && record.waitedOnBy !== dispatchId) writePr({ ...record, waitedOnBy: dispatchId });
+  });
+}
+
+/**
+ * Whether an open PR record is untracked: no live watch observes it and no
+ * parked dispatch waits on it, so nothing will read it again. A merged or
+ * closed record is never untracked: it is final.
+ */
+export function isUntrackedPrRecord(record: PrRecord, waited: ReadonlySet<string> = currentlyWaitedPrKeys()): boolean {
+  if (record.state !== 'OPEN') return false;
+  const watch = readWatch(record.key);
+  return (!watch || !!watch.done) && !waited.has(record.key);
+}
+
+/**
+ * Whether an untracked record was left by a dispatch's wait: a dispatch
+ * read it for `paused --waiting-on pr|review --link <another PR>`, then
+ * reported anything else or ended. Its last state stops standing as
+ * attention: nothing reads it again, so after the PR merges it would still
+ * say open (homebase #3047 stood as pr:ready for days that way).
+ */
+export function isAbandonedWaitRecord(record: PrRecord, waited: ReadonlySet<string> = currentlyWaitedPrKeys()): boolean {
+  return record.waitedOnBy !== undefined && isUntrackedPrRecord(record, waited);
+}
+
+/**
+ * `lobstah watch rm <pr key>` when the PR has no watch: remove its record
+ * when the record is untracked (isUntrackedPrRecord). True when it did.
+ * A tracked or ended record is left in place.
+ */
+export function clearUntrackedPrRecord(key: string): boolean {
+  const record = readPr(key);
+  if (!record || !isUntrackedPrRecord(record)) return false;
+  return removePr(key);
 }
 
 export interface FinishedWait {
