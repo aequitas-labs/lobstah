@@ -1229,8 +1229,8 @@ cannot hold two:
 **One helm per grounds, including on a mirrored Mac.** When `[glass].mirror`
 names a wharf, the local helm also holds that grounds' lease on the wharf.
 Taking or renewing another grounds never displaces it, even when both grounds
-share a wharf account or repo. Unaddressed Slack DMs go to the latest helm
-that signed on. `man helm` takes the wharf's helm seat for its session and
+share a wharf account or repo. Unaddressed Slack DMs go to the helm whose seat the wharf most recently
+updated. `man helm` takes the wharf's helm seat for its session and
 grounds. A seat another session holds for those grounds, on another Mac,
 this Mac or in the cloud, refuses the sign-on and names that session and its boat; `--take`
 takes it over. The daemon's mirror then renews the seat on its socket each
