@@ -1541,7 +1541,9 @@ place.
 Before a sweep or cull removes a checkout with changes, it saves an archive in
 `<git-common-dir>/lobstah/archives/<trap-or-dispatch-id>/<timestamp>-<uuid>/`.
 This also saves changes ignored by cleanup policy. If saving fails, the checkout
-stays. Dirty trap checkouts stay even after a successful archive.
+stays. A standalone clone stays too: its Git directory, and therefore its archive,
+would be removed with the checkout. Dirty trap checkouts stay even after a
+successful archive.
 
 Each archive contains `files/` (working files, including untracked files),
 `git/` (the index and merge/rebase state), `index-info` (all index stages),

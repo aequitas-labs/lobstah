@@ -80,13 +80,15 @@ it('keeps the checkout when its archive cannot be written', () => {
 
 
 it('packs a rebase autostash that is not reachable from HEAD or the index', () => {
-  fs.writeFileSync(path.join(repo, 'stash-file'), 'work saved before rebase');
-  const autostash = git(repo, 'stash', 'create');
-  git(repo, 'reset', '--hard', 'HEAD');
-  const state = path.join(repo, '.git', 'rebase-merge');
+  const checkout = path.join(root, 'rebasing');
+  git(repo, 'worktree', 'add', '-qb', 'rebasing', checkout);
+  fs.writeFileSync(path.join(checkout, 'stash-file'), 'work saved before rebase');
+  const autostash = git(checkout, 'stash', 'create');
+  git(checkout, 'reset', '--hard', 'HEAD');
+  const state = path.join(git(checkout, 'rev-parse', '--absolute-git-dir'), 'rebase-merge');
   fs.mkdirSync(state);
   fs.writeFileSync(path.join(state, 'autostash'), autostash + '\n');
-  const archived = archiveWorktree(repo, 'rebasing-trap');
+  const archived = archiveWorktree(checkout, 'rebasing-trap');
   expect(archived.saved).toBe(true);
   const recovered = path.join(root, 'recovered');
   fs.mkdirSync(recovered);
@@ -94,4 +96,11 @@ it('packs a rebase autostash that is not reachable from HEAD or the index', () =
   execFileSync('git', ['index-pack', '--stdin'], { cwd: recovered, input: fs.readFileSync(path.join(archived.directory!, 'objects.pack')), stdio: ['pipe', 'pipe', 'pipe'] });
   expect(git(recovered, 'show', `${autostash}:stash-file`)).toBe('work saved before rebase');
   expect(fs.readFileSync(path.join(archived.directory!, 'git', 'rebase-merge', 'autostash'), 'utf8')).toBe(autostash + '\n');
+});
+
+
+it('does not authorize removal when the archive would be inside the checkout being removed', () => {
+  fs.writeFileSync(path.join(repo, 'stash-file'), 'unsaved primary checkout');
+  expect(archiveWorktree(repo, 'standalone').saved).toBe(false);
+  expect(fs.readFileSync(path.join(repo, 'stash-file'), 'utf8')).toBe('unsaved primary checkout');
 });

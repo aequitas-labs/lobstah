@@ -69,9 +69,12 @@ export function archiveWorktree(dir: string, owner: string): WorktreeArchive {
   try {
     const status = git('status', '--porcelain=v1', '-z', '--untracked-files=all');
     const own = git('rev-parse', '--path-format=absolute', '--git-dir').trim();
+    const common = git('rev-parse', '--path-format=absolute', '--git-common-dir').trim();
+    const archiveLocation = path.relative(fs.realpathSync(dir), fs.realpathSync(common));
+    // A standalone clone would take its archive with it when removed.
+    if (!path.isAbsolute(archiveLocation) && archiveLocation !== '..' && !archiveLocation.startsWith(`..${path.sep}`)) return { saved: false };
     const operation = OPERATION_FILES.slice(2).some((name) => fs.existsSync(path.join(own, name)));
     if (!operation && !status.split('\0').some((entry) => entry && entry !== '?? .lobstah-trap')) return { saved: true };
-    const common = git('rev-parse', '--path-format=absolute', '--git-common-dir').trim();
     const root = path.join(common, 'lobstah', 'archives', encodeURIComponent(owner).replace(/\./g, '%2E'));
     fs.mkdirSync(root, { recursive: true });
     const name = `${Date.now()}-${randomUUID()}`;
