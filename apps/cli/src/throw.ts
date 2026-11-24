@@ -7,6 +7,7 @@ import {
   repoTrapCount,
   selectRepoTrap,
   planThrow,
+  sweepGhostTraps,
   postNotice,
   readReservation,
   readTrap,
@@ -504,6 +505,8 @@ async function launchAndWait(
 export async function throwTrap(opts: ThrowOptions & { address: string }): Promise<ThrowResult> {
   if (opts.harness && !['claude', 'codex'].includes(opts.harness)) throw new Error('--harness takes claude or codex');
   const started = Date.now();
+  const rostered = rosterByAddress(opts.address);
+  if (rostered) sweepGhostTraps(opts.cfg.soak.ttlSecs * 1000, Date.now(), opts.cfg.soak.pausedTtlSecs * 1000, { deadOnly: true, trapId: rostered.trapId });
   let [row] = planThrow(opts.cfg, { names: [opts.address] }, { harness: opts.harness });
   let entry = rosterByAddress(opts.address);
   if (!row || !entry) throw new Error(`no roster record for ${opts.address} — \`lobstah man roster\` lists the traps a throw can bring back`);

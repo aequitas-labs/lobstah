@@ -1423,10 +1423,20 @@ from its upstream. Dirty, unpushed, no-upstream, or unreadable checkouts stay.
 The ghost notice includes the path, branch, modified-file count and
 unpushed-commit count (or `unknown` when inspection fails). Other worktrees
 stay in place. After the daemon's own tick gap exceeds `[soak].ttlSecs`,
-it grants a full TTL after resume before sweeping any traps, allowing
+it grants a full TTL after resume before sweeping traps with unknown process state, allowing
 sessions to renew their heartbeats. One that **never parked** is a **defective
 enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 `soak --wait`) and left standing so the address keeps protecting its work.
+A confirmed dead session is released after two quiet minutes (or the configured
+TTL, when shorter), even during resume grace or if it never parked. A fresh
+report or heartbeat still protects it during that interval. A recorded process
+identity, or Claude's local session records, supplies the process check; missing
+process evidence keeps the normal TTL rules. The checkout stays in place.
+`man throw <trap>` also performs this check before launching, and resumes the
+saved session in that checkout. `cancel` immediately finalizes an active catch
+when its registered trap's process is confirmed dead; live or unknown claimants
+still receive a cancellation request.
+
 Nobody is conscripted: only a worktree whose session ran `soak` ever
 receives work.
 
@@ -1527,6 +1537,23 @@ writes the checkout's HEAD to the **protected ref**
 `refs/lobstah/traps/<trapId>` in the repository. It is not a branch:
 removing the worktree or deleting its branch leaves the ref and its commit in
 place.
+
+Before a sweep or cull removes a checkout with changes, it saves an archive in
+`<git-common-dir>/lobstah/archives/<trap-or-dispatch-id>/<timestamp>-<uuid>/`.
+This also saves changes ignored by cleanup policy. If saving fails, the checkout
+stays. Dirty trap checkouts stay even after a successful archive.
+
+Each archive contains `files/` (working files, including untracked files),
+`git/` (the index and merge/rebase state), `index-info` (all index stages),
+`objects.pack` (HEAD, index blobs and merge tips), and `manifest.json` (HEAD and
+file inventory, including deleted paths). To recover into a new empty repository,
+run `git init`, import `objects.pack` with `git index-pack --stdin`, copy `files/`
+into the repository and `git/` into its Git directory, then write the manifest's
+HEAD hash to `.git/HEAD` to detach at the saved commit. The original staged and
+unstaged changes and unresolved merge stages are then available. Use a fresh
+recovery directory so deleted paths stay deleted. Archives remain until removed
+by hand.
+
 
 ```bash
 lobstah man roster                                  # every trap the roster keeps

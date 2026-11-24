@@ -2946,8 +2946,8 @@ async function mainCli(): Promise<void> {
         return keys.length > 0 ? { repairHeld: `${keys.join(', ')} (lobstah watch release <key> frees it)` } : {};
       };
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
-        requestCancel(id, lane);
-        console.log(toonKV({ id, cancel: 'requested', note: 'the claimant (daemon or trap) winds it down at its next check', ...repairHeld() }));
+        const finalized = requestCancel(id, lane);
+        console.log(toonKV({ id, cancel: finalized ? 'finalized' : 'requested', note: finalized ? 'cancelled; worktree kept' : 'the claimant (daemon or trap) winds it down at its next check', ...repairHeld() }));
         break;
       }
       // Unclaimed: finalize with a record — never a silent delete. The
@@ -2957,8 +2957,8 @@ async function mainCli(): Promise<void> {
         break;
       }
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
-        requestCancel(id, lane);
-        console.log(toonKV({ id, cancel: 'requested', note: 'claimed while cancelling — the claimant winds it down', ...repairHeld() }));
+        const finalized = requestCancel(id, lane);
+        console.log(toonKV({ id, cancel: finalized ? 'finalized' : 'requested', note: finalized ? 'cancelled; worktree kept' : 'claimed while cancelling — the claimant winds it down', ...repairHeld() }));
         break;
       }
       throw new Error(`${id} is neither queued nor active — already finished (\`lobstah catch ${id}\`)`);

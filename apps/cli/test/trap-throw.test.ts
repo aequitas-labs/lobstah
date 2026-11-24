@@ -146,6 +146,32 @@ function laterTerminal(session: string, seen: TerminalLaunch[], beforeSignOn?: (
 }
 
 describe('man throw <name>', () => {
+  processTest('releases a dead busy trap and resumes its session in the same dirty checkout', async () => {
+    const reg = stowedTrap();
+    const claimed = lobstah(primary, 'dispatch', '--repo', 'r', '--id', 'aaaaaaaa-bbbb-4ccc-8ddd-000000000002', '--brief-text', 'continue here', '--for', 'amber-gull');
+    expect(claimed.status, claimed.stderr).toBe(0);
+    lobstah(reg.worktree, 'soak', '--session', SESSION, '--wait', '--timeout', '0');
+    claudeTranscript(reg.worktree, SESSION);
+    fs.writeFileSync(path.join(reg.worktree, 'f.txt'), 'unfinished work');
+    git(reg.worktree, 'add', 'f.txt');
+    fs.writeFileSync(path.join(reg.worktree, 'f.txt'), 'more unfinished work');
+    const registration = readTrap(reg.trapId)!;
+    const stale = new Date(Date.now() - 180_000).toISOString();
+    fs.writeFileSync(path.join(home, 'soaking', `${reg.trapId}.json`), JSON.stringify({ ...registration,
+      heartbeatAt: stale, harnessProcess: { pid: process.pid, startedAt: 'old process' } }));
+    // The claim report must also be quiet before recovery is allowed.
+    // Resolve the status path through core so this follows the queue layout.
+    const { statusPath } = await import('@lobstah/core');
+    const status = statusPath('aaaaaaaa-bbbb-4ccc-8ddd-000000000002', 'work');
+    fs.writeFileSync(status, fs.readFileSync(status, 'utf8').split('\n').filter(Boolean).map((line) => JSON.stringify({ ...JSON.parse(line), at: stale })).join('\n') + '\n');
+    const seen: TerminalLaunch[] = [];
+    const result = await throwTrap({ address: 'amber-gull', cfg: loadConfig(), adapter: fakeTerminal(SESSION, seen), pollMs: 50, timeoutSecs: 30 });
+    expect(result).toMatchObject({ action: 'resume', checkout: 'kept', registration: { trapId: reg.trapId, sessionId: SESSION, worktree: reg.worktree } });
+    expect(git(reg.worktree, 'show', ':f.txt')).toBe('unfinished work');
+    expect(fs.readFileSync(path.join(reg.worktree, 'f.txt'), 'utf8')).toBe('more unfinished work');
+    expect(seen[0]!.argv.slice(0, 3)).toEqual(['claude', '--resume', SESSION]);
+  });
+
   processTest('a fresh throw skips saved history even on the same harness', async () => {
     const reg = stowedTrap(); stow(reg, true);
     claudeTranscript(reg.worktree, SESSION);

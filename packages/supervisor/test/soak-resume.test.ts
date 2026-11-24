@@ -106,3 +106,15 @@ it('a throwing Codex server watch is logged, and the tick carries on', () => {
   expect(() => tick((message) => log.push(message), { codexServerWatch: () => { throw new Error('socket went away'); } })).not.toThrow();
   expect(log).toContain('codex server watch: socket went away');
 });
+
+it('releases a confirmed dead process during daemon resume grace', () => {
+  const worktree = path.join(home, 'dead-checkout');
+  fs.mkdirSync(worktree);
+  const signed = signOnTrap({ worktree, cwd: worktree, harness: 'codex', sessionId: 'dead', harnessProcess: { pid: process.pid, startedAt: 'gone' }, ttlMs: TTL });
+  if (!('ok' in signed)) throw new Error('unexpected hold');
+  tick();
+  vi.setSystemTime(Date.now() + TTL * 3);
+  tick();
+  expect(readTrap(signed.ok.trapId)).toBeUndefined();
+  expect(fs.existsSync(worktree)).toBe(true);
+});
