@@ -31,7 +31,7 @@ type BoatRow = { id: string; name: string; hash: string; revoked: number };
 type WorkerRow = { id: string; boat: string; repo?: string; seen: number; target?: import('../../../packages/core/src/configured-trap-model.js').ConfiguredTrapTarget };
 type StoredResult = { status: number; value: unknown };
 /**
- * The person's one helm: its session, who holds it, the boat it runs on and
+ * A grounds' helm: its session, who holds it, the boat it runs on and
  * its lease. `mirror` marks a Mac's own helm, which gets Slack DMs over its
  * boat's socket and steers nothing on the wharf.
  */
@@ -604,7 +604,33 @@ export class Account extends DurableObject<Env> {
   private get(key: string): string | undefined {
     return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key=?', key).toArray()[0]?.value;
   }
-  /** The helm seat while its lease holds; none once it lapsed. */
+  /** Move the pre-grounds lease once; its recorded grounds alone inherits it. */
+  private migrateHelmSeats(): void {
+    if (this.get('helm-scoped')) return;
+    const legacy = JSON.parse(this.get('helm') ?? 'null') as HelmSeat | null;
+    if (legacy) this.set(this.helmKey(legacy.grounds), JSON.stringify(legacy));
+    this.set('helm-scoped', 'true');
+  }
+  /** Grounds names, never repos or boat identities, identify lease storage. */
+  private helmKey(grounds?: string): string { return `helm:${grounds ?? ''}`; }
+  /** All grounds leases, including expired seats used to reject displaced callers. */
+  private helmSeats(): HelmSeat[] {
+    this.migrateHelmSeats();
+    return this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key LIKE 'helm:%' ORDER BY rowid DESC").toArray().map((row) => JSON.parse(row.value) as HelmSeat);
+  }
+  /** Resolve an explicit grounds or an older caller's own session, never another session's seat. */
+  private commandSeat(c: Command, actor: Actor): HelmSeat | undefined {
+    const grounds = typeof c.body === 'object' && c.body !== null ? (c.body as { grounds?: unknown }).grounds : undefined;
+    const seats = this.helmSeats();
+    if (grounds !== undefined) {
+      const named = seats.find((seat) => seat.grounds === identifier(grounds));
+      // Pre-grounds clients may still hold the unnamed lease; named seats never borrow it.
+      return named ?? seats.find((seat) => seat.grounds === undefined && seat.session === c.session && seat.actor === `${actor.kind}:${actor.id}`);
+    }
+    const owned = seats.filter((seat) => seat.session === c.session && seat.actor === `${actor.kind}:${actor.id}`);
+    return owned.length === 1 ? owned[0] : undefined;
+  }
+  /** Account-level Slack routing preference only; never used to arbitrate a grounds lease. */
   private seat(now: number): HelmSeat | undefined {
     const h = JSON.parse(this.get('helm') ?? 'null') as HelmSeat | null;
     return h && h.until > now ? h : undefined;
@@ -718,7 +744,7 @@ export class Account extends DurableObject<Env> {
   }
   private helm(c: Command, actor: Actor, now: number) {
     this.requirePermission(actor, 'helm');
-    const seat = this.get('helm'); const h = seat ? JSON.parse(seat) : undefined;
+    const h = this.commandSeat(c, actor);
     requireThat(h && h.session === c.session && h.actor === `${actor.kind}:${actor.id}` && h.until > now, 409, 'take or renew the helm lease first');
   }
   private requirePermission(actor: Actor, permission: Permission) {
@@ -835,7 +861,9 @@ export class Account extends DurableObject<Env> {
       const mac = b.mirror === true;
       if (!mac) this.requirePermission(actor, 'helm');
       const session = identifier(b.session);
-      const previous = JSON.parse(this.get('helm') ?? 'null') as HelmSeat | null;
+      this.migrateHelmSeats();
+      const grounds = b.grounds === undefined ? undefined : identifier(b.grounds);
+      const previous = JSON.parse(this.get(this.helmKey(grounds)) ?? 'null') as HelmSeat | null;
       if (b.remindSecs !== undefined) requireThat(typeof b.remindSecs === 'number' && Number.isSafeInteger(b.remindSecs) && b.remindSecs > 0, 400, 'Choose a positive reminder interval');
       requireThat(!mac || b.grounds !== undefined, 400, 'a Mac’s helm names its grounds');
       const principal = `${actor.kind}:${actor.id}`;
@@ -848,6 +876,8 @@ export class Account extends DurableObject<Env> {
       const boat = actor.kind === 'boat' ? this.ctx.storage.sql.exec<{ name: string }>('SELECT name FROM boats WHERE id=?', actor.id).toArray()[0]?.name : undefined;
       const h: HelmSeat = { session, actor: principal, until: now + HELM_MS, remindSecs: (b.remindSecs as number | undefined) ?? previous?.remindSecs ?? 900,
         ...(b.grounds === undefined ? {} : { grounds: identifier(b.grounds) }), ...(boat ? { boat } : {}), ...(mac ? { mirror: true as const } : {}) };
+      this.set(this.helmKey(grounds), JSON.stringify(h));
+      // Retain the last sign-on as the destination for unaddressed Slack DMs.
       this.set('helm', JSON.stringify(h));
       // A Mac's helm renews by taking again: only a new holder is news.
       if (!(mac && same)) this.event('helm-taken');
@@ -857,10 +887,12 @@ export class Account extends DurableObject<Env> {
     }
     if (c.path === 'helm/renew' || c.path === 'helm/release') {
       requireThat(c.method === 'POST', 405, 'POST required'); this.helm(c, actor, now);
-      const h = { session: c.session, actor: `${actor.kind}:${actor.id}`, until: c.path.endsWith('release') ? 0 : now + HELM_MS };
-      const previous = JSON.parse(this.get('helm') ?? 'null') as HelmSeat | null;
-      const renewed = { ...h, remindSecs: previous?.remindSecs ?? 900, ...(previous?.grounds ? { grounds: previous.grounds } : {}), ...(previous?.boat ? { boat: previous.boat } : {}) };
-      this.set('helm', JSON.stringify(renewed)); return ok(renewed);
+      const h = { session: c.session!, actor: `${actor.kind}:${actor.id}`, until: c.path.endsWith('release') ? 0 : now + HELM_MS };
+      const previous = this.commandSeat(c, actor)!;
+      const renewed: HelmSeat = { ...previous, ...h };
+      this.set(this.helmKey(previous.grounds), JSON.stringify(renewed));
+      if (this.seat(now)?.session === previous.session && this.seat(now)?.grounds === previous.grounds) this.set('helm', JSON.stringify(renewed));
+      return ok(renewed);
     }
     if (c.path === 'boats' && c.method === 'GET') {
       this.requirePermission(actor, 'read');

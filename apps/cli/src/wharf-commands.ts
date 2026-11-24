@@ -175,7 +175,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
       if (pos[0] !== 'forget' || !pos[1]) throw new Error('configured roster supports listing and forget; its settings live in [traps.<name>]');
       const entry = rosterByAddress(pos[1]), slot = configuredTrapSlots().find((instance) => pos[1] === `trap:${instance.profile}` || pos[1]!.replace(/^wt:/, '') === instance.trapId);
       if ((entry?.configured?.grounds ?? slot?.grounds) !== scope.grounds) throw new Error('configured instance belongs to another grounds or is unknown');
-      await backend.request('helm/renew', {}, key());
+      await backend.request('helm/renew', { grounds: scope.grounds }, key());
       const { forgetTrap } = await import('./forget.js'); print(await forgetTrap(pos[1], config)); break;
     }
     case 'cancel': print(await backend.request(`dispatches/${id()}/cancel`, {}, key())); break;
@@ -217,12 +217,12 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'man:file': await fileDocument('report'); break;
     case 'man:tend': print({ dispatches: await backend.list(), ...await backend.request('glass') as Record<string, unknown> }); break;
     case 'man:helm': print(await backend.request('helm/take', { session, grounds: scope.grounds, remindSecs: config.remindSecs ?? 900, take: opts.has('--take') }, key())); break;
-    case 'man:relieve': print(await backend.request('helm/release', {}, key())); break;
+    case 'man:relieve': print(await backend.request('helm/release', { grounds: scope.grounds }, key())); break;
     case 'man:throw': {
       if (configuredName && configuredProfile) {
         if (configuredProfile.grounds !== scope.grounds) throw new Error('configured profile belongs to another grounds');
         if (opts.has('--dry-run') || opts.has('--plan')) { print({ profile: configuredName, surface: configuredProfile.surface, plan: 'dry run' }); break; }
-        await backend.request('helm/renew', {}, key());
+        await backend.request('helm/renew', { grounds: scope.grounds }, key());
         const { throwConfiguredTrap, configuredSignOnCommand } = await import('./configured-throw.js');
         const result = await throwConfiguredTrap(config, configuredName, session ?? 'helm', { command: configuredSignOnCommand() });
         print(result);
@@ -235,7 +235,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
 
       if (!opts.has('--new') || pos.length || opts.has('--all') || opts.has('--dry-run') || opts.opt('--harness') || opts.opt('--count'))
         throw new Error('wharf throw supports --new --repo only; the boat chooses configured harness options');
-      await backend.request('helm/renew', {}, key());
+      await backend.request('helm/renew', { grounds: scope.grounds }, key());
       print(await brokerRequest('launch', { grounds: scope.grounds, repo: opts.opt('--repo') })); break;
     }
     case 'man:threads': {
@@ -283,8 +283,8 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
         onMessage: (m) => { if (m.t === 'event') pushed.push(...m.events); }, onState: (open) => { if (!open) dropped = true; } });
       let unknown = false, renewed = 0, read = Date.now(), cursor = after, dropped = false;
       const renew = async () => {
-        const id = randomUUID(), result = await socket.command({ id, method: 'POST', path: 'helm/renew', body: {}, ...(session ? { session } : {}) });
-        if (!result) await backend.request('helm/renew', {}, id);
+        const id = randomUUID(), result = await socket.command({ id, method: 'POST', path: 'helm/renew', body: { grounds: scope.grounds }, ...(session ? { session } : {}) });
+        if (!result) await backend.request('helm/renew', { grounds: scope.grounds }, id);
         else if (result.status >= 400) throw new BackendError(result.status, String((result.value as { error?: unknown })?.error ?? 'helm renew refused'));
       };
       try {

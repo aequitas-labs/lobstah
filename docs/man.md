@@ -1226,11 +1226,13 @@ cannot hold two:
   digest also starts at the sign-on. A `--take` from a live helm keeps that
   helm's cursor, so nothing in flight is dropped.
 
-**One helm per person, on a mirrored Mac.** When `[glass].mirror` names a
-wharf, the helm is also the person's one helm on that wharf, and every Slack
-DM goes to it. `man helm` takes the wharf's helm seat for its session and
-grounds. A seat another session holds, on another Mac, this Mac or in the
-cloud, refuses the sign-on and names that session and its boat; `--take`
+**One helm per grounds, including on a mirrored Mac.** When `[glass].mirror`
+names a wharf, the local helm also holds that grounds' lease on the wharf.
+Taking or renewing another grounds never displaces it, even when both grounds
+share a wharf account or repo. Unaddressed Slack DMs go to the latest helm
+that signed on. `man helm` takes the wharf's helm seat for its session and
+grounds. A seat another session holds for those grounds, on another Mac,
+this Mac or in the cloud, refuses the sign-on and names that session and its boat; `--take`
 takes it over. The daemon's mirror then renews the seat on its socket each
 minute while the local helm is live (the park's heartbeat), so a Mac that
 sleeps loses it within two minutes and later DMs queue on the wharf. If
