@@ -35,6 +35,15 @@ afterEach(() => {
 });
 
 describe('config precedence: descriptor > repo > global > default', () => {
+  it('loads exact cleanup exclusions and rejects broad or unsafe ignoreDirty settings', () => {
+    expect(loadConfig().repos.myapp?.ignoreDirty).toBeUndefined();
+    fs.writeFileSync(path.join(home, 'config.toml'), '[repos.myapp]\nignoreDirty = ["apps/design/generated.ts", "cache/"]\n');
+    expect(loadConfig().repos.myapp?.ignoreDirty).toEqual(['apps/design/generated.ts', 'cache/']);
+    for (const value of ['"cache"', '[2]', '[""]', '["."]', '["/"]', '["../src"]', '["out/../src"]', '["/tmp"]', '["C:/tmp"]', '[".git"]', '["out/.git/config"]', '["**"]', '["out/*"]', '["out//files"]']) {
+      fs.writeFileSync(path.join(home, 'config.toml'), `[repos.myapp]\nignoreDirty = ${value}\n`);
+      expect(() => loadConfig(), value).toThrow('[repos.myapp].ignoreDirty must be');
+    }
+  });
   it('resolves repo+harness, repo, global+harness and global permission defaults in order', () => {
     const file = path.join(home, 'config.toml');
     fs.writeFileSync(file, '[repos.myapp]\npath = "/tmp/app"\n');

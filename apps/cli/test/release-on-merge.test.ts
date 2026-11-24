@@ -188,6 +188,23 @@ describe('releaseOnMerge', () => {
     expect(planPressureCull().some((i) => i.id === 'd1')).toBe(false);
   });
 
+  it('releases regenerated output and tooling files after real edits are removed', () => {
+    squash();
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = ${JSON.stringify(repo)}\nignoreDirty = ["d1.txt"]\n[limits]\nreleaseOnMerge = true\n`);
+    const wt = wtOf('d1');
+    fs.writeFileSync(path.join(wt, 'd1.txt'), 'regenerated');
+    fs.mkdirSync(path.join(wt, '.ume'));
+    fs.writeFileSync(path.join(wt, '.ume', 'next.json'), 'tool output');
+    fs.writeFileSync(path.join(wt, 'local.txt'), 'keep');
+    pass();
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(readKeptWorktrees()).toMatchObject([{ reason: 'dirty (1 files)' }]);
+    fs.unlinkSync(path.join(wt, 'local.txt'));
+    pass();
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(git(repo, 'branch', '--list', 'lobstah/d1')).toContain('lobstah/d1');
+  });
+
   it('retains every observed PR head and releases an older observed head', () => {
     finished('d1', { pr: 1 });
     pr(1, 'OPEN', ['d1'], 'lobstah/d1');

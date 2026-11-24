@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import { dispatchPrUrls, dispatchWorktree, followUpAncestors, laneDirs, loadConfig, parsePrRef, readEvidence, readPr, readPrs, storedDescriptor } from '@lobstah/core';
+import { cleanupModifiedFiles, dispatchPrUrls, dispatchWorktree, followUpAncestors, laneDirs, loadConfig, parsePrRef, readEvidence, readPr, readPrs, storedDescriptor } from '@lobstah/core';
 import { withRepoLockSync } from '@lobstah/worktree';
 
 const git = (dir: string, ...args: string[]): string | undefined => {
@@ -15,9 +15,10 @@ const git = (dir: string, ...args: string[]): string | undefined => {
  * Never infer that newer work is published merely because some remote contains it.
  */
 export function mergedWorktreeUnsafe(dir: string, heads: readonly string[], trunk: string, fetched: Map<string, boolean>): string | undefined {
-  const status = git(dir, 'status', '--porcelain', '--untracked-files=all');
-  if (status === undefined) return 'unknown (not a readable git checkout; retry next pass)';
-  if (status) return `dirty (${status.split('\n').length} files)`;
+  let modified: number;
+  try { modified = cleanupModifiedFiles(dir); }
+  catch { return 'unknown (not a readable git checkout; retry next pass)'; }
+  if (modified) return `dirty (${modified} files)`;
   const head = git(dir, 'rev-parse', 'HEAD');
   const recorded = [...new Set(heads.filter((s) => /^[a-f0-9]{40,64}$/i.test(s)))];
   if (head && recorded.includes(head)) return undefined;

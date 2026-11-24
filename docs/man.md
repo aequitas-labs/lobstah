@@ -1805,6 +1805,13 @@ time. Retention leaves it inside the window. Both retention and the
 free-space cull keep it unless Git can verify that it is clean and every
 commit is on a remote-tracking branch.
 
+Cleanup ignores untracked `.lobstah-trap`, `.ume/`, `.temp*` and
+`.playwright-cli/` paths at the worktree root. Tracked changes there still
+protect the checkout. Add regenerated files or directories to the repo's
+[`ignoreDirty`](configuration.md#reposkey--workspace-definitions) list to
+allow cleanup to discard their tracked or untracked changes too. Other
+edits and unpublished commits still protect the worktree.
+
 Without `--apply` it is a dry run: it measures each target and prints the
 sizes. A worktree is measured with one `du -sk`; where `du` is missing
 (Windows) a file walk measures it instead. `--apply` measures nothing. It

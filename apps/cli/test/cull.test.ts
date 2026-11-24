@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { appendStatus, claimNext, complete, dispatchAttachmentsDir, enqueue, ensureLayout } from '@lobstah/core';
 import { applyCull, planCull, planPressureCull } from '../src/cull.js';
+import { mergedWorktreeUnsafe } from '../src/merged-worktree-safety.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
 let home: string;
@@ -48,6 +49,39 @@ afterEach(() => {
 });
 
 describe('planCull', () => {
+  it.each(['orphan', 'trap'] as const)('reclaims a published %s with only tooling files and configured regenerated output', (kind) => {
+    const wt = orphan(`generated-${kind}`, 30);
+    git(wt, 'branch', '--set-upstream-to=origin/main');
+    const generated = path.join(wt, 'apps', 'design', 'generated.ts');
+    fs.mkdirSync(path.dirname(generated), { recursive: true });
+    fs.writeFileSync(generated, 'initial output');
+    git(wt, 'add', '.');
+    git(wt, 'commit', '-qm', 'generated output');
+    git(wt, 'push', '-q', 'origin', 'HEAD:main');
+    fs.writeFileSync(generated, 'regenerated');
+    for (const file of ['.ume/next.json', '.temp/note', '.temp-log', '.playwright-cli/state']) {
+      fs.mkdirSync(path.dirname(path.join(wt, file)), { recursive: true });
+      fs.writeFileSync(path.join(wt, file), 'tool output');
+    }
+    fs.writeFileSync(path.join(wt, '.lobstah-trap'), JSON.stringify({ trapId: 'old-trap', ...(kind === 'trap' ? { createdBy: 'soak' } : {}) }));
+    fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = ${JSON.stringify(path.join(home, 'repo'))}\nignoreDirty = ["apps/design/generated.ts"]\n`);
+    age(wt, 30);
+    expect(planCull(3, Date.now(), { measure: false }).map((i) => i.id)).toEqual([`generated-${kind}`]);
+    expect(planPressureCull().map((i) => i.id)).toEqual([`generated-${kind}`]);
+    expect(mergedWorktreeUnsafe(wt, [git(wt, 'rev-parse', 'HEAD')], 'main', new Map())).toBeUndefined();
+    const plan = planCull(3, Date.now(), { measure: false });
+    fs.writeFileSync(path.join(wt, 'real-edits.txt'), 'keep this');
+    expect(planPressureCull()).toEqual([]);
+    expect(planCull(3, Date.now(), { measure: false })).toEqual([]);
+    expect(mergedWorktreeUnsafe(wt, [], 'main', new Map())).toBe('dirty (1 files)');
+    expect(applyCull(plan)).toEqual([]); // Recheck edits made after the plan.
+    expect(fs.readFileSync(path.join(wt, 'real-edits.txt'), 'utf8')).toBe('keep this');
+    fs.unlinkSync(path.join(wt, 'real-edits.txt'));
+    expect(applyCull(plan).map((i) => i.id)).toEqual([`generated-${kind}`]);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(git(path.join(home, 'repo'), 'branch', '--list', `generated-${kind}`)).toContain(`generated-${kind}`);
+    if (kind === 'trap') expect(git(path.join(home, 'repo'), 'rev-parse', 'refs/lobstah/traps/old-trap')).toMatch(/^[a-f0-9]{40}$/);
+  });
   it('flags old done entries and keeps recent ones', () => {
     for (const [id, days] of [['old1', 20], ['fresh1', 2]] as const) {
       fs.mkdirSync(path.join(home, 'done', id));
