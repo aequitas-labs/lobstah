@@ -54,7 +54,7 @@ export function releasesDir(): string {
   return path.join(lobstahHome(), 'releases');
 }
 
-function releaseFile(key: string): string {
+export function releaseFile(key: string): string {
   return path.join(releasesDir(), `${key.replace(/[^A-Za-z0-9._-]+/g, '_')}.json`);
 }
 

@@ -611,7 +611,6 @@ it('shows linked cards inline, answers one from the thread, and keeps previous a
   expect(g.$$('.thread-card-entry')[1]?.querySelector('.danswered')?.textContent).toContain('answered');
 });
 
-
 it('keeps the new-decision alert away while Threads is open, the list or a conversation, and brings it back on leaving', async () => {
   const d = fleet(), detail = helmThread(d);
   const g = await page(d, { hash: '#prs', get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
@@ -625,4 +624,17 @@ it('keeps the new-decision alert away while Threads is open, the list or a conve
   expect(g.$('.dalert')).toBeNull();
   await g.go('#prs');
   expect(g.$('.dalert .dalert-open')?.textContent).toContain('2 new decisions');
+});
+
+it('shows Archived and Removed beside the kind of unavailable linked work', async () => {
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: url => url === `/threads/${ID}` ? { status: 200, body: { ...view(), tracked: [
+    { kind: 'dispatch', ref: 'gone', title: 'Dispatch', state: 'done', status: 'removed' },
+    { kind: 'card', ref: KEY, title: 'Card', state: 'done', status: 'archived' },
+  ] } } : undefined });
+  const linked = g.$('[aria-label="Linked work"]')!;
+  expect(linked.textContent).toContain('Dispatch · Removed');
+  expect(linked.textContent).toContain('Card · Archived');
+  expect(linked.querySelector('a')).toBeNull();
+  expect(linked.textContent).not.toContain('gone');
+  expect(linked.textContent).not.toContain(KEY);
 });

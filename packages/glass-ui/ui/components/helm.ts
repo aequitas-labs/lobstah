@@ -355,7 +355,8 @@ function Tracked(view: ThreadView) {
       <p class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Linked work'}</p>
       <ul>${items.map((item) => {
         const icon = trackedStateIcon(item);
-        return html`<li><${WorkIcon} kind=${item.kind} />${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
+        const unavailable = item.status === 'archived' || item.status === 'removed';
+        return html`<li><${WorkIcon} kind=${item.kind} />${item.href ? html`<a href=${safeHref(item.href)}>${item.title}${unavailable ? ` · ${icon.label}` : ''}</a>` : html`<span>${item.title}${unavailable ? ` · ${icon.label}` : ''}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
       })}</ul>
     </section>`
   );

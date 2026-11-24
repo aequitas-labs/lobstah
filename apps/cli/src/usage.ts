@@ -402,8 +402,8 @@ hides the item from the desktop pet and glass lobs until its state changes — n
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
 watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
 the same items and fields as man tend --json (the desktop pet reads it), less questions held on the helm's turn (the held column).`,
-  cull: `Stop idle worktree servers and containers, then sweep aged catch and state.
-Dry run by default. --apply stops services and deletes aged files (--older-than defaults to 14 days).
+  cull: `Stop idle worktree servers and containers, then clean up old worktrees and archive old records.
+Dry run by default. --apply removes worktrees (--older-than defaults to 14 days) and archives records after [limits].recordRetentionDays (default 30) in ~/.lobstah/archive.
 Busy worktrees are kept. --idle-hours sets the external worktree edit window (default 12).
 [cull].worktreeRoots adds agent worktree parents. Servers receive SIGTERM, then SIGKILL after 5 seconds; containers receive docker stop.
 Disk previews measure targets; --apply reports free-space changes.

@@ -1,12 +1,14 @@
 import type { DaemonCuller } from '@lobstah/supervisor';
 import { applyCull, orderCull, planCull, planPressureCull } from './cull.js';
 import { runMergeRelease } from './release.js';
+import { loadConfig } from '@lobstah/core';
 
 /**
- * The culler the CLI hands to the daemon. Both passes delete without
+ * The culler the CLI hands to the daemon. Cleanup runs without
  * measuring anything.
  *
- * retention: the `lobstah cull` plan at `[limits].retentionDays`, minus every
+ * retention: worktrees at `[limits].retentionDays`, records archived at
+ * `[limits].recordRetentionDays`, minus every
  * dispatch whose PR is still open, with worktree groups before metadata-only groups.
  * release: with `[limits].releaseOnMerge`, the worktrees of merged PRs'
  * finished chains, when clean and pushed (see release.ts).
@@ -15,7 +17,7 @@ import { runMergeRelease } from './release.js';
  */
 export const cliCuller: DaemonCuller = {
   retention(days, now, log) {
-    const plan = planCull(days, now, { measure: false, keepOpenPrs: true });
+    const plan = planCull(days, now, { measure: false, keepOpenPrs: true, worktrees: days > 0, recordRetentionDays: loadConfig().limits.recordRetentionDays });
     const items = orderCull(plan);
     if (items.length === 0) return 0;
     const applied = applyCull(items);
