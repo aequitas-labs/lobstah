@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   answeredAt, appendStatus, claimNext, complete, ensureLayout, laneDirs, queuedDescriptor,
-  storedDescriptor, takeHelm, unhandled, unhandledTrapMessages, mergeEvidence,
+  storedDescriptor, readExpectation, takeHelm, unhandled, unhandledTrapMessages, mergeEvidence,
 } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -49,6 +49,31 @@ function startedId(stdout: string): string {
 }
 
 describe('send wakes a finished dispatch', () => {
+  it.each(['active', 'done'] as const)('wakes failed work in %s even while its runner is still alive', (bucket) => {
+    dispatch(A);
+    expect(claimNext('work')).toBe(A);
+    fs.writeFileSync(path.join(laneDirs('work').active, A, 'runner.json'), JSON.stringify({ pid: process.pid }));
+    appendStatus(A, 'work', 'failed', 'worker ended');
+    if (bucket === 'done') complete(A, 'work');
+    const sent = lobstah('send', A, 'resume the work');
+    expect(sent.status, sent.stdout + sent.stderr).toBe(0);
+    const next = startedId(sent.stdout);
+    expect(queuedDescriptor(next, 'work')).toMatchObject({ followUp: A, sessionMode: 'continue' });
+    expect(readExpectation(A)).toBeUndefined();
+    expect(readExpectation(next)?.line).toBe('resume the work');
+    expect(unhandled(A, 'work')).toHaveLength(0);
+  });
+
+  it('refuses a stranded unfinished worker without leaving a send behind', () => {
+    dispatch(A);
+    expect(claimNext('work')).toBe(A);
+    const sent = lobstah('send', A, 'resume');
+    expect(sent.status).not.toBe(0);
+    expect(sent.stdout).toContain('wait for reconciliation');
+    expect(readExpectation(A)).toBeUndefined();
+    expect(unhandled(A, 'work')).toHaveLength(0);
+  });
+
   it('delivers to a live runner, then to queued work, without creating a dispatch', () => {
     dispatch(A);
     expect(claimNext('work')).toBe(A);

@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  appendStatus, awaitingReply, claimNext, complete, ensureLayout, laneDirs, markListed, readExpectation, takeHelm,
+  appendStatus, expectReply, dueUnanswered, takeReplies, awaitingReply, claimNext, complete, ensureLayout, laneDirs, markListed, readExpectation, takeHelm,
 } from '@lobstah/core';
 import { DEFAULT_HELM, recordHelmPass } from '@lobstah/core';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -63,6 +63,28 @@ const count = (s: string, needle: string) => s.split(needle).length - 1;
 
 describe('a send expects a reply', () => {
   // Six CLI runs and two one-second waits: more than vitest's default 5s on a slow CI runner.
+  it.each(['done', 'failed'] as const)('settles a stranded send when a descendant reports %s', (verb) => {
+    live(A);
+    const before = new Date(Date.now() - 3000).toISOString();
+    appendStatus(A, 'work', 'failed', 'worker ended', before);
+    complete(A, 'work');
+    expectReply({ dispatchId: A, lane: 'work', from: 'terminal', text: 'stranded instruction',
+      sentAt: new Date(Date.now() - 2000).toISOString() });
+    expect(awaitingReply(A)).toBeDefined();
+    const next = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    const dispatched = lobstah(['dispatch', '--repo', 'r', '--id', next, '--follow-up', A, '--brief-text', 'continue']);
+    expect(dispatched.status, dispatched.stdout).toBe(0);
+    expect(claimNext('work')).toBe(next);
+    expect(awaitingReply(A)).toBeDefined();
+    appendStatus(next, 'work', 'paused', 'waiting');
+    expect(awaitingReply(A)).toBeDefined();
+    appendStatus(next, 'work', verb, 'finished');
+    expect(awaitingReply(A)).toBeUndefined();
+    expect(dueUnanswered(false, 0)).toHaveLength(0);
+    expect(takeReplies()).toHaveLength(0);
+    expect(readExpectation(A)).toBeUndefined();
+  });
+
   it('delivers the next working note once as a reply event', () => {
     live(A);
     send(A, 'start the dev server\nand report the URL');
