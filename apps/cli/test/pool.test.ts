@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   claimBait,
@@ -23,9 +23,9 @@ import { removeTempDir } from '../../../test/temp-dir.js';
 
 /**
  * Pools as the CLI and daemon see them: cull leaves them alone, tend shows
- * them, the daemon starts warm-ups, and traps never take pool work. No git:
- * a slot is a directory with a `.git` file pointing at its git dir, which is
- * all the lock and the views read.
+ * them, the daemon starts warm-ups, and traps never take pool work. Slots
+ * only need a `.git` pointer for their lock and views; the removable cull
+ * control is a real linked worktree so its Git state can be verified.
  */
 
 let home: string;
@@ -85,7 +85,14 @@ describe('cull leaves pool worktrees alone', () => {
     age(dir, 60);
     finishedIn('old', dir, 30);
     // A finished dispatch's worktree beside it is still swept, so the cull did run.
-    fs.mkdirSync(path.join(home, 'worktrees', 'ghost'), { recursive: true });
+    const repo = path.join(home, 'repo');
+    fs.mkdirSync(repo);
+    const git = (...args: string[]): void => {
+      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-C', repo, ...args], { stdio: 'pipe' });
+    };
+    git('init', '-q', '-b', 'main');
+    git('commit', '-q', '--allow-empty', '-m', 'initial');
+    git('worktree', 'add', '-q', '--detach', path.join(home, 'worktrees', 'ghost'));
     finishedIn('ghost', path.join(home, 'worktrees', 'ghost'), 30);
     age(path.join(home, 'worktrees', 'ghost'), 30);
     const plan = planCull(0);
