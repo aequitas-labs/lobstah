@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -31,6 +31,7 @@ afterEach(async () => {
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   server = undefined;
   removeTempDir(home);
+  vi.restoreAllMocks();
   delete process.env.LOBSTAH_HOME;
 });
 
@@ -656,7 +657,18 @@ describe('review requests on /requests', () => {
     } finally { delete process.env.LOBSTAH_TEST_REVIEW_TOKEN; }
   });
 
+  /** Dismiss checks GitHub even when this machine has no staged receipt. */
+  function pendingReviewLookup(): void {
+    const tokenFile = path.join(home, 'review-token');
+    fs.writeFileSync(tokenFile, 'fixture');
+    fs.writeFileSync(path.join(home, 'config.toml'), `[reviews]\nenabled = true\nidentity = "chris"\ntokenFile = '${tokenFile}'\n`);
+    const original = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
+      String(input).startsWith('https://api.github.com/') ? Promise.resolve(new Response('[]')) : original(input, init));
+  }
+
   it('dismisses an unstaged round, and refuses what the round cannot do', async () => {
+    pendingReviewLookup();
     observeReviewRequest({
       pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' },
       round: { id: 'RRE_7', requestedAt: ago(60) },
@@ -694,6 +706,7 @@ describe('review requests on /requests', () => {
   });
 
   it('seen preserves the ready notification and needs-you; Skip acknowledges and clears both', async () => {
+    pendingReviewLookup();
     const key = 'review:acme/web#7';
     const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' }, round: { id: 'r', requestedAt: ago(60) } }).item;
     Object.assign(item.rounds[0]!, { state: 'drafted', verdict: 'approve', draftedAt: ago(10) }); writeReview(item); refreshReviewNotifications();
