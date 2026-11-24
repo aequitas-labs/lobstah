@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.18 — 2026-11-24
+
+### Traps and chores
+
+- Chores waiting behind busy chore slots no longer wake the helm with
+  queued-too-long notices while every running chore keeps making progress. A
+  stalled or cancelled chore brings the notices back. (#619)
+- A trap's sign-on window starts when its terminal opens and doesn't count time
+  the Mac is asleep, so a slow setup or a sleep no longer fails the start.
+  (#620)
+
+### PRs and cleanup
+
+- A PR that only another dispatch's wait looked at stops showing as ready to
+  merge once nothing waits on it. `lobstah watch rm` clears such a record when
+  there is no watch to remove. (#621)
+- Cleanup removes worktrees whose only changes are lobstah's own files,
+  tooling scratch files, or output listed in the new `[repos.<key>].ignoreDirty`
+  setting. (#622)
+
 ## 0.8.17 — 2026-11-23
 
 ### Slack

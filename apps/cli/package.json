@@ -1,6 +1,6 @@
 {
   "name": "lobstah",
-  "version": "0.8.17",
+  "version": "0.8.18",
   "type": "module",
   "bin": {
     "lobstah": "dist/main.js"
