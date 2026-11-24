@@ -447,4 +447,5 @@ it('migrates an old account lease only into its recorded grounds', async () => {
   expect((await call('helm/renew', { grounds: 'home' }, home.token, MAC_SESSION)).status).toBe(200);
   expect((await call('helm/release', { grounds: 'helm-test' }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
   expect((await call('helm/renew', { grounds: 'home' }, home.token, MAC_SESSION)).status).toBe(200);
+  expect(await (await call('glass')).json()).toMatchObject({ helmLive: true });
 });

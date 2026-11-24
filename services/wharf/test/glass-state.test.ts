@@ -54,7 +54,7 @@ it.each([false, true])('person cancel fences a worker without taking a helm seat
   const boat = await helmBoat(); await dispatch(boat.token, 'boat-seat');
   expect((await call('workers/sign-on', { worker: 'worker', repo: 'repo', repoRemote: 'github.com/test/repo' }, boat.token)).status).toBe(200);
   const receipt = await (await call('claims', { worker: 'worker' }, boat.token)).json<{ token: string; epoch: number }>();
-  if (!live) await sql("DELETE FROM meta WHERE key='helm'");
+  if (!live) await sql("DELETE FROM meta WHERE key='helm' OR key LIKE 'helm:%'");
   const before = await sql("SELECT value FROM meta WHERE key='helm'");
   const cursor = (await (await call('events')).json<{ cursor: string }>()).cursor;
   expect((await call('dispatches/job/cancel', {})).status).toBe(200);
@@ -68,7 +68,7 @@ it.each([false, true])('person cancel fences a worker without taking a helm seat
 });
 
 it('person send stays queued without a helm and expires visibly, never firing late', async () => {
-  const boat = await helmBoat(); await dispatch(boat.token, 'boat-seat'); await sql("DELETE FROM meta WHERE key='helm'");
+  const boat = await helmBoat(); await dispatch(boat.token, 'boat-seat'); await sql("DELETE FROM meta WHERE key='helm' OR key LIKE 'helm:%'");
   const payload = { id: 'request', kind: 'message', dispatch: 'job', text: 'Please retry' };
   const created = await call('requests', payload, person, 'helm', 'same'); expect(created.status).toBe(200);
   expect(await created.json()).toMatchObject({ state: 'queued', waitingForHelm: true });
@@ -149,7 +149,7 @@ it('publishes a worker\'s lease and tmux pane, and refuses a pane that is not a 
 });
 
 it('person trap requests wait for a helm and are bounded, without launching anything', async () => {
-  const boat = await helmBoat(); await sql("DELETE FROM meta WHERE key='helm'");
+  const boat = await helmBoat(); await sql("DELETE FROM meta WHERE key='helm' OR key LIKE 'helm:%'");
   const result = await call('requests', { id: 'start', kind: 'trap-request', boat: boat.id, repo: 'github.com/test/repo' });
   expect(result.status).toBe(200); expect(await result.json<WharfHumanRequest>()).toMatchObject({ kind: 'trap-request', state: 'queued', waitingForHelm: true });
   expect((await call('requests', { id: 'bad', kind: 'trap-request', boat: boat.id, repo: '/user/path' })).status).toBe(400);

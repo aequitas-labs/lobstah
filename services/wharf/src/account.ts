@@ -530,7 +530,7 @@ export class Account extends DurableObject<Env> {
     // Request counts and the hosted glass's watch moved to memory; their old rows go (nothing to write once gone).
     ctx.storage.sql.exec("DELETE FROM meta WHERE key IN ('budget','mirror-budget','mirror-watched')");
     this.threads = new Threads(ctx.storage.sql, { person: () => ctx.id.name ?? 'owner', remindMs: () => (JSON.parse(this.get('helm') ?? 'null')?.remindSecs ?? 900) * 1000, helm: (c, a, n) => this.helm(c, a, n), event: (k, d, note) => this.event(k, d, note) });
-    this.glass = new GlassState(ctx.storage.sql, { threadGrounds: () => { const h = JSON.parse(this.get('helm') ?? 'null'); return [...new Set([...(h?.grounds && !h.mirror ? [h.grounds] : []), ...this.threads.summaries(Date.now()).map(t => t.grounds)])]; }, messageLimits: () => ({ maxBytes: Math.min(10 * 1024 * 1024, Number(this.env.MAX_FILE_BYTES)), maxFiles: 8, textMax: 20000, extensions: Object.keys(MESSAGE_FILE_TYPES) }), threads: (n) => this.threads.summaries(n), threadCheck: (id, g) => this.threads.checkCard(id, g), threadLink: (id, key, n) => this.threads.linkCard(id, key, n), helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
+    this.glass = new GlassState(ctx.storage.sql, { threadGrounds: () => [...new Set([...this.helmSeats().filter((seat) => seat.until > Date.now() && !seat.mirror && seat.grounds).map((seat) => seat.grounds!), ...this.threads.summaries(Date.now()).map(t => t.grounds)])], messageLimits: () => ({ maxBytes: Math.min(10 * 1024 * 1024, Number(this.env.MAX_FILE_BYTES)), maxFiles: 8, textMax: 20000, extensions: Object.keys(MESSAGE_FILE_TYPES) }), threads: (n) => this.threads.summaries(n), threadCheck: (id, g) => this.threads.checkCard(id, g), threadLink: (id, key, n) => this.threads.linkCard(id, key, n), helm: (c, a, n) => this.helm(c, a, n), read: (a) => this.requirePermission(a, 'read'), work: (a) => this.requirePermission(a, 'work'), event: (k, d, note) => this.event(k, d, note),
       helmLive: (now) => this.helmLive(now), slackUpdate: (request, update, now) => this.outbox.repost(request, update, now) });
     this.cards = new Cards(ctx.storage.sql, {
       dispatches: () => ctx.storage.sql.exec<DispatchRow>('SELECT * FROM dispatches ORDER BY rowid DESC LIMIT 100').toArray().map((d) => this.view(d) as DispatchView),
@@ -636,7 +636,7 @@ export class Account extends DurableObject<Env> {
     return h && h.until > now ? h : undefined;
   }
   /** Whether the wharf's own helm holds the seat. A Mac's helm steers its own boat, not the wharf. */
-  private helmLive(now: number): boolean { return !!this.seat(now) && !this.seat(now)!.mirror; }
+  private helmLive(now: number): boolean { return this.helmSeats().some((seat) => seat.until > now && !seat.mirror); }
   /** The Mac whose own helm holds the seat, while its socket is open: Slack DMs go to it. */
   private macHelm(now: number): { boat: string; name: string; grounds: string } | undefined {
     const h = this.seat(now);
