@@ -227,14 +227,45 @@ but its note starts `budget:` and tells the man what work was saved and to
 send a continuation.
 | `backgroundWaitSecs` | `1800` | A turn that ends without a report is held open this long while background work the worker started is still running (a push behind a slow pre-push gate); the harness wakes the worker when it settles. Heartbeats keep the wedge detector off the wait. Keep it below `wallClockSecs`, which still ends the run. |
 | `exitGraceSecs` | `30` | After the worker reports `done` or `failed` at the end of a turn, the runner ends the session and waits this long for the harness to close its event stream. If the stream is still open, the runner kills the harness, then stops every process the runner started (its process group on Linux and macOS, its process tree on Windows), and finishes. The report stands: the status stays `done` or `failed`, and evidence records `harnessStopped` with how many seconds after the report the harness was stopped. When the stream closes in time, the runner stops any background processes the harness left running on its way out. |
-| `choreRetentionDays` | `7` | Completed chores age out of `chores/done/`. A review chore’s own checkout is removed as soon as it finishes (done or failed), when it is clean and all commits are on remote-tracking branches. Its report, records, done entry and branch stay. Dirty, unpushed, shared, pool, configured and live trap checkouts are kept, with the reason in the runner or cull log. |
-| `runRetentionDays` | `14` | How long a run card's history stays on disk: each run's output and state, and a run card that left the glass. The daemon prunes older ones hourly. `0` keeps them. |
+| `choreRetentionDays` | `7` (deprecated) | Accepted for compatibility. Completed chores use `recordRetentionDays`; this setting no longer removes their history. Review chores still release a clean, published checkout when they finish. |
+| `runRetentionDays` | `14` (deprecated) | Accepted for compatibility. Run cards, output, state and proposed scripts use `recordRetentionDays`. |
 | `attachmentMaxBytes` | `26214400` (25 MiB) | Maximum size of each file supplied with repeatable `dispatch --attach`, `send --attach`, or a decision answer. Picked files and images pasted into a glass answer box use this limit. |
-| `retentionDays` | `0` (off) | The daemon culls finished dispatches (done and failed) older than this many days: their `done/` entries, worktrees, state files, and stale PR records and acks. Branches are kept. A dispatch whose PR is still open is kept. Queued and active dispatches are never culled. At most once per hour, the daemon starts a detached worker that drains the eligible backlog without a count limit. Worktrees go before metadata; groups within each set are oldest first. The claim loop keeps running while the worker removes files. A worktree with no dispatch record ages from its directory's modification time; retention and the free-space cull keep it unless Git verifies that it is clean and all commits are on remote-tracking branches. Suggested: `14`, the same window as `lobstah cull`. |
+| `retentionDays` | `0` (off) | Remove finished worktrees older than this many days, keeping branches and records. Open PRs, queued and active work, configured folders and live traps are kept. Orphaned worktrees require Git proof that they are clean and published. At most hourly, a detached worker drains the backlog, oldest first; claims continue during cleanup. `lobstah cull --older-than` also changes only the worktree window. |
+| `recordRetentionDays` | `30` | Keep finished dispatches, chore records, state (including notes and attachments), answered or withdrawn cards, run history, reports, closed PR records, orphaned acks and question releases online for this many days. `0` keeps records online indefinitely. After the window, cleanup saves and verifies a compressed archive before removing the online files. Queued or active work, open PR dispatches and unanswered cards stay online. Archives have no automatic expiry. |
 | `releaseOnMerge` | `false` (off) | When a PR watch records `merged` for a PR, the daemon's next cull pass removes the worktree of the dispatch that owns the PR, and of every dispatch in its follow-up chain that ran on that PR (its own worktree or a shared one). It uses the retention cull's removal path and detached worker, with the same hourly throttle and no count limit, and runs even when `retentionDays` is `0`. It releases a worktree only when every dispatch in the chain is finished (done or failed) and none is queued or active, `git status --porcelain` is empty, and after a fetch `git branch -r --contains HEAD` is not empty. Otherwise it keeps the worktree, records why, and `lobstah doctor`'s `disk` row shows `kept: unpushed work`; the next pass checks again. Uncommitted changes and unpushed commits are never deleted. A PR closed without merge releases nothing. A trap's worktree is never released. Branches (local and remote), `done/` entries, state, and evidence are kept; `lobstah catch` prints `worktree: released on merge (<time>)`. One `worktree-released` notice per pass lists what was released. |
 | `reuseWorktree` | `true` | A follow-up (`--follow-up <id>`) runs in the worktree of the newest dispatch in its chain whose worktree still exists, on the branch and HEAD where that dispatch stopped. Trunk is fetched; `setup` runs again if a lockfile changed or disk-pressure cleanup cleared its caches. It reuses only when the worktree is clean (untracked files under the repo's `scratch` paths excepted), belongs to the same repo, and no other dispatch runs in it; otherwise it allocates a fresh worktree as usual. A dirty worktree is never cleaned or reset. The first status note says which: `reusing worktree of <origin>` or `fresh worktree (<reason>)`. A lock file in the worktree's git dir (`lobstah.lock`) keeps a second runner out; a lock whose dispatch has finished is stale. A shared worktree is kept by the cull and the free-space guard while any dispatch in the chain is queued or active, and it ages from the newest dispatch that used it. `false` allocates a fresh worktree for every dispatch. Headless dispatches only: a trap works in its own worktree. |
 | `minFreeGB` | `0` (off) | Free space the worktrees volume (`~/.lobstah/worktrees`) must have before the daemon claims work, because each claim creates a worktree (1 to 8 GB). Below the limit, the daemon schedules its background cull worker to remove finished worktrees, oldest first, until the limit is met or none are left (this runs even when `retentionDays` is `0`; live worktrees and PRs needing work are kept; a clean, fully pushed checkout waiting only for review can be removed after its caches; branches and dispatch records stay). If space is still short, the work stays in the queue and is not failed: `man tend` and the glass show it as `held: 3.2 GB free, needs 10 GB`. The daemon checks again on every tick. A `disk-held` notice wakes the helm with elapsed hold time at the start and every thirty minutes; one `disk-cleared` notice marks its end. Suggested: `10`. |
 | `cacheMinFreeGB` | `50` | Below this free space, first clear opted-in `cacheDirs` in finished checkouts whose PRs only await review, then idle traps, biggest first in each group. If space is still short, remove clean, fully pushed review-wait checkouts; records and branches stay for the next round. Uses at least `minFreeGB`; `0` disables the cache threshold but `minFreeGB` still applies. Pressure cleanup clears each trap at most once per hour unless free space is below `minFreeGB`. It posts a notice only when it recovers at least 1 GB or free space is below `minFreeGB` before or after cleanup; smaller recoveries are logged only. Working traps are preserved; paused traps qualify. `lobstah cull` previews clearable cache space. Doctor and cull previews group retained worktrees by reason and show their sizes. Disk holds wake the helm with elapsed wait time when they start and every thirty minutes until cleared. |
+
+### Read or restore archived records
+
+Cleanup saves standard `.tar.gz` bundles under `~/.lobstah/archive/` (or
+`$LOBSTAH_HOME/archive/`). Small JSON receipts in `archive/index/` list each
+record's key, bundle filename, paths and archive time. Glass threads show the
+work's kind and **Archived**; a record removed before archival was available
+shows **Removed**. Worktrees and their caches are not archived.
+
+Find a receipt by its key, then list or read its bundle without restoring:
+
+```sh
+rg -l 'work:<dispatch-id>' ~/.lobstah/archive/index/
+cat ~/.lobstah/archive/index/<receipt>.json
+tar -tzf ~/.lobstah/archive/<bundle>.tar.gz
+tar -xOzf ~/.lobstah/archive/<bundle>.tar.gz done/<dispatch-id>/descriptor.json
+```
+
+To restore, stop the daemon, extract into an empty staging directory, and copy
+the needed paths back into `~/.lobstah/`. Preserve existing files: a bundle can
+hold several records, and run attempts may have been archived in earlier bundles.
+Use each receipt's path list to find those bundles. Start the daemon after the
+copy; increase `recordRetentionDays` first if the restored records should stay
+online. Archives remain available after restoration. An archive failure keeps
+the online records and is reported in the cleanup log.
+
+```sh
+mkdir /tmp/lobstah-restore
+tar -xzf ~/.lobstah/archive/<bundle>.tar.gz -C /tmp/lobstah-restore
+```
 
 ## `[soak]` — soaking sessions (`lobstah soak`)
 

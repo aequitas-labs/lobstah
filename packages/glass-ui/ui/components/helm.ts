@@ -409,6 +409,7 @@ const TRACKED_STATUS: Record<string, WorkStateIconState> = {
   'checks failing': 'failed',
   'not watched yet': 'unknown',
   gone: 'removed',
+  removed: 'removed',
   answered: 'done',
   'waiting for you': 'needs-decision',
   withdrawn: 'removed',
@@ -461,7 +462,11 @@ function WorkBox({ view }: { view: ThreadView }) {
     <ul>${sorted.map((item) => {
       const icon = trackedStateIcon(item);
       const removed = icon.state === 'removed';
-      const title = removed ? `Removed ${WORK_LABEL[item.kind].toLowerCase()}` : item.title;
+      const title = removed
+        ? `Removed ${WORK_LABEL[item.kind].toLowerCase()}`
+        : item.status === 'archived'
+          ? `${item.title} · ${icon.label}`
+          : item.title;
       return html`<li class=${removed ? 'removed' : undefined}><${WorkIcon} kind=${item.kind} />${item.href && !removed ? html`<a href=${safeHref(item.href)}>${title}</a>` : html`<span>${title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
     })}</ul>
   </details>`;

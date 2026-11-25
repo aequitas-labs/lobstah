@@ -240,7 +240,7 @@ describe('part 2: click-to-ack, display-only', () => {
     mergeEvidence(P, 'work', { pr: pr({ state: 'MERGED' }) });
     fs.rmSync(path.join(laneDirs('work').active, Q), { recursive: true, force: true });
     fs.rmSync(path.join(laneDirs('work').state, `${Q}.status`), { force: true });
-    const acks = planCull(14).filter((i) => i.kind === 'ack');
+    const acks = planCull(14, Date.now() + 31 * 86_400_000).filter((i) => i.kind === 'ack');
     expect(acks.map((i) => i.id).sort()).toEqual(['pr:acme/web#9', `work:${Q}`]);
     applyCull(acks);
     expect(fs.readdirSync(acksDir())).toEqual([]);

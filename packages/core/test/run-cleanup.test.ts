@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   RUN_DONE_GRACE_MS,
-  RUN_PROPOSAL_TTL_MS,
   answerDecision,
   archivedDecisionDir,
   askDecision,
@@ -14,12 +14,14 @@ import {
   proposeRunScript,
   pruneRunHistory,
   readDecision,
+  readRecordArchive,
   readRunAttempt,
   recentRuns,
   retireFinishedRuns,
   runProposalsDir,
   standingDecisions,
   writeRunAttempt,
+  withdrawDecision,
 } from '../src/index.js';
 import type { RunAttempt, RunState } from '../src/index.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -132,6 +134,12 @@ describe('pruning run history', () => {
     retireFinishedRuns(NOW);
     expect(pruneRunHistory(14, NOW)).toMatchObject({ attempts: 1, cards: 1 });
     expect(fs.existsSync(archivedDecisionDir(old)!)).toBe(false);
+    const receipt = readRecordArchive(old)!;
+    // Relative paths: GNU tar on Windows reads a drive letter as a remote host.
+    const bundle = `archive/${receipt.bundle}`;
+    const files = execFileSync('tar', ['-tzf', bundle], { cwd: home, encoding: 'utf8' });
+    const output = files.split(/\r?\n/).find((file) => file.endsWith('/output.log'))!;
+    expect(execFileSync('tar', ['-xOzf', bundle, output], { cwd: home, encoding: 'utf8' })).toBe('ok\n');
     expect(readRunAttempt(fresh)?.state).toBe('succeeded');
     expect(fs.existsSync(path.join(decisionDir(running)!, 'run', 'latest.json'))).toBe(true);
     expect(pruneRunHistory(14, NOW)).toMatchObject({ attempts: 0, cards: 0 });
@@ -144,13 +152,21 @@ describe('pruning run history', () => {
     expect(recentRuns(NOW + 0)).toEqual([]);
   });
 
-  it('drops a proposal the helm never posted after a day, and its empty folder', () => {
+  it('archives a proposal after the record window, and removes its empty folder', () => {
     const scriptFile = path.join(home, 'proposed.sh');
     fs.writeFileSync(scriptFile, 'echo proposed\n');
-    proposeRunScript('dispatch-old', scriptFile, 'pearl-gull', new Date(NOW - RUN_PROPOSAL_TTL_MS - MIN));
+    proposeRunScript('dispatch-old', scriptFile, 'pearl-gull', new Date(NOW - 15 * DAY));
     proposeRunScript('dispatch-new', scriptFile, 'pearl-gull', new Date(NOW - MIN));
     expect(pruneRunHistory(14, NOW).proposals).toBe(1);
     expect(fs.existsSync(runProposalsDir('dispatch-old'))).toBe(false);
     expect(fs.readdirSync(runProposalsDir('dispatch-new'))).toHaveLength(2);
   });
+});
+
+it('archives a withdrawn run card that never ran after the same record window', () => {
+  const key = runCard('Never ran');
+  withdrawDecision(key);
+  const future = Date.now() + 31 * DAY;
+  expect(pruneRunHistory(30, future).cards).toBe(1);
+  expect(readRecordArchive(key)).toBeDefined();
 });

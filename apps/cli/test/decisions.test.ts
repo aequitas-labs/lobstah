@@ -331,7 +331,7 @@ describe('the Stop hook and cull', () => {
     lobstah('man', 'answer', answered, '--text', 'done');
     const request = readDecisionAnswer(answered)!.request;
     expect(planCull(14, Date.now()).filter((i) => i.kind === 'decision')).toEqual([]);
-    const plan = planCull(14, Date.now() + 30 * 86_400_000).filter((i) => i.kind === 'decision');
+    const plan = planCull(14, Date.now() + 31 * 86_400_000).filter((i) => i.kind === 'decision');
     expect(plan.map((i) => i.id)).toEqual([answered]);
     applyCull(plan);
     expect(readDecision(answered)).toBeUndefined();

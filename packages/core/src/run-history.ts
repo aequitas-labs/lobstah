@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { archivedDecisionDir, decisionDir, decisionsRoot, listDecisions, readArchivedDecision, readDecision, readDecisionAnswer, runCardSettled, withdrawDecision } from './decisions.js';
 import { lobstahHome } from './paths.js';
 import { atomicRenameSync, uniqueTempPath } from './paths.js';
+import { archiveRecords } from './record-archive.js';
 
 /** A run attempt's state. A finished one leaves the active views after RUN_DONE_GRACE_MS (decisions.ts). */
 export type RunState = 'running' | 'succeeded' | 'failed' | 'stopped';
@@ -134,8 +135,6 @@ export function readRunOutput(attempt: RunAttempt): string {
 export const RECENT_RUNS_DAYS = 7;
 /** Recent runs lists at most this many. */
 export const RECENT_RUNS_MAX = 20;
-/** A trap's proposed script the helm never posted is dropped after this long. */
-export const RUN_PROPOSAL_TTL_MS = 86_400_000;
 
 /** One finished run as Recent runs shows it. */
 export interface RecentRun {
@@ -209,10 +208,9 @@ function attemptTime(file: string): number | undefined {
 }
 
 /**
- * Remove run history older than `days`: each finished attempt's output and
+ * Archive run history older than `days`: each finished attempt's output and
  * state, a withdrawn run card whose last run ended before then (or that never
- * ran and was asked before then), and proposed scripts the helm never posted
- * within RUN_PROPOSAL_TTL_MS. A running attempt is never removed. Returns how
+ * ran and was asked before then), and proposed scripts older than the same window. A running attempt is never removed. Returns how
  * many attempts, cards and proposals went.
  */
 export function pruneRunHistory(days: number, now = Date.now()): { attempts: number; cards: number; proposals: number } {
@@ -230,24 +228,30 @@ export function pruneRunHistory(days: number, now = Date.now()): { attempts: num
       if (!/^[a-f0-9]{8}$/.test(entry)) continue;
       const card = path.join(root, entry);
       const runDir = path.join(card, 'run');
-      if (!fs.existsSync(runDir)) continue;
-      if (days > 0) {
-        for (const id of fs.readdirSync(runDir)) {
-          if (!/^[a-f0-9-]{36}$/.test(id)) continue;
-          const at = attemptTime(path.join(runDir, id, 'state.json'));
-          if (at !== undefined && at < cutoff) {
-            fs.rmSync(path.join(runDir, id), { recursive: true, force: true });
-            removed.attempts += 1;
-          }
-        }
-      }
+      const hasRuns = fs.existsSync(runDir);
+      if (!hasRuns && !readArchivedDecision(`decision:${entry}`)?.run) continue;
       if (days > 0 && root === withdrawn) {
         const latest = path.join(runDir, 'latest.json');
         const meta = readArchivedDecision(`decision:${entry}`);
         const at = fs.existsSync(latest) ? attemptTime(latest) : meta ? Date.parse(meta.askedAt) : undefined;
         if (at !== undefined && Number.isFinite(at) && at < cutoff) {
+          archiveRecords([`decision:${entry}`], [card]);
+          removed.attempts += hasRuns ? fs.readdirSync(runDir).filter((id) => /^[a-f0-9-]{36}$/.test(id)).length : 0;
           fs.rmSync(card, { recursive: true, force: true });
           removed.cards += 1;
+          continue;
+        }
+      }
+      if (!hasRuns) continue;
+      if (days > 0) {
+        for (const id of fs.readdirSync(runDir)) {
+          if (!/^[a-f0-9-]{36}$/.test(id)) continue;
+          const at = attemptTime(path.join(runDir, id, 'state.json'));
+          if (at !== undefined && at < cutoff) {
+            archiveRecords([`run:${id}`], [path.join(runDir, id)]);
+            fs.rmSync(path.join(runDir, id), { recursive: true, force: true });
+            removed.attempts += 1;
+          }
         }
       }
     }
@@ -275,7 +279,10 @@ export function pruneRunHistory(days: number, now = Date.now()): { attempts: num
         // An unreadable proposal is as old as its file.
       }
       if (!Number.isFinite(at)) at = fs.statSync(path.join(dir, file)).mtimeMs;
-      if (now - at < RUN_PROPOSAL_TTL_MS) continue;
+      if (days <= 0 || at >= cutoff) continue;
+      archiveRecords([`proposal:${dispatch}:${file.replace(/\.json$/, '')}`], [
+        path.join(dir, file), path.join(dir, file.replace(/\.json$/, '')), path.join(dir, file.replace(/\.json$/, '.sh')),
+      ]);
       fs.rmSync(path.join(dir, file), { force: true });
       // The copy lives in `<sha256>/` under its own name; older proposals kept it as `<sha256>.sh`.
       fs.rmSync(path.join(dir, file.replace(/\.json$/, '')), { recursive: true, force: true });

@@ -181,7 +181,7 @@ describe('minFreeGB — the free-space guard', () => {
 });
 
 describe('retentionDays — the throttle', () => {
-  it('runs at most once per hour, and never when retentionDays is 0', () => {
+  it('runs at most once per hour, and stops when both retention windows are off', () => {
     const culler = fakeCuller();
     const base = Date.parse('2026-09-01T00:00:00Z');
     let now = base;
@@ -195,7 +195,7 @@ describe('retentionDays — the throttle', () => {
     expect(retentionPass(cfg, hooks, () => {})).toBe(true);
     expect(culler.retentionCalls).toBe(2);
 
-    const off: Config = { ...cfg, limits: { ...DEFAULT_LIMITS, retentionDays: 0 } };
+    const off: Config = { ...cfg, limits: { ...DEFAULT_LIMITS, retentionDays: 0, recordRetentionDays: 0 } };
     now += 10 * CULL_INTERVAL_MS;
     expect(retentionPass(off, hooks, () => {})).toBe(false);
     expect(culler.retentionCalls).toBe(2);
