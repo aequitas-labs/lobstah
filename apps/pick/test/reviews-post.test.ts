@@ -625,17 +625,17 @@ it('cancellation while checking pending reviews prevents staging a new draft', a
 });
 
 
-it('updates the identity pending review without deleting unsent comments', async () => {
+it('updates an older marked pending review without deleting unsent comments', async () => {
   drafted();
   fs.writeFileSync(path.join(home, 'config.toml'), '[reviews]\nidentity = "chris"\n');
   const calls: Call[] = [];
   const fetcher: FetchLike = async (url, init) => {
     calls.push({ method: init.method, url, ...(init.body ? { body: JSON.parse(init.body) } : {}) });
-    if (init.method === 'GET' && /reviews\/77$/.test(url)) return new Response(JSON.stringify({ id: 77, state: 'PENDING', body: 'My unsent summary' }));
+    if (init.method === 'GET' && /reviews\/77$/.test(url)) return new Response(JSON.stringify({ id: 77, state: 'PENDING', body: 'My unsent summary\n\n<!-- lobstah:review older-round -->' }));
     if (init.method === 'GET' && url.includes('/comments?')) return new Response('[]');
     if (init.method === 'GET') return new Response(JSON.stringify([
       { id: 11, state: 'PENDING', body: 'Someone else', user: { login: 'other' } },
-      { id: 77, state: 'PENDING', body: 'My unsent summary', user: { login: 'Chris' } },
+      { id: 77, state: 'PENDING', body: 'My unsent summary\n\n<!-- lobstah:review older-round -->', user: { login: 'Chris' } },
     ]));
     return new Response(JSON.stringify({ id: 77 }));
   };
@@ -786,8 +786,74 @@ it('dismissing a refresh removes its prior pending review and ends the Updating 
   const item = readReview(KEY)!;
   Object.assign(latestRound(item)!, { state: 'requested', pendingReview: { reviewId: '77', at: 'now' }, refresh: { attempts: 1, retryAt: 'now' } }); writeReview(item);
   const calls: Call[] = [];
-  expect(await dismissReviewRound(KEY, 'glass', { token: tok, fetch: github(calls, [{ id: 77, state: 'PENDING', body: 'Chris wrote this.' }]) })).toBeUndefined();
+  expect(await dismissReviewRound(KEY, 'glass', { token: tok, fetch: github(calls, [{ id: 77, state: 'PENDING', body: 'Chris wrote this.\n\n' + MARKER }]) })).toBeUndefined();
   expect(calls.filter(call => call.method === 'DELETE').map(call => call.url)).toEqual(['https://api.github.com/repos/acme/web/pulls/7/reviews/77']);
   expect(latestRound(readReview(KEY)!)!.state).toBe('dismissed');
   expect(latestRound(readReview(KEY)!)!.refresh).toBeUndefined();
+});
+
+
+it('adopts a marker-only older draft without a configured identity or local receipt', async () => {
+  drafted();
+  const calls: Call[] = [];
+  const result = await stageReview(KEY, { token: tok, fetch: github(calls, [{ id: 77, state: 'PENDING', body: '<!-- lobstah:review missing-round -->' }]) });
+  expect(result).toEqual({ staged: true, reviewId: '77' });
+  expect(posts(calls)).toEqual([]);
+  expect(calls.find(call => call.method === 'PUT')!.body!.body).toContain(MARKER);
+});
+
+it('leaves a personal pending review untouched and explains how to stage', async () => {
+  drafted();
+  const calls: Call[] = [];
+  const result = await stageReview(KEY, { token: tok, fetch: async (url, init) => {
+    calls.push({ method: init.method, url });
+    return new Response(JSON.stringify(url.endsWith('/user') ? { login: 'chris' } : [{ id: 77, state: 'PENDING', body: 'My draft', user: { login: 'Chris' } }]));
+  } });
+  expect(result).toEqual({ staged: false, why: 'You have a pending review on this PR. Send or delete it before staging a new draft.' });
+  expect(calls.every(call => call.method === 'GET')).toBe(true);
+  expect(fs.existsSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'staged.json'))).toBe(false);
+});
+
+it('dismiss removes older marked drafts without a newest-round receipt and keeps personal drafts', async () => {
+  drafted();
+  const calls: Call[] = [];
+  expect(await dismissReviewRound(KEY, 'cli', { token: tok, fetch: github(calls, [
+    { id: 77, state: 'PENDING', body: '<!-- lobstah:review older -->' },
+    { id: 78, state: 'PENDING', body: 'Personal draft' },
+    { id: 79, state: 'COMMENTED', body: MARKER },
+  ]) })).toBeUndefined();
+  expect(calls.filter(call => call.method === 'DELETE').map(call => call.url)).toEqual(['https://api.github.com/repos/acme/web/pulls/7/reviews/77']);
+  expect(latestRound(readReview(KEY)!)!.state).toBe('dismissed');
+  expect(await redraftReviewRound(KEY, { newRound: true })).toBeUndefined();
+  const item = readReview(KEY)!;
+  expect(item.rounds[0]!.state).toBe('dismissed');
+  expect(latestRound(item)).toMatchObject({ state: 'requested', localRequest: true });
+});
+
+
+it.each(['stage', 'dismiss'] as const)('%s finds marked drafts beyond the first review page', async action => {
+  drafted();
+  const calls: Call[] = [];
+  const original = github(calls, [{ id: 777, state: 'PENDING', body: '<!-- lobstah:review old -->' }]);
+  const fetcher: FetchLike = async (url, init) => {
+    if (init.method === 'GET' && url.endsWith('/reviews?per_page=100')) {
+      calls.push({ method: init.method, url });
+      return new Response(JSON.stringify(Array.from({ length: 100 }, (_, id) => ({ id, state: 'COMMENTED', body: '' }))));
+    }
+    return original(url, init);
+  };
+  if (action === 'stage') expect(await stageReview(KEY, { token: tok, fetch: fetcher })).toEqual({ staged: true, reviewId: '777' });
+  else expect(await dismissReviewRound(KEY, 'cli', { token: tok, fetch: fetcher })).toBeUndefined();
+  expect(calls.some(call => call.url.endsWith('&page=2'))).toBe(true);
+  expect(posts(calls)).toEqual([]);
+});
+
+it('refuses a fresh round after dismiss when the PR is closed', async () => {
+  drafted();
+  const item = readReview(KEY)!;
+  latestRound(item)!.state = 'dismissed';
+  item.pr.state = 'CLOSED';
+  writeReview(item);
+  expect(await redraftReviewRound(KEY, { newRound: true })).toContain('closed');
+  expect(readReview(KEY)!.rounds).toHaveLength(1);
 });

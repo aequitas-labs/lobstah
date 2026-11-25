@@ -1087,7 +1087,9 @@ A send still waiting on its reply is listed in the `man haul` block as
 watcher is live, beside the arm command. It is listed once, then every
 `remindSecs` until the worker's next note answers it. `man tend` shows it on
 the dispatch as `awaiting reply · <age>`, and the glass dispatch modal shows
-it under the inbox.
+it under the inbox. A send stranded after a dispatch finished stops waiting
+when a later follow-up reports `done` or `failed`. Sending to finished work,
+including failed work, starts a follow-up and prints its id.
 
 **Acknowledging, display-only.** Clicking a desktop pet opens its target and
 runs `lobstah attention ack <item-key> --by pet`, so that pet stops walking

@@ -121,6 +121,22 @@ it('shows the thread name on a decision row and its notes above the question', a
   expect(g.$('.dcompose')).not.toBeNull();
 });
 
+it("heads a card with its thread: the helm's last message under its wheel and the notes, without the work box", async () => {
+  const d = fleet(); d.decisions = [{ key: KEY, thread: ID, title: 'Use Helm?', detail: 'Which tab?', options: ['Yes'], attachments: [], askedBy: 'helm', askedAt: AT, stateHash: 's' }];
+  d.attention = [{ kind: 'decision', key: KEY, id: KEY, verb: 'decision', ageSecs: 0, stateHash: 's' }];
+  const detail: ThreadView = { ...view(), responseText: 'Pick the middle tab', responseAt: AT, tracked: [{ kind: 'dispatch', ref: 'd1', title: 'Fix the deck', state: 'open', status: 'working', href: '#dispatch/d1' }] };
+  const g = await page(d, { get: (url) => (url === `/threads/${ID}` ? { status: 200, body: detail } : undefined) });
+  await click(g, '.drow .dopen');
+  const notes = g.$('.dbody .thread-notes')!;
+  expect(notes.querySelector('.thread-notes-title > .thread-avatar.helm svg')).not.toBeNull();
+  expect(notes.querySelector('.thread-notes-title a')?.getAttribute('href')).toBe(`#thread/${ID}`);
+  const message = notes.querySelector('.thread-response .thread-msg.from-helm .thread-bubble')!;
+  expect(message.querySelector('.thread-meta > .thread-avatar.helm')).not.toBeNull();
+  expect(message.querySelector('.thread-text')?.textContent).toBe('Pick the middle tab');
+  expect(notes.querySelector('.thread-notes-box')?.textContent).toContain('Keep Reviews');
+  expect(notes.querySelector('.thread-tracked')).toBeNull();
+});
+
 it('uses the shared message sheet with dispatch context', async () => {
   const d = everyAttentionFleet(); d.focusToken = 'tok';
   const id = d.dispatches[0]!.id;
@@ -212,7 +228,7 @@ it('groups all open conversation kinds together and keeps resolved ones, read, i
   expect(g.posts().some((p) => JSON.parse(p.body).kind === 'thread-seen')).toBe(false);
 });
 
-it('shows the notes box and existing dispatch, report and PR cards in conversation rounds', async () => {
+it('shows the notes box, linked dispatches and PRs as compact work cards, and a report as its own card', async () => {
   const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [summary()];
   const dispatch = d.dispatches[0]!, report = d.reports[0]!, pr = d.prs[0]!; dispatch.title = 'Implement the navigation change';
   const detail = view();
@@ -226,10 +242,16 @@ it('shows the notes box and existing dispatch, report and PR cards in conversati
     ['decided', '✓', '✓Decided: Keep Reviews'],
     ['open', '?', '?Open: Choose the middle tab'],
   ]);
-  expect(g.$$('.thread-links .card')).toHaveLength(3);
-  expect(g.$('.thread-links')?.textContent).toContain(dispatch.title);
+  // Each sits between the messages at the conversation's width: title, details, and its state in words.
+  const work = g.$$('.thread-timeline .thread-linked .thread-work:not(.thread-work-embed)');
+  expect(work.map((el) => [el.querySelector('.thread-work-title')?.textContent, el.querySelector('.thread-work-title')?.getAttribute('href')])).toEqual([
+    [dispatch.title, `#dispatch/${dispatch.id}`],
+    [pr.title, `#pr/${encodeURIComponent(pr.key)}`],
+  ]);
+  expect(work.map((el) => el.querySelector('.thread-work-meta')?.textContent?.split(' · ')[0])).toEqual(['Dispatch', 'PR']);
+  expect(work.map((el) => el.querySelector('.workpill')?.textContent)).toEqual([expect.any(String), expect.any(String)]);
+  expect(g.$$('.thread-links .card')).toHaveLength(1);
   expect(g.$('.tsheet')?.textContent).toContain(report.title);
-  expect(g.$('.tsheet')?.textContent).toContain(pr.title);
 });
 
 it('opens a conversation in a sheet over the Threads list and returns to the list on Back', async () => {
@@ -256,7 +278,7 @@ it('closes a linked conversation to the Threads list without leaving the glass',
   expect(g.$('#helm .page-head h1')?.textContent).toBe('Threads');
 });
 
-it('reads as a chat: the person on the right, the helm beside its wheel, system lines between, in order', async () => {
+it('reads as a chat: the person on the right, the helm under its wheel, system lines between, in order', async () => {
   const detail = view();
   detail.notesAt = new Date(NOW - 4 * 60_000).toISOString();
   detail.responseSeq = 3; detail.seenThrough = 2; detail.unreadResponse = true;
@@ -276,7 +298,9 @@ it('reads as a chat: the person on the right, the helm beside its wheel, system 
   const order = g.$$('.thread-timeline .thread-entry').map((el) => el.classList.contains('from-person') ? 'person' : el.classList.contains('from-helm') ? 'helm' : el.classList.contains('thread-card-entry') ? 'card' : 'system');
   expect(order).toEqual(['person', 'system', 'helm', 'person', 'helm', 'card']);
   expect(g.$('.thread-system')?.textContent).toContain('Discussion started');
-  expect(g.$$('.from-helm .thread-avatar svg')).toHaveLength(2);
+  // Each author's round icon heads their bubble: the helm's wheel, the person's own.
+  expect(g.$$('.from-helm .thread-bubble > .thread-meta > .thread-avatar.helm svg')).toHaveLength(2);
+  expect(g.$$('.from-person .thread-bubble > .thread-meta > .thread-avatar.person svg')).toHaveLength(2);
   expect(g.$$('.from-helm.unread').map((el) => el.textContent)).toEqual([expect.stringContaining('I will keep the question open for you')]);
   expect(g.$('.from-helm.unread .thread-meta')?.textContent).toContain('New');
   expect(g.$('.from-helm.unread img, .from-helm.unread a[download]')).not.toBeNull();
@@ -404,24 +428,28 @@ it('shows linked work with its live state, read-only, and keeps the composer on 
   detail.rounds = [{ at: AT, entries: [{ by: 'person', via: 'glass', text: 'Fix it', attachments: [], at: AT }, { event: 'tracked', text: 'All linked work finished', at: AT }] }];
   const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
   const panel = g.$('.thread-tracked')!;
-  expect(panel.querySelector('.thread-notes-head')?.textContent).toBe('Tracking · closes when this work finishes');
+  expect(panel.tagName).toBe('DETAILS');
+  expect(panel.hasAttribute('open')).toBe(true);
+  // The summary counts the work by state; the stuck PR sorts ahead of the running dispatch.
+  expect(panel.querySelector('summary .thread-notes-head')?.textContent).toBe('Tracking · closes when this work finishes');
+  expect([...panel.querySelectorAll('summary .workpill')].map((el) => el.textContent)).toEqual(['1 stuck', '1 in progress', '1 done']);
   expect(g.$$('.thread-tracked li').map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
-    'Dispatch: Fix the flaky deck test',
     'PR: Deflake the deck test',
+    'Dispatch: Fix the flaky deck test',
     'Todo: Check it tomorrow',
   ]);
   // Each kind wears the icon its view has in the glass, not a word.
   const tab = (name: string) => g.$$(`a[href="#${name}"]`).map((a) => a.querySelector('svg')?.outerHTML).find(Boolean);
   expect(g.$$('.thread-tracked li .thread-work-icon').map((el) => [el.getAttribute('title'), el.querySelector('svg')?.outerHTML])).toEqual([
-    ['Dispatch', tab('dispatches')],
     ['PR', tab('prs')],
+    ['Dispatch', tab('dispatches')],
     ['Todo', tab('todos')],
   ]);
-  // Each state is an icon in one right-hand column, named with its status words.
+  // Each state is an icon at the right of its chip, named with its status words.
   expect(g.$$('.thread-tracked .badge')).toEqual([]);
   expect(g.$$('.thread-tracked li > :last-child').map((el) => [el.className, el.getAttribute('role'), el.getAttribute('aria-label')])).toEqual([
-    ['runicon verbicon workstate work-working warn', 'img', 'Working'],
     ['runicon verbicon workstate work-failed bad', 'img', 'Checks failing'],
+    ['runicon verbicon workstate work-working warn', 'img', 'Working'],
     ['runicon verbicon workstate work-done ok', 'img', 'Done'],
   ]);
   expect(panel.querySelector('a[href="#dispatch/d1"]')).not.toBeNull();
@@ -442,8 +470,41 @@ it('gives failed, done, working, paused, merged and open linked work distinct st
   ];
   const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : undefined });
   const icons = g.$$('.thread-tracked li > .workstate');
-  expect(icons.map((el) => el.getAttribute('aria-label'))).toEqual(['Failed', 'Done', 'Working', 'Paused', 'Merged', 'Open']);
+  expect(icons.map((el) => el.getAttribute('aria-label'))).toEqual(['Failed', 'Working', 'Paused', 'Open', 'Done', 'Merged']);
   expect(new Set(icons.map((el) => el.querySelector('svg')?.innerHTML)).size).toBe(6);
+});
+
+it('puts what needs you first in the work box, and shows a removed record by its kind, never its id', async () => {
+  const gone = 'aaaa0000-0000-4000-8000-00000000dead';
+  const detail = view();
+  detail.tracked = [
+    { kind: 'dispatch', ref: 'd1', title: 'Fix the deck', state: 'done', status: 'done', href: '#dispatch/d1' },
+    { kind: 'dispatch', ref: gone, title: gone, state: 'done', status: 'gone', href: `#dispatch/${gone}` },
+    { kind: 'card', ref: 'decision:ea1e6263', title: 'decision:ea1e6263', state: 'done', status: 'withdrawn' },
+    { kind: 'card', ref: KEY, title: 'Use Helm?', state: 'open', status: 'waiting for you', href: `#decision/${KEY}` },
+    { kind: 'dispatch', ref: 'd2', title: 'Backfill the answers', state: 'stalled', status: 'needs-decision', href: '#dispatch/d2' },
+  ];
+  detail.rounds = [{ at: AT, entries: [{ by: 'helm', text: 'Sent a trap', attachments: [], at: AT, seq: 1 }, { link: 'dispatched', ref: gone, text: gone, at: AT }] }];
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : url === `/data/dispatch/${gone}` ? { status: 404, body: {} } : undefined });
+  const panel = g.$('.thread-tracked')!;
+  expect(panel.querySelector('summary .thread-notes-head')?.textContent).toBe('Work');
+  expect([...panel.querySelectorAll('summary .workpill')].map((el) => el.textContent)).toEqual(['2 need you', '1 done', '2 removed']);
+  expect(g.$$('.thread-tracked li').map((li) => [li.className || '', li.querySelector(':scope > :nth-child(2)')?.textContent, li.querySelector(':scope > a') !== null])).toEqual([
+    ['', 'Use Helm?', true],
+    ['', 'Backfill the answers', true],
+    ['', 'Fix the deck', true],
+    ['removed', 'Removed dispatch', false],
+    ['removed', 'Removed card', false],
+  ]);
+  expect(g.$$('.thread-tracked li.removed > .workstate').map((el) => el.getAttribute('aria-label'))).toEqual(['Removed', 'Removed']);
+  // In the conversation, the removed dispatch's card keeps its kind and says Removed, with nothing to open.
+  const card = g.$('.thread-timeline .thread-work-dispatch')!;
+  expect(card.classList.contains('removed')).toBe(true);
+  expect(card.querySelector('.thread-work-title')?.textContent).toBe('Removed dispatch');
+  expect(card.querySelector('a')).toBeNull();
+  expect(card.querySelector('.workpill')?.textContent).toBe('Removed');
+  expect(g.$('.thread-view')?.textContent).not.toContain(gone);
+  expect(g.$('.thread-view')?.textContent).not.toContain('decision:ea1e6263');
 });
 
 it('marks a PR link with the PR icon and a linked card with the card icon, even when the snapshot lists neither', async () => {
@@ -462,6 +523,7 @@ it('marks a PR link with the PR icon and a linked card with the card icon, even 
 it('marks each linked item with the icon its kind has in the glass views', async () => {
   const d = everyAttentionFleet(); d.focusToken = 'tok'; d.threads = [summary()];
   const dispatch = d.dispatches[0]!, report = d.reports[0]!, pr = d.prs[0]!;
+  dispatch.title = 'Implement the navigation change';
   const gone = 'aaaa0000-0000-4000-8000-00000000dead';
   const detail = view();
   detail.rounds = [{ at: AT, entries: [
@@ -484,7 +546,8 @@ it('marks each linked item with the icon its kind has in the glass views', async
   expect(svg(icons[3])).toBe(tab('prs'));
   expect(svg(icons[5])).toBe(tab('deck'));
   expect(new Set(icons.map(svg)).size).toBe(5);
-  expect(g.$$('.thread-work-dispatch .card')).toHaveLength(1);
+  expect(g.$(`.thread-work-dispatch a[href="#dispatch/${dispatch.id}"]`)?.textContent).toBe(dispatch.title);
+  // A dispatch neither the snapshot nor the thread can read keeps its link words.
   expect(g.$(`.thread-work-dispatch a[href="#dispatch/${gone}"]`)?.textContent).toBe('Missing dispatch');
   expect(g.$('.thread-work-plan a')?.getAttribute('href')).toBe('https://app.ume.so/a/plan');
 });
@@ -626,13 +689,13 @@ it('keeps the new-decision alert away while Threads is open, the list or a conve
   expect(g.$('.dalert .dalert-open')?.textContent).toContain('2 new decisions');
 });
 
-it('shows Archived and Removed beside the kind of unavailable linked work', async () => {
+it('shows a removed record by its kind and Archived beside an archived one', async () => {
   const g = await page(fleet(), { hash: `#thread/${ID}`, get: url => url === `/threads/${ID}` ? { status: 200, body: { ...view(), tracked: [
     { kind: 'dispatch', ref: 'gone', title: 'Dispatch', state: 'done', status: 'removed' },
     { kind: 'card', ref: KEY, title: 'Card', state: 'done', status: 'archived' },
   ] } } : undefined });
   const linked = g.$('[aria-label="Linked work"]')!;
-  expect(linked.textContent).toContain('Dispatch · Removed');
+  expect(linked.textContent).toContain('Removed dispatch');
   expect(linked.textContent).toContain('Card · Archived');
   expect(linked.querySelector('a')).toBeNull();
   expect(linked.textContent).not.toContain('gone');
