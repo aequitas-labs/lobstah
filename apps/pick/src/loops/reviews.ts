@@ -328,8 +328,24 @@ export async function refreshReviewDrafts(gh: { now: number }, log: (message: st
     if (!round || item.mutedAt || item.unseenAt || ['MERGED', 'CLOSED'].includes(item.pr.state ?? '') ||
         (round.wharf && !round.wharf.mine)) continue;
     const stageFailed = round.state === 'drafted' && round.reason?.startsWith('stage failed');
-    const draft = round.state === 'drafted' ? readRoundDraft(item.key, round.id) : undefined;
-    const staleDraft = round.state === 'stale' || (draft && !('error' in draft) && !reviewDraftCoversHead(item, round, draft));
+    const draft = ['drafted', 'stale'].includes(round.state) ? readRoundDraft(item.key, round.id) : undefined;
+    const headMoved: boolean = round.headSha !== item.pr.headSha;
+    // Only an anchor-free approval can follow verified equivalent changes.
+    // Persist the new head so staging and the glass share the same receipt.
+    if (headMoved && draft && !('error' in draft) && reviewDraftCoversHead(item, round, draft) && !stageFailed) {
+      Object.assign(round, { state: 'drafted', headSha: item.pr.headSha, baseSha: item.pr.baseSha, diffId: item.pr.diffId });
+      delete round.reason;
+      writeReview(item);
+      continue;
+    }
+    const staleDraft: boolean = round.state === 'stale' || (round.state === 'drafted' && headMoved);
+    // Save the transition before asking the re-draft path to reload this item.
+    // Missing draft files must not leave an old-head round looking ready forever.
+    if (staleDraft) {
+      round.state = 'stale';
+      round.reason = 'The PR changed. Re-drafting.';
+      writeReview(item);
+    }
     if (!staleDraft && !stageFailed && !(round.refresh && round.state === 'failed')) continue;
     if (round.refresh && gh.now < Date.parse(round.refresh.retryAt)) continue;
     const job = round.dispatch ? verbOf(round.dispatch) : undefined;
