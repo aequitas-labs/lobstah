@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.8.19 — 2026-11-25
+
+### Records and cleanup
+
+- Dispatch history, decisions and other records stay for 30 days, even after
+  their worktree is cleaned up. The new `[limits].recordRetentionDays` setting
+  changes the window. Expired records are saved to an archive under
+  `~/.lobstah/archive/` before they are removed, and linked work in the glass
+  shows Archived or Removed instead of a dead link. (#624)
+- A trap whose session has died frees its work within two minutes instead of
+  holding it for up to half an hour. Before cleanup removes a checkout with
+  changes, lobstah saves its files and Git state in the repository's Git
+  directory, and keeps the checkout if it can't. (#626)
+
+### Traps and chores
+
+- Chores waiting for a chore slot stay quiet for up to 30 minutes while the
+  running chores are healthy (`[helm].choreQueuedNoticeSecs`). A stalled, dead
+  or cancelling chore raises attention sooner, and the notice names it. (#627)
+- Sending to a failed dispatch starts a follow-up in the same worktree, even
+  while its old session is still running. A send waiting on a finished dispatch
+  stops waiting once a follow-up reports done or failed. (#628)
+
+### Reviews
+
+- Staging a new review round no longer fails on GitHub's one-pending-review
+  limit when an older lobstah draft is still on the PR. Your own drafts are left
+  alone. Dismiss clears lobstah's drafts across the whole PR, and
+  `lobstah reviews redraft <key> --new` starts a fresh round. (#629)
+- When a review fails to post or stage, the record names the GitHub call that
+  failed and why, not just `fetch failed`. A failed GitHub read retries once.
+  (#631)
+- A drafted review whose PR was force-pushed is marked stale and drafted again,
+  and the glass shows "stale: re-drafting". (#632)
+
+### The glass
+
+- A thread shows its linked work as cards between its messages, and a work box
+  at the top counts what needs you, what's stuck and what's in progress.
+  Removed work shows as "Removed dispatch" or "Removed card", never a bare id.
+  (#630)
+
 ## 0.8.18 — 2026-11-24
 
 ### Traps and chores
