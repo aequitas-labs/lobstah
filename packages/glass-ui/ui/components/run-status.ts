@@ -181,12 +181,13 @@ export function VerbIcon({ verb, at, waitingOn }: { verb: VerbIconVerb; at?: str
  * The state of a thread's linked work as an icon in the verb pill: a
  * dispatch's own verb icons, plus a PR's merged, open and closed states.
  * Merged is a branch joining, green; open is a ring, amber like work in
- * progress; closed is a slashed circle, grey. Every pill is the same size,
- * so a column of them lines up.
+ * progress; closed is a slashed circle, grey; removed (its record is gone) is
+ * a dashed ring, grey. Every pill is the same size, so a column of them
+ * lines up.
  */
-export type WorkStateIconState = VerbIconVerb | 'merged' | 'open' | 'closed';
+export type WorkStateIconState = VerbIconVerb | 'merged' | 'open' | 'closed' | 'removed';
 
-const WORK_STATE_TONE: Record<WorkStateIconState, VerbTone> = { ...VERB_TONE, merged: 'ok', open: 'warn', closed: 'dim' };
+const WORK_STATE_TONE: Record<WorkStateIconState, VerbTone> = { ...VERB_TONE, merged: 'ok', open: 'warn', closed: 'dim', removed: 'dim' };
 
 const WORK_STATE_ICON: Record<WorkStateIconState, unknown> = {
   ...VERB_ICON,
@@ -195,9 +196,15 @@ const WORK_STATE_ICON: Record<WorkStateIconState, unknown> = {
   ),
   open: svg('<circle cx="8" cy="8" r="5.2"/>'),
   closed: svg('<circle cx="8" cy="8" r="5.6"/><path d="M4 12l8-8"/>'),
+  removed: svg('<circle cx="8" cy="8" r="5.6" stroke-dasharray="2 2.2"/>'),
 };
 
 /** Linked work's state as an icon in its pill, named and titled with `label`. */
 export function WorkStateIcon({ state, label }: { state: WorkStateIconState; label: string }) {
   return html`<span class=${`runicon verbicon workstate work-${state} ${WORK_STATE_TONE[state]}`} role="img" aria-label=${label} title=${label}>${WORK_STATE_ICON[state]}</span>`;
+}
+
+/** The same pill with its words beside the icon, where a card has room for them. */
+export function WorkStatePill({ state, label }: { state: WorkStateIconState; label: string }) {
+  return html`<span class=${`runicon verbicon workpill work-${state} ${WORK_STATE_TONE[state]}`}><span aria-hidden="true">${WORK_STATE_ICON[state]}</span>${label}</span>`;
 }
