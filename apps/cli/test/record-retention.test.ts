@@ -54,7 +54,8 @@ it('keeps answered cards, reports, closed PRs, orphaned acks and releases thirty
   for (const key of [report.key, 'pr:o/r#7', ackKey]) expect(readRecordArchive(key)?.bundle).toBe(receipt.bundle);
   const staging = path.join(home, 'restore');
   fs.mkdirSync(staging);
-  execFileSync('tar', ['-xzf', path.join(home, 'archive', receipt.bundle), '-C', staging]);
+  // Relative paths: GNU tar on Windows reads a drive letter as a remote host.
+  execFileSync('tar', ['-xzf', `archive/${receipt.bundle}`, '-C', 'restore'], { cwd: home });
   expect(fs.readFileSync(path.join(staging, path.relative(home, requestFilesDir(answer.request)), 'answer.txt'), 'utf8')).toBe('Answer attachment');
   expect(fs.existsSync(path.join(staging, path.relative(home, requestsDir()), `${answer.request}.json`))).toBe(true);
   expect(fs.existsSync(path.join(staging, path.relative(home, releaseFile(ackKey))))).toBe(true);

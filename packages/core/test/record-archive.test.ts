@@ -21,6 +21,13 @@ it('writes an extractable bundle with binary files, nested directories and priva
   fs.mkdirSync(path.join(record, 'attachments'), { recursive: true });
   const bytes = Buffer.from([0, 255, 17, 10, 0]);
   fs.writeFileSync(path.join(record, 'attachments', 'file with spaces'), bytes);
+  // Past ustar's 100-byte name field, and not ASCII: carried in a pax header.
+  const long = `${'nested-directory-'.repeat(4)}/${'é-long-file-name-'.repeat(6)}.txt`;
+  fs.mkdirSync(path.join(record, path.dirname(long)), { recursive: true });
+  fs.writeFileSync(path.join(record, long), 'long name');
+  // Larger than one compressed member, so the bundle spans several.
+  const large = Buffer.alloc(9 * 1024 * 1024 + 7, 'x');
+  fs.writeFileSync(path.join(record, 'large.bin'), large);
   const archived = archiveRecords(['work:d1', 'report:work:d1'], [record])!;
   expect(readRecordArchive('work:d1')).toEqual(archived);
   expect(readRecordArchive('report:work:d1')?.bundle).toBe(archived.bundle);
@@ -28,8 +35,11 @@ it('writes an extractable bundle with binary files, nested directories and priva
   if (process.platform !== 'win32') expect(fs.statSync(bundle).mode & 0o777).toBe(0o600);
   const staging = path.join(home, 'staging');
   fs.mkdirSync(staging);
-  execFileSync('tar', ['-xzf', bundle, '-C', staging]);
+  // Relative paths: GNU tar on Windows reads a drive letter as a remote host.
+  execFileSync('tar', ['-xzf', `archive/${archived.bundle}`, '-C', 'staging'], { cwd: home });
   expect(fs.readFileSync(path.join(staging, 'state', 'd1', 'attachments', 'file with spaces'))).toEqual(bytes);
+  expect(fs.readFileSync(path.join(staging, 'state', 'd1', long), 'utf8')).toBe('long name');
+  expect(fs.readFileSync(path.join(staging, 'state', 'd1', 'large.bin')).equals(large)).toBe(true);
   expect(fs.existsSync(record)).toBe(true); // Only the caller may remove the sources.
   fs.rmSync(bundle);
   expect(readRecordArchive('work:d1')).toBeUndefined();

@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { lobstahHome, atomicRenameSync, uniqueTempPath } from './paths.js';
+import { writeTarGz } from './tar-gz.js';
 
 export interface RecordArchive {
   key: string;
@@ -43,15 +43,10 @@ export function archiveRecords(keys: readonly string[], targets: readonly string
   const bundle = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.tar.gz`;
   const file = path.join(root, bundle);
   const temporary = uniqueTempPath(file);
-  const list = `${temporary}.paths`;
   try {
     fs.writeFileSync(temporary, '', { mode: 0o600, flag: 'wx' });
-    fs.writeFileSync(list, `${paths.map((p) => p.split(path.sep).join('/')).join('\0')}\0`, { mode: 0o600, flag: 'wx' });
-    execFileSync('tar', ['-czf', temporary, '-C', home, '--null', '-T', list], { stdio: 'pipe' });
+    writeTarGz(temporary, home, paths);
     fs.chmodSync(temporary, 0o600);
-    execFileSync('tar', ['-tzf', temporary], { stdio: 'ignore' });
-    const fd = fs.openSync(temporary, 'r');
-    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     atomicRenameSync(temporary, file);
     const archivedAt = new Date().toISOString();
     for (const key of keys) {
@@ -64,6 +59,5 @@ export function archiveRecords(keys: readonly string[], targets: readonly string
     return { key: keys[0] ?? '', bundle, archivedAt, paths };
   } finally {
     fs.rmSync(temporary, { force: true });
-    fs.rmSync(list, { force: true });
   }
 }

@@ -318,7 +318,7 @@ describe('separate worktree and record windows', () => {
     expect(fs.existsSync(note)).toBe(false);
     const receipt = readRecordArchive('work:archive-me')!;
     expect(receipt.paths).toContain(path.join('state', 'archive-me.notes'));
-    const restored = execFileSync('tar', ['-xOzf', path.join(home, 'archive', receipt.bundle), 'state/archive-me.notes'], { encoding: 'utf8' });
+    const restored = execFileSync('tar', ['-xOzf', `archive/${receipt.bundle}`, 'state/archive-me.notes'], { cwd: home, encoding: 'utf8' });
     expect(restored).toBe('Keep these notes');
   });
 
