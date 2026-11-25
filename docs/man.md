@@ -2010,6 +2010,15 @@ to read. Consider a report or plan at six rounds; further messages stop at 100.
 `man resolve <id> --outcome dispatched:<id>|planned:<https-url>|answered|dropped
 --note "<outcome>"` closes it. The person can reopen it.
 
+If failed dispatches were replaced, add
+`--superseded-by dispatched:<id>|pr:<url>|decision:<key>`. This marks every
+currently failed dispatch linked to the thread as superseded, retains its
+history, and links the replacement. The thread tracks the replacement and any
+other unfinished work; superseded failures no longer hold it open or hand it
+back. The dispatch's own failed status stays unchanged. A replacement dispatch
+must exist and cannot be one of those failures. This flag runs on the boat that
+tracks the thread.
+
 A resolved thread whose linked work is unfinished moves to tracking instead. Its
 links are the dispatches it names (`--link dispatched:<id>` or a dispatched
 outcome), its cards, its PRs (`man note <id> --link pr:<url>`) and any todo added
@@ -2026,6 +2035,13 @@ overdue or stale todo. A message from the person also reopens it. Unanswered mes
 on the configured reminder cadence. Discussion threads with no new message for
 seven days and no standing card close as dropped; bait and standing questions
 remain open. Reads never run this maintenance; the helm wait does.
+
+An open thread quiet for 24 hours, with no unfinished linked dispatch, card, PR
+or todo, raises a `thread-stale` notice. `man wait`, `man report` and the Stop
+hook deliver it once per quiet spell, naming the thread, its quiet age and the
+exact `man resolve` command. A new person or helm activity (including a card
+answer) starts a new spell. A pending notice stops applying if the conversation
+resumes, closes or gains unfinished work. `man report --peek` leaves it pending.
 
 A conversation reads as one continuous chat: the helm's notes pinned on top
 (decided lines with a check, open lines with a question mark), then every

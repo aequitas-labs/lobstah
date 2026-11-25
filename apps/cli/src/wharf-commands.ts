@@ -248,6 +248,7 @@ export async function wharfCommand(cmd: string | undefined, pos: string[], opts:
     case 'man:note':
     case 'man:say':
     case 'man:resolve': {
+      if (cmd === 'man:resolve' && opts.opt('--superseded-by')) throw new Error('Replace linked dispatches from the boat that tracks this conversation.');
       const grounds = scope.grounds;
       if (cmd === 'man:discuss') {
         const existing = /^[0-9a-f-]{36}$/.test(pos[0] ?? '');

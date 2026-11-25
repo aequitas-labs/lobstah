@@ -247,13 +247,37 @@ export function linkThreadCard(id: string, key: string, now = new Date()): HelmT
     return recordThreadResponse({ ...item, rounds, updatedAt: at, lastHelmAt: at }, at, THREAD_CARD_READY);
   });
 }
-/** Resolving keeps the thread tracking while any work it links to is unfinished. */
-export function resolveThread(id: string, outcome: unknown, note: unknown, now = new Date()): HelmThread {
-  return update(id, (item) => {
+/** Replace every currently failed dispatch, retaining its history and linking the replacement. */
+function supersedeFailedDispatches(item: HelmThread, replacement: string, at: string): { thread: HelmThread; entry: ThreadEntry } {
+  const failed = threadTrackedItems(item).filter((tracked) => tracked.kind === 'dispatch' && tracked.status === 'failed');
+  if (!failed.length) throw new ThreadError('This conversation has no failed dispatch to replace');
+  const entry = threadLinkEntry(replacement, undefined, at, item.id);
+  if (!('card' in entry) && !('link' in entry && (entry.link === 'dispatched' || entry.link === 'pr'))) throw new ThreadError('Choose a dispatch, PR or card as the replacement');
+  if ('link' in entry && entry.link === 'dispatched') {
+    const dispatch = entry.ref.replace(/^(work|chore):/, '');
+    if (failed.some((tracked) => tracked.ref === dispatch)) throw new ThreadError('Choose a replacement other than the failed dispatch');
+    if (!laneOf(dispatch)) throw new ThreadError('Replacement dispatch not found', 404);
+  }
+  const links: ThreadEntry[] = [entry];
+  // An earlier dispatched outcome is still history when the new outcome replaces it.
+  if (item.outcome?.kind === 'dispatched' && item.outcome.ref && !item.rounds.some((round) => round.entries.some((linked) => 'link' in linked && linked.link === 'dispatched' && linked.ref.replace(/^(work|chore):/, '') === item.outcome!.ref))) {
+    links.unshift({ link: 'dispatched', ref: item.outcome.ref, text: item.outcome.note, at });
+  }
+  return { thread: { ...addLinks(item, links), supersessions: [...(item.supersessions ?? []), ...failed.map((tracked) => ({ dispatch: tracked.ref, replacement, at }))] }, entry };
+}
+
+/** Resolving tracks unfinished work; an explicit replacement supersedes failed dispatches and is tracked itself. */
+export function resolveThread(id: string, outcome: unknown, note: unknown, now = new Date(), supersededBy?: string): HelmThread {
+  let replacement: ThreadEntry | undefined;
+  const resolved = update(id, (item) => {
     const at = nextAt(item, now), result = threadOutcome(outcome, note, at);
-    const settled = { ...item, outcome: result, updatedAt: at, lastHelmAt: at };
+    const superseded = supersededBy === undefined ? undefined : supersedeFailedDispatches(item, supersededBy, at);
+    replacement = superseded?.entry;
+    const settled = { ...(superseded?.thread ?? item), outcome: result, updatedAt: at, lastHelmAt: at };
     return relayResponse({ ...settled, state: settledState(threadTrackedItems(settled, { now: now.getTime() })) }, at, result.note);
   });
+  if (replacement) claimCards(id, [replacement]);
+  return resolved;
 }
 /** Tracking threads close when their work finishes and return to the person when it stalls. Only the helm wait runs this. */
 export function trackThreads(grounds?: string, now = Date.now()): HelmThread[] {

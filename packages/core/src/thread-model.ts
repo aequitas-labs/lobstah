@@ -5,6 +5,8 @@ type Attachment = ThreadAttachment;
 export type ThreadKind = 'untriaged' | 'bait' | 'thread';
 export type ThreadOutcomeKind = 'dispatched' | 'planned' | 'answered' | 'dropped';
 export interface ThreadOutcome { kind: ThreadOutcomeKind; ref?: string; note: string; at: string }
+/** A failed dispatch replaced explicitly when the helm resolves its conversation. */
+export interface ThreadSupersession { dispatch: string; replacement: string; at: string }
 /** Entries keep the order they happened in; `at` is absent only on entries written before helm messages. */
 export type ThreadEntry =
   /** `submission`: the glass submission that wrote it, so a retried delivery adds it once and the page knows its own message. */
@@ -65,6 +67,7 @@ export interface HelmThread {
   lastHelmAt?: string;
   notifiedAt?: string;
   outcome?: ThreadOutcome;
+  supersessions?: ThreadSupersession[];
   relay?: ThreadRelay;
   /** Set to 'helm' on a conversation the helm opened with `man thread new`. */
   startedBy?: ThreadStarter;
