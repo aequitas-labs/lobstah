@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { appendStatus, claimNext, complete, dispatchAttachmentsDir, enqueue, ensureLayout } from '@lobstah/core';
-import { applyCull, planCull, planPressureCull } from '../src/cull.js';
+import { applyCull, planCull, planPressureCull, removeWorktree } from '../src/cull.js';
 import { mergedWorktreeUnsafe } from '../src/merged-worktree-safety.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -180,4 +180,29 @@ describe('planCull', () => {
     applyCull(plan);
     expect(fs.readFileSync(file, 'utf8')).toBe('keep me');
   });
+});
+
+
+it('archives uncommitted work before culling a finished dispatch and keeps it if archiving fails', () => {
+  for (const failed of [false, true]) {
+    const id = failed ? 'archive-fails' : 'archive-succeeds';
+    const checkout = orphan(id, 30);
+    enqueue({ id, repo: 'r', brief: 'finished work' });
+    expect(claimNext('work')).toBe(id);
+    appendStatus(id, 'work', 'done', 'finished');
+    complete(id, 'work');
+    fs.writeFileSync(path.join(checkout, 'unsaved'), 'keep this content');
+    const archiveRoot = path.join(home, 'repo', '.git', 'lobstah');
+    if (failed) {
+      fs.rmSync(archiveRoot, { recursive: true, force: true });
+      fs.writeFileSync(archiveRoot, 'cannot create archives here');
+    }
+    removeWorktree(id, checkout);
+    expect(fs.existsSync(checkout)).toBe(failed);
+    if (!failed) {
+      const archives = path.join(archiveRoot, 'archives', id);
+      const [name] = fs.readdirSync(archives);
+      expect(fs.readFileSync(path.join(archives, name!, 'files', 'unsaved'), 'utf8')).toBe('keep this content');
+    }
+  }
 });

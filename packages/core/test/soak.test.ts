@@ -693,3 +693,20 @@ describe('soak beat (post-tool hook liveness)', () => {
     expect('held' in res).toBe(true);
   });
 });
+
+describe('cancelling dead claimants', () => {
+  it.each([true, false])('finalizes immediately only for a dead process (dead: %s)', async (dead) => {
+    const { processStartedAt, dispatchWasCancelled } = await import('../src/index.js');
+    const initial = trap('cancel-session', 'web');
+    enqueue({ id: 'cancel-work', repo: 'web', brief: 'x' });
+    claimBait(initial);
+    const reg = readTrap(initial.trapId)!;
+    const harnessProcess = { pid: process.pid, startedAt: dead ? 'old process' : processStartedAt(process.pid)! };
+    signOnTrap({ ...reg, harnessProcess, ttlMs: TTL_MS });
+    expect(requestCancel('cancel-work', 'work')).toBe(dead);
+    expect(dispatchWasCancelled('cancel-work', 'work')).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'cancel-work'))).toBe(dead);
+    expect(readStatusLog('cancel-work', 'work').at(-1)?.verb).toBe(dead ? 'failed' : 'working');
+    expect(fs.existsSync(reg.worktree)).toBe(true);
+  });
+});

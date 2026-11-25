@@ -1,3 +1,4 @@
+import { archiveWorktree } from '@lobstah/core';
 import { configuredFolderOverlaps } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -478,6 +479,7 @@ export function removeWorktree(id: string, dir: string, reviewWait = false): voi
     recordRosterRevision(anchor.trapId, removeGhostWorktree(dir).revision);
     return; // Never fall through to force removal of a trap checkout.
   }
+  if (!archiveWorktree(dir, id).saved) return;
   if (reviewWait || reviewWorktreeUsers().has(id) || !worktreeUsage().newest.has(id)) {
     // Recheck reviews and orphans at removal; only disposable changes may remain.
     // Never fall through to recursive removal when verification fails.

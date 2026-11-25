@@ -657,7 +657,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   try { hooks.idleTraps?.(cfg, now, log); }
   catch (err) { log(`idle traps: ${err instanceof Error ? err.message : String(err)}`); }
 
-  for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {
+  for (const action of sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000, { deadOnly: resumed !== undefined && now - resumed <= ttl })) {
     const label = trapLabel({ trapId: action.trapId, name: trapNameForId(action.trapId) });
     log(
       action.defective

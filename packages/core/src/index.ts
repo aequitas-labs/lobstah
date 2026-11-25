@@ -128,3 +128,5 @@ export * from './codex-idle-recovery.js';
 
 export * from './review-wait-worktrees.js';
 export * from './tool-project.js';
+
+export * from './worktree-archive.js';

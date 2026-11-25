@@ -22,7 +22,7 @@ export default defineConfig({
     // Sign-on writes a turn-end owner file (packages/core/src/turn-owner.ts):
     // never into the real ~/.agent-turn. LOBSTAH_TEST_NO_REAL_HOME makes a
     // test that reaches ~/.lobstah (no LOBSTAH_HOME) fail instead of writing there.
-    env: { LOBSTAH_TERMINAL_TITLE: '0', LOBSTAH_TEST_NO_REAL_HOME: '1', AGENT_TURN_HOME: path.join(os.tmpdir(), `lobstah-test-agent-turn-${process.pid}`) },
+    env: { CLAUDE_CONFIG_DIR: path.join(os.tmpdir(), `lobstah-test-no-claude-${process.pid}`), LOBSTAH_TERMINAL_TITLE: '0', LOBSTAH_TEST_NO_REAL_HOME: '1', AGENT_TURN_HOME: path.join(os.tmpdir(), `lobstah-test-agent-turn-${process.pid}`) },
     ...(windows && {
       maxWorkers: windowsWorkers,
       minWorkers: 1,

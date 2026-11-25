@@ -16,6 +16,7 @@ import { mergeEvidence } from './evidence.js';
 import { gitPushTargets, recordPush, resolvePushTargets } from './pushes.js';
 import { postNotice } from './notices.js';
 import type { WindowRef } from './window.js';
+import { readClaudeProcesses } from './session-holder.js';
 import { harnessProcessAlive, type HarnessProcess } from './harness-process.js';
 import { TERMINAL_VERBS } from './types.js';
 import { attachmentBlock } from './attachments.js';
@@ -941,6 +942,27 @@ export function pauseExpiry(entry: StatusEntry, pausedTtlMs: number): number {
   return Number.isNaN(until) ? msOf(entry.at) + pausedTtlMs : until;
 }
 
+/** Process evidence for the session currently manning a trap. */
+export type TrapSessionLiveness = 'alive' | 'dead' | 'unknown';
+
+/** Whether the trap's own session has a process, or lacks enough evidence to tell. */
+export function trapSessionLiveness(reg: TrapRegistration): TrapSessionLiveness {
+  if (reg.harnessProcess) return harnessProcessAlive(reg.harnessProcess) ? 'alive' : 'dead';
+  if (reg.harness === 'claude' && reg.configured?.surface !== 'claude-desktop') {
+    const processes = readClaudeProcesses();
+    if (processes !== undefined) return processes.some((process) => process.sessionId === reg.sessionId) ? 'alive' : 'dead';
+  }
+  return 'unknown';
+}
+
+/** Limit a reconciliation pass without changing the usual ghost timeout rules. */
+export interface GhostSweepOptions {
+  /** Reconcile confirmed process deaths even while unknown sessions have resume grace. */
+  deadOnly?: boolean;
+  /** A named throw only reconciles the trap it is about to resume. */
+  trapId?: string;
+}
+
 /**
  * Traps whose heartbeat went stale past the TTL. One that HAS parked before
  * is a ghost: its open catch is released and the registration removed (the
@@ -956,21 +978,28 @@ export function pauseExpiry(entry: StatusEntry, pausedTtlMs: number): number {
  * for longer than the TTL is working, not gone. A catch whose last report is
  * `paused` is waiting on something outside lobstah: its trap is kept until
  * the pause expires (`--until`, else `pausedTtlMs` from the report), then
- * swept with a notice that says the pause expired.
+ * swept with a notice that says the pause expired. Confirmed dead processes
+ * instead need at most two quiet minutes, even if they never parked or the
+ * daemon just resumed. Their checkout is always kept for session recovery.
  */
-export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 86400_000): GhostSweepAction[] {
+export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 86400_000, options: GhostSweepOptions = {}): GhostSweepAction[] {
   const actions: GhostSweepAction[] = [];
   for (const reg of listTraps()) {
-    // A known provider limit is not a vanished worker; keep its identity until reset or explicit stow.
-    if (trapUsageLimit(reg)) continue;
+    if (options.trapId && options.trapId !== reg.trapId) continue;
+    const liveness = trapSessionLiveness(reg);
+    const dead = liveness === 'dead';
+    if (options.deadOnly && !dead) continue;
+    // Confirmed process death needs only two quiet minutes, including after daemon resume.
+    const quietMs = dead ? Math.min(ttlMs, 120_000) : ttlMs;
+    if (!dead && trapUsageLimit(reg)) continue;
     // A fresh park heartbeat or a fresh tool beat: the session is alive.
-    if (now - trapLastSeen(reg) <= ttlMs) continue;
+    if (now - trapLastSeen(reg) <= quietMs) continue;
     // A timed-out or interrupted park hook can stop beating while its
     // harness stays open. Silence alone must not evict that session.
-    if (reg.firstParkedAt && reg.harnessProcess && harnessProcessAlive(reg.harnessProcess)) continue;
+    if (liveness === 'alive') continue;
     // Waiting for a slot or running in one, whatever the pause's expiry says.
-    if (liveHeavyTickets({ trap: reg.trapId }, now).length > 0) continue;
-    if (reg.firstParkedAt === undefined) {
+    if (!dead && liveHeavyTickets({ trap: reg.trapId }, now).length > 0) continue;
+    if (!dead && reg.firstParkedAt === undefined) {
       const posted = postNotice({
         kind: 'trap-defective',
         text:
@@ -991,10 +1020,10 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     let pauseExpired = false;
     if (hasOpenCatch(reg)) {
       const last = readStatusLog(reg.claimed!, laneOf(reg.claimed!) ?? 'work').at(-1);
-      if (last && now - msOf(last.at) <= ttlMs) continue; // working, just not parked
+      if (last && now - msOf(last.at) <= quietMs) continue; // working, just not parked
       // A paused catch waits on something outside lobstah (a review, a
       // deploy): silence is expected until the pause expires.
-      if (last?.verb === 'paused') {
+      if (!dead && last?.verb === 'paused') {
         if (now < pauseExpiry(last, pausedTtlMs)) continue;
         pauseExpired = true;
       }
@@ -1002,7 +1031,7 @@ export function sweepGhostTraps(ttlMs: number, now = Date.now(), pausedTtlMs = 8
     dropTrapTickets(reg.trapId, 'its trap ghosted');
     const holding = hasOpenCatch(reg);
     const released = releaseCatch(reg);
-    const removal = !reg.configured && reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
+    const removal = !dead && !reg.configured && reg.createdWorktree && fs.existsSync(reg.worktree) ? removeGhostWorktree(reg.worktree) : undefined;
     const revision = removal?.revision ?? (!reg.configured && fs.existsSync(reg.worktree) ? protectTrapRevision(reg.worktree, reg.trapId, now) : undefined);
     if (reg.configured?.surface === 'claude-desktop') releaseDesktopLease(reg.trapId);
     recordRosterDeparture(reg, 'ghosted', pauseExpired ? 'ghosted: its pause expired' : 'ghosted: went quiet mid-watch', { revision, now });

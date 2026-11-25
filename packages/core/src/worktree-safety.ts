@@ -1,3 +1,4 @@
+import { archiveWorktree } from './worktree-archive.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -110,9 +111,11 @@ export function gitCommonDir(dir: string): string | undefined {
  */
 export function removeGhostWorktree(dir: string): WorktreeSafety & { removed: boolean; revision?: TrapRevision } {
   const safety = inspectTrapWorktree(dir);
-  if (safety.reason) return { ...safety, removed: false };
   const anchor = path.join(dir, '.lobstah-trap');
   const trapId = anchoredTrapId(anchor);
+  const archive = archiveWorktree(dir, trapId ?? path.basename(dir));
+  if (!archive.saved) return { ...safety, removed: false, reason: 'cannot save checkout changes; worktree kept' };
+  if (safety.reason) return { ...safety, removed: false };
   const revision = trapId !== undefined ? protectTrapRevision(dir, trapId) : undefined;
   if (trapId !== undefined && !revision) return { ...safety, removed: false, reason: 'cannot keep the trap revision under a protected ref' };
   let saved: Buffer | undefined;

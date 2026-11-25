@@ -61,3 +61,16 @@ it("says plainly which Codex process holds a thread, instead of Codex's \"open i
   expect(text).toContain('Codex process 3903 (tmux pane %3) holds the thread');
   expect(text).toContain('--stop-stale');
 });
+
+it('releases a dead never-parked session within two quiet minutes, preserving its checkout and session', () => {
+  const worktree = path.join(home, 'dead-before-park');
+  fs.mkdirSync(worktree);
+  const signed = signOnTrap({ worktree, cwd: worktree, harness: 'codex', sessionId: 'dead-thread', harnessProcess: PROC, ttlMs: 1800_000 });
+  if (!('ok' in signed)) throw new Error('unexpected hold');
+  const trapId = signed.ok.trapId;
+  const lastSeen = Date.parse(signed.ok.heartbeatAt);
+  expect(sweepGhostTraps(1800_000, lastSeen + 120_000)).toEqual([]);
+  expect(sweepGhostTraps(1800_000, lastSeen + 120_001, undefined, { deadOnly: true })).toMatchObject([{ trapId }]);
+  expect(readTrap(trapId)).toBeUndefined();
+  expect(fs.existsSync(worktree)).toBe(true);
+});
