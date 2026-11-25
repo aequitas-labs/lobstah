@@ -31,6 +31,12 @@ const OPERATION_FILES: readonly string[] = [
   'rebase-merge', 'rebase-apply', 'sequencer',
 ];
 
+/** Resolve directory aliases, including Windows short names, before containment checks. */
+function canonicalDirectory(directory: string): string {
+  const resolved = fs.realpathSync.native(directory);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 /** Compare saved bytes and file kinds without following symbolic links. */
 function matchesArchive(source: string, saved: string): boolean {
   const stat = (file: string): fs.Stats | undefined => {
@@ -70,7 +76,7 @@ export function archiveWorktree(dir: string, owner: string): WorktreeArchive {
     const status = git('status', '--porcelain=v1', '-z', '--untracked-files=all');
     const own = git('rev-parse', '--path-format=absolute', '--git-dir').trim();
     const common = git('rev-parse', '--path-format=absolute', '--git-common-dir').trim();
-    const archiveLocation = path.relative(fs.realpathSync(dir), fs.realpathSync(common));
+    const archiveLocation = path.relative(canonicalDirectory(dir), canonicalDirectory(common));
     // A standalone clone would take its archive with it when removed.
     if (!path.isAbsolute(archiveLocation) && archiveLocation !== '..' && !archiveLocation.startsWith(`..${path.sep}`)) return { saved: false };
     const operation = OPERATION_FILES.slice(2).some((name) => fs.existsSync(path.join(own, name)));

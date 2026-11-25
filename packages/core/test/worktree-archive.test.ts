@@ -104,3 +104,12 @@ it('does not authorize removal when the archive would be inside the checkout bei
   expect(archiveWorktree(repo, 'standalone').saved).toBe(false);
   expect(fs.readFileSync(path.join(repo, 'stash-file'), 'utf8')).toBe('unsaved primary checkout');
 });
+
+
+it('keeps a standalone checkout reached through a directory alias', () => {
+  const alias = path.join(root, 'checkout-alias');
+  fs.symlinkSync(repo, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  fs.writeFileSync(path.join(repo, 'stash-file'), 'unsaved aliased checkout');
+  expect(archiveWorktree(alias, 'aliased-standalone').saved).toBe(false);
+  expect(fs.readFileSync(path.join(repo, 'stash-file'), 'utf8')).toBe('unsaved aliased checkout');
+});
