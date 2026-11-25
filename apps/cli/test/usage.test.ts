@@ -40,6 +40,13 @@ describe('parseArgs — one flag-extraction step (axi P6)', () => {
     return { flags: Object.fromEntries(p.flags), positionals: p.positionals };
   };
 
+  it('accepts --new only for reviews redraft', () => {
+    expect(ok('reviews', ['redraft', 'review:acme/web#7', '--new'])).toEqual({
+      flags: { '--new': true }, positionals: ['redraft', 'review:acme/web#7'],
+    });
+    expect(parseArgs('reviews', ['dismiss', 'review:acme/web#7', '--new'])?.error).toBeTruthy();
+  });
+
   it('accepts known flags and consumes value tokens unexamined', () => {
     expect(ok('dispatch', ['--repo', 'web', '--brief-text', '--looks-like-a-flag', '--chore'])).toEqual({
       flags: { '--repo': 'web', '--brief-text': '--looks-like-a-flag', '--chore': true },

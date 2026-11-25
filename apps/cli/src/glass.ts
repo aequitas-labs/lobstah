@@ -108,7 +108,8 @@ import { answerKey, viewKey } from './decision-answer.js';
 import { markThreadResponsesSeen, dismissThreadNotice, threadSubscriberNotices, startThread, postThread, reopenThread, readThread, threadView, threadSummaries, resolveThreadFile, ThreadError } from '@lobstah/core';
 import { answerPermissionsProposal, previewPermissionsProposal } from './permission-proposals.js';
 import type { TendAttention } from './tend.js';
-import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, readMergeView, redraftReviewRound } from '@lobstah/pick';
+import { dismissReviewRound, postReview, draftReviewOnDemand, requestNewReview, readMergeView, redraftReviewRound, reviewFailureLogText } from '@lobstah/pick';
+import type { PostResult } from '@lobstah/pick';
 import { muteReview, unmuteReview } from '@lobstah/core';
 import { glassReviews } from './reviews.js';
 import { reviewSetupView } from './reviews-setup.js';
@@ -1305,15 +1306,24 @@ export function serveGlass(
             const current = readReview(key);
             if (body.kind === 'review-skip' && current && latestRound(current)?.state === 'posted') return reply(200, { ok: true });
             const event = body.kind === 'review-approve' ? 'APPROVE' : body.kind === 'review-request-changes' ? 'REQUEST_CHANGES' : body.kind === 'review-comment' ? 'COMMENT' : undefined;
-            const act = body.kind === 'review-approve-anyway' ? postReview(key, { by: 'glass', approveAnyway: true }).then(out => out.posted ? undefined : out.why)
-              : event ? postReview(key, { by: 'glass', event }).then(out => out.posted ? undefined : out.why)
+            // glass.log keeps why a post did not go out, with the network cause when GitHub gave no response.
+            const posted = (out: PostResult): string | undefined => {
+              if (out.posted) return undefined;
+              console.error(`lobstah glass: ${body.kind} ${key} not posted: ${reviewFailureLogText(out)}`);
+              return out.why;
+            };
+            const act = body.kind === 'review-approve-anyway' ? postReview(key, { by: 'glass', approveAnyway: true }).then(posted)
+              : event ? postReview(key, { by: 'glass', event }).then(posted)
               : body.kind === 'review-mute' ? Promise.resolve(muteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : body.kind === 'review-unmute' ? Promise.resolve(unmuteReview(key)).then((out) => typeof out === 'string' ? out : undefined)
               : body.kind === 'review-new' ? Promise.resolve().then(() => requestNewReview(key))
               : ['review-dismiss', 'review-skip'].includes(body.kind) ? dismissReviewRound(key, 'glass') : body.kind === 'review-draft' ? draftReviewOnDemand(key) : redraftReviewRound(key);
             void act.then(
               (why) => (why ? reply(409, { ok: false, reason: why }) : reply(200, { ok: true, key })),
-              () => reply(500, { ok: false, reason: 'The review could not be changed.' }),
+              (err: unknown) => {
+                console.error(`lobstah glass: ${body.kind} ${key} failed: ${err instanceof Error ? err.message : String(err)}`);
+                reply(500, { ok: false, reason: 'The review could not be changed.' });
+              },
             );
             return;
           }

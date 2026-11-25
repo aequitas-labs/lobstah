@@ -42,6 +42,7 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-cull-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
+  fs.writeFileSync(path.join(home, "config.toml"), "[limits]\nrecordRetentionDays = 14\n");
 });
 afterEach(() => {
   removeTempDir(home);

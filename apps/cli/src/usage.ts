@@ -112,8 +112,8 @@ export const COMMANDS: Record<string, CommandSpec> = {
   reports: { flags: { '--json': {} } },
   reviews: {
     subverbs: ['ls', 'redraft', 'post', 'dismiss'],
-    flags: { '--json': {}, '--all': {}, '--stale': {} },
-    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'] },
+    flags: { '--json': {}, '--all': {}, '--stale': {}, '--new': {} },
+    flagSubverbs: { '--all': ['ls', ''], '--json': ['ls', ''], '--stale': ['post'], '--new': ['redraft'] },
     positionals: '[<key>]',
   },
   todo: {
@@ -402,8 +402,8 @@ hides the item from the desktop pet and glass lobs until its state changes — n
 Item keys: <lane>:<uuid> (question, landed), pr:<owner>/<repo>#<n> (pr:*),
 watch:<key>, report:<lane>:<uuid> or report:helm:<grounds>:<rid> (report). An unknown key exits 2. --json prints { "attention": [...] },
 the same items and fields as man tend --json (the desktop pet reads it), less questions held on the helm's turn (the held column).`,
-  cull: `Stop idle worktree servers and containers, then sweep aged catch and state.
-Dry run by default. --apply stops services and deletes aged files (--older-than defaults to 14 days).
+  cull: `Stop idle worktree servers and containers, then clean up old worktrees and archive old records.
+Dry run by default. --apply removes worktrees (--older-than defaults to 14 days) and archives records after [limits].recordRetentionDays (default 30) in ~/.lobstah/archive.
 Busy worktrees are kept. --idle-hours sets the external worktree edit window (default 12).
 [cull].worktreeRoots adds agent worktree parents. Servers receive SIGTERM, then SIGKILL after 5 seconds; containers receive docker stop.
 Disk previews measure targets; --apply reports free-space changes.
@@ -434,7 +434,8 @@ acked. \`lobstah attention ack <key>\` acks one.`,
   reviews: `PRs that ask for your review ([reviews]), newest round each; --all adds closed rounds.
 A draft is staged on the PR as your pending review: edit and send it in your review tool.
 post sends it as a comment-only review (--stale for a stale one); dismiss deletes the
-pending draft; redraft re-drafts a stale or failed round. lobstah never approves.`,
+pending draft; redraft re-drafts a stale or failed round. Use redraft <key> --new
+to start a fresh round after dismissing a review. lobstah never approves.`,
   watch: `Stand watch on something external; bare \`watch\` lists. \`watch add pr:<o>/<r>#<n>\`
 installs the shipped PR check; with --for, a check that fails after the first
 (baseline) check forks a CI-fix continuation (pick only). Only \`watch add\`,

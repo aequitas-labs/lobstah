@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -11,7 +11,7 @@ import type { GlassReview } from '@lobstah/core';
 import { GLASS_PAGE } from '../src/glass-page.generated.js';
 import { serveGlass } from '../src/glass.js';
 import { lobItems } from '../../../packages/glass-ui/src/glass-lobs.js';
-import { reviewSections } from '../../../packages/glass-ui/ui/components/reviews.js';
+import { reviewSections, reviewStatus } from '../../../packages/glass-ui/ui/components/reviews.js';
 import { loadGlass } from './glass-dom.js';
 import type { GlassDom } from './glass-dom.js';
 import { NOW, ago, emptyFleet } from './fixtures/glass-snapshots.js';
@@ -31,6 +31,7 @@ afterEach(async () => {
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   server = undefined;
   removeTempDir(home);
+  vi.restoreAllMocks();
   delete process.env.LOBSTAH_HOME;
 });
 
@@ -420,7 +421,7 @@ describe('the Reviews tab', () => {
     await g.go('#reviews');
     // A drafted round's chip says its draft is ready; every other state says itself.
     const chips = g.$$('#reviews .gstate .gchip').map((b) => b.textContent?.replace(/^● /, ''));
-    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'Ready to post' : state === 'stale' ? 'Updating' : state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : state);
+    for (const state of REVIEW_ROUND_STATES) expect(chips).toContain(state === 'drafted' ? 'Ready to post' : state === 'stale' ? 'stale: re-drafting' : state === 'merged' ? 'Merged' : state === 'closed' ? 'Closed' : state);
     // The drafted round's card links its pending review; the others open the review tool.
     const drafted = 20 + REVIEW_ROUND_STATES.indexOf('drafted');
     const draftLink = g.$(`#reviews [data-review="review:acme/web#${drafted}"] .gactions a`)!;
@@ -656,7 +657,18 @@ describe('review requests on /requests', () => {
     } finally { delete process.env.LOBSTAH_TEST_REVIEW_TOKEN; }
   });
 
+  /** Dismiss checks GitHub even when this machine has no staged receipt. */
+  function pendingReviewLookup(): void {
+    const tokenFile = path.join(home, 'review-token');
+    fs.writeFileSync(tokenFile, 'fixture');
+    fs.writeFileSync(path.join(home, 'config.toml'), `[reviews]\nenabled = true\nidentity = "chris"\ntokenFile = '${tokenFile}'\n`);
+    const original = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
+      String(input).startsWith('https://api.github.com/') ? Promise.resolve(new Response('[]')) : original(input, init));
+  }
+
   it('dismisses an unstaged round, and refuses what the round cannot do', async () => {
+    pendingReviewLookup();
     observeReviewRequest({
       pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' },
       round: { id: 'RRE_7', requestedAt: ago(60) },
@@ -694,6 +706,7 @@ describe('review requests on /requests', () => {
   });
 
   it('seen preserves the ready notification and needs-you; Skip acknowledges and clears both', async () => {
+    pendingReviewLookup();
     const key = 'review:acme/web#7';
     const item = observeReviewRequest({ pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 't', author: 'dana', headSha: 'aaaaaaa1' }, round: { id: 'r', requestedAt: ago(60) } }).item;
     Object.assign(item.rounds[0]!, { state: 'drafted', verdict: 'approve', draftedAt: ago(10) }); writeReview(item); refreshReviewNotifications();
@@ -906,4 +919,17 @@ it('updates stack recency from any member while preserving expansion and falls b
   expect(container.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector('.gnow')!.textContent).toBe('acme/web · updated 1s ago');
   expect(container.querySelector('.gcontext')!.textContent).toBe('#7 → #8');
+});
+
+it('shows a stale draft as updating before daemon repair and replaces its old failure reason', () => {
+  const item = observeReviewRequest({
+    pr: { owner: 'acme', repo: 'web', number: 7, url: 'https://github.com/acme/web/pull/7', title: 'Preserve preferences', author: 'dana', headSha: 'new-head' },
+    round: { id: 'round-7', requestedAt: ago(60) },
+  }).item;
+  Object.assign(latestRound(item)!, { state: 'drafted', headSha: 'old-head', reason: 'post failed: fetch failed' });
+  writeReview(item);
+  const review: GlassReview = glassReviews()[0]!;
+  expect(review).toMatchObject({ state: 'stale', updating: true, reason: 'The PR changed. Re-drafting.' });
+  expect(review.reason).not.toContain('fetch failed');
+  expect(reviewStatus(review).word).toBe('stale: re-drafting');
 });

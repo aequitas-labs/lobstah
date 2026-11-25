@@ -275,16 +275,17 @@ export interface LimitsConfig {
    * runner stops the harness and its process group, and finishes.
    */
   exitGraceSecs: number;
+  /** Deprecated; recordRetentionDays governs completed chore history. */
   choreRetentionDays: number;
   /**
-   * How long a run card's history (each run's output and state, a withdrawn
-   * run card) stays on disk before the daemon prunes it. 0 keeps it.
+   * Deprecated; recordRetentionDays governs run history.
    */
   runRetentionDays: number;
+  /** Days to keep finished records online before archiving them. 0 keeps them online. */
+  recordRetentionDays: number;
   attachmentMaxBytes: number;
   /**
-   * The daemon culls finished work dispatches (done and failed) older than
-   * this many days, with their worktrees and state. 0 turns it off.
+   * The daemon removes finished worktrees older than this many days. 0 turns it off.
    */
   retentionDays: number;
   /**
@@ -730,6 +731,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   exitGraceSecs: 30,
   choreRetentionDays: 7,
   runRetentionDays: 14,
+  recordRetentionDays: 30,
   attachmentMaxBytes: 25 * 1024 * 1024,
   retentionDays: 0,
   minFreeGB: 0,
@@ -769,6 +771,9 @@ export function loadConfig(): Config {
   const cacheMinFreeGB = (raw.limits as Partial<LimitsConfig> | undefined)?.cacheMinFreeGB ?? DEFAULT_LIMITS.cacheMinFreeGB;
   if (typeof cacheMinFreeGB !== 'number' || !Number.isFinite(cacheMinFreeGB) || cacheMinFreeGB < 0)
     throw new Error('[limits].cacheMinFreeGB must be a non-negative number');
+  const recordRetentionDays = (raw.limits as Partial<LimitsConfig> | undefined)?.recordRetentionDays ?? DEFAULT_LIMITS.recordRetentionDays;
+  if (typeof recordRetentionDays !== 'number' || !Number.isFinite(recordRetentionDays) || recordRetentionDays < 0)
+    throw new Error('[limits].recordRetentionDays must be a non-negative number');
   const petOpen = (raw.pet as Partial<PetConfig> | undefined)?.open ?? 'tab';
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };

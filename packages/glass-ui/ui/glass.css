@@ -4341,22 +4341,23 @@ footer .glass-brand {
   max-width: 760px;
   margin: 0 auto;
 }
-/* The conversation: one chat top to bottom, the person on the right, the helm on the left. */
+/*
+ * The conversation: one chat top to bottom, the person on the right, the
+ * helm on the left, each with their round icon at the top of the bubble.
+ * Linked work and cards sit between them at the conversation's full width.
+ */
 .thread-timeline {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding: 12px 0 4px;
 }
 .thread-msg {
   display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  max-width: min(560px, 88%);
+  max-width: min(580px, 88%);
 }
 .thread-msg.from-person {
   align-self: flex-end;
-  flex-direction: row-reverse;
 }
 .thread-msg.from-helm {
   align-self: flex-start;
@@ -4403,64 +4404,154 @@ footer .glass-brand {
 .from-person .thread-bubble {
   border-color: color-mix(in srgb, var(--link) 45%, var(--line));
   background: color-mix(in srgb, var(--link) 14%, var(--card));
-  border-bottom-right-radius: 4px;
+  border-top-right-radius: 4px;
 }
 .from-helm .thread-bubble {
-  border-bottom-left-radius: 4px;
+  border-top-left-radius: 4px;
 }
 .from-helm.unread .thread-bubble {
   border-color: var(--link);
 }
 .thread-meta {
-  margin: 0 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
   color: var(--dim);
   font-size: 11px;
+}
+.from-person .thread-meta {
+  flex-direction: row-reverse;
 }
 .thread-new {
   color: var(--link);
 }
+/* Who wrote a message: a round icon in their color, the helm's wheel blue and the person lobster red. */
 .thread-avatar {
+  --who: var(--link);
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--line);
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--who);
   border-radius: 50%;
-  color: var(--link);
+  background: color-mix(in srgb, var(--who) 16%, var(--card));
+  color: var(--who);
+}
+.thread-avatar.person {
+  --who: var(--lobstah);
 }
 .thread-avatar svg {
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
   margin: 0;
 }
-/* Linked work: its kind's icon (components/icons.ts WORK_ICON), then its card or link. */
+/*
+ * Linked work (components/helm.ts WorkCard): a compact card at the
+ * conversation's width, its kind's round icon (components/icons.ts
+ * WORK_ICON), its title and details, and its state with words at the right.
+ */
+.thread-linked {
+  align-self: stretch;
+  min-width: 0;
+}
+/* A run of linked items between two messages reads as one stack. */
+.thread-linked + .thread-linked {
+  margin-top: -6px;
+}
 .thread-work {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--inset);
   text-align: left;
+}
+.thread-work.removed {
+  border-style: dashed;
+  background: none;
+}
+.thread-work.removed .thread-work-title {
+  color: var(--dim);
+}
+/* A report keeps its own card beside its icon, without a second box around it. */
+.thread-work-embed {
+  align-items: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 .thread-work-body {
   flex: 1 1 auto;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
-.thread-work-body > p {
-  margin: 0;
-  line-height: 26px;
+.thread-work-title {
+  display: block;
+  color: var(--fg);
 }
+a.thread-work-title:hover {
+  color: var(--link);
+}
+.thread-work-meta {
+  display: block;
+  font-size: 11px;
+}
+.workpill {
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.workpill svg {
+  width: 13px;
+  height: 13px;
+}
+/* Each kind of work in its own color, on a tint of it. */
 .thread-work-icon {
+  --kind: var(--dim);
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  color: var(--dim);
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--kind);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kind) 16%, var(--card));
+  color: var(--kind);
 }
 .thread-work-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   margin: 0;
+}
+.work-kind-dispatch {
+  --kind: var(--ansi-6);
+}
+.work-kind-pr {
+  --kind: var(--pr-merged-fg);
+}
+.work-kind-card {
+  --kind: var(--info);
+}
+.work-kind-report {
+  --kind: var(--warn);
+}
+.work-kind-plan {
+  --kind: var(--ansi-13);
+}
+.work-kind-todo {
+  --kind: var(--ansi-7);
+}
+.thread-work.removed .thread-work-icon,
+.thread-tracked .removed .thread-work-icon {
+  --kind: var(--dim);
+  border-style: dashed;
+  background: none;
 }
 .thread-system {
   align-self: center;
@@ -4468,7 +4559,7 @@ footer .glass-brand {
   font-size: 12px;
   text-align: center;
 }
-.thread-system .thread-links {
+.thread-linked .thread-links {
   margin: 0;
   text-align: left;
 }
@@ -4622,16 +4713,36 @@ footer .glass-brand {
   flex-wrap: wrap;
   gap: 12px;
 }
+/*
+ * The work box (components/helm.ts WorkBox): counts by state in its summary,
+ * then every linked item as a chip, what needs you first.
+ */
 .thread-tracked {
   margin: 12px 0;
-  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
+  border-radius: 10px;
+  background: var(--inset);
+}
+.thread-tracked > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.thread-tracked > summary > .thread-notes-head {
+  margin: 0 4px 0 0;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
 }
 .thread-tracked ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px;
   list-style: none;
-  padding: 0;
+  padding: 0 12px 12px;
   margin: 0;
 }
 .thread-tracked li {
@@ -4639,14 +4750,48 @@ footer .glass-brand {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  margin: 2px 0;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.thread-tracked li.removed {
+  border-style: dashed;
+  background: none;
+  color: var(--dim);
 }
 .thread-tracked li > :nth-child(2) {
-  overflow-wrap: anywhere;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-/* Each item's state icon, right-aligned in one column. */
+.thread-tracked li.removed > :nth-child(2) {
+  color: var(--dim);
+}
+.thread-tracked li .thread-work-icon {
+  width: 24px;
+  height: 24px;
+}
+.thread-tracked li .thread-work-icon svg {
+  width: 13px;
+  height: 13px;
+}
+/* Each item's state icon, right-aligned in its chip. */
 .thread-tracked li > .workstate {
   justify-self: end;
+}
+/* A card's thread, above its question: its title beside the helm's wheel, then the conversation's pieces. */
+.thread-notes-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+.thread-notes .thread-response .thread-msg {
+  max-width: 100%;
 }
 .thread-tracking {
   margin-top: 16px;

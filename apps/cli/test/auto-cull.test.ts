@@ -4,7 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { appendStatus, claimNext, enqueue, ensureLayout, GB, laneDirs, prRecordFile, statusPath } from '@lobstah/core';
+import { appendStatus, claimNext, enqueue, ensureLayout, GB, laneDirs, prRecordFile, statusPath, readRecordArchive } from '@lobstah/core';
 import { cliCuller } from '../src/auto-cull.js';
 import { applyCull, planCull, planPressureCull, runCull, sizing } from '../src/cull.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
@@ -64,6 +64,7 @@ afterEach(() => {
 });
 
 describe('retention cull (the daemon culler)', () => {
+  beforeEach(() => fs.appendFileSync(path.join(home, 'config.toml'), '[limits]\nrecordRetentionDays = 3\n'));
   it('culls an old review chore and retains one inside the configured window', () => {
     const old = finished('old-review', 4, 'done', 'chore');
     const recent = finished('recent-review', 2, 'done', 'chore');
@@ -80,7 +81,7 @@ describe('retention cull (the daemon culler)', () => {
     for (let i = 0; i < 15; i++) {
       writeAck({ key: `decision:gone-${i}`, kind: 'decision', stateHash: 'x', at: new Date(Date.now() - 40 * DAY).toISOString(), by: 'test' });
     }
-    writeAck({ key: 'work:old-checkout', kind: 'landed', stateHash: 'x', at: new Date().toISOString(), by: 'test' });
+    writeAck({ key: 'work:old-checkout', kind: 'landed', stateHash: 'x', at: new Date(Date.now() - 40 * DAY).toISOString(), by: 'test' });
     const order: string[] = [];
     const remove = fs.rmSync;
     vi.spyOn(fs, 'rmSync').mockImplementation(((target, options) => {
@@ -293,5 +294,51 @@ describe('lobstah cull sizing', () => {
     fs.writeFileSync(path.join(dir, 'sub', 'b'), 'world!!');
     expect(sizing.worktree(dir, 'win32')).toBe(12);
     expect(sizing.worktree(dir, 'win32')).toBe(sizing.walk(dir));
+  });
+});
+
+describe('separate worktree and record windows', () => {
+  it.each(['work', 'chore'] as const)('removes a two-day %s checkout and keeps its history for thirty days by default', (lane) => {
+    const wt = finished('recent-record', 2, 'done', lane);
+    fs.appendFileSync(path.join(home, 'config.toml'), '[limits]\nchoreRetentionDays = 1\nrunRetentionDays = 1\n');
+    cliCuller.retention(1, Date.now(), () => {});
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(fs.existsSync(path.join(laneDirs(lane).done, 'recent-record'))).toBe(true);
+    expect(fs.existsSync(statusPath('recent-record', lane))).toBe(true);
+    expect(readRecordArchive(`${lane}:recent-record`)).toBeUndefined();
+  });
+
+  it('archives records after thirty days even when worktree retention is off', () => {
+    const wt = finished('archive-me', 31);
+    const note = path.join(laneDirs('work').state, 'archive-me.notes');
+    fs.writeFileSync(note, 'Keep these notes');
+    cliCuller.retention(0, Date.now(), () => {});
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'archive-me'))).toBe(false);
+    expect(fs.existsSync(note)).toBe(false);
+    const receipt = readRecordArchive('work:archive-me')!;
+    expect(receipt.paths).toContain(path.join('state', 'archive-me.notes'));
+    const restored = execFileSync('tar', ['-xOzf', `archive/${receipt.bundle}`, 'state/archive-me.notes'], { cwd: home, encoding: 'utf8' });
+    expect(restored).toBe('Keep these notes');
+  });
+
+  it('supports a configurable record window and zero to keep records online', () => {
+    fs.appendFileSync(path.join(home, 'config.toml'), '[limits]\nrecordRetentionDays = 0\n');
+    finished('keep-record', 100);
+    cliCuller.retention(1, Date.now(), () => {});
+    expect(fs.existsSync(statusPath('keep-record', 'work'))).toBe(true);
+    const config = path.join(home, 'config.toml');
+    fs.writeFileSync(config, fs.readFileSync(config, 'utf8').replace('recordRetentionDays = 0', 'recordRetentionDays = 90'));
+    cliCuller.retention(1, Date.now(), () => {});
+    expect(fs.existsSync(statusPath('keep-record', 'work'))).toBe(false);
+    expect(readRecordArchive('work:keep-record')).toBeDefined();
+  });
+
+  it('keeps online records if archival fails', () => {
+    finished('archive-failed', 31);
+    fs.writeFileSync(path.join(home, 'archive'), 'cannot create an archive directory');
+    expect(() => cliCuller.retention(1, Date.now(), () => {})).toThrow();
+    expect(fs.existsSync(path.join(laneDirs('work').done, 'archive-failed'))).toBe(true);
+    expect(fs.existsSync(statusPath('archive-failed', 'work'))).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
+import { uniqueTempPath, atomicRenameSync, lobstahHome, laneDirs } from './paths.js';
+import { followUpAncestors } from './worktrees.js';
 import { readStatusLog } from './status.js';
 import type { Lane, StatusEntry } from './types.js';
 
@@ -113,7 +114,28 @@ export function replyState(e: SentExpectation): ReplyState {
     if (WAKING_VERBS.includes(entry.verb)) return { kind: 'woke', entry };
     if (entry.reported) return { kind: 'reply', entry };
   }
+  // An old inbox can outlive its worker. A later finished descendant
+  // settles that send without manufacturing a second reply event.
+  const originVerb = readStatusLog(e.dispatchId, e.lane).at(-1)?.verb;
+  if (originVerb === 'done' || originVerb === 'failed') {
+    const completion = finishedFollowUp(e, sent);
+    if (completion) return { kind: 'woke', entry: completion };
+  }
   return { kind: 'awaiting' };
+}
+
+/** Find a descendant's terminal report after this instruction was sent. */
+function finishedFollowUp(expectation: SentExpectation, sent: number): StatusEntry | undefined {
+  const directories = laneDirs(expectation.lane);
+  for (const bucket of ['active', 'done'] as const) {
+    for (const id of fs.readdirSync(directories[bucket])) {
+      if (id.startsWith('.') || id === expectation.dispatchId) continue;
+      const entry = readStatusLog(id, expectation.lane).at(-1);
+      if (!entry || (entry.verb !== 'done' && entry.verb !== 'failed') || Date.parse(entry.at) <= sent) continue;
+      if (followUpAncestors(id, expectation.lane).includes(expectation.dispatchId)) return entry;
+    }
+  }
+  return undefined;
 }
 
 /** The pending expectation for a dispatch, when its reply has not come. */

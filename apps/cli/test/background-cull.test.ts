@@ -15,12 +15,12 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'lobstah-background-cull-'));
   process.env.LOBSTAH_HOME = home;
   ensureLayout();
-  fs.writeFileSync(path.join(home, 'config.toml'), '[limits]\nretentionDays = 1\n');
+  fs.writeFileSync(path.join(home, 'config.toml'), '[limits]\nretentionDays = 1\ncacheMinFreeGB = 0\n');
 });
 afterEach(() => { removeTempDir(home); delete process.env.LOBSTAH_HOME; });
 
 describe('background culling', () => {
-  it('the worker entry drains more than ten checkouts and their metadata in one pass', () => {
+  it('the worker entry drains more than ten checkouts and retains their metadata for thirty days', () => {
     const repo = path.join(home, 'repo');
     fs.mkdirSync(repo);
     const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repo, stdio: 'pipe' });
@@ -39,7 +39,8 @@ describe('background culling', () => {
     const result = spawnSync(process.execPath, [cli, '__cull'], { env: { ...process.env, LOBSTAH_HOME: home }, encoding: 'utf8', timeout: 30_000 });
     expect(result.status, result.stderr).toBe(0);
     expect(fs.readdirSync(path.join(home, 'worktrees'))).toEqual([]);
-    expect(fs.readdirSync(path.join(home, 'done'))).toEqual([]);
+    expect(fs.readdirSync(path.join(home, 'done'))).toHaveLength(15);
+    expect(fs.existsSync(path.join(home, 'archive'))).toBe(false);
     expect(result.stdout).toContain('15 finished dispatch(es)');
     expect(lastCullPassAt()).toBeDefined();
   });
