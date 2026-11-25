@@ -13,14 +13,13 @@ import { ThreadComposer } from './thread-composer.js';
 import { Button } from './button.js';
 import { SectionHead } from './section-head.js';
 import { LinkedText } from './links.js';
-import { Age, ImageThumb } from './common.js';
+import { Age, dispatchContext, ImageThumb } from './common.js';
 import { DecisionRow } from './decision-row.js';
 import { InlineDecisionAnswer } from './decisions.js';
-import { isIconVerb, VerbIcon, WorkStateIcon, type WorkStateIconState } from './run-status.js';
-import { dispatchCard, dispatchHeadCard } from './dispatches.js';
+import { isIconVerb, VerbIcon, WorkStateIcon, WorkStatePill, type WorkStateIconState } from './run-status.js';
+import { dispatchHeadCard } from './dispatches.js';
 import { ReportEmbed } from './decision-embeds.js';
-import { prCard } from './prs.js';
-import { HelmIcon, WORK_ICON } from './icons.js';
+import { HelmIcon, PersonIcon, WORK_ICON } from './icons.js';
 import type { WorkKind } from './icons.js';
 import { Sheet } from './sheet.js';
 
@@ -90,19 +89,27 @@ function useSeen(view: ThreadView) {
   }, [view.id, view.responseSeq, view.unreadResponse, covered]);
   return box;
 }
-/** Above a card's question: the thread's latest response, read once it shows. */
+/** Above a card's question: the thread's latest response, as the conversation shows it, read once it shows. */
 function ThreadResponse({ view }: { view: ThreadView }) {
   const box = useSeen(view);
-  return html`<div class="thread-response" ref=${box}>${outcome(view)}${view.responseText && html`<p>Helm · ${LinkedText(view.responseText)}</p>`}</div>`;
+  return html`<div class="thread-response" ref=${box}>${outcome(view)}${
+    view.responseText &&
+    html`<div class="thread-msg from-helm"><div class="thread-bubble"><p class="thread-meta"><${Avatar} by="helm" /><span>${view.responseAt ? html`Helm · ${Age(view.responseAt)} ago` : 'Helm'}</span></p><div class="thread-text">${LinkedText(view.responseText)}</div></div></div>`
+  }</div>`;
+}
+/** Who wrote a message, as a round icon at the top of its bubble: the helm's wheel, or the person. */
+function Avatar({ by }: { by: 'helm' | 'person' }) {
+  return html`<span class=${`thread-avatar ${by}`} aria-hidden="true">${by === 'helm' ? HelmIcon : PersonIcon}</span>`;
 }
 /** The end of the conversation: everything above it has been shown once it is in view. */
 function SeenMark({ view }: { view: ThreadView }) {
   const box = useSeen(view);
   return html`<div class="thread-seen" ref=${box} aria-hidden="true"></div>`;
 }
+/** A card's thread, above its question: the same pieces the conversation shows, its work box closed. */
 export function ThreadNotes({ id }: { id: string }) {
   const { view, error } = useThread(id);
-  return html`<aside class="thread-notes"><a href=${`#thread/${id}`}>${view?.title ?? 'Conversation'}</a>${error && html`<p class="dim">${error}</p>`}${view && html`<${ThreadResponse} view=${view} />`}${view && Notes(view)}</aside>`;
+  return html`<aside class="thread-notes"><p class="thread-notes-title"><${Avatar} by="helm" /><a href=${`#thread/${id}`}>${view?.title ?? 'Conversation'}</a></p>${error && html`<p class="dim">${error}</p>`}${view && html`<${ThreadResponse} view=${view} />`}${view && Notes(view)}${view && html`<${WorkBox} view=${view} open=${false} />`}</aside>`;
 }
 /** The helm's notes, pinned above the conversation: what's decided, then what's still open. */
 function Notes(view: Pick<ThreadView, 'notes' | 'notesAt'>) {
@@ -125,30 +132,89 @@ function Notes(view: Pick<ThreadView, 'notes' | 'notesAt'>) {
 const WORK_LABEL: Record<WorkKind, string> = { dispatch: 'Dispatch', pr: 'PR', card: 'Card', todo: 'Todo', report: 'Report', plan: 'Plan' };
 /** A kind of work's icon, named for screen readers. */
 function WorkIcon({ kind }: { kind: WorkKind }) {
-  return html`<span class="thread-work-icon" title=${WORK_LABEL[kind]}>${WORK_ICON[kind]}<span class="sr-only">${WORK_LABEL[kind]}: </span></span>`;
+  return html`<span class=${`thread-work-icon work-kind-${kind}`} title=${WORK_LABEL[kind]}>${WORK_ICON[kind]}<span class="sr-only">${WORK_LABEL[kind]}: </span></span>`;
 }
-/** Linked work in a conversation: its kind's icon beside its card or link. */
+/**
+ * Linked work in a conversation, as a compact card at the conversation's
+ * width: its kind's round icon, its title and where it stands, and its live
+ * state with words. A removed record keeps its kind and says Removed.
+ */
+function WorkCard({
+  kind,
+  title,
+  href,
+  external = false,
+  meta,
+  state,
+}: {
+  kind: WorkKind;
+  title: ComponentChildren;
+  href?: string;
+  external?: boolean;
+  meta?: ComponentChildren[];
+  state?: { state: WorkStateIconState; label: string };
+}) {
+  const removed = state?.state === 'removed';
+  const name =
+    href && !removed
+      ? html`<a class="thread-work-title" href=${safeHref(href)} target=${external ? '_blank' : undefined} rel=${external ? 'noopener' : undefined}>${title}</a>`
+      : html`<span class="thread-work-title">${title}</span>`;
+  const line = [WORK_LABEL[kind], ...(meta ?? [])].flatMap((part, i) => (i ? [' · ', part] : [part]));
+  return html`<div class=${`thread-work thread-work-${kind}${removed ? ' removed' : ''}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${name}<span class="thread-work-meta dim">${line}</span></div>${state && html`<${WorkStatePill} state=${state.state} label=${state.label} />`}</div>`;
+}
+/** A report linked in a conversation keeps its own card, beside its kind's icon. */
 function Work({ kind, children }: { kind: WorkKind; children: ComponentChildren }) {
-  return html`<div class=${`thread-work thread-work-${kind}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${children}</div></div>`;
+  return html`<div class=${`thread-work thread-work-embed thread-work-${kind}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${children}</div></div>`;
+}
+/** When the item was linked, after its other details. */
+const linkedAt = (at: string | undefined): ComponentChildren[] => (at ? [html`linked ${Age(at)} ago`] : []);
+/** The thread's own read of a linked item, when the store could read it. */
+const trackedItem = (view: ThreadView | undefined, kind: ThreadTrackedItem['kind'], ...refs: Array<string | undefined>) =>
+  view?.tracked?.find((t) => t.kind === kind && refs.some((ref) => ref && (t.ref === ref || t.href === ref)));
+/** A PR's GitHub state in the words a thread's linked work uses. */
+function prStatus(pr: { state: string; draft: boolean; checks: { failed: number } }): string {
+  if (pr.state === 'MERGED') return 'merged';
+  if (pr.state === 'CLOSED') return 'closed without merging';
+  return pr.draft ? 'draft' : pr.checks.failed > 0 ? 'checks failing' : 'open';
 }
 /** A PR reference (`owner/repo#7`, `pr:owner/repo#7`, or already its URL) as its GitHub URL. */
 function prUrl(ref: string): string {
   const m = /^(?:pr:)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)$/.exec(ref.trim());
   return m ? `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}` : ref;
 }
-/** References keep the same cards and destinations as their own overview pages. */
-function ThreadLink({ kind, reference: ref, text }: { kind: string; reference: string; text: string }) {
+/** References open the same views as their own overview pages. */
+function ThreadLink({
+  kind,
+  reference: ref,
+  text,
+  view,
+  at,
+}: {
+  kind: string;
+  reference: string;
+  text: string;
+  view?: ThreadView;
+  at?: string;
+}) {
   const snapshot = viewOf(getState());
   if (kind === 'report') {
     const key = ref.startsWith('report:') ? ref : `report:${ref}`;
     return html`<${Work} kind="report"><div class="thread-links cards"><${ReportEmbed} reference=${{ kind: 'report', key }} /></div><//>`;
   }
-  if (kind === 'dispatched') return html`<${ThreadDispatch} id=${ref} text=${text} />`;
+  if (kind === 'dispatched') return html`<${ThreadDispatch} id=${ref} text=${text} view=${view} at=${at} />`;
   const pr = snapshot?.prs.find((p) => p.url === ref || p.key === ref);
-  if (pr) return html`<${Work} kind="pr"><div class="thread-links cards">${prCard(pr)}</div><//>`;
-  // A PR the snapshot doesn't list keeps its icon and links to GitHub.
-  const href = kind === 'pr' ? prUrl(ref) : ref;
-  return html`<${Work} kind=${kind === 'pr' ? 'pr' : 'plan'}><p><a href=${safeHref(href)} target="_blank" rel="noopener">${LinkedText(text)}</a></p><//>`;
+  if (pr) {
+    const status = prStatus(pr);
+    const tracked = trackedItem(view, 'pr', pr.key, pr.url, ref);
+    return html`<${WorkCard} kind="pr" title=${pr.title ? LinkedText(pr.title) : `#${pr.number}`} href=${`#pr/${encodeURIComponent(pr.key)}`}
+      meta=${[`${pr.repo}#${pr.number}`, ...linkedAt(at)]} state=${trackedStateIcon({ state: tracked?.state ?? 'open', status })} />`;
+  }
+  if (kind === 'pr') {
+    // A PR the snapshot doesn't list keeps its icon and links to GitHub.
+    const tracked = trackedItem(view, 'pr', ref, prUrl(ref));
+    return html`<${WorkCard} kind="pr" title=${tracked?.title ?? LinkedText(text)} href=${prUrl(ref)} external meta=${linkedAt(at)} state=${tracked && trackedStateIcon(tracked)} />`;
+  }
+  return html`<${WorkCard} kind="plan" title=${LinkedText(text)} href=${ref} external meta=${linkedAt(at)} />`;
 }
 /** The dispatch a conversation started on: its card heads the conversation, loaded when the snapshot no longer lists it. */
 function useDispatch(id: string) {
@@ -181,13 +247,22 @@ function AboutDispatch({ id }: { id: string }) {
       : (snapshot?.prs ?? []).filter((pr) => pr.dispatchIds.includes(dispatch.id));
   return html`<div class="thread-about cards">${dispatchHeadCard(dispatch, prs)}</div>`;
 }
-function ThreadDispatch({ id, text }: { id: string; text: string }) {
+/** A linked dispatch: its title, repo and trap, and its verb now. */
+function ThreadDispatch({ id, text, view, at }: { id: string; text: string; view?: ThreadView; at?: string }) {
   const dispatch = useDispatch(id);
-  return html`<${Work} kind="dispatch">${
-    dispatch
-      ? html`<div class="thread-links cards">${dispatchCard(dispatch)}</div>`
-      : html`<p><a href=${`#dispatch/${encodeURIComponent(id)}`}>${LinkedText(text)}</a></p>`
-  }<//>`;
+  const key = id.replace(/^(work|chore):/, '');
+  const tracked = trackedItem(view, 'dispatch', key);
+  const href = `#dispatch/${encodeURIComponent(key)}`;
+  if (tracked && isRemoved(tracked))
+    return html`<${WorkCard} kind="dispatch" title="Removed dispatch" meta=${linkedAt(at)} state=${trackedStateIcon(tracked)} />`;
+  if (dispatch) {
+    const trap = [dispatch.for, dispatch.claimedBy].find((a) => a?.startsWith('wt:'));
+    const where = dispatch.repo || trap ? [dispatchContext(dispatch.repo, trap)] : [];
+    return html`<${WorkCard} kind="dispatch" title=${dispatch.title || tracked?.title || text} href=${href}
+      meta=${[...where, ...linkedAt(at)]}
+      state=${trackedStateIcon({ state: tracked?.state ?? 'open', status: dispatch.verb })} />`;
+  }
+  return html`<${WorkCard} kind="dispatch" title=${tracked?.title ?? LinkedText(text)} href=${href} meta=${linkedAt(at)} state=${tracked && trackedStateIcon(tracked)} />`;
 }
 function outcome(item: ThreadSummary | ThreadView) {
   const result = item.outcome;
@@ -195,7 +270,7 @@ function outcome(item: ThreadSummary | ThreadView) {
   const chip = html`<span class="badge">${result.kind}</span>`;
   return html`<div class="thread-outcome">${
     result.ref && (result.kind === 'planned' || result.kind === 'dispatched')
-      ? html`<${ThreadLink} kind=${result.kind} reference=${result.ref} text=${result.note} />`
+      ? html`<${ThreadLink} kind=${result.kind} reference=${result.ref} text=${result.note} view=${'rounds' in item ? item : undefined} at=${result.at} />`
       : [chip, ' ', LinkedText(result.note)]
   }</div>`;
 }
@@ -217,7 +292,11 @@ function MessageText({ text, thread }: { text: string; thread?: string }) {
   return html`<div class="thread-text mdpage"><${MarkdownElements} text=${text} image=${image} lineBreaks="typed" glassLinks copyCode openImage=${openLightbox} /></div>`;
 }
 const SYSTEM_EVENT: Record<string, string> = { thread: 'Discussion started', bait: 'Bait received' };
-/** One entry of the conversation: the person on the right, the helm beside its wheel on the left. */
+/**
+ * One entry of the conversation: the person on the right, the helm on the
+ * left, each with their round icon at the top of the bubble. Linked work and
+ * cards sit between the messages at the conversation's full width.
+ */
 function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: string }) {
   if ('card' in entry) {
     const card = view.cards.find((c) => c.key === entry.card);
@@ -231,14 +310,14 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
     return html`<article class="thread-entry thread-card-entry"><${WorkIcon} kind="card" />${card.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} class="thread-card-title" onClick=${() => openDecision(card.key)}>${card.title}<//>${answer}${card.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
   }
   if ('link' in entry)
-    return html`<div class="thread-entry thread-system"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} /></div>`;
+    return html`<div class="thread-entry thread-linked"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} view=${view} at=${at} /></div>`;
   if ('event' in entry)
     return html`<p class="thread-entry thread-system dim">${entry.event === 'tracked' ? entry.text : (SYSTEM_EVENT[entry.kind] ?? 'Classified')} · ${Age(at)} ago</p>`;
   if (entry.by === 'helm') {
     const unread = entry.seq > (view.seenThrough ?? 0);
-    return html`<article class=${'thread-entry thread-msg from-helm' + (unread ? ' unread' : '')}><span class="thread-avatar" aria-hidden="true">${HelmIcon}</span><div class="thread-bubble"><p class="thread-meta">Helm · ${Age(at)} ago${unread && html` · <span class="thread-new">New</span>`}</p>${entry.text && html`<${MessageText} text=${entry.text} thread=${view.id} />`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
+    return html`<article class=${'thread-entry thread-msg from-helm' + (unread ? ' unread' : '')}><div class="thread-bubble"><p class="thread-meta"><${Avatar} by="helm" /><span>Helm · ${Age(at)} ago${unread && html` · <span class="thread-new">New</span>`}</span></p>${entry.text && html`<${MessageText} text=${entry.text} thread=${view.id} />`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
   }
-  return html`<article class="thread-entry thread-msg from-person"><div class="thread-bubble"><p class="thread-meta">You${entry.via === 'chat' ? ' · in chat' : entry.via === 'slack' ? ' · in Slack' : ''} · ${Age(at)} ago</p>${entry.text && html`<${MessageText} text=${entry.text} thread=${view.id} />`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
+  return html`<article class="thread-entry thread-msg from-person"><div class="thread-bubble"><p class="thread-meta"><${Avatar} by="person" /><span>You${entry.via === 'chat' ? ' · in chat' : entry.via === 'slack' ? ' · in Slack' : ''} · ${Age(at)} ago</span></p>${entry.text && html`<${MessageText} text=${entry.text} thread=${view.id} />`}<${Files} view=${view} files=${entry.attachments} /></div></article>`;
 }
 /** The conversation as one chat: rounds stay in the stored thread for the helm, but the reader sees only the messages. */
 function Timeline({ view }: { view: ThreadView }) {
@@ -318,7 +397,7 @@ const PENDING_STATE: Record<PendingMessage['state'], string> = { sending: 'Sendi
 /** A message this page sent, before its conversation holds it. */
 function PendingEntry({ message }: { message: PendingMessage }) {
   return html`<article class=${`thread-entry thread-msg from-person pending-msg ${message.state}`} aria-busy=${message.state === 'sending'}>
-    <div class="thread-bubble"><p class="thread-meta">You · ${PENDING_STATE[message.state]}</p>${message.text && html`<${MessageText} text=${message.text} />`}${message.files.map((f) => html`<span class="dchip">${f.name}</span>`)}</div>
+    <div class="thread-bubble"><p class="thread-meta"><${Avatar} by="person" /><span>You · ${PENDING_STATE[message.state]}</span></p>${message.text && html`<${MessageText} text=${message.text} />`}${message.files.map((f) => html`<span class="dchip">${f.name}</span>`)}</div>
   </article>`;
 }
 /** Status words that name a state other than the dispatch verb of the same name. */
@@ -329,10 +408,10 @@ const TRACKED_STATUS: Record<string, WorkStateIconState> = {
   'closed without merging': 'closed',
   'checks failing': 'failed',
   'not watched yet': 'unknown',
-  gone: 'unknown',
+  gone: 'removed',
   answered: 'done',
   'waiting for you': 'needs-decision',
-  withdrawn: 'closed',
+  withdrawn: 'removed',
   dropped: 'closed',
   overdue: 'limited',
   stale: 'paused',
@@ -343,26 +422,53 @@ const TRACKED_FALLBACK: Record<ThreadTrackedItem['state'], WorkStateIconState> =
 /** A linked item's state icon, and its status in words for its name and tooltip. */
 export function trackedStateIcon(item: Pick<ThreadTrackedItem, 'state' | 'status'>): { state: WorkStateIconState; label: string } {
   const state = TRACKED_STATUS[item.status] ?? (isIconVerb(item.status) ? item.status : TRACKED_FALLBACK[item.state]);
+  if (state === 'removed') return { state, label: 'Removed' };
   const words = item.status.replace(/-/g, ' ');
   return { state, label: words.charAt(0).toUpperCase() + words.slice(1) };
 }
-/** Work the thread waits on, with its live state as an icon in one right-hand column. Read-only: each item is acted on in its own view. */
-function Tracked(view: ThreadView) {
+/** A linked item whose record is gone: the store keeps only its kind. */
+const isRemoved = (item: Pick<ThreadTrackedItem, 'state' | 'status'>) => trackedStateIcon(item).state === 'removed';
+
+type WorkGroup = 'needs' | 'stuck' | 'running' | 'done' | 'removed';
+/** Where a linked item sorts in the work box: what needs you first, removed records last. */
+function workGroup(item: ThreadTrackedItem): WorkGroup {
+  if (isRemoved(item)) return 'removed';
+  if (item.status === 'needs-decision' || item.status === 'waiting for you') return 'needs';
+  if (item.state === 'stalled') return 'stuck';
+  return item.state === 'open' ? 'running' : 'done';
+}
+/** Each group's place, its pill's icon, and its count in words. */
+const WORK_GROUPS: ReadonlyArray<{ group: WorkGroup; state: WorkStateIconState; words: (n: number) => string }> = [
+  { group: 'needs', state: 'needs-decision', words: (n) => (n === 1 ? '1 needs you' : `${n} need you`) },
+  { group: 'stuck', state: 'blocked', words: (n) => `${n} stuck` },
+  { group: 'running', state: 'working', words: (n) => `${n} in progress` },
+  { group: 'done', state: 'done', words: (n) => `${n} done` },
+  { group: 'removed', state: 'removed', words: (n) => `${n} removed` },
+];
+/**
+ * Everything the thread links to, with its live state: counts by state in
+ * its summary, then each item, what needs you first. Read-only: each item is
+ * acted on in its own view. A removed record shows its kind, never its id.
+ */
+function WorkBox({ view, open }: { view: ThreadView; open: boolean }) {
   const items = view.tracked ?? [];
-  return (
-    items.length > 0 &&
-    html`<section class="thread-tracked" aria-label="Linked work">
-      <p class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Linked work'}</p>
-      <ul>${items.map((item) => {
-        const icon = trackedStateIcon(item);
-        return html`<li><${WorkIcon} kind=${item.kind} />${item.href ? html`<a href=${safeHref(item.href)}>${item.title}</a>` : html`<span>${item.title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
-      })}</ul>
-    </section>`
-  );
+  if (!items.length) return null;
+  const rank = (item: ThreadTrackedItem) => WORK_GROUPS.findIndex((g) => g.group === workGroup(item));
+  const sorted = [...items].sort((a, b) => rank(a) - rank(b));
+  const counts = WORK_GROUPS.map((g) => ({ ...g, n: items.filter((item) => workGroup(item) === g.group).length })).filter((g) => g.n > 0);
+  return html`<details class="thread-tracked" open=${open} aria-label="Linked work">
+    <summary><span class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Work'}</span>${counts.map((g) => html`<${WorkStatePill} state=${g.state} label=${g.words(g.n)} />`)}</summary>
+    <ul>${sorted.map((item) => {
+      const icon = trackedStateIcon(item);
+      const removed = icon.state === 'removed';
+      const title = removed ? `Removed ${WORK_LABEL[item.kind].toLowerCase()}` : item.title;
+      return html`<li class=${removed ? 'removed' : undefined}><${WorkIcon} kind=${item.kind} />${item.href && !removed ? html`<a href=${safeHref(item.href)}>${title}</a>` : html`<span>${title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
+    })}</ul>
+  </details>`;
 }
 function Conversation({ view, pending = [] }: { view: ThreadView; pending?: readonly PendingMessage[] }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
-    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}${Tracked(view)}
+    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}<${WorkBox} view=${view} open=${true} />
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
     <${Timeline} view=${view} />${pending.length > 0 && html`<div class="thread-timeline">${pending.map((m) => html`<${PendingEntry} key=${m.submission} message=${m} />`)}</div>`}
     ${outcome(view)}<${SeenMark} view=${view} />
