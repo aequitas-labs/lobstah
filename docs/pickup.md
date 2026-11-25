@@ -289,7 +289,7 @@ review or a draft the person asked for stays, but nothing drafts or
 refreshes it automatically. The Reviews tab lists it under Done, not Needs
 your review. A truncated search (more than 50 results) withdraws nothing.
 
-**Drafting.** `[reviews].mode = "notify"` starts no jobs. `"on-demand"` enables the glass Review action for requested, stale, or failed rounds and starts no new requested reviews automatically. Existing drafts are repaired automatically when stale or staging fails. `"auto-draft"` and `"auto-review"` start a review job for each requested round in
+**Drafting.** `[reviews].mode = "notify"` starts no jobs. `"on-demand"` enables the glass Review action for requested, stale, or failed rounds and starts no new requested reviews automatically. Existing drafts are repaired automatically when stale or staging fails. After a force-push with verified identical changes, an approval without inline comments or blocking findings carries over to the new head without another review job. Other old-head drafts show “stale: re-drafting” in the glass while repair starts, replacing any previous failure reason. `"auto-draft"` and `"auto-review"` start a review job for each requested round in
 a configured repo: a chore-lane dispatch with the
 `prReview` brief, `readOnly` (the runner pushes nothing, opens no PR, and
 checkpoints nothing), and the `[reviews]` cost bounds. With `work = "trap"`
