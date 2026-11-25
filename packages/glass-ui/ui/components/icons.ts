@@ -21,6 +21,9 @@ export const HelmIcon = svg(
   '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v8M12 14v8M2 12h8M14 12h8M5 5l5.5 5.5M13.5 13.5 19 19M5 19l5.5-5.5M13.5 10.5 19 5"/>',
 );
 
+/** The person, beside their own messages in a conversation. */
+export const PersonIcon = svg('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>');
+
 /** Each view's icon. Configuration (the `settings` tab) is lobstah's own settings: sliders, apart from the glass's gear. */
 export const TAB_ICON: Record<GlassTab, Children> = {
   deck: svg(

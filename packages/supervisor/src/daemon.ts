@@ -354,15 +354,6 @@ function writeHeartbeat(cfg: Config): void {
   fs.renameSync(tmp, executorPath());
 }
 
-function pruneChores(cfg: Config): void {
-  const dir = laneDirs('chore').done;
-  const cutoff = Date.now() - cfg.limits.choreRetentionDays * 86_400_000;
-  for (const id of fs.readdirSync(dir)) {
-    const p = path.join(dir, id);
-    if (fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { recursive: true, force: true });
-  }
-}
-
 /**
  * Culling lives in the CLI (it shares code with `lobstah cull`), so the CLI
  * hands the daemon a culler. Without one the daemon never deletes anything.
@@ -373,8 +364,8 @@ export interface DaemonCuller {
   /** A chore finalized by reconciliation may need its checkout released. */
   finished?(id: string, log: (m: string) => void): void;
   /**
-   * Cull finished dispatches older than `days`: done entries, worktrees,
-   * state, stale PR records and acks. Keeps branches, open-PR dispatches,
+   * Remove finished worktrees older than `days`; independently archive
+   * metadata at recordRetentionDays. Keeps branches, open-PR dispatches,
    * and all queued and active work. Worktrees precede metadata.
    * Returns how many dispatches it culled.
    */
@@ -490,7 +481,8 @@ export const CULL_INTERVAL_MS = 3_600_000;
 export function retentionPass(cfg: Config, hooks: DaemonHooks, log: (m: string) => void): boolean {
   const days = cfg.limits.retentionDays;
   const release = cfg.limits.releaseOnMerge === true && hooks.culler?.release !== undefined;
-  if (!hooks.culler || (!(days > 0) && !release)) return false;
+  const records = cfg.limits.recordRetentionDays > 0;
+  if (!hooks.culler || (!(days > 0) && !records && !release)) return false;
   const now = hooks.now?.() ?? Date.now();
   const last = lastCullPassAt();
   if (last !== undefined && now - last < CULL_INTERVAL_MS) return false;
@@ -508,10 +500,10 @@ export function retentionPass(cfg: Config, hooks: DaemonHooks, log: (m: string) 
       log(`release on merge error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  if (days > 0) {
+  if (days > 0 || records) {
     try {
       const n = hooks.culler.retention(days, now, log);
-      if (n > 0) log(`retention cull: ${n} finished dispatch(es) older than ${days}d removed`);
+      if (n > 0) log(`retention cull: ${n} finished dispatch(es) cleaned up; records archived after ${cfg.limits.recordRetentionDays}d`);
     } catch (err) {
       log(`retention cull error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -665,7 +657,7 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
   try { hooks.idleTraps?.(cfg, now, log); }
   catch (err) { log(`idle traps: ${err instanceof Error ? err.message : String(err)}`); }
 
-  for (const action of resumed !== undefined && now - resumed <= ttl ? [] : sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000)) {
+  for (const action of sweepGhostTraps(ttl, now, cfg.soak.pausedTtlSecs * 1000, { deadOnly: resumed !== undefined && now - resumed <= ttl })) {
     const label = trapLabel({ trapId: action.trapId, name: trapNameForId(action.trapId) });
     log(
       action.defective
@@ -777,8 +769,6 @@ export function tick(log: (m: string) => void = () => {}, hooks: DaemonHooks = {
       }
     }
   }
-
-  pruneChores(loadConfig());
 }
 
 /**

@@ -312,7 +312,7 @@ describe('cull', () => {
 
     // Nothing is old yet.
     expect(planCull(14).filter((i) => i.kind === 'report' || i.kind === 'state')).toEqual([]);
-    const later = Date.now() + 30 * 86_400_000;
+    const later = Date.now() + 31 * 86_400_000;
     const old = new Date(Date.now() - 30 * 86_400_000);
     fs.utimesSync(done, old, old);
     const plan = planCull(14, later);

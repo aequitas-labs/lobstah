@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   dismissReview,
+  newReviewRound,
   dispatchWasCancelled,
   loadConfig,
   reviewCanPublish,
@@ -20,7 +21,7 @@ import {
   reviewThreadReplies,
   unansweredReviewDecisions,
 } from '@lobstah/core';
-import type { ReviewComment, ReviewDecision, ReviewRound, ReviewMemory, ReviewThreadCall } from '@lobstah/core';
+import type { ReviewCallFailure, ReviewComment, ReviewDecision, ReviewRound, ReviewMemory, ReviewThreadCall } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 
 const API = 'https://api.github.com';
@@ -32,7 +33,11 @@ export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<Response>;
 
-export type PostResult = { posted: true; reviewId: string; by: string } | { posted: false; why: string };
+/** A refused or failed post carries `failure` when GitHub could not be reached, for the caller's log. */
+export type PostResult = { posted: true; reviewId: string; by: string } | { posted: false; why: string; failure?: ReviewCallFailure };
+
+/** A failed stage carries `failure` when GitHub could not be reached, for the caller's log. */
+export type StageResult = { staged: true; reviewId: string } | { staged: false; why: string; failure?: ReviewCallFailure };
 
 /** Who asked for the post: the CLI, a glass button, a confirmed Slack button, or automatic publishing. */
 export type PostBy = 'cli' | 'auto' | 'glass' | 'slack';
@@ -48,8 +53,62 @@ class GitHubError extends Error {
   }
 }
 
+/** What a person reads when GitHub gave no response. The cause goes to the round's `lastFailure` and the logs. */
+export const GITHUB_UNREACHABLE = "GitHub couldn't be reached. Try again in a moment.";
+
+/** How long a read waits before its one retry after a network failure. */
+const READ_RETRY_MS = 500;
+
+/** GitHub gave no response to `call` (`METHOD /path`): the connection, DNS lookup or TLS handshake failed. */
+export class GitHubUnreachable extends Error {
+  constructor(
+    public readonly call: string,
+    public readonly networkCause: string,
+  ) {
+    super(GITHUB_UNREACHABLE);
+  }
+}
+
+/**
+ * The underlying reason a fetch threw, read through its `cause` chain:
+ * Node's fetch says only `fetch failed` and keeps the socket, DNS or TLS
+ * error as its cause. An AggregateError (both address families failed)
+ * lists each member. Returns `code: message`, or the message when there is no code.
+ */
+export function fetchFailureCause(err: unknown): string {
+  let current: unknown = err;
+  for (let depth = 0; depth < 4 && current instanceof Error && current.message === 'fetch failed' && current.cause !== undefined; depth++)
+    current = current.cause;
+  return describeError(current);
+}
+
+/** `code: message` for one error, with an AggregateError's distinct members in parentheses. */
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const code = (err as Error & { code?: unknown }).code;
+  const message = err.message || err.name;
+  const own = typeof code === 'string' && code !== message ? `${code}: ${message}` : message;
+  const members = err instanceof AggregateError ? [...new Set(err.errors.map(describeError))] : [];
+  return members.length ? `${own} (${members.join('; ')})` : own;
+}
+
+/** A log line's account of a failed outcome: its reason, then the call and network cause when GitHub gave no response. */
+export function reviewFailureLogText(out: { why: string; failure?: ReviewCallFailure }): string {
+  return out.failure ? `${out.why} (${out.failure.call}: ${out.failure.cause})` : out.why;
+}
+
+/** The round's failure record for a GitHub call that got no response, or undefined for any other error. */
+function callFailure(err: unknown, step: ReviewCallFailure['step'], at: string): ReviewCallFailure | undefined {
+  return err instanceof GitHubUnreachable ? { at, step, call: err.call, cause: err.networkCause } : undefined;
+}
+
+/**
+ * One GitHub REST call. A fetch that throws becomes GitHubUnreachable,
+ * naming the call and its network cause. A read (GET) retries once after
+ * a short wait; a write never retries, since GitHub may have applied it.
+ */
 async function github<T>(f: FetchLike, token: string, method: string, url: string, body?: unknown): Promise<T> {
-  const res = await f(`${API}${url}`, {
+  const init = {
     method,
     headers: {
       authorization: `Bearer ${token}`,
@@ -58,12 +117,43 @@ async function github<T>(f: FetchLike, token: string, method: string, url: strin
       ...(body ? { 'content-type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+  };
+  let res: Response;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await f(`${API}${url}`, init);
+      break;
+    } catch (err) {
+      if (method === 'GET' && attempt === 1) {
+        await new Promise(resolve => setTimeout(resolve, READ_RETRY_MS));
+        continue;
+      }
+      throw new GitHubUnreachable(`${method} ${url}`, fetchFailureCause(err));
+    }
+  }
   const headers: Record<string, string> = {};
   res.headers.forEach((v, k) => (headers[k.toLowerCase()] = v));
   recordGitHubResponse(headers, { success: res.ok });
   if (!res.ok) throw new GitHubError(res.status, `GitHub ${method} ${url}: ${res.status} ${(await res.text()).slice(0, 300)}`);
   return (res.status === 204 ? undefined : await res.json()) as T;
+}
+
+/** A review returned by GitHub, including the author needed to protect personal drafts. */
+interface GitHubReview { id: number; state: string; body?: string | null; user?: { login: string } }
+
+/** Recognize drafts from any lobstah round, including rounds absent from local history. */
+function isLobstahReview(review: GitHubReview): boolean {
+  return /<!-- lobstah:review [^\r\n]+? -->/.test(review.body ?? '');
+}
+
+/** Read all review pages so an older pending draft cannot hide behind submitted reviews. */
+async function listReviews(f: FetchLike, token: () => string, base: string): Promise<GitHubReview[]> {
+  const reviews: GitHubReview[] = [];
+  for (let page = 1; ; page++) {
+    const batch = await github<GitHubReview[]>(f, token(), 'GET', `${base}?per_page=100${page > 1 ? `&page=${page}` : ''}`);
+    reviews.push(...batch);
+    if (batch.length < 100) return reviews;
+  }
 }
 
 function context(key: string, opts: Opts): { r: ReviewRound; token: () => string; f: FetchLike; at: string; base: string } | string {
@@ -208,7 +298,7 @@ async function clearGeneratedComments(key: string, round: ReviewRound, reviewId:
  * already carries the round's marker is adopted and updated instead of duplicated.
  * Existing body text and inline comments survive re-requests and redrafts.
  */
-export async function stageReview(key: string, opts: Opts = {}): Promise<{ staged: true; reviewId: string } | { staged: false; why: string }> {
+export async function stageReview(key: string, opts: Opts = {}): Promise<StageResult> {
   const c = context(key, opts);
   if (typeof c === 'string') return { staged: false, why: c };
   const { r, token, f, at, base } = c;
@@ -221,7 +311,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   const lock = receipt(key, r.id, 'staged.json', 'stage', at);
   if (!lock) return { staged: false, why: `${key}: staging this round is already in flight or done` };
   try {
-    const existing = await github<Array<{ id: number; state: string; body?: string | null; user?: { login: string } }>>(f, token(), 'GET', `${base}?per_page=100`);
+    const existing = await listReviews(f, token, base);
     const prior = existing.find((x) => String(x.id) === r.pendingReview?.reviewId) ?? existing.find((x) => x.body?.includes(reviewMarker(r.id)));
     if (prior && prior.state !== 'PENDING') {
       markReviewPosted(key, r.id, { reviewId: String(prior.id), by: 'review tool', at });
@@ -229,12 +319,16 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
     }
     const refused = postRefusal(key, r, 'cli');
     if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
-    // GitHub allows one pending review per identity, across all request rounds.
-    // Keep its body and inline comments intact; put the new draft alongside them.
-    const identity = loadConfig().reviews.identity?.toLowerCase();
-    const pending = prior ?? (identity
-      ? existing.find(review => review.state === 'PENDING' && review.user?.login.toLowerCase() === identity)
-      : undefined);
+    const drafts = existing.filter(review => review.state === 'PENDING');
+    const personal = drafts.filter(review => !isLobstahReview(review));
+    if (personal.length) {
+      const identity = loadConfig().reviews.identity ?? (await github<{ login: string }>(f, token(), 'GET', '/user')).login;
+      if (personal.some(review => review.user?.login.toLowerCase() === identity.toLowerCase())) {
+        fs.rmSync(lock, { force: true });
+        return { staged: false, why: 'You have a pending review on this PR. Send or delete it before staging a new draft.' };
+      }
+    }
+    const pending = prior && isLobstahReview(prior) ? prior : drafts.find(isLobstahReview);
     let generatedBody = reviewBody(draft.body, r, draft.decisions, draft.threads);
     let created = false;
     let id: number;
@@ -299,8 +393,9 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   } catch (err) {
     fs.rmSync(lock, { force: true });
     const why = err instanceof Error ? err.message : String(err);
-    saveRound(key, r.id, (x) => (x.reason = `stage failed: ${why}`), at);
-    return { staged: false, why };
+    const failure = callFailure(err, 'stage', at);
+    saveRound(key, r.id, (x) => { x.reason = `stage failed: ${why}`; if (failure) x.lastFailure = failure; }, at);
+    return { staged: false, why, ...(failure ? { failure } : {}) };
   }
 }
 
@@ -372,7 +467,9 @@ async function approveWithoutDraft(key: string, opts: Opts & { by: PostBy }): Pr
     return finish(String(posted.id), current.head.sha);
   } catch (error) {
     fs.rmSync(lock, { force: true });
-    return { posted: false, why: error instanceof Error ? error.message : String(error) };
+    const failure = callFailure(error, 'post', at);
+    if (failure) saveRound(key, r.id, (x) => { x.lastFailure = failure; }, at);
+    return { posted: false, why: error instanceof Error ? error.message : String(error), ...(failure ? { failure } : {}) };
   }
 }
 
@@ -461,8 +558,9 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   } catch (err) {
     fs.rmSync(lock, { force: true });
     const why = err instanceof Error ? err.message : String(err);
-    saveRound(key, r.id, (x) => (x.reason = `post failed: ${why}`), at);
-    return { posted: false, why };
+    const failure = callFailure(err, 'post', at);
+    saveRound(key, r.id, (x) => { x.reason = `post failed: ${why}`; if (failure) x.lastFailure = failure; }, at);
+    return { posted: false, why, ...(failure ? { failure } : {}) };
   }
 }
 
@@ -491,32 +589,40 @@ export async function settleStagedReview(key: string, opts: Opts = {}): Promise<
   }
 }
 
-/** Delete the round's staged pending review, if it is still pending. Nothing a person sent is ever deleted. */
+/** Delete the tracked draft and any older lobstah pending drafts on this PR. Submitted reviews survive. */
 async function discardStaged(key: string, opts: Opts): Promise<string | undefined> {
   const item = readReview(key);
   const newest = item && latestRound(item);
-  if (!(newest?.staged ?? newest?.pendingReview)) return undefined;
+  if (!newest) return undefined;
   const c = context(key, opts);
   if (typeof c === 'string') return c;
   const { r, token, f, at, base } = c;
   const pending = r.staged ?? r.pendingReview;
-  if (!pending) return undefined;
   try {
-    const review = await github<{ state: string }>(f, token(), 'GET', `${base}/${pending.reviewId}`);
-    if (review.state !== 'PENDING') {
-      markReviewPosted(key, r.id, { reviewId: pending.reviewId, by: 'review tool', at });
-      return `${key}: this review was already sent from the review tool`;
+    if (pending) {
+      try {
+        const review = await github<GitHubReview>(f, token(), 'GET', `${base}/${pending.reviewId}`);
+        if (review.state !== 'PENDING') {
+          markReviewPosted(key, r.id, { reviewId: pending.reviewId, by: 'review tool', at });
+          return `${key}: this review was already sent from the review tool`;
+        }
+      } catch (err) {
+        if (!(err instanceof GitHubError && err.status === 404)) throw err;
+      }
     }
-    await github(f, token(), 'DELETE', `${base}/${pending.reviewId}`);
+    for (const review of await listReviews(f, token, base)) {
+      if (review.state === 'PENDING' && isLobstahReview(review))
+        await github(f, token(), 'DELETE', `${base}/${review.id}`);
+    }
   } catch (err) {
-    if (!(err instanceof GitHubError && err.status === 404)) return err instanceof Error ? err.message : String(err);
+    return err instanceof Error ? err.message : String(err);
   }
   fs.rmSync(path.join(reviewRoundDir(key, r.id)!, 'staged.json'), { force: true });
   saveRound(key, r.id, (x) => { delete x.staged; delete x.pendingReview; delete x.refresh; }, at);
   return undefined;
 }
 
-/** Dismiss the newest round: its pending review is deleted from the PR, and nothing is posted. */
+/** Dismiss the newest round after removing lobstah pending drafts from every round on the PR. */
 export async function dismissReviewRound(key: string, by: string, opts: Opts = {}): Promise<string | undefined> {
   const why = await discardStaged(key, opts);
   if (why) return why;
@@ -526,7 +632,11 @@ export async function dismissReviewRound(key: string, by: string, opts: Opts = {
 }
 
 /** Re-draft locally, retaining the pending review and any edits for the next staging pass. */
-export async function redraftReviewRound(key: string, opts: Opts = {}): Promise<string | undefined> {
+export async function redraftReviewRound(key: string, opts: Opts & { newRound?: boolean } = {}): Promise<string | undefined> {
+  if (opts.newRound) {
+    const out = newReviewRound(key, opts.now);
+    return typeof out === 'string' ? out : undefined;
+  }
   const item = readReview(key);
   const r = item && latestRound(item);
   if (r && !['drafted', 'stale', 'failed'].includes(r.state)) return `${key}: the newest round is ${r.state}; only a drafted, stale or failed round re-drafts`;

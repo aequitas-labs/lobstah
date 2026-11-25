@@ -1,4 +1,4 @@
-import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot, derivePrStacks } from '@lobstah/core';
+import { latestRound, listReviews, loadConfig, prReviewUrl, reviewSettings, reviewStands, readRoundDraft, reviewAsker, isReviewBot, derivePrStacks, reviewDraftCoversHead } from '@lobstah/core';
 import type { GlassReview, PrEvidence } from '@lobstah/core';
 
 const OPEN = new Set(['requested', 'drafting', 'drafted', 'stale', 'failed']);
@@ -51,13 +51,16 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
     const name = person.name;
     const avatar = person.avatarUrl;
     const draft = ['drafted', 'stale'].includes(r.state) ? readRoundDraft(item.key, r.id) : undefined;
+    // Derive freshness while the daemon is between observing a push and repairing it.
+    const staleDraft: boolean = r.state === 'drafted' && r.headSha !== item.pr.headSha &&
+      (!draft || 'error' in draft || !reviewDraftCoversHead(item, r, draft));
     // Submitting a review ends its request too; that round and a re-review are not removed requests.
     const requestRemoved = !!item.unseenAt && item.pr.state === 'OPEN' && r.state !== 'posted' && !r.reReview;
     const threadHistory = item.rounds.flatMap(round => round.threadResolutions ?? []).sort((a, b) => b.at.localeCompare(a.at));
     out.push({
       ...(stack ? { stack: { id: stack.id, title: stack.title, keys: stack.members.map(member => items.find(item => item.pr.url === member.url)!.key) } } : {}),
       updatedAt: item.updatedAt,
-      ...(r.refresh ? { updating: true } : {}),
+      ...(r.refresh || staleDraft ? { updating: true } : {}),
       reReview: r.reReview, autoReapproved: r.autoReapprovals?.at(-1)?.headSha === item.pr.headSha,
       roundId: r.id, decisions: r.decisions, decisionAnswers: r.decisionAnswers,
       verdict: r.verdict, blocking: r.blocking, needsYou: r.needsYou, seenAt: r.seenAt, acknowledgedAt: r.acknowledgedAt, notification: r.notification,
@@ -82,10 +85,10 @@ export function glassReviews(tools: Readonly<Record<string, string>> = {}): Glas
       ...(item.pr.repoKey ? { repoKey: item.pr.repoKey } : {}),
       requestedBy: asker,
       requestedAt: r.requestedAt,
-      state: r.state,
+      state: staleDraft ? 'stale' : r.state,
       ...(requestRemoved ? { requestRemoved } : {}),
-      stands: !requestRemoved && reviewStands(r),
-      ...(!r.refresh && r.reason ? { reason: r.reason } : {}),
+      stands: !requestRemoved && !staleDraft && reviewStands(r),
+      ...(staleDraft ? { reason: 'The PR changed. Re-drafting.' } : !r.refresh && r.reason ? { reason: r.reason } : {}),
       headSha: r.headSha,
       prHeadSha: item.pr.headSha,
       ...(r.draftedAt ? { draftedAt: r.draftedAt } : {}),

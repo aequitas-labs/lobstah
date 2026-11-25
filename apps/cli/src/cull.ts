@@ -1,9 +1,11 @@
+import { archiveWorktree } from '@lobstah/core';
 import { configuredFolderOverlaps } from '@lobstah/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   acquireWorktreeLock,
+  archiveRecords,
   releaseWorktreeLock,
   worktreeGitDir,
   dispatchWorktree,
@@ -44,6 +46,12 @@ import {
   recoverTrapCaches,
   planReviewWaitCaches,
   reviewWaitWorktrees,
+  requestsDir,
+  requestFilesDir,
+  releaseFile,
+  decisionsRoot,
+  readArchivedDecision,
+  readRunAttempt,
 } from '@lobstah/core';
 import type { CatchRef, FreeBytesReader, Lane } from '@lobstah/core';
 import { ackFile, ackItemExists, listAcks, removeAck } from './acks.js';
@@ -52,7 +60,7 @@ import { runServerCull, type ServerCullOptions } from './cull-servers.js';
 import type { ServerRuntime } from './cull-server-inventory.js';
 
 export interface CullItem {
-  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'decision' | 'release';
+  kind: 'done' | 'worktree' | 'state' | 'ack' | 'pr' | 'report' | 'decision' | 'withdrawn' | 'release';
   id: string;
   target: string;
   ageDays: number;
@@ -65,6 +73,10 @@ export interface CullItem {
 }
 
 export interface PlanOptions {
+  /** The daemon can archive records while worktree retention is disabled. */
+  worktrees?: boolean;
+  /** Metadata has its own window; zero keeps it online. */
+  recordRetentionDays?: number;
   /**
    * Measure each target. Only a dry run measures: an apply deletes without
    * sizing, because walking 190 GB of worktrees takes minutes.
@@ -154,7 +166,9 @@ function reviewWorktreeUsers(): Map<string, Set<string>> {
 export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOptions = {}): CullItem[] {
   const measure = opts.measure ?? true;
   const size = (target: string) => (measure ? sizing.walk(target) : 0);
-  const cutoff = now - olderThanDays * DAY;
+  const worktreeCutoff = opts.worktrees === false ? -Infinity : now - olderThanDays * DAY;
+  const recordDays = opts.recordRetentionDays ?? loadConfig().limits.recordRetentionDays;
+  const cutoff = recordDays > 0 ? now - recordDays * DAY : -Infinity;
   const items: CullItem[] = [];
   const live = new Set<string>();
   const doneMtimes = new Map<string, number>();
@@ -199,7 +213,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
     const doneAt = usage.newest.get(id) ?? doneMtimes.get(id);
     const p = path.join(wtRoot, id);
     const from = doneAt ?? fs.statSync(p).mtimeMs;
-    if (from >= cutoff) continue; // recent catch or orphan — keep for attach/swap
+    if (from >= worktreeCutoff) continue; // recent catch or orphan — keep for attach/swap
     if (configuredFolderOverlaps(p)) continue;
     const reviewUsers = reviews.get(id);
     if (reviewUsers && !orphanWorktreeSafe(p)) {
@@ -226,7 +240,7 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
       const target = path.join(d.state, f);
       const directory = fs.statSync(target).isDirectory();
       if (directory && !fs.existsSync(path.join(target, 'attachments')) && !fs.existsSync(path.join(target, 'report.json'))) continue;
-      const id = directory ? f : f.replace(/\.(status|events|evidence|catch-context|attn|notified|runner\.log)$/, '');
+      const id = directory ? f : f.replace(/\.(status|events|evidence|catch-context|attn|notified|runner\.log|notes|activity)$/, '');
       if (id === f && !directory) continue;
       if (live.has(id) || (doneMtimes.get(id) ?? 0) >= cutoff || referencedAttachmentState.has(path.join(d.state, id))) continue;
       const previous = groups.get(id);
@@ -263,26 +277,38 @@ export function planCull(olderThanDays: number, now = Date.now(), opts: PlanOpti
   // window, with the request that carries the answer. A standing one never
   // ages out.
   for (const d of listDecisions()) {
+    if (readRunAttempt(d.key)?.state === 'running') continue;
     const answer = readDecisionAnswer(d.key);
     if (!answer) continue;
     const at = Date.parse(answer.answeredAt) || now;
     const dir = decisionDir(d.key)!;
     if (at < cutoff) items.push({ kind: 'decision', id: d.key, target: dir, ageDays: Math.floor((now - at) / DAY), bytes: size(dir), ageFrom: at });
   }
+  const withdrawn = path.join(decisionsRoot(), '.withdrawn');
+  for (const entry of idsIn(withdrawn)) {
+    const key = `decision:${entry}`;
+    const meta = readArchivedDecision(key);
+    if (!meta || meta.run) continue; // Run history has its own archive pass.
+    const target = path.join(withdrawn, entry);
+    const at = fs.statSync(target).mtimeMs;
+    if (at < cutoff) items.push({ kind: 'withdrawn', id: key, target, ageDays: Math.floor((now - at) / DAY), bytes: size(target), ageFrom: at });
+  }
 
   // Orphaned acks: the item is gone (dispatch culled — including by this
-  // very sweep — PR merged or closed, watch removed). Acks never age out
-  // on their own, so no cutoff applies here.
+  // very sweep — PR merged or closed, watch removed). Keep orphaned acks
+  // for the record window too.
   const culling = new Set(items.filter((i) => i.kind === 'done' || i.kind === 'state' || i.kind === 'report').map((i) => i.id));
   for (const a of listAcks()) {
     if (ackItemExists(a.key, culling)) continue;
     const at = Date.parse(a.at) || now;
+    if (at >= cutoff) continue;
     items.push({ kind: 'ack', id: a.key, target: a.key, ageDays: Math.floor((now - at) / DAY), bytes: size(ackFile(a.key)), ageFrom: at });
   }
   // Question releases go the same way as acks: when their dispatch does.
   for (const r of listReleases()) {
     if (ackItemExists(r.key, culling)) continue;
     const at = Date.parse(r.releasedAt) || now;
+    if (at >= cutoff) continue;
     items.push({ kind: 'release', id: r.key, target: r.key, ageDays: Math.floor((now - at) / DAY), bytes: 0, ageFrom: at });
   }
   return items;
@@ -453,6 +479,7 @@ export function removeWorktree(id: string, dir: string, reviewWait = false): voi
     recordRosterRevision(anchor.trapId, removeGhostWorktree(dir).revision);
     return; // Never fall through to force removal of a trap checkout.
   }
+  if (!archiveWorktree(dir, id).saved) return;
   if (reviewWait || reviewWorktreeUsers().has(id) || !worktreeUsage().newest.has(id)) {
     // Recheck reviews and orphans at removal; only disposable changes may remain.
     // Never fall through to recursive removal when verification fails.
@@ -505,6 +532,33 @@ function culledState(items: CullItem[]): CatchRef[] {
   });
 }
 
+/** Expand exactly the paths each metadata removal below will consume. */
+function archiveCull(items: CullItem[]): void {
+  const allTargets: string[] = [];
+  const keys = new Set<string>();
+  for (const item of items) {
+    if (item.kind === 'worktree') continue;
+    let targets = [item.target];
+    let key = item.id;
+    if (item.kind === 'done' || item.kind === 'state') {
+      const lane = (['work', 'chore'] as Lane[]).find((lane) =>
+        path.resolve(item.kind === 'done' ? laneDirs(lane).done : laneDirs(lane).state) === path.resolve(path.dirname(item.target)))!;
+      key = `${lane}:${item.id}`;
+      if (item.kind === 'state') targets = fs.readdirSync(path.dirname(item.target))
+        .filter((f) => f === item.id || f.startsWith(`${item.id}.`)).map((f) => path.join(path.dirname(item.target), f));
+    } else if (item.kind === 'ack') targets = [ackFile(item.id)];
+    else if (item.kind === 'pr') targets = [prRecordFile(item.id)];
+    else if (item.kind === 'release') targets = [releaseFile(item.id)];
+    else if (item.kind === 'decision') {
+      const answer = readDecisionAnswer(item.id);
+      if (answer && /^[0-9a-f-]{36}$/.test(answer.request)) targets.push(path.join(requestsDir(), `${answer.request}.json`), requestFilesDir(answer.request));
+    }
+    keys.add(key);
+    allTargets.push(...targets);
+  }
+  archiveRecords([...keys], allTargets);
+}
+
 export function applyCull(items: CullItem[]): CullItem[] {
   // A background pass may outlive its plan. A warm lock prevents a follow-up
   // claiming the checkout while current liveness is checked and it is removed.
@@ -528,6 +582,18 @@ export function applyCull(items: CullItem[]): CullItem[] {
     }
   }
   items = items.filter((i) => !blocked.has(groupOf(i)));
+  // Recheck records too: a detached plan may predate a new follow-up or reopened PR.
+  const protectedIds = new Set(openPrDispatches());
+  for (const lane of ['work', 'chore'] as Lane[]) {
+    for (const id of [...idsIn(laneDirs(lane).queue), ...idsIn(laneDirs(lane).active)]) {
+      protectedIds.add(id);
+      for (const ancestor of followUpAncestors(id, lane)) protectedIds.add(ancestor);
+    }
+  }
+  items = items.filter((item) => item.kind === 'worktree' || !protectedIds.has(groupOf(item)) &&
+    !(item.kind === 'pr' && readPr(item.id)?.state === 'OPEN') &&
+    !(item.kind === 'decision' && (!readDecisionAnswer(item.id) || readRunAttempt(item.id)?.state === 'running')));
+  archiveCull(items);
   // Catches outlive their state: fold them into stats.json before the state goes.
   foldCatches(culledState(items));
   for (const item of items.filter((i) => i.kind === 'done')) fs.rmSync(item.target, { recursive: true, force: true });
@@ -535,6 +601,7 @@ export function applyCull(items: CullItem[]): CullItem[] {
   for (const item of items.filter((i) => i.kind === 'pr')) removePr(item.target);
   for (const item of items.filter((i) => i.kind === 'report')) removeHelmReport(item.id);
   for (const item of items.filter((i) => i.kind === 'decision')) removeAnsweredDecision(item.id);
+  for (const item of items.filter((i) => i.kind === 'withdrawn')) fs.rmSync(item.target, { recursive: true, force: true });
   for (const item of items.filter((i) => i.kind === 'release')) removeRelease(item.id);
   for (const item of items.filter((i) => i.kind === 'state')) {
     const dir = path.dirname(item.target);
@@ -573,7 +640,7 @@ export function runCull(days: number, apply: boolean, freeBytes: FreeBytesReader
   const lines: string[] = [];
   // Under pressure, disposable caches come before removing whole worktrees, including a manual --apply.
   if (apply) recoverTrapCaches(loadConfig(), worktreesDir(), freeBytes, (message) => lines.push(message));
-  const plan = planCull(days, now, { measure: !apply, keepOpenPrs: true });
+  const plan = planCull(days, now, { measure: !apply, keepOpenPrs: true, recordRetentionDays: loadConfig().limits.recordRetentionDays });
   if (!apply) {
     const caches = planTrapCaches();
     if (caches.length > 0) lines.push(`caches: ${formatGB(caches.reduce((bytes, cache) => bytes + cache.bytes, 0))} clearable in ${caches.length} idle trap(s)`);

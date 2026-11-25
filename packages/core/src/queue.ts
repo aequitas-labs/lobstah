@@ -1,3 +1,4 @@
+import { readSessionClaim, readTrap, trapSessionLiveness, releaseCatch } from './soak.js';
 import { stageAssistance } from './assistance.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -190,13 +191,20 @@ export function complete(id: string, lane: Lane): void {
   fs.renameSync(path.join(dirs.active, id), path.join(dirs.done, id));
 }
 
-export function requestCancel(id: string, lane: Lane): void {
+/** Request cancellation; a confirmed dead trap's claim finishes synchronously. */
+export function requestCancel(id: string, lane: Lane): boolean {
   fs.writeFileSync(path.join(laneDirs(lane).active, id, 'cancel'), new Date().toISOString());
   try {
     dropHeavyTickets({ dispatch: id }, 'its dispatch was cancelled');
   } catch {
     /* the tickets clear once their processes end */
   }
+  const claim = readSessionClaim(id, lane);
+  const trap = claim?.by.startsWith('wt:') ? readTrap(claim.by.slice(3)) : undefined;
+  if (trap?.sessionId === claim?.sessionId && trap?.claimed === id && trapSessionLiveness(trap) === 'dead') {
+    return releaseCatch(trap).finalized === id;
+  }
+  return false;
 }
 
 /**

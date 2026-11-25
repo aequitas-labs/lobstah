@@ -1087,7 +1087,9 @@ A send still waiting on its reply is listed in the `man haul` block as
 watcher is live, beside the arm command. It is listed once, then every
 `remindSecs` until the worker's next note answers it. `man tend` shows it on
 the dispatch as `awaiting reply · <age>`, and the glass dispatch modal shows
-it under the inbox.
+it under the inbox. A send stranded after a dispatch finished stops waiting
+when a later follow-up reports `done` or `failed`. Sending to finished work,
+including failed work, starts a follow-up and prints its id.
 
 **Acknowledging, display-only.** Clicking a desktop pet opens its target and
 runs `lobstah attention ack <item-key> --by pet`, so that pet stops walking
@@ -1423,10 +1425,20 @@ from its upstream. Dirty, unpushed, no-upstream, or unreadable checkouts stay.
 The ghost notice includes the path, branch, modified-file count and
 unpushed-commit count (or `unknown` when inspection fails). Other worktrees
 stay in place. After the daemon's own tick gap exceeds `[soak].ttlSecs`,
-it grants a full TTL after resume before sweeping any traps, allowing
+it grants a full TTL after resume before sweeping traps with unknown process state, allowing
 sessions to renew their heartbeats. One that **never parked** is a **defective
 enlistment** — noticed with its diagnosis (usually a missing Stop hook →
 `soak --wait`) and left standing so the address keeps protecting its work.
+A confirmed dead session is released after two quiet minutes (or the configured
+TTL, when shorter), even during resume grace or if it never parked. A fresh
+report or heartbeat still protects it during that interval. A recorded process
+identity, or Claude's local session records, supplies the process check; missing
+process evidence keeps the normal TTL rules. The checkout stays in place.
+`man throw <trap>` also performs this check before launching, and resumes the
+saved session in that checkout. `cancel` immediately finalizes an active catch
+when its registered trap's process is confirmed dead; live or unknown claimants
+still receive a cancellation request.
+
 Nobody is conscripted: only a worktree whose session ran `soak` ever
 receives work.
 
@@ -1527,6 +1539,25 @@ writes the checkout's HEAD to the **protected ref**
 `refs/lobstah/traps/<trapId>` in the repository. It is not a branch:
 removing the worktree or deleting its branch leaves the ref and its commit in
 place.
+
+Before a sweep or cull removes a checkout with changes, it saves an archive in
+`<git-common-dir>/lobstah/archives/<trap-or-dispatch-id>/<timestamp>-<uuid>/`.
+This also saves changes ignored by cleanup policy. If saving fails, the checkout
+stays. A standalone clone stays too: its Git directory, and therefore its archive,
+would be removed with the checkout. Dirty trap checkouts stay even after a
+successful archive.
+
+Each archive contains `files/` (working files, including untracked files),
+`git/` (the index and merge/rebase state), `index-info` (all index stages),
+`objects.pack` (HEAD, index blobs and merge tips), and `manifest.json` (HEAD and
+file inventory, including deleted paths). To recover into a new empty repository,
+run `git init`, import `objects.pack` with `git index-pack --stdin`, copy `files/`
+into the repository and `git/` into its Git directory, then write the manifest's
+HEAD hash to `.git/HEAD` to detach at the saved commit. The original staged and
+unstaged changes and unresolved merge stages are then available. Use a fresh
+recovery directory so deleted paths stay deleted. Archives remain until removed
+by hand.
+
 
 ```bash
 lobstah man roster                                  # every trap the roster keeps
@@ -1785,10 +1816,11 @@ pools[1]{pool,repo,size,free,overflow,claimed,out,warming}:
 
 ### Culling and disk space
 
-Worktrees are 1 to 8 GB each. `lobstah cull` sweeps what is finished: `done/`
-entries older than the window (`--older-than <days>`, default 14), worktrees
-whose dispatch is finished or gone, stale state files, merged or closed PR
-records, and orphaned acks. It never touches queued or active work, and
+Worktrees are 1 to 8 GB each. `lobstah cull` removes finished or orphaned
+worktrees older than `--older-than <days>` (default 14). Independently, it
+archives finished dispatch entries, stale state, merged or closed PR records,
+answered cards, reports and orphaned acks after `[limits].recordRetentionDays`
+(default 30). It never touches queued or active work, and
 `git worktree remove` keeps each dispatch's branch. A worktree that soak
 created counts as in use while a trap registration anchors it. After that,
 the cull and the daemon's retention and free-space culls can remove it only
@@ -1815,14 +1847,14 @@ edits and unpublished commits still protect the worktree.
 Without `--apply` it is a dry run: it measures each target and prints the
 sizes. A worktree is measured with one `du -sk`; where `du` is missing
 (Windows) a file walk measures it instead. `--apply` measures nothing. It
-deletes, then prints the count and the change in free space on the worktrees
-volume.
+removes old worktrees and archives expired records, then prints the count and
+the change in free space on the worktrees volume.
 
 ```
 $ lobstah cull
 cull[2]{kind,id,ageDays,bytes}:
-  done,6a1f…,21,4120
-  worktree,6a1f…,21,3221225472
+  done,6a1f…,31,4120
+  worktree,6a1f…,31,3221225472
 totalBytes: 3221229592
 total: 3 GB
 dry run — pass --apply to remove
@@ -1832,9 +1864,10 @@ The daemon can do this on its own. Two `[limits]` keys turn it on
 ([configuration](configuration.md#limits)); both are off by default:
 
 - `retentionDays` — once an hour at most, the daemon starts a background
-  worker that drains finished dispatches older than this, without a count
-  limit. A dispatch whose PR is still open is kept. Worktrees go before
-  metadata, oldest first within each set. Claims continue during removal.
+  worker that removes finished worktrees older than this, without a count
+  limit. A dispatch whose PR is still open is kept. Claims continue during removal.
+  Records stay online for `recordRetentionDays` (30 by default), then move to
+  compressed archives. See [archive recovery](configuration.md#read-or-restore-archived-records).
 - `minFreeGB` — before it claims work (each claim creates a worktree), the
   daemon reads free space on the worktrees volume. Below the limit it schedules
   the background worker to remove finished worktrees, oldest first, until the limit is met. If space is still

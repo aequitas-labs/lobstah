@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { claimBait, complete, enqueue, ensureLayout, latestRound, observeReviewRequest, readReview, readStatusLog, signOnTrap, writeReview } from '@lobstah/core';
+import { claimBait, complete, enqueue, ensureLayout, latestRound, observeReviewRequest, readReview, readStatusLog, trapBySession, laneDirs, signOnTrap, writeReview } from '@lobstah/core';
 import { draftReviews } from '../../pick/src/loops/reviews.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -49,4 +49,17 @@ it.each(['claude', 'codex'])('%s: cancel stops a running trap review at the tool
   expect(run(['hook', 'pre-tool-use', 'codex'], waiting).stdout).not.toContain('"permissionDecision":"deny"');
   const chain = { ...input, tool_input: { command: 'lobstah soak --wait; git diff' } };
   expect(JSON.parse(run(['hook', 'pre-tool-use', 'codex'], chain).stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+});
+
+
+it('cancel finalizes a dead trap catch immediately and reports that its worktree was kept', () => {
+  const trap = signOnTrap({ ...trapBySession(session)!,
+    harnessProcess: { pid: process.pid, startedAt: 'old process' }, ttlMs: 60000 });
+  if (!('ok' in trap)) throw new Error('trap not available');
+  const cancelled = run(['cancel', id]);
+  expect(cancelled.status, cancelled.stderr).toBe(0);
+  expect(cancelled.stdout).toContain('finalized');
+  expect(fs.existsSync(path.join(laneDirs('chore').done, id))).toBe(true);
+  expect(readStatusLog(id, 'chore').at(-1)).toMatchObject({ verb: 'failed', note: expect.stringContaining('cancelled') });
+  expect(fs.existsSync(home)).toBe(true);
 });

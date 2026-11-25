@@ -379,7 +379,7 @@ export function reviewStatus(
   word: string;
   tone: CardTone;
 } {
-  if (reviewUpdating(r)) return { word: 'Updating', tone: 'dim' };
+  if (reviewUpdating(r)) return { word: r.state === 'stale' ? 'stale: re-drafting' : 'Updating', tone: 'dim' };
   if (r.reReview) return { word: 're-review needed', tone: 'bad' };
   if (r.autoReapproved) return { word: 'automatically re-approved', tone: 'ok' };
   if (reviewState(r) === 'needs your call') return { word: 'needs your call', tone: 'bad' };

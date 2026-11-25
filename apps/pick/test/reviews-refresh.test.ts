@@ -141,3 +141,48 @@ it('ends the quiet update when a fresh draft needs a product decision, without s
   expect(round().manualPublishOnly).toBe(true); expect(round().decisions).toEqual(REVIEW_DECISIONS);
   expect(refreshReviewNotifications(NOW + 1000)).toHaveLength(1);
 });
+
+/** Write the files a completed review job leaves for the daemon. */
+function completedDraft(verdict: 'approve' | 'comment', inline: boolean): void {
+  const directory = reviewRoundDir(KEY, round().id)!;
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, 'review.md'), 'Review findings');
+  fs.writeFileSync(path.join(directory, 'comments.json'), JSON.stringify(inline ? [{ path: 'code.ts', line: 2, body: 'Preserve the write.' }] : []));
+  fs.writeFileSync(path.join(directory, 'verdict.json'), JSON.stringify({ verdict, blocking: [] }));
+}
+
+it.each([true, false])('repairs a drafted old head even when draft files exist: %s', async filesExist => {
+  const item = readReview(KEY)!;
+  Object.assign(latestRound(item)!, { state: 'drafted', reason: 'post failed: fetch failed' });
+  writeReview(item);
+  if (filesExist) completedDraft('comment', true);
+  await refreshReviewDrafts({ now: NOW });
+  expect(round()).toMatchObject({ state: 'requested', headSha: 'new-head', manualPublishOnly: true });
+  expect(round().reason).toBeUndefined();
+  draftReviews('chris', () => {}, NOW);
+  expect(round().state).toBe('drafting');
+  expect(pendingIds('chore')).toHaveLength(1);
+});
+
+it.each(['drafted', 'stale'] as const)('carries a %s anchor-free approval to an equivalent force-pushed head without a job', async state => {
+  const item = readReview(KEY)!;
+  item.pr.diffId = 'same-diff';
+  Object.assign(latestRound(item)!, { state, diffId: 'same-diff', reason: 'post failed: fetch failed' });
+  writeReview(item);
+  completedDraft('approve', false);
+  await refreshReviewDrafts({ now: NOW });
+  expect(round()).toMatchObject({ state: 'drafted', headSha: 'new-head' });
+  expect(round().reason).toBeUndefined();
+  expect(round().refresh).toBeUndefined();
+  expect(pendingIds('chore')).toEqual([]);
+});
+
+it('re-drafts equivalent changes when the draft has inline anchors', async () => {
+  const item = readReview(KEY)!;
+  item.pr.diffId = 'same-diff';
+  Object.assign(latestRound(item)!, { state: 'drafted', diffId: 'same-diff' });
+  writeReview(item);
+  completedDraft('approve', true);
+  await refreshReviewDrafts({ now: NOW });
+  expect(round()).toMatchObject({ state: 'requested', headSha: 'new-head', refresh: { attempts: 1 } });
+});

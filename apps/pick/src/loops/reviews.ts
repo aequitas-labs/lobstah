@@ -48,7 +48,7 @@ import {
 import type { ReviewItem, ReviewRound, ReviewThread, ReviewThreadCall, ReviewVerdict } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
 import { dispatchLane } from './report.js';
-import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
+import { dismissReviewRound, postReview, redraftReviewRound, reviewFailureLogText, settleStagedReview, stageReview } from '../reviews-post.js';
 import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
 import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
@@ -328,8 +328,24 @@ export async function refreshReviewDrafts(gh: { now: number }, log: (message: st
     if (!round || item.mutedAt || item.unseenAt || ['MERGED', 'CLOSED'].includes(item.pr.state ?? '') ||
         (round.wharf && !round.wharf.mine)) continue;
     const stageFailed = round.state === 'drafted' && round.reason?.startsWith('stage failed');
-    const draft = round.state === 'drafted' ? readRoundDraft(item.key, round.id) : undefined;
-    const staleDraft = round.state === 'stale' || (draft && !('error' in draft) && !reviewDraftCoversHead(item, round, draft));
+    const draft = ['drafted', 'stale'].includes(round.state) ? readRoundDraft(item.key, round.id) : undefined;
+    const headMoved: boolean = round.headSha !== item.pr.headSha;
+    // Only an anchor-free approval can follow verified equivalent changes.
+    // Persist the new head so staging and the glass share the same receipt.
+    if (headMoved && draft && !('error' in draft) && reviewDraftCoversHead(item, round, draft) && !stageFailed) {
+      Object.assign(round, { state: 'drafted', headSha: item.pr.headSha, baseSha: item.pr.baseSha, diffId: item.pr.diffId });
+      delete round.reason;
+      writeReview(item);
+      continue;
+    }
+    const staleDraft: boolean = round.state === 'stale' || (round.state === 'drafted' && headMoved);
+    // Save the transition before asking the re-draft path to reload this item.
+    // Missing draft files must not leave an old-head round looking ready forever.
+    if (staleDraft) {
+      round.state = 'stale';
+      round.reason = 'The PR changed. Re-drafting.';
+      writeReview(item);
+    }
     if (!staleDraft && !stageFailed && !(round.refresh && round.state === 'failed')) continue;
     if (round.refresh && gh.now < Date.parse(round.refresh.retryAt)) continue;
     const job = round.dispatch ? verbOf(round.dispatch) : undefined;
@@ -387,10 +403,10 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
     const publish = reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r, draft.verdict);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
-      log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
+      log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${reviewFailureLogText(out)}`);
     } else if (!r.staged) {
       const out = await stageReview(item.key, gh);
-      log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${out.why}`);
+      log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${reviewFailureLogText(out)}`);
     }
   }
 }

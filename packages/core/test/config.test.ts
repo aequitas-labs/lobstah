@@ -222,7 +222,6 @@ describe('config precedence: descriptor > repo > global > default', () => {
   });
 });
 
-
 describe('headless Codex settings', () => {
   const dispatch = { id: 'x', repo: 'myapp', brief: 'b', harness: 'codex' };
   it('keeps workspace-write by default, and leaves interactive defaults intact', () => {
@@ -252,4 +251,16 @@ describe('headless Codex settings', () => {
       expect(() => loadConfig()).toThrow(`[${scope}].headless_model must be a non-empty string`);
     }
   });
+});
+
+it('keeps records thirty days by default and accepts a separate configurable window', () => {
+  expect(loadConfig().limits.recordRetentionDays).toBe(30);
+  for (const days of [0, 1, 90]) {
+    fs.writeFileSync(path.join(home, 'config.toml'), `[limits]\nretentionDays = 1\nrecordRetentionDays = ${days}\n`);
+    expect(loadConfig().limits.recordRetentionDays).toBe(days);
+  }
+  for (const value of ['-1', '"thirty"', 'true', 'nan', 'inf']) {
+    fs.writeFileSync(path.join(home, 'config.toml'), `[limits]\nrecordRetentionDays = ${value}\n`);
+    expect(() => loadConfig()).toThrow('[limits].recordRetentionDays must be a non-negative number');
+  }
 });

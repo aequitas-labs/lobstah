@@ -21,6 +21,7 @@ export * from './threads.js';
 export * from './thread-tracking.js';
 export * from './run-cards.js';
 export * from './run-history.js';
+export * from './record-archive.js';
 export * from './run-inputs.js';
 export * from './run-scrub.js';
 export * from './terminal-render.js';
@@ -127,3 +128,5 @@ export * from './codex-idle-recovery.js';
 
 export * from './review-wait-worktrees.js';
 export * from './tool-project.js';
+
+export * from './worktree-archive.js';

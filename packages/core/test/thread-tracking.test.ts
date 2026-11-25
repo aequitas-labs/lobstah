@@ -10,6 +10,8 @@ import { ensureLayout } from '../src/paths.js';
 import { appendStatus } from '../src/status.js';
 import { addTodo, closeTodo } from '../src/todos.js';
 import { noteThread, postThread, readThread, reopenThread, resolveThread, sayThread, startThread, threadSummaries, threadView, trackThreads, triageThread } from '../src/threads.js';
+import { archiveRecords } from '../src/record-archive.js';
+import { laneDirs } from '../src/paths.js';
 import { threadTrackedItems } from '../src/thread-tracking.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
 
@@ -126,4 +128,25 @@ describe('tracking threads', () => {
     expect(postThread(id, { text: 'Can you also check the phone?', now: later(3) }).state).toBe('open');
     expect(reopenThread(id, later(4)).state).toBe('open');
   });
+});
+
+it('names removed and archived dispatches and cards without bare ids or dead dispatch links', () => {
+  const id = thread();
+  noteThread(id, { link: 'dispatched:gone', text: 'gone' });
+  const { meta } = askDecision({ title: 'Review this', thread: id, options: ['Yes'], askedBy: 'helm', maxBytes: 100 });
+  const dir = path.join(home, 'decisions', meta.key.slice('decision:'.length));
+  archiveRecords([meta.key], [dir]);
+  fs.rmSync(dir, { recursive: true });
+  const tracked = threadTrackedItems(readThread(id)!);
+  expect(tracked).toMatchObject([
+    { kind: 'dispatch', title: 'Dispatch', status: 'removed', state: 'done' },
+    { kind: 'card', title: 'Card', status: 'archived', state: 'done' },
+  ]);
+  expect(tracked[0]!.href).toBeUndefined();
+  const record = path.join(laneDirs('work').done, 'gone');
+  fs.mkdirSync(record);
+  fs.writeFileSync(path.join(record, 'descriptor.json'), '{}');
+  archiveRecords(['work:gone'], [record]);
+  fs.rmSync(record, { recursive: true });
+  expect(threadTrackedItems(readThread(id)!)[0]).toMatchObject({ title: 'Dispatch', status: 'archived' });
 });

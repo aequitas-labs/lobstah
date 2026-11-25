@@ -873,6 +873,8 @@ function dispatchChain(target: string): ChainMember[] {
 /** An active record only steers a worker while its runner or trap is live. */
 function liveChainMember(member: ChainMember): boolean {
   if (member.bucket !== 'active') return false;
+  const lastVerb = readStatusLog(member.id, member.lane).at(-1)?.verb;
+  if (lastVerb === 'done' || lastVerb === 'failed') return false;
   if (isParked(member.id, member.lane)) return true;
   const dir = path.join(laneDirs(member.lane).active, member.id);
   const claim = readSessionClaim(member.id, member.lane);
@@ -1612,7 +1614,7 @@ async function mainCli(): Promise<void> {
       }
       const origin = chain.at(-1)!;
       const lastVerb = readStatusLog(origin.id, origin.lane).at(-1)?.verb;
-      if (origin.bucket !== 'done' && lastVerb !== 'needs-decision' && lastVerb !== 'blocked') {
+      if (origin.bucket !== 'done' && lastVerb !== 'done' && lastVerb !== 'failed' && lastVerb !== 'needs-decision' && lastVerb !== 'blocked') {
         throw new Error(`dispatch ${origin.id} has no live worker but is not finished — wait for reconciliation before sending`);
       }
       let address: string | undefined;
@@ -2120,7 +2122,7 @@ async function mainCli(): Promise<void> {
         if (!key) throw new UsageError(`reviews ${pos[0]} requires a review key\n\n${usageFor('reviews')!}`);
         acknowledgeReview(key);
         if (pos[0] === 'redraft') {
-          const why = await redraftReviewRound(key);
+          const why = await redraftReviewRound(key, { newRound: has('--new') });
           if (why) throw new Error(why);
           console.log(toonKV({ key, state: 'requested', next: 'the next lobstah pick cycle starts a draft job' }));
         } else if (pos[0] === 'dismiss') {
@@ -2946,8 +2948,8 @@ async function mainCli(): Promise<void> {
         return keys.length > 0 ? { repairHeld: `${keys.join(', ')} (lobstah watch release <key> frees it)` } : {};
       };
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
-        requestCancel(id, lane);
-        console.log(toonKV({ id, cancel: 'requested', note: 'the claimant (daemon or trap) winds it down at its next check', ...repairHeld() }));
+        const finalized = requestCancel(id, lane);
+        console.log(toonKV({ id, cancel: finalized ? 'finalized' : 'requested', note: finalized ? 'cancelled; worktree kept' : 'the claimant (daemon or trap) winds it down at its next check', ...repairHeld() }));
         break;
       }
       // Unclaimed: finalize with a record — never a silent delete. The
@@ -2957,8 +2959,8 @@ async function mainCli(): Promise<void> {
         break;
       }
       if (fs.existsSync(path.join(laneDirs(lane).active, id))) {
-        requestCancel(id, lane);
-        console.log(toonKV({ id, cancel: 'requested', note: 'claimed while cancelling — the claimant winds it down', ...repairHeld() }));
+        const finalized = requestCancel(id, lane);
+        console.log(toonKV({ id, cancel: finalized ? 'finalized' : 'requested', note: finalized ? 'cancelled; worktree kept' : 'claimed while cancelling — the claimant winds it down', ...repairHeld() }));
         break;
       }
       throw new Error(`${id} is neither queued nor active — already finished (\`lobstah catch ${id}\`)`);

@@ -218,6 +218,18 @@ export interface ReviewPerson {
 /** Stable row target shared by notifications, the pet, and the glass. */
 export const reviewHash = (key: string): string => `#review-${encodeURIComponent(key)}`;
 
+/** A GitHub call that never got a response while a round was staged or posted. */
+export interface ReviewCallFailure {
+  /** When the attempt started. */
+  at: string;
+  /** The step that failed: `stage` or `post`. */
+  step: 'stage' | 'post';
+  /** The request, as `METHOD /path`. */
+  call: string;
+  /** The network cause, such as `ECONNRESET: read ECONNRESET`, never just `fetch failed`. */
+  cause: string;
+}
+
 export interface ReviewRound {
   /** Stable round id, taken from the request that opened it. */
   id: string;
@@ -300,6 +312,8 @@ export interface ReviewRound {
   pendingReview?: ReviewRound['staged'];
   /** Why the round is where it is: a skip rule, the daily cap, a failure, a withdrawal. */
   reason?: string;
+  /** The last GitHub call that failed while staging or posting this round. A record for diagnosis; the glass shows `reason`. */
+  lastFailure?: ReviewCallFailure;
   /**
    * On wharf grounds: the round's review document. `mine` is false when
    * another boat created it first (that boat drafts and posts the round);
