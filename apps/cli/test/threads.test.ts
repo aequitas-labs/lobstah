@@ -23,6 +23,29 @@ function run(...args: string[]) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE') && !k.startsWith('CODEX') && k !== 'LOBSTAH_GROUNDS'));
   return spawnSync(process.execPath, [cli, ...args], { cwd: home, env: { ...env, LOBSTAH_HOME: home }, encoding: 'utf8', timeout: 15_000 });
 }
+it.each(['dispatched:abc-123', 'report:helm:home:abc-123', 'planned:https://example.com/plan', 'pr:https://github.com/o/r/pull/7', 'decision'])('accepts the same %s link in thread new and man note', (kind) => {
+  takeHelm({ sessionId: 'test-helm', grounds: { name: 'home', repos: ['web'] }, ttlMs: 60_000 });
+  const cardLink = (): string => askDecision({ title: 'Merge?', askedBy: 'helm', maxBytes: 100 }).meta.key;
+  const firstLink = kind === 'decision' ? cardLink() : kind;
+  const started = run('man', 'thread', 'new', '--title', 'Merge discussion', '--link', firstLink, '--session', 'test-helm');
+  expect(started.status, started.stderr + started.stdout).toBe(0);
+  const id = /^id: (\S+)$/m.exec(started.stdout)![1]!;
+  const firstEntry = readThread(id)!.rounds[0]!.entries.at(-1)!;
+  const secondLink = kind === 'decision' ? cardLink() : kind;
+  const noted = run('man', 'note', id, '--link', secondLink, '--session', 'test-helm');
+  expect(noted.status, noted.stderr + noted.stdout).toBe(0);
+  const secondEntry = readThread(id)!.rounds[0]!.entries.at(-1)!;
+  if (kind === 'decision') {
+    expect(firstEntry).toEqual({ card: firstLink });
+    expect(secondEntry).toEqual({ card: secondLink });
+  } else {
+    const split = kind.indexOf(':');
+    const expected = { link: kind.slice(0, split), ref: kind.slice(split + 1) };
+    expect(firstEntry).toMatchObject(expected);
+    expect(secondEntry).toMatchObject(expected);
+  }
+});
+
 it('delivers a thread event and supports triage, notes, card answers, chat rounds and resolution through the CLI', () => {
   const item = startThread({ grounds: 'home', text: 'Where does Helm go?' });
   const wake = run('man', 'wait', '--timeout', '0');

@@ -108,7 +108,7 @@ import { readMergeView, readPickupMap } from '@lobstah/pick';
 import { readCursor, reportedThroughMs } from './reported.js';
 import { currentAck, prStateHash, statusStateHash } from './acks.js';
 import { reportAttention } from './report-file.js';
-import { decisionAttention, hideFramedQuestions } from './decisions.js';
+import { decisionAttention, decisionDiscussionNext, hideFramedQuestions } from './decisions.js';
 import { worktreeView } from './worktree-view.js';
 import { backendViews, hostedAttention, hostedDecisionFrames } from './hosted-view.js';
 import { otherBoatsAttention } from './wharf-attention.js';
@@ -698,6 +698,8 @@ export interface TendAnsweredCard {
   answer: string;
   answeredAt: string;
   ageSecs: number;
+  /** The discussion advice for an answer with text and no chosen option. */
+  discussionNext?: string;
 }
 
 /** One unanswered card in tend's "Open cards" section. */
@@ -779,6 +781,7 @@ export function answeredCardRows(cfg: Config, now: number = Date.now()): TendAns
       answer: [answer.option && `"${answer.option}"`, answer.text, files > 0 && `${files} file${files === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
       answeredAt: answer.answeredAt,
       ageSecs: Math.max(0, Math.round((now - Date.parse(answer.answeredAt)) / 1000)),
+      discussionNext: decisionDiscussionNext({ key: card.key, thread: card.thread, text: answer.text, option: answer.option }),
     }];
   });
 }
@@ -793,6 +796,7 @@ export function renderAnsweredCards(cards: readonly TendAnsweredCard[]): string 
       ['key', 'title', 'answer', 'age'],
     ),
     'next: act on each answer, then `lobstah man ack <key> "<what you did>"`. An answered card blocks your turn end until acked; `man report` never acks it.',
+    ...cards.flatMap((card) => card.discussionNext ? [`next: ${card.key}: ${card.discussionNext}.`] : []),
   ].join('\n');
 }
 

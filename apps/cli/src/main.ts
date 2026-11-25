@@ -259,14 +259,14 @@ import { questionPark } from '@lobstah/core';
 import { deliverHelmPass, helmPassNotice } from './helm-pass.js';
 import { charter, HELM_REMINDER, HELM_STOP_REMINDER, helmChatRule } from './charter.js';
 import { buildBriefContext, titleReminder } from './brief.js';
-import { attentionKindLabel, buildTendReport, renderTend, poolRows, POOL_COLUMNS, walkingAttention } from './tend.js';
+import { attentionKindLabel, answeredCardRows, buildTendReport, renderAnsweredCards, renderTend, poolRows, POOL_COLUMNS, walkingAttention } from './tend.js';
 import { runCullWithServers } from './cull.js';
 import { telemetryCommand } from './telemetry.js';
 import { worktreeView } from './worktree-view.js';
 import { livenessView } from './liveness-view.js';
 import { backgroundCuller, runCullWorker } from './background-cull.js';
 import { MANUAL } from './manual.js';
-import { decisionEventFields, decisionLine } from './decisions.js';
+import { decisionEventFields, decisionLine, decisionThreadNext, reusedTitleCard } from './decisions.js';
 import { readHelmPassRequest, requestHelmPass } from '@lobstah/core';
 import { cardsDueAtStop, openCardsAtStop, waitingCardsAtStop } from './open-cards.js';
 import { answerKey } from './decision-answer.js';
@@ -2384,6 +2384,7 @@ async function mainCli(): Promise<void> {
       const repo = dispatch !== undefined ? repoOf(dispatch, lane!) : undefined;
       if (groundsName === undefined && caller?.id !== undefined) groundsName = helmOf(caller.id)?.grounds;
       const grounds = groundsName !== undefined ? resolveGrounds(loadConfig(), groundsName).name : undefined;
+      const earlierCard = reusedTitleCard({ title, grounds });
       let asked: ReturnType<typeof askDecision>;
       try {
         asked = askDecision({
@@ -2406,6 +2407,7 @@ async function mainCli(): Promise<void> {
         throw err;
       }
       const { meta, replaced } = asked;
+      const repeatedCard = earlierCard ?? reusedTitleCard(meta);
       const url = `${glassUrl(glassPort())}/${decisionHash(meta.key)}`;
       const unshown = unattachedDecisionWarning(meta);
       console.log(
@@ -2422,6 +2424,7 @@ async function mainCli(): Promise<void> {
           ...(unshown ? { warning: unshown } : {}),
         }),
       );
+      if (repeatedCard) console.log(`note: this title repeats ${repeatedCard.key}; ${decisionThreadNext(repeatedCard.key, meta.thread)}.`);
       console.log(
         toonHelp([
           `Point to it with [card](${url}); the answer wakes man wait as a decision-answer event`,
@@ -2838,6 +2841,11 @@ async function mainCli(): Promise<void> {
       else if (digest.changed) console.log(renderDigest(digest));
       else console.log(toonKV({ digest: 'no change', since: digest.since, fleet: digest.verdict }));
       if (!has('--json') && todos.length > 0) console.log(todoTable(todos, grounds === undefined && new Set(todos.map((t) => t.grounds)).size > 1));
+      if (!has('--json')) {
+        const cards = answeredCardRows(cfgReport).filter((card) => !grounds || card.grounds === undefined || card.grounds === displayGrounds(grounds.name, cfgReport));
+        const answered = renderAnsweredCards(cards);
+        if (answered) console.log(answered);
+      }
       if (digest.changed && !has('--peek')) advanceCursor(cursor, digest.now);
       break;
     }

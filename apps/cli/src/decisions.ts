@@ -1,5 +1,5 @@
 import { runSealKey } from './run-seal.js';
-import { answeredAt, cardCoversQuestion, decisionHandoff, handoffDecisions, archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, readDecision, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions } from '@lobstah/core';
+import { answeredAt, cardCoversQuestion, decisionHandoff, handoffDecisions, archivedDecisionDir, decisionDir, decisionViewedAt, listDecisions, loadConfig, readDecision, readDecisionAck, readDecisionDetail, readRunAttempt, readStoredRunScript, scriptWarnings, standingDecisions, storageGrounds } from '@lobstah/core';
 import type { DecisionAnswerPayload, DecisionMeta, GlassDecision, GlassRunCard, LobstahRequest, TendAttention } from '@lobstah/core';
 
 /**
@@ -110,6 +110,8 @@ export function glassDecisions(decisions: DecisionMeta[] = [...standingDecisions
 /** The fields of one `decision-answer` event, in print order: the request id and its payload. */
 export function decisionEventFields(r: LobstahRequest): Record<string, string> {
   const p = r.payload as unknown as DecisionAnswerPayload;
+  const discussion = decisionDiscussionNext({ ...p, thread: readDecision(p.key)?.thread ?? p.thread });
+  const next = [discussion, decisionHandoff(p.key)?.state === 'answered' ? ackNext(p.key) : undefined].filter(Boolean).join('; ');
   return {
     event: 'decision-answer',
     id: r.id,
@@ -123,8 +125,38 @@ export function decisionEventFields(r: LobstahRequest): Record<string, string> {
     attachments: (p.attachments ?? []).map((a) => a.path).join(', '),
     from: r.from,
     at: r.at,
-    ...(decisionHandoff(p.key)?.state === 'answered' ? { next: ackNext(p.key) } : {}),
+    ...(next ? { next } : {}),
   };
+}
+
+/** Move a free-text answer without an option into its existing thread or a new discussion. */
+export function decisionDiscussionNext(answer: { key: string; text?: string; option?: string; thread?: string }): string | undefined {
+  if (!answer.text?.trim() || answer.option) return undefined;
+  return answer.thread
+    ? `this card has become a discussion; reuse thread ${answer.thread}, then ask the next card with \`man ask --thread ${answer.thread}\``
+    : `this card has become a discussion; ${decisionThreadNext(answer.key)}`;
+}
+
+/** Start or reuse a discussion, preserving the card as context for the next question. */
+export function decisionThreadNext(key: string, thread?: string): string {
+  return thread
+    ? `reuse thread ${thread} (\`man note ${thread} --link ${key}\`), then ask the next card with \`man ask --thread ${thread}\``
+    : `start \`man thread new --title "<title>" --link ${key}\` or reuse a thread (\`man note <thread> --link ${key}\`), then ask the next card with \`man ask --thread <id>\``;
+}
+
+/** Find an unthreaded card with the same title on this helm's grounds, open or acked within 24 hours. */
+export function reusedTitleCard(asked: Pick<DecisionMeta, 'title' | 'grounds'> & Partial<Pick<DecisionMeta, 'key'>>, now: number = Date.now()): DecisionMeta | undefined {
+  const config = loadConfig();
+  const helmGrounds = asked.grounds === undefined ? undefined : storageGrounds(asked.grounds, config);
+  const openKeys = new Set(standingDecisions(now).map((card) => card.key));
+  return listDecisions().find((card) => {
+    if (card.key === asked.key || card.title !== asked.title.trim() || card.thread || card.askedBy !== 'helm') return false;
+    const cardGrounds = card.grounds === undefined ? undefined : storageGrounds(card.grounds, config);
+    if (cardGrounds !== helmGrounds) return false;
+    const ackedAt = readDecisionAck(card.key)?.ackedAt;
+    const age = ackedAt === undefined ? Infinity : now - Date.parse(ackedAt);
+    return openKeys.has(card.key) || (age >= 0 && age <= 24 * 60 * 60 * 1000);
+  });
 }
 
 /** What a helm does with an answer that awaits its ack. */
