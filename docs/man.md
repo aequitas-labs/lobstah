@@ -802,6 +802,10 @@ the same rule.
   for a question such as "cut 0.6.0?"), who asked (`helm`), and when. It is
   stored in `~/.lobstah/decisions/<rid>/`: `decision.json`, `detail.md`, and
   `attachments/`. The claimed helm alone may ask.
+  Reusing the title of an unthreaded card on the same helm's grounds prints a
+  note if the earlier card is open or was acked within 24 hours. The note
+  suggests starting or reusing a thread and linking the earlier card with
+  `man note <thread> --link decision:<key>`; the new card is still created.
 - **Context cards.** Repeat `--report <report-key>` and `--pr <pr-key>` to embed
   up to 16 existing report and PR cards in argument order. They appear above
   the answer controls. Opening a report or PR retains the decision's draft;
@@ -871,13 +875,18 @@ the same rule.
   helm acts on it, usually with `lobstah send <dispatch> "<instruction>"`.
   Answering does not message the worker. When the answer awaits the helm's
   ack, the event's `next` field says so.
+  With text and no chosen option, `next` says the card has become a discussion:
+  start `man thread new --title "<title>" --link decision:<key>` or reuse a
+  thread, then ask the next card with `man ask --thread <id>`. If the card
+  already belongs to a thread, it names that thread. The answered-cards block
+  at Stop carries the same advice.
 - **The ack.** An answered card stays `answered` until the helm acks it:
   `lobstah man ack decision:<key> ["<what I did>"]` moves it to `acked` and
   stores `ack.json` beside `answer.json`. The claimed helm alone acks, and
   only once. Until then, the glass shows the run card's spinner on the card
   and nothing more. The Stop hook lists the card under `answered-cards` with
   its answer and blocks every helm turn end on it; it is not paced like an
-  open card. `man tend` lists it too, and `man report` never acks it. Once
+  open card. `man tend` and `man report` list it too; neither acks it. Once
   acked, the card shows the run card's check for two minutes, then leaves the
   glass, as a finished run card does. The note stays in `ack.json` and the
   CLI; the glass doesn't show it. Three other moves also ack the card:
@@ -1963,7 +1972,7 @@ both a full key such as `report:helm:fleet:<id>` and its bare form
 
 The helm uses `man triage <id> --as bait|thread`, then keeps `man note <id>
 --decided <line> --open <line>` current. Repeat either flag to replace that set of
-notes; an empty line clears it. `--link dispatched:<id>|report:<key>|planned:<url>`
+notes; an empty line clears it. `--link dispatched:<id>|report:<key>|planned:<https-url>|pr:<url>`
 adds context; `--link decision:<key>` attaches an existing card. `man ask --thread
 <id>` asks on a card; its answer stays on the card and the answer event names the
 conversation. `man ask --replace <key>` keeps the replaced card's conversation.
