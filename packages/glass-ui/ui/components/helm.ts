@@ -106,10 +106,10 @@ function SeenMark({ view }: { view: ThreadView }) {
   const box = useSeen(view);
   return html`<div class="thread-seen" ref=${box} aria-hidden="true"></div>`;
 }
-/** A card's thread, above its question: the same pieces the conversation shows, its work box closed. */
+/** A card's thread, above its question: the helm's last message and the notes. */
 export function ThreadNotes({ id }: { id: string }) {
   const { view, error } = useThread(id);
-  return html`<aside class="thread-notes"><p class="thread-notes-title"><${Avatar} by="helm" /><a href=${`#thread/${id}`}>${view?.title ?? 'Conversation'}</a></p>${error && html`<p class="dim">${error}</p>`}${view && html`<${ThreadResponse} view=${view} />`}${view && Notes(view)}${view && html`<${WorkBox} view=${view} open=${false} />`}</aside>`;
+  return html`<aside class="thread-notes"><p class="thread-notes-title"><${Avatar} by="helm" /><a href=${`#thread/${id}`}>${view?.title ?? 'Conversation'}</a></p>${error && html`<p class="dim">${error}</p>`}${view && html`<${ThreadResponse} view=${view} />`}${view && Notes(view)}</aside>`;
 }
 /** The helm's notes, pinned above the conversation: what's decided, then what's still open. */
 function Notes(view: Pick<ThreadView, 'notes' | 'notesAt'>) {
@@ -450,13 +450,13 @@ const WORK_GROUPS: ReadonlyArray<{ group: WorkGroup; state: WorkStateIconState; 
  * its summary, then each item, what needs you first. Read-only: each item is
  * acted on in its own view. A removed record shows its kind, never its id.
  */
-function WorkBox({ view, open }: { view: ThreadView; open: boolean }) {
+function WorkBox({ view }: { view: ThreadView }) {
   const items = view.tracked ?? [];
   if (!items.length) return null;
   const rank = (item: ThreadTrackedItem) => WORK_GROUPS.findIndex((g) => g.group === workGroup(item));
   const sorted = [...items].sort((a, b) => rank(a) - rank(b));
   const counts = WORK_GROUPS.map((g) => ({ ...g, n: items.filter((item) => workGroup(item) === g.group).length })).filter((g) => g.n > 0);
-  return html`<details class="thread-tracked" open=${open} aria-label="Linked work">
+  return html`<details class="thread-tracked" open aria-label="Linked work">
     <summary><span class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Work'}</span>${counts.map((g) => html`<${WorkStatePill} state=${g.state} label=${g.words(g.n)} />`)}</summary>
     <ul>${sorted.map((item) => {
       const icon = trackedStateIcon(item);
@@ -468,7 +468,7 @@ function WorkBox({ view, open }: { view: ThreadView; open: boolean }) {
 }
 function Conversation({ view, pending = [] }: { view: ThreadView; pending?: readonly PendingMessage[] }) {
   return html`<div class="thread-view"><${SectionHead} title=${view.title} page />
-    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}<${WorkBox} view=${view} open=${true} />
+    ${view.about && html`<${AboutDispatch} id=${view.about} />`}${Notes(view)}<${WorkBox} view=${view} />
     ${view.rounds.length >= 6 && html`<p class="thread-hint dim">This is a long thread · A report can fill in missing facts or a plan can settle the approach</p>`}
     <${Timeline} view=${view} />${pending.length > 0 && html`<div class="thread-timeline">${pending.map((m) => html`<${PendingEntry} key=${m.submission} message=${m} />`)}</div>`}
     ${outcome(view)}<${SeenMark} view=${view} />

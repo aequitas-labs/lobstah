@@ -121,7 +121,7 @@ it('shows the thread name on a decision row and its notes above the question', a
   expect(g.$('.dcompose')).not.toBeNull();
 });
 
-it('heads a card with its thread as the conversation shows it: the helm under its wheel, the notes, and the work box closed', async () => {
+it("heads a card with its thread: the helm's last message under its wheel and the notes, without the work box", async () => {
   const d = fleet(); d.decisions = [{ key: KEY, thread: ID, title: 'Use Helm?', detail: 'Which tab?', options: ['Yes'], attachments: [], askedBy: 'helm', askedAt: AT, stateHash: 's' }];
   d.attention = [{ kind: 'decision', key: KEY, id: KEY, verb: 'decision', ageSecs: 0, stateHash: 's' }];
   const detail: ThreadView = { ...view(), responseText: 'Pick the middle tab', responseAt: AT, tracked: [{ kind: 'dispatch', ref: 'd1', title: 'Fix the deck', state: 'open', status: 'working', href: '#dispatch/d1' }] };
@@ -134,9 +134,7 @@ it('heads a card with its thread as the conversation shows it: the helm under it
   expect(message.querySelector('.thread-meta > .thread-avatar.helm')).not.toBeNull();
   expect(message.querySelector('.thread-text')?.textContent).toBe('Pick the middle tab');
   expect(notes.querySelector('.thread-notes-box')?.textContent).toContain('Keep Reviews');
-  const work = notes.querySelector('.thread-tracked')!;
-  expect(work.hasAttribute('open')).toBe(false);
-  expect([...work.querySelectorAll('summary .workpill')].map((el) => el.textContent)).toEqual(['1 in progress']);
+  expect(notes.querySelector('.thread-tracked')).toBeNull();
 });
 
 it('uses the shared message sheet with dispatch context', async () => {
