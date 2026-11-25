@@ -14,6 +14,7 @@ import { archiveRecords } from '../src/record-archive.js';
 import { laneDirs } from '../src/paths.js';
 import { threadTrackedItems } from '../src/thread-tracking.js';
 import { removeTempDir } from '../../../test/temp-dir.js';
+import { readStatusLog } from '../src/status.js';
 
 let home: string;
 const at = new Date('2026-11-19T10:00:00Z');
@@ -45,6 +46,86 @@ const pr = (number: number, state: string) => {
 const systemLines = (id: string) => readThread(id)!.rounds.flatMap((round) => round.entries.flatMap((entry) => ('event' in entry && entry.event === 'tracked' ? [entry.text] : [])));
 
 describe('tracking threads', () => {
+  it.each(['dispatch', 'PR', 'card'])('supersedes failed work and tracks its replacement %s until it finishes', (kind) => {
+    const id = thread();
+    dispatch('old');
+    resolveThread(id, 'dispatched:old', 'Dispatched the reshape', later(1));
+    appendStatus('old', 'work', 'failed', 'Outreach reshape did not land');
+    let replacement: string;
+    let finish: () => void;
+    if (kind === 'dispatch') {
+      dispatch('new');
+      replacement = 'dispatched:work:new';
+      finish = () => { appendStatus('new', 'work', 'done', 'Replacement landed'); };
+    } else if (kind === 'PR') {
+      replacement = `pr:${pr(3114, 'OPEN')}`;
+      finish = () => { pr(3114, 'MERGED'); };
+    } else {
+      const card = askDecision({ title: 'Review the replacement?', askedBy: 'helm', maxBytes: 100 }).meta;
+      replacement = card.key;
+      finish = () => { answerDecision({ key: card.key, text: 'Approved', by: 'glass', maxBytes: 100 }); };
+    }
+    const resolved = resolveThread(id, 'answered', 'Replaced the failed reshape', later(2), replacement);
+    expect(resolved.state).toBe('tracking');
+    expect(resolved.supersessions).toMatchObject([{ dispatch: 'old', replacement }]);
+    expect(threadTrackedItems(resolved)).toMatchObject([
+      { kind: 'dispatch', ref: 'old', state: 'done', status: 'superseded' },
+      { kind: kind === 'PR' ? 'pr' : kind, state: 'open' },
+    ]);
+    expect(readStatusLog('old', 'work').at(-1)?.verb).toBe('failed');
+    expect(trackThreads('home', later(3).getTime())).toEqual([]);
+    finish();
+    expect(trackThreads('home', later(4).getTime())).toMatchObject([{ id, state: 'resolved' }]);
+    expect(trackThreads('home', later(5).getTime())).toEqual([]);
+  });
+
+  it('can resolve immediately against a merged replacement and retains other unfinished work', () => {
+    const id = thread();
+    dispatch('old'); appendStatus('old', 'work', 'failed', 'Did not land');
+    noteThread(id, { link: 'dispatched:old' }, later(1));
+    const replacement = `pr:${pr(3114, 'MERGED')}`;
+    expect(resolveThread(id, 'answered', 'PR replaced the reshape', later(2), replacement).state).toBe('resolved');
+    expect(trackThreads('home', later(3).getTime())).toEqual([]);
+
+    const other = thread();
+    dispatch('another-old'); appendStatus('another-old', 'work', 'failed', 'Did not land');
+    noteThread(other, { link: 'dispatched:another-old' }, later(1));
+    const todo = addTodo('fleet', 'Check the rollout', later(1).getTime(), { thread: other });
+    expect(resolveThread(other, 'answered', 'Replaced; rollout still pending', later(2), replacement).state).toBe('tracking');
+    closeTodo('fleet', todo.id, 'done');
+    expect(trackThreads('home', later(3).getTime())).toMatchObject([{ id: other, state: 'resolved' }]);
+  });
+
+  it('hands the thread back if the replacement itself stalls', () => {
+    const id = thread();
+    dispatch('old'); appendStatus('old', 'work', 'failed', 'Failed');
+    noteThread(id, { link: 'dispatched:old' }, later(1));
+    resolveThread(id, 'answered', 'Replacement PR', later(2), `pr:${pr(3114, 'OPEN')}`);
+    pr(3114, 'CLOSED');
+    expect(trackThreads('home', later(3).getTime())).toMatchObject([{ id, state: 'open', responseText: 'PR Deflake the deck test is closed without merging' }]);
+  });
+
+  it.each(['dispatched:old', 'dispatched:missing', 'report:some-report', 'planned:https://example.com/plan', 'decision:missing'])('refuses replacement %s without changing the thread', (replacement) => {
+    const id = thread();
+    dispatch('old'); appendStatus('old', 'work', 'failed', 'Failed');
+    noteThread(id, { link: 'dispatched:old' }, later(1));
+    const before = readThread(id);
+    expect(() => resolveThread(id, 'answered', 'Replacement', later(2), replacement)).toThrow();
+    expect(readThread(id)).toEqual(before);
+  });
+
+  it('replaces only failed dispatches and requires a failure to replace', () => {
+    const id = thread();
+    dispatch('blocked'); appendStatus('blocked', 'work', 'blocked', 'Needs a token');
+    noteThread(id, { link: 'dispatched:blocked' }, later(1));
+    expect(() => resolveThread(id, 'answered', 'Replacement', later(2), `pr:${pr(3114, 'MERGED')}`)).toThrow('no failed dispatch');
+    dispatch('failed'); appendStatus('failed', 'work', 'failed', 'Failed');
+    noteThread(id, { link: 'dispatched:failed' }, later(1));
+    const resolved = resolveThread(id, 'answered', 'Replaced failed work only', later(2), `pr:${pr(3114, 'MERGED')}`);
+    expect(resolved.supersessions).toMatchObject([{ dispatch: 'failed' }]);
+    expect(trackThreads('home', later(3).getTime())).toMatchObject([{ id, state: 'open', responseText: 'Dispatch Fix the flaky deck test is blocked' }]);
+  });
+
   it('resolves outright when nothing it links to is unfinished', () => {
     const id = thread();
     expect(resolveThread(id, 'answered', 'Answered in chat', later(1)).state).toBe('resolved');

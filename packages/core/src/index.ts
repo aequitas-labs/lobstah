@@ -19,6 +19,7 @@ export * from './pr-linked-card-answers.js';
 export * from './thread-model.js';
 export * from './threads.js';
 export * from './thread-tracking.js';
+export * from './stale-threads.js';
 export * from './run-cards.js';
 export * from './run-history.js';
 export * from './record-archive.js';

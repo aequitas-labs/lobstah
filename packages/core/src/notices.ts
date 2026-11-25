@@ -12,6 +12,7 @@ import { parsePrRef } from './pr.js';
 import { readPr } from './prs.js';
 import { readWatch } from './watch.js';
 import { withDirLock } from './dir-lock.js';
+import { staleThreadNoticeStands } from './stale-threads.js';
 
 /**
  * Helm notices: the attention channel for events that are not status-log
@@ -47,6 +48,7 @@ export type NoticeKind =
   | 'trap-request'
   | 'decision-answer'
   | 'thread'
+  | 'thread-stale'
   | 'bait-orphaned'
   | 'message-bounced'
   | 'pr-merged'
@@ -397,6 +399,7 @@ export function unseenNotices(
   const owned = consumeNotices(filter, consume);
   const progress = owned.some((n) => n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') ? dispatchProgress() : [];
   const waking = owned.filter((n) => {
+    if (n.kind === 'thread-stale') return staleThreadNoticeStands(n);
     if (n.quiet || QUIET_NOTICE_KINDS.includes(n.kind)) return includeQuietKinds.includes(n.kind);
     if (n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working') return progress.some((p) => p.id === n.refId && p.stateHash === n.stateHash);
     if (n.kind !== 'stack-ready') return true;

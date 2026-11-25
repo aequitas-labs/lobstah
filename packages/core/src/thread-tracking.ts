@@ -105,5 +105,7 @@ export function threadTrackedItems(item: HelmThread, opts: { now?: number; todoS
     else if (stale.has(todo.id)) items.push({ kind: 'todo', ref: String(todo.id), title, state: 'stalled', status: 'stale' });
     else items.push({ kind: 'todo', ref: String(todo.id), title, state: 'open', status: 'open' });
   }
-  return items;
+  return items.map((tracked) => tracked.kind === 'dispatch' && item.supersessions?.some((replacement) => replacement.dispatch === tracked.ref)
+    ? { ...tracked, state: 'done', status: 'superseded' }
+    : tracked);
 }

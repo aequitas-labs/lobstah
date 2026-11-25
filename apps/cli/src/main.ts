@@ -267,6 +267,7 @@ import { livenessView } from './liveness-view.js';
 import { backgroundCuller, runCullWorker } from './background-cull.js';
 import { MANUAL } from './manual.js';
 import { decisionEventFields, decisionLine, decisionThreadNext, reusedTitleCard } from './decisions.js';
+import { staleThreadNoticeFields } from './thread-notices.js';
 import { readHelmPassRequest, requestHelmPass } from '@lobstah/core';
 import { cardsDueAtStop, openCardsAtStop, waitingCardsAtStop } from './open-cards.js';
 import { answerKey } from './decision-answer.js';
@@ -322,7 +323,7 @@ import { briefPrMentions, resolvePrTarget } from './pr-target.js';
 import { createTodoFiring, emitTodoDue, helmTimezone, prepareTodoTriggers, quietGoalsNudge, renderTodoList, takeTodoDue, todoDueLine, todoTable, todoViews, watchTriggerPr } from './todo.js';
 import { explainRefusal, resolveSessionId, type ResolvedSession } from './session-id.js';
 import { UsageError, parseArgs, usageFor, decisionReferences, type FlagValue } from './usage.js';
-import { listThreads, readThread, startThread, startHelmThread, postThread, sayThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, expireIdleThreads, trackThreads, checkThreadForLink, linkThreadDispatch, ThreadError } from '@lobstah/core';
+import { listThreads, readThread, startThread, startHelmThread, postThread, sayThread, triageThread, noteThread, resolveThread, threadView, threadSummaries, remindThreads, noticeStaleThreads, expireIdleThreads, trackThreads, checkThreadForLink, linkThreadDispatch, ThreadError } from '@lobstah/core';
 import { pluginBehindLine } from './plugin-version.js';
 import { detectHarness } from './harness-detect.js';
 import { alreadyArmed, armWatcher, awaitWatcher, liveWatcher, processGone, sessionWatcher, stopWatcher } from './watchers.js';
@@ -712,6 +713,10 @@ function trapRequestFields(n: Notice): Record<string, string> | undefined {
 
 function emitNotices(notices: Notice[], sessionId?: string): void {
   for (const n of notices) {
+    if (n.kind === 'thread-stale') {
+      console.log(toonKV(staleThreadNoticeFields(n)));
+      continue;
+    }
     if (n.kind === 'thread' && n.refId) {
       const item = readThread(n.refId);
       if (item?.state === 'open') console.log(toonKV({ event: 'thread', id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, ...(item.relay ? { via: 'slack' } : {}), text: n.text }));
@@ -741,6 +746,10 @@ function emitReplies(replies: ReplyEvent[], sessionId?: string): void {
 
 /** A haul line for a notice; requests carry their own payload and remedy. */
 function noticeLine(n: Notice, prefix = 'notice '): string {
+  if (n.kind === 'thread-stale') {
+    const fields = staleThreadNoticeFields(n);
+    return `- thread-stale ${fields.thread} — ${fields.text}\nnext: ${fields.next}`;
+  }
   const answer = n.kind === 'decision-answer' && n.refId ? readRequest(n.refId) : undefined;
   if (answer) return decisionLine(answer);
   const r = trapRequestFields(n);
@@ -2314,7 +2323,7 @@ async function mainCli(): Promise<void> {
         let item;
         if (cmd === 'man:discuss') item = existing ? postThread(id, { text: opt('--said'), via: 'chat' }) : startThread({ grounds, title: pos.join(' '), text: opt('--said'), via: 'chat' });
         else if (cmd === 'man:triage') item = triageThread(id, opt('--as'));
-        else if (cmd === 'man:resolve') item = resolveThread(id, opt('--outcome'), opt('--note'));
+        else if (cmd === 'man:resolve') item = resolveThread(id, opt('--outcome'), opt('--note'), new Date(), opt('--superseded-by'));
         else if (cmd === 'man:say') {
           const said = pos.slice(1).join(' ');
           const files = values('--attach').map((file) => {
@@ -2833,15 +2842,19 @@ async function mainCli(): Promise<void> {
       // An identified helm defaults to its own grounds.
       if (groundsName === undefined && sid !== undefined) groundsName = helmOf(sid)?.grounds;
       const grounds = groundsName !== undefined ? resolveGrounds(cfgReport, groundsName) : undefined;
+      noticeStaleThreads(grounds ? displayGrounds(grounds.name, cfgReport) : undefined);
+      const noticeFilter = grounds ? noticeFilterForGrounds(grounds.name, cfgReport) : undefined;
+      const staleNotices = unseenNotices(!has('--peek'), (notice) => notice.kind === 'thread-stale' && (!noticeFilter || noticeFilter(notice)), noticeWakes(sid ? helmOf(sid) : undefined));
       const cursor = storageGrounds(opt('--cursor') ?? grounds?.name ?? 'fleet', cfgReport);
       const digest = buildDigest({ cursor, grounds: grounds?.name, repos: grounds ? new Set(grounds.repos) : undefined });
       // Open todos are standing, not news: they show with or without a change.
       const todos = todoViews(Date.now(), grounds?.name);
-      if (has('--json')) console.log(JSON.stringify({ ...digest, todos }, null, 2));
+      if (has('--json')) console.log(JSON.stringify({ ...digest, todos, ...(staleNotices.length ? { staleThreads: staleNotices.map(staleThreadNoticeFields) } : {}) }, null, 2));
       else if (digest.changed) console.log(renderDigest(digest));
       else console.log(toonKV({ digest: 'no change', since: digest.since, fleet: digest.verdict }));
       if (!has('--json') && todos.length > 0) console.log(todoTable(todos, grounds === undefined && new Set(todos.map((t) => t.grounds)).size > 1));
       if (!has('--json')) {
+        for (const notice of staleNotices) console.log(toonKV(staleThreadNoticeFields(notice)));
         const cards = answeredCardRows(cfgReport).filter((card) => !grounds || card.grounds === undefined || card.grounds === displayGrounds(grounds.name, cfgReport));
         const answered = renderAnsweredCards(cards);
         if (answered) console.log(answered);
@@ -3070,6 +3083,7 @@ async function mainCli(): Promise<void> {
         const floorMs = wakeFloorMs(callerHelm);
         const threadMaintenance = () => {
           const threadGrounds = groundsScope ? displayGrounds(groundsScope.name, cfgWait) : undefined;
+          noticeStaleThreads(threadGrounds);
           expireIdleThreads(threadGrounds);
           trackThreads(threadGrounds);
           remindThreads(threadGrounds, remindMs);
@@ -3338,6 +3352,11 @@ async function mainCli(): Promise<void> {
         // A pass stands even with an empty fleet or an already armed watcher.
         if (blockPass()) break;
         if (blockTodos()) break;
+        /** Scan the helm's threads before checking notices, including while the Stop hook parks. */
+        const staleThreadsAtStop = (): void => {
+          noticeStaleThreads(helm ? displayGrounds(helm.grounds, cfgHaul) : undefined);
+        };
+        staleThreadsAtStop();
         // The periodic digest: for a helm session, when the report cadence
         // has elapsed and the grounds delta is non-empty, a park delivers the
         // digest as the wake. Change-gated, so it can never loop the hook.
@@ -3464,6 +3483,7 @@ async function mainCli(): Promise<void> {
             }
             if (blockPass()) return;
             if (blockTodos()) return;
+            staleThreadsAtStop();
             if (helm) heartbeatHelm(helm.sessionId, { parked: true }); // a queued-only park is liveness too
             evs = freshWakeEvents(baseline, undefined, matchHelm);
             if (evs.length === 0) evs = attentionNow(true, remindMs, Date.now(), matchHelm); // reminders fire mid-park too

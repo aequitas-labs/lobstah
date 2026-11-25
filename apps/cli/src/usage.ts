@@ -336,7 +336,7 @@ export const COMMANDS: Record<string, CommandSpec> = {
   'man:discuss': { flags: { '--said': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<title|thread-id>' },
   'man:note': { flags: { '--decided': { value: '<line>', repeatable: true }, '--open': { value: '<line>', repeatable: true }, '--link': { value: '<kind:ref>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> [<note>]' },
   'man:say': { flags: { '--attach': { value: '<file>', repeatable: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id> <text>' },
-  'man:resolve': { flags: { '--outcome': { value: '<kind:ref>', required: true }, '--note': { value: '<text>', required: true }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
+  'man:resolve': { flags: { '--outcome': { value: '<kind:ref>', required: true }, '--note': { value: '<text>', required: true }, '--superseded-by': { value: '<dispatched:id|pr:url|decision:key>' }, '--grounds': { value: '<name>' }, '--session': { value: '<id>' } }, positionals: '<thread-id>' },
   'man:ack': { flags: { '--session': { value: '<id>' } }, positionals: 'decision:<key> ["<what I did>"]' },
   'man:answer': {
     flags: { '--option': { value: '<label>' }, '--text': { value: '<text>' }, '--attach': { value: '<file>', repeatable: true } },
@@ -550,7 +550,7 @@ Stores the answer; the helm's man wait receives it as decision-answer.`,
   'man:thread': `new: start a conversation for the person, unread until shown; prints its id and glass URL. --detail is your first message, such as a summary of the chat so far. --link (repeatable) takes the kinds man note does. Link more with man ask --thread, man note --link, and dispatch or send --thread. Helm only.`,
   'man:note': `Replace decided/open notes or add a link: dispatched:<id>, report:<key>, planned:<https-url>, pr:<url> or decision:<key> (an existing card). Helm only.`,
   'man:say': `Write to the person in a conversation, with optional --attach files. It shows as unread in the glass. Helm only.`,
-  'man:resolve': `Close a conversation with its outcome and a one-line note. While a linked dispatch, card, PR or todo is unfinished it tracks instead: man wait closes it when the work finishes and hands it back to the person if the work stalls. The person can reopen it. Helm only.`,
+  'man:resolve': `Close a conversation with its outcome and a one-line note. While linked work is unfinished it tracks instead; man wait closes it when the work finishes and hands it back if work stalls. --superseded-by dispatched:<id>|pr:<url>|decision:<key> replaces its failed dispatches and tracks the replacement. The person can reopen it. Helm only.`,
   'man:brief': `SessionStart-hook entry point: announce the session id and fleet state into
 the conversation.`,
   hook: `The plugin hook entry points. Each detects the session's role (helm, trap, or

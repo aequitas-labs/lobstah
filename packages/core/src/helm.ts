@@ -4,6 +4,7 @@ import { loadConfig, type Config, type HelmChat } from './config.js';
 import { displayGrounds, storageGrounds } from './grounds-name.js';
 import { readHold } from './disk.js';
 import type { Notice } from './notices.js';
+import { staleThreadNoticeStands } from './stale-threads.js';
 import { dispatchProgress } from './dispatch-progress.js';
 import { uniqueTempPath, atomicRenameSync, lobstahHome } from './paths.js';
 import type { WindowRef } from './window.js';
@@ -313,6 +314,8 @@ export function wakeFloorMs(h: HelmRegistration | undefined): number {
  */
 export function noticeStands(n: Notice): boolean {
   switch (n.kind) {
+    case 'thread-stale':
+      return staleThreadNoticeStands(n);
     case 'dispatch-progress':
     case 'trap-idle-working':
       return dispatchProgress().some((p) => p.id === n.refId && p.stateHash === n.stateHash);

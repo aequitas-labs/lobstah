@@ -76,6 +76,14 @@ afterEach(async () => {
   delete process.env.LOBSTAH_HOME; delete process.env.LOBSTAH_TEST_SOCKET_TOKEN; removeTempDir(home);
 });
 
+it('refuses supersession on wharf grounds instead of sending an ordinary resolve that drops the flag', async () => {
+  const w = await wharf(); configure(w.url);
+  const flags: Record<string, string> = { '--grounds': 'away', '--session': 'helm', '--outcome': 'answered', '--note': 'Replaced', '--superseded-by': 'pr:https://github.com/o/r/pull/3114' };
+  const opts = { opt: (flag: string) => flags[flag], has: (flag: string) => flag in flags, values: () => [] };
+  await expect(wharfCommand('man:resolve', ['thread-id'], opts, loadConfig())).rejects.toThrow('boat that tracks this conversation');
+  expect(w.messages.some((message) => message.t === 'command' && message.path === 'threads/thread-id/resolve')).toBe(false);
+});
+
 it('man wait ends on a pushed event, renews the helm on the socket, and sends no GET events', async () => {
   const w = await wharf(); configure(w.url);
   const output = vi.spyOn(console, 'log').mockImplementation(() => {});
