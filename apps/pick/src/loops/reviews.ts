@@ -48,7 +48,7 @@ import {
 import type { ReviewItem, ReviewRound, ReviewThread, ReviewThreadCall, ReviewVerdict } from '@lobstah/core';
 import { githubRepoFromOrigin, loadPickupConfig } from '../config.js';
 import { dispatchLane } from './report.js';
-import { dismissReviewRound, postReview, redraftReviewRound, settleStagedReview, stageReview } from '../reviews-post.js';
+import { dismissReviewRound, postReview, redraftReviewRound, reviewFailureLogText, settleStagedReview, stageReview } from '../reviews-post.js';
 import { claimReviewDocs, publishReviewDocs, reviewScope, runReviewRequests } from '../reviews-wharf.js';
 import type { ReviewWharfOptions } from '../reviews-wharf.js';
 import type { FetchLike } from '../reviews-post.js';
@@ -387,10 +387,10 @@ async function postOrStage(gh: { token: () => string; fetch?: FetchLike; now: nu
     const publish = reviewCanPublish(loadConfig().reviews, item.pr.repoKey, r, draft.verdict);
     if (publish) {
       const out = await postReview(item.key, { by: 'auto', ...gh });
-      log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${out.why}`);
+      log(out.posted ? `${item.key}: review published (${out.reviewId})` : `${item.key}: not published: ${reviewFailureLogText(out)}`);
     } else if (!r.staged) {
       const out = await stageReview(item.key, gh);
-      log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${out.why}`);
+      log(out.staged ? `${item.key}: draft staged as your pending review (${out.reviewId})` : `${item.key}: not staged: ${reviewFailureLogText(out)}`);
     }
   }
 }
