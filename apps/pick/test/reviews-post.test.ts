@@ -3,7 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { answerReviewDecision, cancelQueued, enqueue, claimNext, requestCancel, complete, ensureLayout, latestRound, muteReview, observeReviewRequest, readReview, reviewRoundDir, writeReview } from '@lobstah/core';
-import { dismissReviewRound, postReview, redraftReviewRound, stageReview } from '../src/reviews-post.js';
+import * as net from 'node:net';
+import { dismissReviewRound, fetchFailureCause, GITHUB_UNREACHABLE, postReview, redraftReviewRound, reviewFailureLogText, stageReview } from '../src/reviews-post.js';
 import type { FetchLike } from '../src/reviews-post.js';
 import { draftReviews, reviewsLoop } from '../src/loops/reviews.js';
 import type { GhGraphql } from '../src/loops/reviews.js';
@@ -304,6 +305,92 @@ describe('postReview', () => {
     expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', reason: expect.stringContaining('post failed') });
     expect(fs.existsSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'posted.json'))).toBe(false);
     expect(await postReview(KEY, { by: 'cli', token: tok, fetch: github(calls) })).toMatchObject({ posted: true });
+  });
+});
+
+describe('GitHub that gives no response', () => {
+  /** What Node's fetch throws when the connection resets: `fetch failed`, with the socket error as its cause. */
+  const resetError = (): TypeError => new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+
+  /** The fake GitHub, except that requests matching `fails` throw a reset, `times` times each. */
+  function unreachable(calls: Call[], fails: (method: string, url: string) => boolean, times = Infinity, existing: Array<{ id: number; body: string; state?: string }> = []): FetchLike {
+    const fake = github(calls, existing);
+    let thrown = 0;
+    return async (url, init) => {
+      if (fails(init.method, url) && thrown < times) {
+        thrown++;
+        calls.push({ method: init.method, url });
+        throw resetError();
+      }
+      return fake(url, init);
+    };
+  }
+
+  function staged(): void {
+    drafted();
+    const item = readReview(KEY)!;
+    item.rounds[0]!.staged = { reviewId: '77', at: '2026-10-15T10:00:00Z' };
+    writeReview(item);
+  }
+
+  it('names the cause of a real fetch failure, not just "fetch failed"', async () => {
+    const server = net.createServer(socket => socket.destroy()).listen(0, '127.0.0.1');
+    await new Promise(resolve => server.once('listening', resolve));
+    try {
+      const err = await fetch(`http://127.0.0.1:${(server.address() as net.AddressInfo).port}/`).then(() => undefined, (e: unknown) => e);
+      expect(err).toMatchObject({ message: 'fetch failed' });
+      expect(fetchFailureCause(err)).toMatch(/^(ECONNRESET|UND_ERR_SOCKET): /);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('lists each address family when both fail', () => {
+    const both = Object.assign(new AggregateError([
+      Object.assign(new Error('connect ETIMEDOUT 140.82.112.5:443'), { code: 'ETIMEDOUT' }),
+      Object.assign(new Error('connect ENETUNREACH 2606:50c0::1:443'), { code: 'ENETUNREACH' }),
+    ], ''), { code: 'ETIMEDOUT' });
+    expect(fetchFailureCause(new TypeError('fetch failed', { cause: both })))
+      .toBe('ETIMEDOUT: AggregateError (ETIMEDOUT: connect ETIMEDOUT 140.82.112.5:443; ENETUNREACH: connect ENETUNREACH 2606:50c0::1:443)');
+    expect(fetchFailureCause('offline')).toBe('offline');
+  });
+
+  it('records the failed submit and its cause on the round, and never repeats the write', async () => {
+    staged();
+    const calls: Call[] = [];
+    const out = await postReview(KEY, { by: 'glass', token: tok, fetch: unreachable(calls, method => method === 'POST') });
+    const failure = { step: 'post', call: 'POST /repos/acme/web/pulls/7/reviews/77/events', cause: 'ECONNRESET: read ECONNRESET' };
+    expect(out).toEqual({ posted: false, why: GITHUB_UNREACHABLE, failure: { ...failure, at: expect.any(String) } });
+    expect(posts(calls)).toHaveLength(1);
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ state: 'drafted', reason: `post failed: ${GITHUB_UNREACHABLE}`, lastFailure: failure });
+    expect(reviewFailureLogText(out as { why: string })).toBe(`${GITHUB_UNREACHABLE} (POST /repos/acme/web/pulls/7/reviews/77/events: ECONNRESET: read ECONNRESET)`);
+    expect(fs.existsSync(path.join(reviewRoundDir(KEY, 'RRE_7')!, 'posted.json'))).toBe(false);
+  });
+
+  it('retries a read once, then posts', async () => {
+    staged();
+    const calls: Call[] = [];
+    const out = await postReview(KEY, { by: 'glass', token: tok, fetch: unreachable(calls, (method, url) => method === 'GET' && url.endsWith('/reviews?per_page=100'), 1) });
+    expect(out).toMatchObject({ posted: true });
+    expect(calls.filter(call => call.url.endsWith('/reviews?per_page=100'))).toHaveLength(2);
+  });
+
+  it('a read that fails twice names that read and writes nothing', async () => {
+    staged();
+    const calls: Call[] = [];
+    const out = await postReview(KEY, { by: 'glass', token: tok, fetch: unreachable(calls, (method, url) => method === 'GET' && /\/pulls\/7$/.test(url)) });
+    expect(out).toMatchObject({ posted: false, failure: { call: 'GET /repos/acme/web/pulls/7', cause: 'ECONNRESET: read ECONNRESET' } });
+    expect(posts(calls)).toEqual([]);
+    expect(calls.filter(call => /\/pulls\/7$/.test(call.url))).toHaveLength(2);
+  });
+
+  it('records a failed stage and its cause on the round', async () => {
+    drafted();
+    const calls: Call[] = [];
+    const out = await stageReview(KEY, { token: tok, fetch: unreachable(calls, method => method === 'POST') });
+    expect(out).toMatchObject({ staged: false, why: GITHUB_UNREACHABLE, failure: { step: 'stage', call: 'POST /repos/acme/web/pulls/7/reviews' } });
+    expect(latestRound(readReview(KEY)!)).toMatchObject({ reason: `stage failed: ${GITHUB_UNREACHABLE}`,
+      lastFailure: { step: 'stage', call: 'POST /repos/acme/web/pulls/7/reviews', cause: 'ECONNRESET: read ECONNRESET' } });
   });
 });
 

@@ -21,7 +21,7 @@ import {
   reviewThreadReplies,
   unansweredReviewDecisions,
 } from '@lobstah/core';
-import type { ReviewComment, ReviewDecision, ReviewRound, ReviewMemory, ReviewThreadCall } from '@lobstah/core';
+import type { ReviewCallFailure, ReviewComment, ReviewDecision, ReviewRound, ReviewMemory, ReviewThreadCall } from '@lobstah/core';
 import { loadPickupConfig } from './config.js';
 
 const API = 'https://api.github.com';
@@ -33,7 +33,11 @@ export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE';
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<Response>;
 
-export type PostResult = { posted: true; reviewId: string; by: string } | { posted: false; why: string };
+/** A refused or failed post carries `failure` when GitHub could not be reached, for the caller's log. */
+export type PostResult = { posted: true; reviewId: string; by: string } | { posted: false; why: string; failure?: ReviewCallFailure };
+
+/** A failed stage carries `failure` when GitHub could not be reached, for the caller's log. */
+export type StageResult = { staged: true; reviewId: string } | { staged: false; why: string; failure?: ReviewCallFailure };
 
 /** Who asked for the post: the CLI, a glass button, a confirmed Slack button, or automatic publishing. */
 export type PostBy = 'cli' | 'auto' | 'glass' | 'slack';
@@ -49,8 +53,62 @@ class GitHubError extends Error {
   }
 }
 
+/** What a person reads when GitHub gave no response. The cause goes to the round's `lastFailure` and the logs. */
+export const GITHUB_UNREACHABLE = "GitHub couldn't be reached. Try again in a moment.";
+
+/** How long a read waits before its one retry after a network failure. */
+const READ_RETRY_MS = 500;
+
+/** GitHub gave no response to `call` (`METHOD /path`): the connection, DNS lookup or TLS handshake failed. */
+export class GitHubUnreachable extends Error {
+  constructor(
+    public readonly call: string,
+    public readonly networkCause: string,
+  ) {
+    super(GITHUB_UNREACHABLE);
+  }
+}
+
+/**
+ * The underlying reason a fetch threw, read through its `cause` chain:
+ * Node's fetch says only `fetch failed` and keeps the socket, DNS or TLS
+ * error as its cause. An AggregateError (both address families failed)
+ * lists each member. Returns `code: message`, or the message when there is no code.
+ */
+export function fetchFailureCause(err: unknown): string {
+  let current: unknown = err;
+  for (let depth = 0; depth < 4 && current instanceof Error && current.message === 'fetch failed' && current.cause !== undefined; depth++)
+    current = current.cause;
+  return describeError(current);
+}
+
+/** `code: message` for one error, with an AggregateError's distinct members in parentheses. */
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const code = (err as Error & { code?: unknown }).code;
+  const message = err.message || err.name;
+  const own = typeof code === 'string' && code !== message ? `${code}: ${message}` : message;
+  const members = err instanceof AggregateError ? [...new Set(err.errors.map(describeError))] : [];
+  return members.length ? `${own} (${members.join('; ')})` : own;
+}
+
+/** A log line's account of a failed outcome: its reason, then the call and network cause when GitHub gave no response. */
+export function reviewFailureLogText(out: { why: string; failure?: ReviewCallFailure }): string {
+  return out.failure ? `${out.why} (${out.failure.call}: ${out.failure.cause})` : out.why;
+}
+
+/** The round's failure record for a GitHub call that got no response, or undefined for any other error. */
+function callFailure(err: unknown, step: ReviewCallFailure['step'], at: string): ReviewCallFailure | undefined {
+  return err instanceof GitHubUnreachable ? { at, step, call: err.call, cause: err.networkCause } : undefined;
+}
+
+/**
+ * One GitHub REST call. A fetch that throws becomes GitHubUnreachable,
+ * naming the call and its network cause. A read (GET) retries once after
+ * a short wait; a write never retries, since GitHub may have applied it.
+ */
 async function github<T>(f: FetchLike, token: string, method: string, url: string, body?: unknown): Promise<T> {
-  const res = await f(`${API}${url}`, {
+  const init = {
     method,
     headers: {
       authorization: `Bearer ${token}`,
@@ -59,7 +117,20 @@ async function github<T>(f: FetchLike, token: string, method: string, url: strin
       ...(body ? { 'content-type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+  };
+  let res: Response;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await f(`${API}${url}`, init);
+      break;
+    } catch (err) {
+      if (method === 'GET' && attempt === 1) {
+        await new Promise(resolve => setTimeout(resolve, READ_RETRY_MS));
+        continue;
+      }
+      throw new GitHubUnreachable(`${method} ${url}`, fetchFailureCause(err));
+    }
+  }
   const headers: Record<string, string> = {};
   res.headers.forEach((v, k) => (headers[k.toLowerCase()] = v));
   recordGitHubResponse(headers, { success: res.ok });
@@ -227,7 +298,7 @@ async function clearGeneratedComments(key: string, round: ReviewRound, reviewId:
  * already carries the round's marker is adopted and updated instead of duplicated.
  * Existing body text and inline comments survive re-requests and redrafts.
  */
-export async function stageReview(key: string, opts: Opts = {}): Promise<{ staged: true; reviewId: string } | { staged: false; why: string }> {
+export async function stageReview(key: string, opts: Opts = {}): Promise<StageResult> {
   const c = context(key, opts);
   if (typeof c === 'string') return { staged: false, why: c };
   const { r, token, f, at, base } = c;
@@ -322,8 +393,9 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   } catch (err) {
     fs.rmSync(lock, { force: true });
     const why = err instanceof Error ? err.message : String(err);
-    saveRound(key, r.id, (x) => (x.reason = `stage failed: ${why}`), at);
-    return { staged: false, why };
+    const failure = callFailure(err, 'stage', at);
+    saveRound(key, r.id, (x) => { x.reason = `stage failed: ${why}`; if (failure) x.lastFailure = failure; }, at);
+    return { staged: false, why, ...(failure ? { failure } : {}) };
   }
 }
 
@@ -395,7 +467,9 @@ async function approveWithoutDraft(key: string, opts: Opts & { by: PostBy }): Pr
     return finish(String(posted.id), current.head.sha);
   } catch (error) {
     fs.rmSync(lock, { force: true });
-    return { posted: false, why: error instanceof Error ? error.message : String(error) };
+    const failure = callFailure(error, 'post', at);
+    if (failure) saveRound(key, r.id, (x) => { x.lastFailure = failure; }, at);
+    return { posted: false, why: error instanceof Error ? error.message : String(error), ...(failure ? { failure } : {}) };
   }
 }
 
@@ -484,8 +558,9 @@ export async function postReview(key: string, opts: Opts & { by: PostBy; stale?:
   } catch (err) {
     fs.rmSync(lock, { force: true });
     const why = err instanceof Error ? err.message : String(err);
-    saveRound(key, r.id, (x) => (x.reason = `post failed: ${why}`), at);
-    return { posted: false, why };
+    const failure = callFailure(err, 'post', at);
+    saveRound(key, r.id, (x) => { x.reason = `post failed: ${why}`; if (failure) x.lastFailure = failure; }, at);
+    return { posted: false, why, ...(failure ? { failure } : {}) };
   }
 }
 
