@@ -135,9 +135,11 @@ describe('pruning run history', () => {
     expect(pruneRunHistory(14, NOW)).toMatchObject({ attempts: 1, cards: 1 });
     expect(fs.existsSync(archivedDecisionDir(old)!)).toBe(false);
     const receipt = readRecordArchive(old)!;
-    const files = execFileSync('tar', ['-tzf', path.join(home, 'archive', receipt.bundle)], { encoding: 'utf8' });
-    const output = files.split('\n').find((file) => file.endsWith('/output.log'))!;
-    expect(execFileSync('tar', ['-xOzf', path.join(home, 'archive', receipt.bundle), output], { encoding: 'utf8' })).toBe('ok\n');
+    // Relative paths: GNU tar on Windows reads a drive letter as a remote host.
+    const bundle = `archive/${receipt.bundle}`;
+    const files = execFileSync('tar', ['-tzf', bundle], { cwd: home, encoding: 'utf8' });
+    const output = files.split(/\r?\n/).find((file) => file.endsWith('/output.log'))!;
+    expect(execFileSync('tar', ['-xOzf', bundle, output], { cwd: home, encoding: 'utf8' })).toBe('ok\n');
     expect(readRunAttempt(fresh)?.state).toBe('succeeded');
     expect(fs.existsSync(path.join(decisionDir(running)!, 'run', 'latest.json'))).toBe(true);
     expect(pruneRunHistory(14, NOW)).toMatchObject({ attempts: 0, cards: 0 });
