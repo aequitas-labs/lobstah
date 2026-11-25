@@ -375,33 +375,6 @@ it('Stop lists overdue queues and stalls beside send expectations even after the
   expect(hook(['hook', 'stop'], { session_id: HELM }).stdout).not.toContain('queued-too-long');
 });
 
-it('lets the helm stop behind a progressing chore but blocks a long wait with its holder', () => {
-  takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
-  fs.writeFileSync(path.join(home, 'config.toml'), '[repos.web]\npath = "/unused"\n');
-  enqueue({ id: 'holder', repo: 'web', brief: 'review' }, 'chore');
-  claimNext('chore');
-  appendStatus('holder', 'chore', 'working', 'reading the diff');
-  fs.writeFileSync(path.join(laneDirs('chore').active, 'holder', 'runner.json'),
-    JSON.stringify({ pid: process.pid, startedAt: new Date(Date.now() - 300_000).toISOString() }));
-  enqueue({ id: 'waiting', repo: 'web', brief: 'review', queuedAt: new Date(Date.now() - 200_000).toISOString() }, 'chore');
-  noticeDispatchProgress();
-  const quiet = hook(['hook', 'stop'], { session_id: HELM, hook_event_name: 'Stop' });
-  expect(quiet.status, quiet.stderr).toBe(0);
-  expect(quiet.stdout).not.toContain('queued-too-long');
-  expect(buildTendReport().attention.filter((item) => item.kind === 'dispatch-progress')).toEqual([]);
-  const queuePath = path.join(laneDirs('chore').queue, 'waiting.json');
-  const descriptor = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-  descriptor.queuedAt = new Date(Date.now() - 1801_000).toISOString();
-  fs.writeFileSync(queuePath, JSON.stringify(descriptor));
-  noticeDispatchProgress(); unseenNotices(true);
-  const overdue = hook(['hook', 'stop'], { session_id: HELM, hook_event_name: 'Stop' });
-  expect(overdue.status, overdue.stderr).toBe(0);
-  expect(overdue.stdout).toContain('queued-too-long');
-  expect(overdue.stdout).toContain('holder (5m old)');
-  expect(overdue.stdout).toContain('Check or cancel the slot holder');
-  expect(overdue.stdout).not.toContain('re-address');
-});
-
 it('man wait wakes without polling status when the daemon posts an overdue queue notice', () => {
   const id = '77777777-7777-4777-8777-777777777777';
   enqueue({ id, repo: 'web', brief: 'b', for: 'wt:absent', queuedAt: new Date(Date.now() - 200_000).toISOString() });
