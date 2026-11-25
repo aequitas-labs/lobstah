@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   dismissReview,
+  newReviewRound,
   dispatchWasCancelled,
   loadConfig,
   reviewCanPublish,
@@ -64,6 +65,24 @@ async function github<T>(f: FetchLike, token: string, method: string, url: strin
   recordGitHubResponse(headers, { success: res.ok });
   if (!res.ok) throw new GitHubError(res.status, `GitHub ${method} ${url}: ${res.status} ${(await res.text()).slice(0, 300)}`);
   return (res.status === 204 ? undefined : await res.json()) as T;
+}
+
+/** A review returned by GitHub, including the author needed to protect personal drafts. */
+interface GitHubReview { id: number; state: string; body?: string | null; user?: { login: string } }
+
+/** Recognize drafts from any lobstah round, including rounds absent from local history. */
+function isLobstahReview(review: GitHubReview): boolean {
+  return /<!-- lobstah:review [^\r\n]+? -->/.test(review.body ?? '');
+}
+
+/** Read all review pages so an older pending draft cannot hide behind submitted reviews. */
+async function listReviews(f: FetchLike, token: () => string, base: string): Promise<GitHubReview[]> {
+  const reviews: GitHubReview[] = [];
+  for (let page = 1; ; page++) {
+    const batch = await github<GitHubReview[]>(f, token(), 'GET', `${base}?per_page=100${page > 1 ? `&page=${page}` : ''}`);
+    reviews.push(...batch);
+    if (batch.length < 100) return reviews;
+  }
 }
 
 function context(key: string, opts: Opts): { r: ReviewRound; token: () => string; f: FetchLike; at: string; base: string } | string {
@@ -221,7 +240,7 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
   const lock = receipt(key, r.id, 'staged.json', 'stage', at);
   if (!lock) return { staged: false, why: `${key}: staging this round is already in flight or done` };
   try {
-    const existing = await github<Array<{ id: number; state: string; body?: string | null; user?: { login: string } }>>(f, token(), 'GET', `${base}?per_page=100`);
+    const existing = await listReviews(f, token, base);
     const prior = existing.find((x) => String(x.id) === r.pendingReview?.reviewId) ?? existing.find((x) => x.body?.includes(reviewMarker(r.id)));
     if (prior && prior.state !== 'PENDING') {
       markReviewPosted(key, r.id, { reviewId: String(prior.id), by: 'review tool', at });
@@ -229,12 +248,16 @@ export async function stageReview(key: string, opts: Opts = {}): Promise<{ stage
     }
     const refused = postRefusal(key, r, 'cli');
     if (refused) { fs.rmSync(lock, { force: true }); return { staged: false, why: refused }; }
-    // GitHub allows one pending review per identity, across all request rounds.
-    // Keep its body and inline comments intact; put the new draft alongside them.
-    const identity = loadConfig().reviews.identity?.toLowerCase();
-    const pending = prior ?? (identity
-      ? existing.find(review => review.state === 'PENDING' && review.user?.login.toLowerCase() === identity)
-      : undefined);
+    const drafts = existing.filter(review => review.state === 'PENDING');
+    const personal = drafts.filter(review => !isLobstahReview(review));
+    if (personal.length) {
+      const identity = loadConfig().reviews.identity ?? (await github<{ login: string }>(f, token(), 'GET', '/user')).login;
+      if (personal.some(review => review.user?.login.toLowerCase() === identity.toLowerCase())) {
+        fs.rmSync(lock, { force: true });
+        return { staged: false, why: 'You have a pending review on this PR. Send or delete it before staging a new draft.' };
+      }
+    }
+    const pending = prior && isLobstahReview(prior) ? prior : drafts.find(isLobstahReview);
     let generatedBody = reviewBody(draft.body, r, draft.decisions, draft.threads);
     let created = false;
     let id: number;
@@ -491,32 +514,40 @@ export async function settleStagedReview(key: string, opts: Opts = {}): Promise<
   }
 }
 
-/** Delete the round's staged pending review, if it is still pending. Nothing a person sent is ever deleted. */
+/** Delete the tracked draft and any older lobstah pending drafts on this PR. Submitted reviews survive. */
 async function discardStaged(key: string, opts: Opts): Promise<string | undefined> {
   const item = readReview(key);
   const newest = item && latestRound(item);
-  if (!(newest?.staged ?? newest?.pendingReview)) return undefined;
+  if (!newest) return undefined;
   const c = context(key, opts);
   if (typeof c === 'string') return c;
   const { r, token, f, at, base } = c;
   const pending = r.staged ?? r.pendingReview;
-  if (!pending) return undefined;
   try {
-    const review = await github<{ state: string }>(f, token(), 'GET', `${base}/${pending.reviewId}`);
-    if (review.state !== 'PENDING') {
-      markReviewPosted(key, r.id, { reviewId: pending.reviewId, by: 'review tool', at });
-      return `${key}: this review was already sent from the review tool`;
+    if (pending) {
+      try {
+        const review = await github<GitHubReview>(f, token(), 'GET', `${base}/${pending.reviewId}`);
+        if (review.state !== 'PENDING') {
+          markReviewPosted(key, r.id, { reviewId: pending.reviewId, by: 'review tool', at });
+          return `${key}: this review was already sent from the review tool`;
+        }
+      } catch (err) {
+        if (!(err instanceof GitHubError && err.status === 404)) throw err;
+      }
     }
-    await github(f, token(), 'DELETE', `${base}/${pending.reviewId}`);
+    for (const review of await listReviews(f, token, base)) {
+      if (review.state === 'PENDING' && isLobstahReview(review))
+        await github(f, token(), 'DELETE', `${base}/${review.id}`);
+    }
   } catch (err) {
-    if (!(err instanceof GitHubError && err.status === 404)) return err instanceof Error ? err.message : String(err);
+    return err instanceof Error ? err.message : String(err);
   }
   fs.rmSync(path.join(reviewRoundDir(key, r.id)!, 'staged.json'), { force: true });
   saveRound(key, r.id, (x) => { delete x.staged; delete x.pendingReview; delete x.refresh; }, at);
   return undefined;
 }
 
-/** Dismiss the newest round: its pending review is deleted from the PR, and nothing is posted. */
+/** Dismiss the newest round after removing lobstah pending drafts from every round on the PR. */
 export async function dismissReviewRound(key: string, by: string, opts: Opts = {}): Promise<string | undefined> {
   const why = await discardStaged(key, opts);
   if (why) return why;
@@ -526,7 +557,11 @@ export async function dismissReviewRound(key: string, by: string, opts: Opts = {
 }
 
 /** Re-draft locally, retaining the pending review and any edits for the next staging pass. */
-export async function redraftReviewRound(key: string, opts: Opts = {}): Promise<string | undefined> {
+export async function redraftReviewRound(key: string, opts: Opts & { newRound?: boolean } = {}): Promise<string | undefined> {
+  if (opts.newRound) {
+    const out = newReviewRound(key, opts.now);
+    return typeof out === 'string' ? out : undefined;
+  }
   const item = readReview(key);
   const r = item && latestRound(item);
   if (r && !['drafted', 'stale', 'failed'].includes(r.state)) return `${key}: the newest round is ${r.state}; only a drafted, stale or failed round re-drafts`;

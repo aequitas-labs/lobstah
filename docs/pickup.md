@@ -314,6 +314,7 @@ the jobs lobstah starts on its own: a round you ask for (Draft on the
 glass's Reviews tab, or a redraft) always starts, and counts toward the
 day's total. `lobstah reviews redraft <key>` replaces a ready draft or retries a stale or
 failed round at the current head, on the next pick cycle, in any mode.
+After dismissing a review, `lobstah reviews redraft <key> --new` opens a fresh round.
 
 **Staging and posting.** With `mode = "auto-draft"` or `publish = false` for an on-demand job, a
 fresh draft is staged on the PR as the identity's **pending review**:
@@ -328,7 +329,9 @@ search, pick reads that review once: submitted marks the round `posted` (by
 `lobstah reviews` and Glass as “Ready to post” with its verdict’s send button. Previously withdrawn
 staged drafts return to the inbox when GitHub confirms they are still pending.
 A fresh draft replaces only unchanged content that lobstah generated in the
-identity's pending review. Hand-written comments, summaries, and edits stay.
+identity's lobstah-marked pending review, including drafts from older rounds.
+Hand-written comments, summaries, and edits stay. A pending review without
+lobstah's marker belongs to you: send or delete it before staging a new draft.
 When the PR head changes, GitHub requires a new pending review for that commit:
 hand-written inline comments carry over verbatim with file and line context in
 the summary. A local backup survives failed replacement attempts.
@@ -340,7 +343,8 @@ created with `wx` before the call and removed if it fails, and a review on
 the PR that already carries the round's marker is adopted (pending) or
 recorded (sent) instead of written again. A failed stage or post keeps its
 reason on the round. Failed publishing is not retried on its own; failed staging is repaired automatically. `lobstah reviews dismiss`
-deletes the round’s pending review; a review already sent is never deleted.
+deletes any lobstah-marked pending review on the PR, including older rounds;
+personal drafts and reviews already sent are never deleted.
 Redraft keeps the pending review and unsent edits for the next staging pass.
 Stale drafts and staging failures automatically start a replacement draft, with
 persisted backoff between failed attempts. Repairs always require a send
