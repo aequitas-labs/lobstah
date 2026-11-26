@@ -114,6 +114,57 @@ it('reports only the stalled holder while queued chores wait their turn', () => 
   expect(notices.every((notice) => !noticeStands(notice))).toBe(true);
 });
 
+/** Claim a headless chore whose runner process (this test process) is alive. */
+function liveChore(id: string): void {
+  enqueue({ id, repo: 'r', brief: 'review a PR' }, 'chore');
+  claimNext('chore');
+  fs.writeFileSync(path.join(laneDirs('chore').active, id, 'runner.json'),
+    JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), attempts: 1 }));
+  appendStatus(id, 'chore', 'working', 'reading the diff');
+}
+const hung = (cfg = loadConfig()) => dispatchProgress(Date.now(), cfg).filter((p) => p.state === 'hung');
+const hungNotices = () => listNotices().filter((n) => n.text.startsWith('hung '));
+
+it('alerts once when a live slot holder passes the max age with no progress', () => {
+  const cfg = loadConfig();
+  expect(cfg.limits.slotMaxAgeSecs).toBe(2700);
+  liveChore('stuck-review');
+  enqueue({ id: 'queued-review', repo: 'r', brief: 'review a PR' }, 'chore');
+  advance(2700);
+  expect(hung(cfg)).toEqual([expect.objectContaining({ id: 'stuck-review', lane: 'chore' })]);
+  expect(hung(cfg)[0]?.text).toBe('hung stuck-review: chore has held a chore slot for 45m with no note or activity for 45m. ' +
+    'Check it with lobstah status stuck-review, or cancel it with lobstah cancel stuck-review.');
+  noticeDispatchProgress(Date.now(), cfg);
+  noticeDispatchProgress(Date.now(), cfg);
+  advance(3600);
+  noticeDispatchProgress(Date.now(), cfg);
+  expect(hungNotices()).toHaveLength(1);
+  expect(noticeStands(hungNotices()[0]!)).toBe(true);
+  expect(dispatchProgress(Date.now(), cfg).some((p) => p.id === 'queued-review')).toBe(false);
+});
+
+it('stays quiet for a live slot holder past the max age that is still progressing', () => {
+  const cfg = loadConfig();
+  liveChore('long-review');
+  for (let step = 0; step < 6; step++) {
+    advance(600);
+    if (step % 2 === 0) appendStatus('long-review', 'chore', 'working', `step ${step}`);
+    else writeActivity('long-review', 'chore', { at: new Date().toISOString(), kind: 'tool', summary: 'testing' });
+  }
+  expect(hung(cfg)).toEqual([]);
+  noticeDispatchProgress(Date.now(), cfg);
+  expect(hungNotices()).toEqual([]);
+});
+
+it('stays quiet for a silent slot holder under the max age', () => {
+  const cfg = loadConfig();
+  liveChore('young-review');
+  advance(2699);
+  expect(hung(cfg)).toEqual([]);
+  noticeDispatchProgress(Date.now(), cfg);
+  expect(hungNotices()).toEqual([]);
+});
+
 it('keeps both queues quiet while work and chore capacity is running', () => {
   const cfg = loadConfig();
   cfg.limits.choreConcurrent = 2;

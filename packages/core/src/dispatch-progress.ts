@@ -1,4 +1,4 @@
-import { loadConfig } from './config.js';
+import { loadConfig, DEFAULT_LIMITS } from './config.js';
 import type { Config } from './config.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -49,7 +49,7 @@ export interface DispatchProgress {
   id: string;
   lane: Lane;
   repo?: string;
-  state: 'queued-too-long' | 'stalled' | 'idle-while-working';
+  state: 'queued-too-long' | 'stalled' | 'idle-while-working' | 'hung';
   since: string;
   ageSecs: number;
   stateHash: string;
@@ -106,6 +106,40 @@ function runnerIsDead(id: string, lane: Lane): boolean {
   try { process.kill(pid, 0); }
   catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
   return false;
+}
+
+/** The runner record of a headless slot holder whose process answers a signal check. */
+function liveRunner(id: string, lane: Lane): RunnerInfo | undefined {
+  let runner: Partial<RunnerInfo>;
+  try { runner = JSON.parse(fs.readFileSync(path.join(laneDirs(lane).active, id, 'runner.json'), 'utf8')) as Partial<RunnerInfo>; }
+  catch { return undefined; }
+  const pid: number | undefined = runner.pid;
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0 || typeof runner.startedAt !== 'string') return undefined;
+  try { process.kill(pid, 0); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EPERM') return undefined; }
+  return runner as RunnerInfo;
+}
+
+/** Headless slot holders alive past the max age with no note, activity or event in that time. */
+function hungSlotHolders(lane: Lane, now: number, cfg: Config): DispatchProgress[] {
+  const maxAgeSecs: number = cfg.limits.slotMaxAgeSecs ?? DEFAULT_LIMITS.slotMaxAgeSecs ?? 0;
+  if (maxAgeSecs <= 0) return [];
+  return activeIds(lane).flatMap((id): DispatchProgress[] => {
+    if (isFinished(id, lane) || isParked(id, lane) || isTrapCatch(id, lane) || cancelRequested(id, lane)) return [];
+    const last = readStatusLog(id, lane).at(-1);
+    if (last && ['done', 'failed', 'paused', 'needs-decision', 'blocked'].includes(last.verb)) return [];
+    const runner: RunnerInfo | undefined = liveRunner(id, lane);
+    const started: number = Date.parse(runner?.startedAt ?? '');
+    if (!runner || !Number.isFinite(started)) return [];
+    const progress: number = Math.max(started, Date.parse(last?.at ?? '') || 0,
+      Date.parse(readActivity(id, lane)?.at ?? '') || 0, lastEventAt(id, lane) ?? 0);
+    const ageSecs: number = (now - started) / 1000;
+    const silentSecs: number = (now - progress) / 1000;
+    if (ageSecs < maxAgeSecs || silentSecs < maxAgeSecs) return [];
+    return [{ id, lane, repo: storedDescriptor(id, lane)?.repo, state: 'hung', since: runner.startedAt, ageSecs,
+      thresholdSecs: maxAgeSecs, stateHash: `hung:${runner.startedAt}`,
+      text: `hung ${id}: ${lane === 'chore' ? 'chore' : 'work dispatch'} has held a ${lane} slot for ${ageLabel(ageSecs * 1000)} with no note or activity for ${ageLabel(silentSecs * 1000)}. Check it with lobstah status ${id}, or cancel it with lobstah cancel ${id}.` }];
+  });
 }
 
 /** Count running capacity that can release a turn for this queued dispatch. */
@@ -192,13 +226,19 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), o
         thresholdSecs: cfg.helm.stalledNoticeSecs, stateHash: `stalled:${since}`,
         text: `stalled ${id}: no activity or note for ${ageLabel(ageSecs * 1000)} (last activity/note ${since}); last note: ${last?.note ?? '(none)'}. ${lane === 'chore' ? `Check the chore with lobstah status ${id}, or cancel it.` : `Check the worker with lobstah status ${id}; resolve or cancel and re-dispatch.`}` });
     }
+    out.push(...hungSlotHolders(lane, now, cfg));
   }
   return out;
 }
 
-/** First wake at the threshold; reminders at +15m, +45m, +105m, … . */
+/** First wake at the threshold; reminders at +15m, +45m, +105m, … . A hung slot holder wakes once. */
 export function noticeDispatchProgress(now = Date.now(), cfg = loadConfig()): void {
   for (const p of dispatchProgress(now, cfg)) {
+    if (p.state === 'hung') {
+      postNotice({ kind: 'dispatch-progress', refId: p.id, repo: p.repo, text: p.text,
+        stateHash: p.stateHash, dedupeKey: `dispatch-hung-${p.lane}-${p.id}` });
+      continue;
+    }
     const reminder = Math.floor(Math.log2(1 + Math.max(0, p.ageSecs - p.thresholdSecs) / 900));
     postNotice({ kind: p.state === 'idle-while-working' ? 'trap-idle-working' : 'dispatch-progress', refId: p.id, repo: p.repo, text: p.text,
       stateHash: p.stateHash, dedupeKey: `dispatch-progress-${p.lane}-${p.id}-${p.stateHash}-${reminder}` });

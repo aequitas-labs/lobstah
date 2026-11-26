@@ -260,6 +260,8 @@ export interface LimitsConfig {
   questionWaitSecs?: number;
   /** Hard ceiling for progress-extended wall-clock time (default 4× wallClockSecs). */
   maxWallClockSecs?: number;
+  /** A live headless slot holder this old with no note or activity in that time raises one alert (default 45 minutes); 0 disables. */
+  slotMaxAgeSecs?: number;
   pushEarly: boolean;
   draftPr: boolean;
   checkpointOnStop: boolean;
@@ -727,6 +729,7 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   maxRestartAttempts: 2,
   wallClockSecs: 3600,
   questionWaitSecs: 86400,
+  slotMaxAgeSecs: 2700,
   pushEarly: true,
   draftPr: true,
   checkpointOnStop: true,
@@ -777,6 +780,9 @@ export function loadConfig(): Config {
   const recordRetentionDays = (raw.limits as Partial<LimitsConfig> | undefined)?.recordRetentionDays ?? DEFAULT_LIMITS.recordRetentionDays;
   if (typeof recordRetentionDays !== 'number' || !Number.isFinite(recordRetentionDays) || recordRetentionDays < 0)
     throw new Error('[limits].recordRetentionDays must be a non-negative number');
+  const slotMaxAgeSecs = (raw.limits as Partial<LimitsConfig> | undefined)?.slotMaxAgeSecs ?? DEFAULT_LIMITS.slotMaxAgeSecs;
+  if (typeof slotMaxAgeSecs !== 'number' || !Number.isFinite(slotMaxAgeSecs) || slotMaxAgeSecs < 0)
+    throw new Error('[limits].slotMaxAgeSecs must be a non-negative number');
   const petOpen = (raw.pet as Partial<PetConfig> | undefined)?.open ?? 'tab';
   if (!['tab', 'app', 'helm'].includes(petOpen)) throw new Error(`[pet].open must be "tab", "app", or "helm" in ${configPath()}`);
   const watch = { ...DEFAULT_WATCH, ...((raw.watch as Partial<WatchConfig>) ?? {}) };
