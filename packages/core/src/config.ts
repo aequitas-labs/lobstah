@@ -408,9 +408,9 @@ export interface HelmConfig {
   chat: HelmChat;
   /** IANA timezone for the 04:00-local daily goals boundary; absent uses the system zone. */
   timezone?: string;
-  /** Queued age before lack of a claim needs attention; 0 disables. */
+  /** Queued age with no running capacity before attention; 0 disables. */
   queuedNoticeSecs: number;
-  /** Maximum quiet wait behind progressing chore slots; 0 disables this escalation. */
+  /** Legacy setting, accepted for compatibility; running chore queues stay quiet. */
   choreQueuedNoticeSecs: number;
   /** Silence since both activity and note before stalled attention; 0 disables. */
   stalledNoticeSecs: number;

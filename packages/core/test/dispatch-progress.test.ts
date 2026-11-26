@@ -89,7 +89,7 @@ it.each([1, 2])('keeps chores quiet while all %i chore slots are progressing', (
   expect(listNotices()).toEqual([]);
 });
 
-it('restores queued chore notices when one holder stalls and clears them when activity resumes', () => {
+it('reports only the stalled holder while queued chores wait their turn', () => {
   const cfg = loadConfig();
   cfg.limits.choreConcurrent = 2;
   for (const id of ['silent-review', 'busy-review']) {
@@ -104,35 +104,36 @@ it('restores queued chore notices when one holder stalls and clears them when ac
   touchEvents('busy-review', 'chore');
   expect(dispatchProgress(Date.now(), cfg)).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: 'silent-review', state: 'stalled' }),
-    expect.objectContaining({ id: 'queued-review', state: 'queued-too-long' }),
-    expect.objectContaining({ id: 'queued-repair', state: 'queued-too-long' }),
   ]));
   noticeDispatchProgress(Date.now(), cfg);
   const notices = listNotices();
-  expect(notices).toHaveLength(3);
+  expect(notices).toHaveLength(1);
   expect(notices.every((notice) => noticeStands(notice))).toBe(true);
   touchEvents('silent-review', 'chore');
   expect(dispatchProgress(Date.now(), cfg)).toEqual([]);
   expect(notices.every((notice) => !noticeStands(notice))).toBe(true);
 });
 
-it('still reports queued work while healthy chores and work hold every headless slot', () => {
+it('keeps both queues quiet while work and chore capacity is running', () => {
   const cfg = loadConfig();
-  cfg.limits.choreConcurrent = 1;
-  cfg.limits.maxConcurrent = 1;
+  cfg.limits.choreConcurrent = 2;
+  cfg.limits.maxConcurrent = 2;
   for (const lane of ['work', 'chore'] as const) {
-    enqueue({ id: `active-${lane}`, repo: 'r', brief: 'active dispatch' }, lane);
-    claimNext(lane);
-    appendStatus(`active-${lane}`, lane, 'working');
-    enqueue({ id: `queued-${lane}`, repo: 'r', brief: 'waiting dispatch' }, lane);
+    for (const slot of [0, 1]) {
+      const id: string = `active-${lane}-${slot}`;
+      enqueue({ id, repo: 'r', brief: 'active dispatch' }, lane);
+      claimNext(lane);
+      appendStatus(id, lane, 'working');
+    }
+    const queued = { id: `queued-${lane}`, repo: 'r', brief: 'waiting dispatch' };
+    enqueue(queued, lane);
+    expect(dispatchQueueReason(queued, lane, cfg)).toBe(`queued behind 2 running ${lane === 'chore' ? 'chores' : 'work dispatches'} (0 ahead)`);
   }
   advance(cfg.helm.queuedNoticeSecs);
-  expect(dispatchProgress(Date.now(), cfg)).toEqual([
-    expect.objectContaining({ id: 'queued-work', lane: 'work', state: 'queued-too-long' }),
-  ]);
+  expect(dispatchProgress(Date.now(), cfg)).toEqual([]);
 });
 
-it.each([0, 1])('reports a queued chore when %i of two chore slots are occupied', (occupied: number) => {
+it.each([0, 1])('reports a queued chore only with no running chores (%i of two slots occupied)', (occupied: number) => {
   const cfg = loadConfig();
   cfg.limits.choreConcurrent = 2;
   for (let slot = 0; slot < occupied; slot++) {
@@ -142,7 +143,7 @@ it.each([0, 1])('reports a queued chore when %i of two chore slots are occupied'
   }
   enqueue({ id: 'queued-review', repo: 'r', brief: 'review a PR' }, 'chore');
   advance(cfg.helm.queuedNoticeSecs);
-  expect(dispatchProgress(Date.now(), cfg)).toEqual([
+  expect(dispatchProgress(Date.now(), cfg)).toEqual(occupied ? [] : [
     expect.objectContaining({ id: 'queued-review', state: 'queued-too-long' }),
   ]);
 });
@@ -172,14 +173,13 @@ it('does not count an interactive chore catch as an occupied headless slot', () 
   ]);
 });
 
-it.each(['cancelled', 'done', 'failed', 'paused'] as const)('does not suppress queued chores behind a %s chore', (state) => {
+it.each(['done', 'failed', 'paused'] as const)('does not suppress queued chores behind a %s chore', (state) => {
   const cfg = loadConfig();
   cfg.limits.choreConcurrent = 1;
   enqueue({ id: 'review', repo: 'r', brief: 'review a PR' }, 'chore');
   claimNext('chore');
   appendStatus('review', 'chore', 'working');
-  if (state === 'cancelled') requestCancel('review', 'chore');
-  else appendStatus('review', 'chore', state);
+  appendStatus('review', 'chore', state);
   enqueue({ id: 'queued-review', repo: 'r', brief: 'review a PR' }, 'chore');
   advance(cfg.helm.queuedNoticeSecs);
   expect(dispatchProgress(Date.now(), cfg)).toEqual([
@@ -192,7 +192,7 @@ it('explains busy/absent traps, headless capacity and unknown repos without chan
   fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify({ trapId: 'seat', name: 'young-foam',
     sessionId: 'session', harness: 'codex', worktree: home, cwd: home, repo: 'r', claimed: 'other-job',
     heartbeatAt: new Date().toISOString(), signedOnAt: new Date().toISOString() }));
-  expect(dispatchQueueReason({ id: 'q', repo: 'r', brief: 'b', for: 'wt:seat' }, 'work')).toContain('young-foam (wt:seat), busy on dispatch other-job');
+  expect(dispatchQueueReason({ id: 'q', repo: 'r', brief: 'b', for: 'wt:seat' }, 'work')).toContain('queued behind 1 running dispatch on r · young-foam (wt:seat)');
   appendStatus('other-job', 'work', 'done');
   expect(dispatchQueueReason({ id: 'q', repo: 'r', brief: 'b', for: 'wt:seat' }, 'work')).not.toContain('busy');
   expect(dispatchQueueReason({ id: 'q', repo: 'absent', brief: 'b' }, 'work')).toContain('not configured');
@@ -236,35 +236,45 @@ function queueBehindLiveChore(): void {
   enqueue({ id: 'waiting', repo: 'r', brief: 'review another PR' }, 'chore');
 }
 
-it('escalates a progressing chore queue at 30 minutes with its holder and age', () => {
+it('keeps a running chore queue quiet beyond the former long-wait threshold', () => {
   queueBehindLiveChore();
-  advance(1799);
+  advance(3600);
   touchEvents('holder', 'chore');
   expect(dispatchProgress()).toEqual([]);
-  advance(1);
-  const notice = dispatchProgress()[0]!;
-  expect(notice.thresholdSecs).toBe(1800);
-  expect(notice.text).toContain('holder (30m old)');
-  expect(notice.text).toContain('Check or cancel the slot holder');
-  expect(notice.text).not.toContain('re-address');
   noticeDispatchProgress();
-  expect(noticeStands(listNotices()[0]!)).toBe(true);
-  claimNext('chore');
-  expect(noticeStands(listNotices()[0]!)).toBe(false);
+  expect(listNotices()).toEqual([]);
+  // A terminal report releases capacity even while its active directory remains.
+  appendStatus('holder', 'chore', 'done');
+  expect(dispatchProgress()).toEqual([
+    expect.objectContaining({ id: 'waiting', state: 'queued-too-long', thresholdSecs: 180 }),
+  ]);
+  expect(dispatchProgress()[0]?.text).toContain('Check or cancel the chore.');
+  noticeDispatchProgress();
+  const notice = listNotices()[0]!;
+  expect(noticeStands(notice)).toBe(true);
+  enqueue({ id: 'next-holder', repo: 'r', brief: 'review' }, 'chore');
+  claimNext('chore', (d) => d.id !== 'next-holder');
+  appendStatus('next-holder', 'chore', 'working');
+  expect(noticeStands(notice)).toBe(false);
 });
 
-it('honors the configured long chore wait and allows disabling it', () => {
+it('accepts the legacy chore wait setting without escalating a running queue', () => {
   fs.appendFileSync(path.join(home, 'config.toml'), '\n[helm]\nchoreQueuedNoticeSecs = 600\n');
   queueBehindLiveChore();
-  advance(599);
+  advance(600);
   expect(dispatchProgress()).toEqual([]);
-  advance(1);
-  expect(dispatchProgress()[0]?.thresholdSecs).toBe(600);
   const cfg = loadConfig();
   cfg.helm.choreQueuedNoticeSecs = 0;
   advance(3600);
   touchEvents('holder', 'chore');
   expect(dispatchProgress(Date.now(), cfg)).toEqual([]);
+});
+
+it('keeps a cancelling chore queue quiet until its holder finishes', () => {
+  queueBehindLiveChore();
+  requestCancel('holder', 'chore');
+  advance(180);
+  expect(dispatchProgress()).toEqual([]);
 });
 
 it('reports a dead slot holder even when its last activity is recent', () => {
@@ -274,7 +284,8 @@ it('reports a dead slot holder even when its last activity is recent', () => {
     throw Object.assign(new Error('No such process'), { code: 'ESRCH' });
   });
   try {
-    expect(dispatchProgress()[0]?.text).toContain('holder (3m old, dead)');
+    expect(dispatchProgress()[0]?.id).toBe('waiting');
+    expect(dispatchProgress()[0]?.text).toContain('Check or cancel the chore.');
     noticeDispatchProgress();
     expect(noticeStands(listNotices()[0]!)).toBe(true);
   } finally { kill.mockRestore(); }
@@ -282,16 +293,42 @@ it('reports a dead slot holder even when its last activity is recent', () => {
   expect(noticeStands(listNotices()[0]!)).toBe(false);
 });
 
-it('names the stalled holder and gives a chore remedy', () => {
+it('reports a stalled holder without raising queued notices for its waiting chores', () => {
   queueBehindLiveChore();
   advance(1200);
-  const queued = dispatchProgress().find((item) => item.id === 'waiting')!;
-  expect(queued.text).toContain('holder (20m old, stalled');
-  expect(queued.text).toContain('Check or cancel the slot holder');
-  expect(queued.text).not.toContain('trap');
-  const stalled = dispatchProgress().find((item) => item.id === 'holder')!;
+  expect(dispatchProgress()).toHaveLength(1);
+  const stalled = dispatchProgress()[0]!;
+  expect(stalled.id).toBe('holder');
   expect(stalled.text).toContain('Check the chore with lobstah status holder, or cancel it.');
-  expect(stalled.text).not.toContain('re-dispatch');
+});
+
+it.each(['work', 'chore'] as const)('keeps addressed %s quiet only while its signed-on trap is busy', (lane) => {
+  enqueue({ id: 'holder', repo: 'r', brief: 'work' }, lane);
+  claimNext(lane);
+  appendStatus('holder', lane, 'working');
+  fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify({ trapId: 'seat', name: 'young-foam',
+    sessionId: 'session', harness: 'codex', worktree: home, cwd: home, repo: 'r', claimed: 'holder',
+    heartbeatAt: new Date().toISOString(), signedOnAt: new Date().toISOString() }));
+  enqueue({ id: 'waiting', repo: 'r', brief: 'work', for: 'wt:seat' }, lane);
+  enqueue({ id: 'absent', repo: 'r', brief: 'work', for: 'wt:absent' }, lane);
+  advance(180);
+  expect(dispatchProgress()).toEqual([
+    expect.objectContaining({ id: 'absent', state: 'queued-too-long', text: expect.stringContaining('not signed on') }),
+  ]);
+  fs.rmSync(path.join(home, 'soaking', 'seat.json'));
+  expect(dispatchProgress().map((item) => item.id).sort()).toEqual(['absent', 'waiting']);
+});
+
+it.each(['work', 'chore'] as const)('does not let the other lane hide a stalled %s queue', (lane) => {
+  const other = lane === 'work' ? 'chore' : 'work';
+  enqueue({ id: 'holder', repo: 'r', brief: 'work' }, other);
+  claimNext(other);
+  appendStatus('holder', other, 'working');
+  enqueue({ id: 'waiting', repo: 'r', brief: 'work' }, lane);
+  advance(180);
+  expect(dispatchProgress()).toEqual([
+    expect.objectContaining({ id: 'waiting', lane, state: 'queued-too-long' }),
+  ]);
 });
 
 it('does not hide an addressed chore behind unrelated healthy capacity', () => {
@@ -312,4 +349,32 @@ it('does not call a holder dead when process access is denied', () => {
   });
   try { expect(dispatchProgress()).toEqual([]); }
   finally { kill.mockRestore(); }
+});
+
+it('keeps a configured target quiet only while its matching signed-on trap is busy', () => {
+  const target = { kind: 'configured-trap' as const, profile: 'inspector', grounds: 'home', surface: 'terminal' as const };
+  enqueue({ id: 'waiting', brief: 'inspect', target, for: 'trap:inspector' });
+  fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify({ trapId: 'seat', name: 'young-foam',
+    sessionId: 'session', harness: 'codex', worktree: home, cwd: home, configured: target, hostedCatch: 'remote-work',
+    heartbeatAt: new Date().toISOString(), signedOnAt: new Date().toISOString() }));
+  advance(180);
+  expect(dispatchProgress()).toEqual([]);
+  expect(dispatchQueueReason({ id: 'waiting', brief: 'inspect', target, for: 'trap:inspector' }, 'work')).toContain('queued behind 1 running dispatch');
+  fs.rmSync(path.join(home, 'soaking', 'seat.json'));
+  expect(dispatchProgress()).toEqual([
+    expect.objectContaining({ id: 'waiting', state: 'queued-too-long', text: expect.stringContaining('not signed on') }),
+  ]);
+});
+
+it('keeps trap-any work quiet behind matching busy traps without hiding an unrelated queue', () => {
+  enqueue({ id: 'holder', repo: 'r', brief: 'work' });
+  claimNext('work');
+  appendStatus('holder', 'work', 'working');
+  fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify({ trapId: 'seat', name: 'young-foam',
+    sessionId: 'session', harness: 'codex', worktree: home, cwd: home, repo: 'r', claimed: 'holder',
+    heartbeatAt: new Date().toISOString(), signedOnAt: new Date().toISOString() }));
+  enqueue({ id: 'waiting', repo: 'r', brief: 'work', trapAny: true, harness: 'codex' });
+  enqueue({ id: 'other', repo: 'r', brief: 'work', trapAny: true, harness: 'claude' });
+  advance(180);
+  expect(dispatchProgress().map((item) => item.id)).toEqual(['other']);
 });

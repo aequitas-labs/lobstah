@@ -13,7 +13,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(home, 'config.toml'), '[limits]\nmaxConcurrent = 0\n');
 });
 afterEach(() => { vi.useRealTimers(); delete process.env.LOBSTAH_HOME; removeTempDir(home); });
-it('a trap-any queue at capacity wakes the helm with all-busy reason and clears when a trap takes it', () => {
+it('a trap-any queue waits quietly while its trap is busy and clears when the trap takes it', () => {
   fs.writeFileSync(path.join(home, 'config.toml'), `[repos.r]\npath = '${home}'\ntraps = 1\n`);
   const worktree = path.join(home, 'wt'); fs.mkdirSync(worktree);
   const on = signOnTrap({ name: 'amber-gull', sessionId: 's', repo: 'r', harness: 'claude', worktree, cwd: worktree, ttlMs: 60_000 });
@@ -22,9 +22,8 @@ it('a trap-any queue at capacity wakes the helm with all-busy reason and clears 
   enqueue({ id: 'waiting', repo: 'r', brief: 'b', trapAny: true });
   vi.setSystemTime(Date.now() + 180_000); tick(); tick();
   const notices = listNotices().filter((n) => n.kind === 'dispatch-progress' && n.refId === 'waiting');
-  expect(notices).toHaveLength(1);
-  expect(notices[0]?.text).toContain('all 1 r traps are busy');
-  expect(unseenNotices(false).find((n) => n.refId === 'waiting')?.text).toContain('all 1 r traps are busy');
+  expect(notices).toEqual([]);
+  expect(unseenNotices(false).filter((n) => n.refId === 'waiting')).toEqual([]);
   appendStatus('busy', 'work', 'done');
   expect(claimBait(readTrap(on.ok.trapId)!)?.id).toBe('waiting');
   expect(unseenNotices(false).filter((n) => n.kind === 'dispatch-progress' && n.refId === 'waiting')).toEqual([]);

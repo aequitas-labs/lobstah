@@ -15,6 +15,7 @@ import {
   waitingView,
   activityLine,
   dispatchProgress,
+  hasOpenCatch,
   dispatchQueueReason,
   activityView,
   readActivity,
@@ -654,6 +655,8 @@ export interface TendReport {
     failed24h: number;
   };
   queueWait?: string;
+  /** Queued chores and their current turn or delivery reason, without attention. */
+  queuedChores?: Array<{ id: string; reason: string }>;
   attention: TendAttention[];
   stories: TendStory[];
   watches: TendWatch[];
@@ -1107,7 +1110,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
   const hold = readHold();
   // A hold is the daemon choosing not to claim, not claiming broken.
   const stalled =
-    !hold && daemonUp && unaddressedQueued.length > 0 && slots.headless < cfg.limits.maxConcurrent && oldestQueuedAge > CLAIM_STALE_MS;
+    !hold && daemonUp && unaddressedQueued.length > 0 && slots.headless === 0 && oldestQueuedAge > CLAIM_STALE_MS;
 
   let queueWait: string | undefined;
   if (unaddressedQueued.length > 0 && slots.headless >= cfg.limits.maxConcurrent) {
@@ -1116,7 +1119,7 @@ export function buildTendReport(now: number = Date.now()): TendReport {
     const registered = listTraps();
     const notListening = [...new Set(awaiting.map((a) => a.for))].filter((address) => {
       const reg = registered.find((r) => address === `wt:${r.trapId}`);
-      return !reg || !!reg.claimed || !reg.firstParkedAt || now - Date.parse(reg.heartbeatAt) > cfg.soak.deferSecs * 1000;
+      return !reg || (!hasOpenCatch(reg) && (!reg.firstParkedAt || now - Date.parse(reg.heartbeatAt) > cfg.soak.deferSecs * 1000));
     });
     if (notListening.length) queueWait = `queued work waits: trap ${notListening.map((address) => {
       const reg = registered.find((r) => address === `wt:${r.trapId}`);
@@ -1303,6 +1306,10 @@ export function buildTendReport(now: number = Date.now()): TendReport {
       failed24h,
     },
     queueWait,
+    queuedChores: pendingIds('chore').flatMap((id) => {
+      const descriptor: Descriptor | undefined = storedDescriptor(id, 'chore');
+      return descriptor ? [{ id, reason: dispatchQueueReason(descriptor, 'chore', cfg, now) }] : [];
+    }),
     attention,
     stories,
     watches,
@@ -1368,6 +1375,7 @@ export function renderTend(r: TendReport): string {
   if (r.mergeWhenGreen?.length) lines.push(toonTable('merge when green', r.mergeWhenGreen.map((m) => ({ ...m })), ['pr', 'by', 'at', 'method', 'status', 'hold', 'note', 'sha']));
   if (r.heavy) lines.push(formatHeavyView(r.heavy));
   if (r.queueWait) lines.push(r.queueWait);
+  if (r.queuedChores?.length) lines.push(toonTable('queued chores', r.queuedChores, ['id', 'reason']));
   if (r.todoNote) lines.push(r.todoNote);
   for (const stack of r.stacks) {
     lines.push(`stack ${stack.title ? `${stack.title} · ` : ''}${stack.numbers.map((n) => `#${n}`).join(' → ')}: next ${stack.nextNumber ? `#${stack.nextNumber}` : 'none'}`);

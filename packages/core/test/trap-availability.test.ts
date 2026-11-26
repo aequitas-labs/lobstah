@@ -85,7 +85,7 @@ describe('trap availability and selection', () => {
     expect(selectRepoTrap(cfg, 'r', undefined, NOW)).toEqual({ action: 'wait', why: 'all 2 r traps are busy' });
     const d = { id: 'waiting', repo: 'r', brief: 'b', trapAny: true, harness: 'claude' };
     enqueue(d);
-    expect(dispatchQueueReason(d, 'work', cfg, NOW)).toBe('all 2 r traps are busy; waiting for a claude trap');
+    expect(dispatchQueueReason(d, 'work', cfg, NOW)).toBe('queued behind 1 running trap dispatch (0 ahead)');
     expect(daemonSkip([], 0, NOW)(d)).toBe(true);
     const wrong = trap('young-foam', 'codex');
     expect(claimBait(wrong)).toBeNull();

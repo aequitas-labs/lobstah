@@ -141,6 +141,35 @@ describe('man tend — the fleet verdict', () => {
     expect(text).toContain('queued work waits: all 2 headless slots are in use');
   });
 
+  it('shows old queued work waiting its turn while a work slot is running', () => {
+    heartbeat();
+    enqueue({ id: 'holder', repo: 'r', brief: 'work' });
+    claimNext('work');
+    appendStatus('holder', 'work', 'working');
+    enqueue({ id: 'waiting', repo: 'r', brief: 'work', queuedAt: new Date(Date.now() - 3600_000).toISOString() });
+    const old = new Date(Date.now() - 3600_000);
+    fs.utimesSync(path.join(laneDirs('work').queue, 'waiting.json'), old, old);
+    const report = buildTendReport();
+    expect(report.verdict).toBe('working');
+    expect(report.attention.filter((item) => item.kind === 'dispatch-progress')).toEqual([]);
+    expect(renderTend(report)).toContain('queued behind 1 running work dispatch (0 ahead)');
+  });
+
+  it('shows addressed work waiting its turn without calling its busy trap absent', () => {
+    heartbeat();
+    enqueue({ id: 'holder', repo: 'r', brief: 'work' });
+    claimNext('work');
+    appendStatus('holder', 'work', 'working');
+    fs.writeFileSync(path.join(home, 'soaking', 'seat.json'), JSON.stringify({ trapId: 'seat', repo: 'r',
+      worktree: home, cwd: home, sessionId: 'session', harness: 'codex', claimed: 'holder',
+      heartbeatAt: new Date().toISOString(), signedOnAt: new Date().toISOString() }));
+    enqueue({ id: 'waiting', repo: 'r', brief: 'work', for: 'wt:seat', queuedAt: new Date(Date.now() - 3600_000).toISOString() });
+    const report = buildTendReport();
+    expect(report.queueWait).toBeUndefined();
+    expect(report.attention.filter((item) => item.kind === 'dispatch-progress')).toEqual([]);
+    expect(renderTend(report)).toContain('queued behind 1 running dispatch on r · wt:seat (0 ahead)');
+  });
+
   it('names an addressed trap that is not listening', () => {
     heartbeat();
     enqueue({ id: 'addressed', repo: 'r', brief: 'b', for: 'wt:missing' });
