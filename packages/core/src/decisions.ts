@@ -1,7 +1,7 @@
 import { MESSAGE_FILE_TYPES, messageFileType } from './message-files.js';
 import { validDesktopStartLink, type DesktopAppStart } from './desktop-start-link.js';
 import type { GrantIntent } from './grants.js';
-import { validDecisionReferences, type DecisionReference } from './backend-model.js';
+import { validDecisionReferences, type DecisionReference, type DecisionWithdrawal } from './backend-model.js';
 import { linkThreadCard, readThread } from './threads.js';
 import { displayGrounds } from './grounds-name.js';
 import { loadConfig } from './config.js';
@@ -29,7 +29,7 @@ import { storageGrounds } from './grounds-name.js';
  * Each decision has its own directory, `decisions/<rid>/`: `decision.json`
  * (the record), `detail.md`, and `attachments/` (the helm's files). A
  * decision stands until it is answered or withdrawn. A withdrawn decision's
- * directory is removed.
+ * directory is retained in `.withdrawn` for read-only visits.
  *
  * An answer is a glass request of kind `decision-answer` (requests.ts):
  * `requests/<id>.json`, with the human's files in `requests/<id>/`. Writing
@@ -97,6 +97,7 @@ export interface PermissionsProposal {
 }
 
 export interface DecisionMeta {
+  withdrawal?: DecisionWithdrawal;
   thread?: string;
   references?: DecisionReference[];
   /** A configured desktop session start action, separate from tool approval. */
@@ -286,7 +287,7 @@ export function archivedDecisionDir(key: string): string | undefined {
 export function readArchivedDecision(key: string): DecisionMeta | undefined {
   const dir = archivedDecisionDir(key);
   const meta = dir ? readJsonFile<DecisionMeta>(path.join(dir, DECISION_JSON)) : undefined;
-  return meta?.key === key ? meta : undefined;
+  return meta?.key === key ? { ...meta, withdrawal: meta.withdrawal ?? { reason: 'the card was withdrawn' } } : undefined;
 }
 
 export function readDecisionDetail(key: string): string | undefined {
@@ -691,15 +692,28 @@ export function askDecision(asked: AskOptions): { meta: DecisionMeta; replaced: 
   const replaced = opts.replace !== undefined && opts.replace !== key ? [opts.replace] : [];
   for (const old of replaced) {
     if (replacesAnswer) ackDecision(old, { note: `Replaced by ${key}`, by: 'replace', ...(opts.now ? { now: opts.now } : {}) });
-    else if (readDecision(old)?.run) withdrawDecision(old);
+    else if (readDecision(old)?.run) withdrawDecision(old, `replaced by ${key}`, opts.now);
     else fs.rmSync(decisionDir(old)!, { recursive: true, force: true });
   }
   return { meta, replaced };
 }
 
 /** Withdraw a standing decision into a read-only archive, retaining its task progress. */
-export function withdrawDecision(key: string): DecisionMeta {
-  return withDecisionLock(key, () => withdrawStandingDecision(key));
+export function withdrawDecision(key: string, reason: string = 'the helm withdrew this card', now: Date = new Date()): DecisionMeta {
+  return withDecisionLock(key, () => withdrawStandingDecision(key, { at: now.toISOString(), reason }));
+}
+
+/** A terminal worker report supersedes the worker's unanswered cards, while helm questions keep standing. */
+export function withdrawFinishedWorkerCards(id: string, lane: Lane, now: Date): void {
+  for (const card of listDecisions()) {
+    if (card.dispatch !== id || (card.lane ?? 'work') !== lane || card.askedBy !== 'worker' || readDecisionAnswer(card.key)) continue;
+    try {
+      withdrawDecision(card.key, 'its dispatch finished', now);
+    } catch (error) {
+      // An answer or another withdrawal can win the lifecycle lock first.
+      if (!(error instanceof DecisionError) || (error.status !== 404 && !(error.status === 409 && readDecisionAnswer(card.key)))) throw error;
+    }
+  }
 }
 
 /** Serialize withdrawal with a permission answer and its grant application. */
@@ -716,15 +730,17 @@ export function withDecisionLock<T>(key: string, action: () => T): T {
 }
 
 /** Move the standing card while its lifecycle lock is held. */
-function withdrawStandingDecision(key: string): DecisionMeta {
+function withdrawStandingDecision(key: string, withdrawal: DecisionWithdrawal): DecisionMeta {
   const meta = readDecision(key);
   if (!meta) throw new DecisionError(`no decision ${key}`, 404);
   const answer = readDecisionAnswer(key);
   if (answer) throw new DecisionError(`decision ${key} was already answered at ${answer.answeredAt}`, 409);
   const archive = archivedDecisionDir(key)!;
   fs.mkdirSync(path.dirname(archive), { recursive: true });
+  const withdrawn: DecisionMeta = { ...meta, withdrawal };
+  writeAtomic(path.join(decisionDir(key)!, DECISION_JSON), `${JSON.stringify(withdrawn, null, 2)}\n`);
   atomicRenameSync(decisionDir(key)!, archive);
-  return meta;
+  return withdrawn;
 }
 
 /** A plain basename for an uploaded file, or undefined when none is left. */

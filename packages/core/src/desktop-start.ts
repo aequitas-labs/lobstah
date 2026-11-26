@@ -32,5 +32,5 @@ export function requestDesktopStart(config: Config, name: string, askedBy: strin
 export function closeDesktopStartCards(trapId: string): void {
   const registration = readTrap(trapId);
   if (!registration?.firstParkedAt || !registration.configured) return;
-  for (const decision of standingDecisions()) if (decision.appStart?.profile === registration.configured.profile && decision.grounds === registration.configured.grounds) withdrawDecision(decision.key);
+  for (const decision of standingDecisions()) if (decision.appStart?.profile === registration.configured.profile && decision.grounds === registration.configured.grounds) withdrawDecision(decision.key, 'a new app start replaced it');
 }

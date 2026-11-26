@@ -145,8 +145,8 @@ export function createWharfBackend(options: WharfBackendOptions = {}): WharfBack
       return { ok: true, status: answer.status, data: dispatchDetail(answer.body) };
     },
     async decision(key) {
-      const found = doc(key);
-      if (!found || found.kind !== 'decision') return missing();
+      const found = doc(key) ?? (await call<WharfDocument>(`/api/glass/documents/${encodeURIComponent(key)}`)).body;
+      if (!found || found.kind !== 'decision' || !found.published) return missing();
       if (found.markdown && !texts.has(found.markdown.id)) await decisionTexts([found]);
       return { ok: true, status: 200, data: decisionOf(found, found.markdown ? texts.get(found.markdown.id) : undefined) };
     },

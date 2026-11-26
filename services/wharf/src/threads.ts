@@ -39,9 +39,9 @@ export class Threads {
       const row = this.sql.exec<{data: string}>('SELECT data FROM documents WHERE id=?', key).toArray()[0];
       if (!row) return [];
       const d = JSON.parse(row.data) as WharfDocument;
-      return [{ key, title: d.title, options: d.options ?? [], standing: d.published && !d.withdrawn && !d.answer, ...(d.answer ? { answer: { option: d.answer.option, text: d.answer.text, attachments: [], answeredAt: d.answer.at } } : {}) }];
+      return [{ key, title: d.title, options: d.options ?? [], ...(d.withdrawn ? { withdrawal: d.withdrawal ?? { reason: 'the card was withdrawn' } } : {}), standing: d.published && !d.withdrawn && !d.answer, ...(d.answer ? { answer: { option: d.answer.option, text: d.answer.text, attachments: [], answeredAt: d.answer.at } } : {}) }];
     });
-    return { ...item, ...responseState(item, this.hooks.person()), cards };
+    return { ...item, ...responseState(item, this.hooks.person(), cards), cards };
   }
   /** A dispatch's title from its brief, for a thread started on its page. */
   private dispatchTitle(id: string | undefined): string | undefined {
@@ -51,7 +51,7 @@ export class Threads {
   }
   private personAt(item: HelmThread): string { return this.view(item).cards.reduce((at, c) => c.answer && c.answer.answeredAt > at ? c.answer.answeredAt : at, item.lastPersonAt); }
   summaries(now: number): ThreadSummary[] {
-    return this.list().filter(t => t.state === 'open' || responseState(t, this.hooks.person()).unreadResponse || now - Date.parse(t.updatedAt) < 86400_000).map(t => ({ ...responseState(t, this.hooks.person()), id: t.id, grounds: t.grounds, title: t.title, kind: t.kind, state: t.state, updatedAt: t.updatedAt, roundCount: t.rounds.length,
+    return this.list().filter(t => t.state === 'open' || responseState(t, this.hooks.person(), this.view(t).cards).unreadResponse || now - Date.parse(t.updatedAt) < 86400_000).map(t => ({ ...responseState(t, this.hooks.person(), this.view(t).cards), id: t.id, grounds: t.grounds, title: t.title, kind: t.kind, state: t.state, updatedAt: t.updatedAt, roundCount: t.rounds.length,
       ...(t.about ? { about: t.about } : {}), cards: this.view(t).cards.filter(c => c.standing).map(c => c.key), waitingForHelm: t.state === 'open' && (!t.lastHelmAt || this.personAt(t) > t.lastHelmAt), ...(t.notes.open[0] ? { openLine: t.notes.open[0] } : {}), ...(t.outcome ? { outcome: t.outcome } : {}) }));
   }
   checkCard(id: unknown, grounds?: string): HelmThread {
@@ -101,7 +101,7 @@ export class Threads {
   private action(c: Command, actor: Actor, now: number): {status: number; value: unknown} | undefined {
     const parts = c.path.split('/'), b = c.method === 'GET' ? {} : object(c.body);
     const ok = (value: unknown, status = 200) => ({ status, value });
-    if (c.path === 'threads/notices' && c.method === 'GET') return ok(this.list().flatMap(item => pendingThreadNotice(item, this.hooks.person()) ?? []));
+    if (c.path === 'threads/notices' && c.method === 'GET') return ok(this.list().flatMap(item => pendingThreadNotice(item, this.hooks.person(), this.view(item).cards) ?? []));
     if (c.path === 'threads' && c.method === 'GET') return ok(this.summaries(now));
     if (c.path === 'threads' && c.method === 'POST') {
       if (b.via === 'chat') this.hooks.helm(c, actor, now); else this.person(actor);

@@ -161,7 +161,7 @@ export function retireFinishedRuns(now = Date.now()): string[] {
   for (const d of listDecisions()) {
     if (!d.run || readDecisionAnswer(d.key) || !runCardSettled(d, now)) continue;
     try {
-      withdrawDecision(d.key);
+      withdrawDecision(d.key, 'its run finished', new Date(now));
       retired.push(d.key);
     } catch {
       // Answered or busy in the meantime: the next pass looks again.

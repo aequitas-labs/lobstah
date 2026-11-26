@@ -50,9 +50,9 @@ function matchesCall(ask: PermissionAsk, event: PermissionCardEvent): boolean {
 }
 
 /** Withdraw a card if it still stands; an answer that already won stays recorded. */
-function retireCard(card: DecisionMeta): void {
+function retireCard(card: DecisionMeta, reason: string): void {
   try {
-    withdrawDecision(card.key);
+    withdrawDecision(card.key, reason);
   } catch (error) {
     if (error instanceof DecisionError && (error.status === 404 || (error.status === 409 && readDecisionAnswer(card.key)))) return;
     throw error;
@@ -76,7 +76,7 @@ export function settlePermissionCards(event: PermissionCardEvent): string[] {
     const finishedBatch =
       endedBatch && event.tool_calls?.some((call) => matchesCall(ask, { ...call, cwd: event.cwd }));
     if (endedTurn || nextTurn || finishedBatch || (endedCall && matchesCall(ask, event))) {
-      retireCard(card);
+      retireCard(card, 'its tool request ended');
       retired.push(card.key);
     }
   }
@@ -100,7 +100,7 @@ export function reconcilePermissionCards(): string[] {
       (waitsForTool(ask) || dispatch) && ask.session && !trap && !listHelms().some((helm) => helm.sessionId === ask.session);
     const changedDispatch = dispatch && trap && trap.claimed !== card.dispatch;
     if (movedOn || lostSession || changedDispatch) {
-      retireCard(card);
+      retireCard(card, movedOn ? 'its dispatch moved on' : 'its permission request no longer applies');
       retired.push(card.key);
     }
   }

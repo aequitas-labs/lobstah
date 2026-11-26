@@ -14,6 +14,7 @@ import {
   ensureLayout,
   executorPath,
   listDecisions,
+  readArchivedDecision,
   readDecision,
   readDecisionAnswer,
   decisionViewedAt,
@@ -225,6 +226,7 @@ describe('man ask', () => {
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout).toContain('withdrawn: true');
     expect(fs.existsSync(decisionDir(key)!)).toBe(false);
+    expect(readArchivedDecision(key)?.withdrawal).toEqual({ at: expect.any(String), reason: 'the helm withdrew this card' });
     expect(buildTendReport().attention.some((a) => a.key === key)).toBe(false);
     expect(lobstah('man', 'ask', '--withdraw', key).status).toBe(2);
   });

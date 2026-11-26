@@ -346,6 +346,18 @@ it('accepts native conversation messages through the cookie boundary and blocks 
   expect(await (await browser(`threads/${id}/files/${file}`)).text()).toBe('Phone context');
 });
 
+it('opens a published withdrawn question through its cookie-scoped deep link without allowing an answer', async () => {
+  await api('helm/take', { session: 'live' });
+  await api('documents', { id: 'withdrawn-question', kind: 'decision', title: 'Use Helm?', options: ['Yes'] });
+  await api('documents/withdrawn-question/publish', {});
+  await api('documents/withdrawn-question/withdraw', {});
+  const response = await browser('documents/withdrawn-question');
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ title: 'Use Helm?', withdrawn: true, withdrawal: { at: expect.any(String), reason: 'the helm withdrew this card' } });
+  expect((await browser('documents/withdrawn-question/answer', { option: 'Yes' })).status).toBe(409);
+  expect((await browser('documents/withdrawn-question/withdraw', {})).status).toBe(404);
+});
+
 it('requires a separate in-page deletion confirmation and then removes identity and account data', async () => {
   await job();
   expect((await browser('account', {}, 'DELETE')).status).toBe(400);

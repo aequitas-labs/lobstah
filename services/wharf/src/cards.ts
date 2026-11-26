@@ -78,7 +78,7 @@ const seenAction = (seen: WharfAck | undefined): GlassCardAction[] => (seen ? []
 export function decisionCard(d: WharfDocument): ProjectedCard {
   const terminal: GlassCardTerminal | undefined = d.answer
     ? { state: 'answered', at: d.answer.at, by: d.answer.by, outcome: d.answer.option ?? firstLine(d.answer.text ?? '', 300) }
-    : d.withdrawn ? { state: 'withdrawn', at: d.at } : undefined;
+    : d.withdrawn ? { state: 'withdrawn', at: d.withdrawal?.at ?? d.at, ...(d.withdrawal ? { outcome: d.withdrawal.reason } : {}) } : undefined;
   return {
     family: 'decision', key: d.id, stateHash: `${d.at}:${d.answer?.at ?? ''}:${d.withdrawn ? 'withdrawn' : ''}`, sourceAt: d.answer?.at ?? d.at, ...(d.grounds ? { grounds: d.grounds } : {}),
     title: firstLine(d.title, 300), item: { kind: 'decision', id: d.id },

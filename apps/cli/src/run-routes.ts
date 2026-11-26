@@ -277,7 +277,7 @@ export async function handleRunRequest(kind: RunRequestKind, payload: unknown, c
         const card = runnableCard(p.key);
         if ('status' in card) return card;
         if (!ctx.runs.get(card.meta.key)?.result) return refuse(409, 'Stop the command before dismissing this card.');
-        withdrawDecision(card.meta.key);
+        withdrawDecision(card.meta.key, 'you dismissed its run');
         return { status: 200, body: { ok: true } };
       }
       case 'run-pair-challenge': {

@@ -824,9 +824,11 @@ the same rule.
   newer `man ask` on the same dispatch keeps the older decisions: each shows
   as its own card. `lobstah man ask ... --replace <key>` replaces that one
   standing decision, or acks an answered one (see **The ack**); any other key
-  is refused. A card stays visible
+  is refused. A helm-asked card stays visible
   if its worker reports `paused`, `working`, `done`, or `failed`, and can still
-  be answered after the dispatch finishes.
+  be answered after the dispatch finishes. A worker's unanswered cards are withdrawn
+  when its dispatch reports `done` or `failed`. Withdrawn cards show when and why
+  they closed in their thread and open read-only, without an answer badge or count.
 - **Attention.** A standing decision is attention of kind `decision`, in
   the default `attentionKinds`. It makes the verdict `needs-attention`. A
   worker's raw `needs-decision` or `blocked` stays a `question` until the

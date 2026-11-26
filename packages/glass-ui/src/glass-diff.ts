@@ -288,6 +288,7 @@ export type DecisionCard =
       kind: 'decision';
       thread?: string;
       readOnly?: boolean;
+      withdrawal?: import('@lobstah/core').DecisionWithdrawal;
       appStart?: import('@lobstah/core').DesktopAppStart;
       key: string;
       title: string;
@@ -337,7 +338,7 @@ export function decisionCards(
   for (const a of attention) {
     if (a.kind === 'decision') {
       const d = byKey.get(a.key);
-      if (!d) continue;
+      if (!d || d.withdrawal) continue;
       cards.push(decisionCard(d, linkedRepo(d, repos) ?? a.repo, d.viewedAt ?? a.viewedAt));
     } else if (a.kind === 'question') {
       const repo = linkedRepo({ ...a, dispatch: a.id }, repos);
@@ -367,7 +368,8 @@ function decisionCard(d: GlassDecision, repo: string | undefined, viewedAt: stri
     key: d.key,
     title: d.title,
     ...(d.thread ? { thread: d.thread } : {}),
-    ...(d.readOnly ? { readOnly: true } : {}),
+    ...(d.readOnly || d.withdrawal ? { readOnly: true } : {}),
+    ...(d.withdrawal ? { withdrawal: d.withdrawal } : {}),
     detail: d.detail,
     options: d.options,
     ...(d.permission ? { permission: true } : {}),
@@ -386,7 +388,7 @@ function decisionCard(d: GlassDecision, repo: string | undefined, viewedAt: stri
 }
 
 /** Whether a card waits on the person: answered cards handed to the helm do not. */
-export const isOpenDecision = (c: DecisionCard): boolean => !(c.kind === 'decision' && c.handoff);
+export const isOpenDecision = (c: DecisionCard): boolean => !(c.kind === 'decision' && (c.handoff || c.withdrawal));
 
 /** What an answered card says it sent: the option, the text's first line, the files. */
 export function answerSummary(a: { option?: string; text?: string; files?: number }): string {

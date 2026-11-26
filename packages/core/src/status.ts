@@ -12,6 +12,7 @@ import { readSessionClaim, readTrap } from './soak.js';
 import { withTrapCacheLock } from './cache-paths.js';
 import { clearFinishedTrapCaches, repoCachesConfigured } from './cache-cleanup.js';
 import { wakeHeavyWait } from './heavy-waits.js';
+import { withdrawFinishedWorkerCards } from './decisions.js';
 import { answeredAt } from './inbox.js';
 
 export function isVerb(v: string): v is Verb {
@@ -138,7 +139,10 @@ export function appendStatus(
       // A count is never worth failing a report: cull folds any catch missed here.
     }
   }
-  if (verb === 'done' || verb === 'failed') reconcileAssistance();
+  if (verb === 'done' || verb === 'failed') {
+    withdrawFinishedWorkerCards(id, lane, new Date(entry.at));
+    reconcileAssistance();
+  }
   return entry;
 }
 

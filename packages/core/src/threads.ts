@@ -298,7 +298,8 @@ export function reopenThread(id: string, now = new Date()): HelmThread {
   return item;
 }
 export function threadView(item: HelmThread, person = THREAD_PERSON): ThreadView {
-  return { ...item, ...responseState(item, person), tracked: threadTrackedItems(item), cards: threadCards(item) };
+  const cards = threadCards(item);
+  return { ...item, ...responseState(item, person, cards), tracked: threadTrackedItems(item), cards };
 }
 function threadCards(item: HelmThread): ThreadView['cards'] {
   const keys = [...new Set(item.rounds.flatMap((round) => round.entries.flatMap((entry) => 'card' in entry ? [entry.card] : [])))];
@@ -306,15 +307,15 @@ function threadCards(item: HelmThread): ThreadView['cards'] {
     const card = readDecision(key) ?? readArchivedDecision(key);
     if (!card) return [];
     const answer = readDecisionAnswer(key);
-    return [{ key, title: card.title, options: card.options, ...(answer ? { answer: { option: answer.option, text: answer.text, attachments: answer.attachments, answeredAt: answer.answeredAt } } : {}), standing: !!readDecision(key) && !answer }];
+    return [{ key, title: card.title, options: card.options, ...(answer ? { answer: { option: answer.option, text: answer.text, attachments: answer.attachments, answeredAt: answer.answeredAt } } : {}), ...(card.withdrawal ? { withdrawal: card.withdrawal } : {}), standing: !card.withdrawal && !!readDecision(key) && !answer }];
   });
 }
 function newestPersonAt(item: HelmThread): string {
   return threadCards(item).reduce((at, card) => card.answer && card.answer.answeredAt > at ? card.answer.answeredAt : at, item.lastPersonAt);
 }
 export function threadSummaries(grounds?: string, now = Date.now()): ThreadSummary[] {
-  return listThreads(grounds).filter((item) => item.state !== 'resolved' || responseState(item).unreadResponse || now - Date.parse(item.updatedAt) < 86400_000).map((item) => ({
-    ...responseState(item), id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, state: item.state, updatedAt: item.updatedAt,
+  return listThreads(grounds).filter((item) => item.state !== 'resolved' || responseState(item, THREAD_PERSON, threadCards(item)).unreadResponse || now - Date.parse(item.updatedAt) < 86400_000).map((item) => ({
+    ...responseState(item, THREAD_PERSON, threadCards(item)), id: item.id, grounds: item.grounds, kind: item.kind, title: item.title, state: item.state, updatedAt: item.updatedAt,
     roundCount: item.rounds.length, ...(item.about ? { about: item.about } : {}), ...(item.notes.open[0] ? { openLine: item.notes.open[0] } : {}),
     cards: threadCards(item).filter((card) => card.standing).map((card) => card.key),
     waitingForHelm: item.state === 'open' && (!item.lastHelmAt || newestPersonAt(item) > item.lastHelmAt), ...(item.outcome ? { outcome: item.outcome } : {}), ...(item.startedBy ? { startedBy: item.startedBy } : {}) }));
@@ -363,5 +364,5 @@ export function dismissThreadNotice(id: string, through: unknown, person = THREA
   return update(id, item => acknowledgeThreadResponse(item, person, through, true));
 }
 export function threadSubscriberNotices(person = THREAD_PERSON) {
-  return listThreads().flatMap(item => pendingThreadNotice(item, person) ?? []);
+  return listThreads().flatMap(item => pendingThreadNotice(item, person, threadCards(item)) ?? []);
 }

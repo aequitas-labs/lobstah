@@ -1,3 +1,4 @@
+import { WithdrawalNote } from './decision-withdrawal.js';
 import { DecisionRow } from './decision-row.js';
 import { ThreadNotes } from './helm.js';
 import { Composer } from './composer.js';
@@ -375,7 +376,11 @@ export function DecisionModal({
       : handoff
         ? html`<div class="danswered runstate"><${HandoffIcon} handoff=${handoff} /></div>`
         : c.kind === 'decision' && c.readOnly
-          ? [runRow(false), !(run && ran?.busy) && html`<div class="dim">Closed decision</div>`]
+          ? [
+              runRow(false),
+              !(run && ran?.busy) &&
+                (c.withdrawal ? html`<${WithdrawalNote} withdrawal=${c.withdrawal} />` : html`<div class="dim">Closed decision</div>`),
+            ]
           : run && (ran?.busy || ran?.result || run.latest)
             ? runRow(false)
             : draft?.sent

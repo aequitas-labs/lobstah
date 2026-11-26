@@ -100,7 +100,7 @@ export interface ThreadView extends HelmThread {
   seenThrough?: number;
   unreadResponse?: boolean;
 
-  cards: Array<{ key: string; title: string; options: string[]; answer?: { option?: string; text?: string; attachments: Attachment[]; answeredAt: string }; standing: boolean }>;
+  cards: Array<{ key: string; title: string; options: string[]; answer?: { option?: string; text?: string; attachments: Attachment[]; answeredAt: string }; standing: boolean; withdrawal?: import('./backend-model.js').DecisionWithdrawal }>;
   /** Linked work and its live state; read-only, present when the store can read it. */
   tracked?: ThreadTrackedItem[];
 }
@@ -179,10 +179,18 @@ export const THREAD_PERSON = 'owner';
 /** The responses the notes and card verbs record, as Slack replies tell them apart. */
 export const THREAD_NOTES_UPDATED = 'Notes updated';
 export const THREAD_CARD_READY = 'A card is ready for you';
-/** Only an open thread asks for the person: one the helm has resolved never counts as unread. */
-export function responseState(item: HelmThread, person = THREAD_PERSON) {
+/** A withdrawn card's ready notice does not hide genuine unread messages or another standing card. */
+function withdrawnCardNotice(item: HelmThread, person: string, cards?: ThreadView['cards']): boolean {
+  if (item.responseText !== THREAD_CARD_READY || !cards || cards.some((card) => card.standing)) return false;
+  const lastCard = item.rounds.flatMap((round) => round.entries).filter((entry) => 'card' in entry).at(-1);
+  if (!lastCard || !cards.some((card) => card.key === lastCard.card && card.withdrawal)) return false;
+  const seenThrough = item.readers?.[person]?.seenThrough ?? 0;
+  return !item.rounds.some((round) => round.entries.some((entry) => 'by' in entry && entry.by === 'helm' && entry.seq > seenThrough));
+}
+/** An open thread counts unread replies; a withdrawn card alone no longer asks for attention. */
+export function responseState(item: HelmThread, person = THREAD_PERSON, cards?: ThreadView['cards']) {
   const responseSeq = item.responseSeq ?? 0, seenThrough = item.readers?.[person]?.seenThrough ?? 0;
-  return { responseSeq, seenThrough, unreadResponse: item.state === 'open' && responseSeq > seenThrough, responseAt: item.responseAt, responseText: item.responseText };
+  return { responseSeq, seenThrough, unreadResponse: item.state === 'open' && responseSeq > seenThrough && !withdrawnCardNotice(item, person, cards), responseAt: item.responseAt, responseText: item.responseText };
 }
 /**
  * A response and its coalesced subscriber notice commit with the thread. Only
@@ -199,7 +207,8 @@ export function acknowledgeThreadResponse(item: HelmThread, person: string, thro
   const next = { ...previous, [dismiss ? 'dismissedThrough' : 'seenThrough']: Math.max(through as number, previous[dismiss ? 'dismissedThrough' : 'seenThrough']) };
   return { ...item, readers: { ...item.readers, [person]: next } };
 }
-export function pendingThreadNotice(item: HelmThread, person = THREAD_PERSON): ThreadSubscriberNotice | undefined {
+export function pendingThreadNotice(item: HelmThread, person = THREAD_PERSON, cards?: ThreadView['cards']): ThreadSubscriberNotice | undefined {
+  if (withdrawnCardNotice(item, person, cards)) return undefined;
   const notice = item.notice, reader = item.readers?.[person];
   return notice && notice.seq > (reader?.seenThrough ?? 0) && notice.seq > (reader?.dismissedThrough ?? 0) ? { ...notice, thread: item.id, person } : undefined;
 }
