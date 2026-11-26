@@ -49,7 +49,7 @@ function cardItem(key: string): ThreadTrackedItem {
   if (readDecisionAnswer(key)) return { kind: 'card', ref: key, title: card?.title ?? 'Card', state: 'done', status: 'answered', href };
   const dir = decisionDir(key);
   if (!card) return unavailable('card', key, [key]);
-  if (!dir || !fs.existsSync(dir)) return { kind: 'card', ref: key, title: card.title, state: 'done', status: 'archived', href };
+  if (!dir || !fs.existsSync(dir)) return { kind: 'card', ref: key, title: card.title, state: 'done', status: 'withdrawn', href };
   return { kind: 'card', ref: key, title: card.title, state: 'open', status: 'waiting for you', href };
 }
 

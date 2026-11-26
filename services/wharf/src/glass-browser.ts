@@ -40,7 +40,7 @@ export async function glassBrowser(request: Request, env: Env): Promise<Response
   // A relayed call's answer comes on the tab's socket, or with the relay itself: there is no call to poll.
   if (request.method === 'GET' && /^mirror\/calls\/[A-Za-z0-9_-]+$/.test(route)) return Response.json({ error: 'a relayed call answers on the socket or with its relay; it is not polled' }, { status: 410 });
   const read = request.method === 'GET' && (['glass', 'dispatches', 'events', 'wake', 'mirror', 'mirror/read', 'cards', 'threads'].includes(route)
-    || /^threads\/[A-Za-z0-9_-]+$/.test(route)
+    || /^(threads|documents)\/[A-Za-z0-9_-]+$/.test(route)
     || /^cards\/c\d{1,15}$/.test(route)
     || /^dispatches\/[A-Za-z0-9_-]+\/detail$/.test(route)
     || /^(documents|dispatches|threads)\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+$/.test(route));

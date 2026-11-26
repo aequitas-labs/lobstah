@@ -354,14 +354,14 @@ export class GlassState {
         requireThat(!d.attachments.some((f) => f.id === d.markdown?.id) && new Set(d.attachments.map((f) => f.name)).size === d.attachments.length, 400, 'document attachment names must differ');
         if (b.replace !== undefined) {
           const previous = this.document(identifier(b.replace)); requireThat(previous.kind === 'decision' && !previous.withdrawn && !previous.answer, 409, 'no standing decision to replace');
-          previous.withdrawn = true; this.put('documents', previous.id, previous);
+          previous.withdrawn = true; previous.withdrawal = { at: new Date(now).toISOString(), reason: `replaced by ${d.id}` }; this.put('documents', previous.id, previous);
         }
         // A review raises no event: every event wakes a helm's wait, and a review is the person's queue, not the fleet's.
         d.published = true; this.put('documents', d.id, d); if (d.thread) this.hooks.threadLink(d.thread, d.id, now); if (d.kind !== 'review') this.hooks.event(d.kind, d.dispatch, d.id); return ok(d);
       }
       if (parts.length === 3 && parts[2] === 'withdraw' && c.method === 'POST') {
         this.hooks.helm(c, actor, now); requireThat(d.kind === 'decision' && !d.answer && !d.withdrawn, 409, 'no standing decision to withdraw');
-        d.withdrawn = true; this.put('documents', d.id, d); this.hooks.event('decision-withdrawn', d.dispatch, d.id); return ok(d);
+        d.withdrawn = true; d.withdrawal = { at: new Date(now).toISOString(), reason: 'the helm withdrew this card' }; this.put('documents', d.id, d); this.hooks.event('decision-withdrawn', d.dispatch, d.id); return ok(d);
       }
       if (parts.length === 3 && parts[2] === 'ack' && c.method === 'POST') {
         const acker = this.acker(actor);

@@ -1,4 +1,10 @@
 /** Portable coordination records. No filesystem, service or runtime imports. */
+/** When and why an unanswered card stopped asking for an answer. Older archives may lack a time. */
+export interface DecisionWithdrawal {
+  at?: string;
+  reason: string;
+}
+
 export type BackendVerb = 'working' | 'needs-decision' | 'blocked' | 'paused' | 'done' | 'failed';
 export type BackendWait = 'review' | 'pr' | 'deploy' | 'person' | 'external' | 'heavy';
 export interface DispatchInput {
@@ -64,6 +70,7 @@ export interface WharfDocumentInput {
 }
 export interface WharfDocument extends WharfDocumentInput {
   at: string; author: string; published: boolean; withdrawn?: boolean;
+  withdrawal?: DecisionWithdrawal;
   markdown?: WharfFile; attachments: WharfFile[];
   answer?: { option?: string; text?: string; at: string; by: string };
   /** The first ack stands; a published document does not change. */

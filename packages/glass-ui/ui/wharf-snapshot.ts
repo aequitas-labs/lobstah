@@ -150,6 +150,11 @@ export function trapOf(worker: Worker): GlassTrap {
 export function decisionOf(doc: WharfDocument, detail: string | undefined): GlassDecision {
   return {
     key: documentKey(doc),
+    ...(doc.withdrawn
+      ? { readOnly: true, withdrawal: doc.withdrawal ?? { reason: 'the card was withdrawn' } }
+      : doc.answer
+        ? { readOnly: true }
+        : {}),
     title: doc.title,
     detail: detail ?? '',
     options: doc.options ?? [],

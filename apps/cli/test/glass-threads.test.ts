@@ -480,7 +480,7 @@ it('puts what needs you first in the work box, and shows a removed record by its
   detail.tracked = [
     { kind: 'dispatch', ref: 'd1', title: 'Fix the deck', state: 'done', status: 'done', href: '#dispatch/d1' },
     { kind: 'dispatch', ref: gone, title: gone, state: 'done', status: 'gone', href: `#dispatch/${gone}` },
-    { kind: 'card', ref: 'decision:ea1e6263', title: 'decision:ea1e6263', state: 'done', status: 'withdrawn' },
+    { kind: 'card', ref: 'decision:ea1e6263', title: 'Choose tabs?', state: 'done', status: 'withdrawn', href: '#decision/decision%3Aea1e6263' },
     { kind: 'card', ref: KEY, title: 'Use Helm?', state: 'open', status: 'waiting for you', href: `#decision/${KEY}` },
     { kind: 'dispatch', ref: 'd2', title: 'Backfill the answers', state: 'stalled', status: 'needs-decision', href: '#dispatch/d2' },
   ];
@@ -488,15 +488,15 @@ it('puts what needs you first in the work box, and shows a removed record by its
   const g = await page(fleet(), { hash: `#thread/${ID}`, get: (url) => url.startsWith('/threads/') ? { status: 200, body: detail } : url === `/data/dispatch/${gone}` ? { status: 404, body: {} } : undefined });
   const panel = g.$('.thread-tracked')!;
   expect(panel.querySelector('summary .thread-notes-head')?.textContent).toBe('Work');
-  expect([...panel.querySelectorAll('summary .workpill')].map((el) => el.textContent)).toEqual(['2 need you', '1 done', '2 removed']);
+  expect([...panel.querySelectorAll('summary .workpill')].map((el) => el.textContent)).toEqual(['2 need you', '1 done', '1 withdrawn', '1 removed']);
   expect(g.$$('.thread-tracked li').map((li) => [li.className || '', li.querySelector(':scope > :nth-child(2)')?.textContent, li.querySelector(':scope > a') !== null])).toEqual([
     ['', 'Use Helm?', true],
     ['', 'Backfill the answers', true],
     ['', 'Fix the deck', true],
+    ['removed', 'Choose tabs? · Withdrawn', true],
     ['removed', 'Removed dispatch', false],
-    ['removed', 'Removed card', false],
   ]);
-  expect(g.$$('.thread-tracked li.removed > .workstate').map((el) => el.getAttribute('aria-label'))).toEqual(['Removed', 'Removed']);
+  expect(g.$$('.thread-tracked li.removed > .workstate').map((el) => el.getAttribute('aria-label'))).toEqual(['Withdrawn', 'Removed']);
   // In the conversation, the removed dispatch's card keeps its kind and says Removed, with nothing to open.
   const card = g.$('.thread-timeline .thread-work-dispatch')!;
   expect(card.classList.contains('removed')).toBe(true);
@@ -700,4 +700,47 @@ it('shows a removed record by its kind and Archived beside an archived one', asy
   expect(linked.querySelector('a')).toBeNull();
   expect(linked.textContent).not.toContain('gone');
   expect(linked.textContent).not.toContain(KEY);
+});
+
+
+it('renders a withdrawn thread card without attention or answer controls and opens its read-only question', async () => {
+  const withdrawal = { at: AT, reason: 'its dispatch finished' };
+  const closed: ThreadView = { ...view(), cards: [{ key: KEY, title: 'Use Helm?', options: ['Yes'], standing: false, withdrawal }] };
+  const card = { key: KEY, thread: ID, title: 'Use Helm?', detail: 'Which tab should we use?', options: ['Yes'], attachments: [], askedBy: 'helm', askedAt: AT, stateHash: 'closed', readOnly: true, withdrawal };
+  const d = fleet();
+  d.threads![0] = { ...summary(), cards: [], unreadResponse: false };
+  // Even a stale attention item cannot put a withdrawn card back in the answer queue.
+  d.decisions = [card];
+  d.attention = [{ kind: 'decision', key: KEY, id: KEY, verb: 'decision', ageSecs: 0, stateHash: 'closed' }];
+  const g = await page(d, { hash: `#thread/${ID}`, get: url => url === `/threads/${ID}` ? { status: 200, body: closed } : url === `/data/decision/${encodeURIComponent(KEY)}` ? { status: 200, body: card } : undefined });
+  const inline = g.$('.thread-card-entry')!;
+  expect(inline.textContent).toContain('Withdrawn');
+  expect(inline.textContent).toContain('its dispatch finished');
+  expect(inline.querySelector('time')?.getAttribute('datetime')).toBe(AT);
+  expect(inline.textContent).not.toContain('Card for you');
+  expect(inline.querySelector('textarea, input, .dopt, .dsend')).toBeNull();
+  expect(g.$('.dalert, .drow.unread, [aria-label="Waiting for you"]')).toBeNull();
+  await click(g, '.thread-card-title');
+  expect(g.$('.dmodal')?.textContent).toContain('Which tab should we use?');
+  expect(g.$('.dmodal')?.textContent).toContain('Withdrawn');
+  expect(g.$('.dmodal')?.textContent).toContain('its dispatch finished');
+  expect(g.$('.dmodal textarea, .dmodal input, .dmodal .dopt, .dmodal .dsend')).toBeNull();
+  expect(g.posts().some(post => JSON.parse(post.body).kind === 'decision-answer')).toBe(false);
+});
+
+
+it('shows a withdrawn Work item as withdrawn without a spinner or progress ring, and keeps its question link', async () => {
+  const detail: ThreadView = { ...view(), cards: [{ key: KEY, title: 'Use Helm?', options: ['Yes'], standing: false, withdrawal: { at: AT, reason: 'its dispatch finished' } }], tracked: [{ kind: 'card', ref: KEY, title: 'Use Helm?', state: 'done', status: 'withdrawn', href: `#decision/${encodeURIComponent(KEY)}` }] };
+  const g = await page(fleet(), { hash: `#thread/${ID}`, get: url => url === `/threads/${ID}` ? { status: 200, body: detail } : undefined });
+  const panel = g.$('.thread-tracked')!;
+  expect(panel.querySelector('summary')?.textContent).toContain('1 withdrawn');
+  expect(panel.querySelector('summary')?.textContent).not.toContain('1 done');
+  expect(panel.querySelector('li a')?.textContent).toBe('Use Helm? · Withdrawn');
+  expect(panel.querySelector('li a')?.getAttribute('href')).toBe(`#decision/${encodeURIComponent(KEY)}`);
+  expect(panel.querySelector('[role="img"][aria-label="Withdrawn"]')).not.toBeNull();
+  // The header and item share a terminal mark, with no running arc or ring.
+  expect(panel.querySelector('summary svg')?.innerHTML).toBe(panel.querySelector('[aria-label="Withdrawn"] svg')?.innerHTML);
+  expect(panel.querySelector('.runspin, .rundot, svg circle')).toBeNull();
+  expect(g.$('.thread-card-entry')?.textContent).toContain('Withdrawn');
+  expect(g.$('.thread-card-entry')?.textContent).not.toContain('Card for you');
 });

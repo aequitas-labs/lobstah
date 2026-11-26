@@ -145,3 +145,18 @@ it('resolves quietly: never unread, no notice, and an old resolved item leaves t
   expect(await (await call('threads')).json()).toEqual([]);
   expect((await call(`threads/${ID}`)).status).toBe(200);
 });
+
+
+it('keeps a withdrawn card read-only in its thread with its withdrawal time and reason', async () => {
+  await create();
+  await call('helm/take', { session: 'helm', grounds: 'harbor' });
+  await call(`threads/${ID}/triage`, { kind: 'thread' });
+  await call('documents', { id: 'withdrawn-question', kind: 'decision', title: 'Use Helm?', options: ['Yes'], thread: ID, grounds: 'harbor' });
+  await call('documents/withdrawn-question/publish', {});
+  expect((await call('documents/withdrawn-question/withdraw', {})).status).toBe(200);
+  const thread = await (await call(`threads/${ID}`)).json<ThreadView>();
+  expect(thread.cards).toMatchObject([{ key: 'withdrawn-question', standing: false, withdrawal: { at: expect.any(String), reason: 'the helm withdrew this card' } }]);
+  const summaries = await (await call('threads')).json<ThreadSummary[]>();
+  expect(summaries[0]).toMatchObject({ cards: [], unreadResponse: false });
+  expect((await call('documents/withdrawn-question/answer', { option: 'Yes' })).status).toBe(409);
+});

@@ -75,6 +75,7 @@ export function glassDecisions(decisions: DecisionMeta[] = [...standingDecisions
     const viewedAt = decisionViewedAt(d.key);
     const handoff = decisionHandoff(d.key);
     return {
+    ...(d.withdrawal ? { withdrawal: d.withdrawal, readOnly: true } : {}),
     key: d.key,
     title: d.title,
     ...(d.thread ? { thread: d.thread } : {}),

@@ -1,3 +1,4 @@
+import { WithdrawalNote } from './decision-withdrawal.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ThreadSummary, ThreadView, ThreadEntry, ThreadAttachment, ThreadTrackedItem } from '@lobstah/core';
 import type { ComponentChildren } from 'preact';
@@ -155,12 +156,13 @@ function WorkCard({
   state?: { state: WorkStateIconState; label: string };
 }) {
   const removed = state?.state === 'removed';
+  const muted = removed || state?.state === 'withdrawn';
   const name =
     href && !removed
       ? html`<a class="thread-work-title" href=${safeHref(href)} target=${external ? '_blank' : undefined} rel=${external ? 'noopener' : undefined}>${title}</a>`
       : html`<span class="thread-work-title">${title}</span>`;
   const line = [WORK_LABEL[kind], ...(meta ?? [])].flatMap((part, i) => (i ? [' · ', part] : [part]));
-  return html`<div class=${`thread-work thread-work-${kind}${removed ? ' removed' : ''}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${name}<span class="thread-work-meta dim">${line}</span></div>${state && html`<${WorkStatePill} state=${state.state} label=${state.label} />`}</div>`;
+  return html`<div class=${`thread-work thread-work-${kind}${muted ? ' removed' : ''}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${name}<span class="thread-work-meta dim">${line}</span></div>${state && html`<${WorkStatePill} state=${state.state} label=${state.label} />`}</div>`;
 }
 /** A report linked in a conversation keeps its own card, beside its kind's icon. */
 function Work({ kind, children }: { kind: WorkKind; children: ComponentChildren }) {
@@ -302,12 +304,15 @@ function Entry({ entry, view, at }: { entry: ThreadEntry; view: ThreadView; at: 
     const card = view.cards.find((c) => c.key === entry.card);
     // A card replaced before it was answered is gone; its replacement follows in the conversation.
     if (!card) return null;
-    const answer = card.answer
-      ? html`<p class="thread-answer">${LinkedText([card.answer.option, card.answer.text].filter(Boolean).join(' · '))}</p>`
-      : card.standing
-        ? html`<${InlineDecisionAnswer} cardKey=${card.key} />`
-        : html`<p class="dim">Closed card</p>`;
-    return html`<article class="thread-entry thread-card-entry"><${WorkIcon} kind="card" />${card.standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} class="thread-card-title" onClick=${() => openDecision(card.key)}>${card.title}<//>${answer}${card.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
+    const standing = card.standing && !card.withdrawal;
+    const answer = card.withdrawal
+      ? html`<${WithdrawalNote} withdrawal=${card.withdrawal} />`
+      : card.answer
+        ? html`<p class="thread-answer">${LinkedText([card.answer.option, card.answer.text].filter(Boolean).join(' · '))}</p>`
+        : standing
+          ? html`<${InlineDecisionAnswer} cardKey=${card.key} />`
+          : html`<p class="dim">Closed card</p>`;
+    return html`<article class=${'thread-entry thread-card-entry' + (card.withdrawal ? ' dim' : '')} style=${card.withdrawal ? { borderLeftColor: 'var(--dim)' } : undefined}><${WorkIcon} kind="card" />${standing ? html`<span class="badge warn">Card for you</span>` : null}<${Button} class=${'thread-card-title' + (card.withdrawal ? ' dim' : '')} onClick=${() => openDecision(card.key)}>${card.title}<//>${answer}${card.answer?.attachments.map((a) => html`<span class="dchip">${a.name}</span>`)}</article>`;
   }
   if ('link' in entry)
     return html`<div class="thread-entry thread-linked"><${ThreadLink} kind=${entry.link} reference=${entry.ref} text=${entry.text} view=${view} at=${at} /></div>`;
@@ -412,7 +417,7 @@ const TRACKED_STATUS: Record<string, WorkStateIconState> = {
   removed: 'removed',
   answered: 'done',
   'waiting for you': 'needs-decision',
-  withdrawn: 'removed',
+  withdrawn: 'withdrawn',
   dropped: 'closed',
   overdue: 'limited',
   stale: 'paused',
@@ -430,10 +435,11 @@ export function trackedStateIcon(item: Pick<ThreadTrackedItem, 'state' | 'status
 /** A linked item whose record is gone: the store keeps only its kind. */
 const isRemoved = (item: Pick<ThreadTrackedItem, 'state' | 'status'>) => trackedStateIcon(item).state === 'removed';
 
-type WorkGroup = 'needs' | 'stuck' | 'running' | 'done' | 'removed';
+type WorkGroup = 'needs' | 'stuck' | 'running' | 'done' | 'withdrawn' | 'removed';
 /** Where a linked item sorts in the work box: what needs you first, removed records last. */
 function workGroup(item: ThreadTrackedItem): WorkGroup {
   if (isRemoved(item)) return 'removed';
+  if (item.status === 'withdrawn') return 'withdrawn';
   if (item.status === 'needs-decision' || item.status === 'waiting for you') return 'needs';
   if (item.state === 'stalled') return 'stuck';
   return item.state === 'open' ? 'running' : 'done';
@@ -444,6 +450,7 @@ const WORK_GROUPS: ReadonlyArray<{ group: WorkGroup; state: WorkStateIconState; 
   { group: 'stuck', state: 'blocked', words: (n) => `${n} stuck` },
   { group: 'running', state: 'working', words: (n) => `${n} in progress` },
   { group: 'done', state: 'done', words: (n) => `${n} done` },
+  { group: 'withdrawn', state: 'withdrawn', words: (n) => `${n} withdrawn` },
   { group: 'removed', state: 'removed', words: (n) => `${n} removed` },
 ];
 /**
@@ -461,13 +468,14 @@ function WorkBox({ view }: { view: ThreadView }) {
     <summary><span class="thread-notes-head">${view.state === 'tracking' ? 'Tracking · closes when this work finishes' : 'Work'}</span>${counts.map((g) => html`<${WorkStatePill} state=${g.state} label=${g.words(g.n)} />`)}</summary>
     <ul>${sorted.map((item) => {
       const icon = trackedStateIcon(item);
-      const removed = icon.state === 'removed';
+      const removed = isRemoved(item);
+      const muted = removed || icon.state === 'withdrawn';
       const title = removed
         ? `Removed ${WORK_LABEL[item.kind].toLowerCase()}`
-        : item.status === 'archived'
+        : item.status === 'archived' || item.status === 'withdrawn'
           ? `${item.title} · ${icon.label}`
           : item.title;
-      return html`<li class=${removed ? 'removed' : undefined}><${WorkIcon} kind=${item.kind} />${item.href && !removed ? html`<a href=${safeHref(item.href)}>${title}</a>` : html`<span>${title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
+      return html`<li class=${muted ? 'removed' : undefined}><${WorkIcon} kind=${item.kind} />${item.href && !removed ? html`<a href=${safeHref(item.href)}>${title}</a>` : html`<span>${title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
     })}</ul>
   </details>`;
 }
