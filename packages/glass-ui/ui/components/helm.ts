@@ -156,12 +156,13 @@ function WorkCard({
   state?: { state: WorkStateIconState; label: string };
 }) {
   const removed = state?.state === 'removed';
+  const muted = removed || state?.state === 'withdrawn';
   const name =
     href && !removed
       ? html`<a class="thread-work-title" href=${safeHref(href)} target=${external ? '_blank' : undefined} rel=${external ? 'noopener' : undefined}>${title}</a>`
       : html`<span class="thread-work-title">${title}</span>`;
   const line = [WORK_LABEL[kind], ...(meta ?? [])].flatMap((part, i) => (i ? [' · ', part] : [part]));
-  return html`<div class=${`thread-work thread-work-${kind}${removed ? ' removed' : ''}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${name}<span class="thread-work-meta dim">${line}</span></div>${state && html`<${WorkStatePill} state=${state.state} label=${state.label} />`}</div>`;
+  return html`<div class=${`thread-work thread-work-${kind}${muted ? ' removed' : ''}`}><${WorkIcon} kind=${kind} /><div class="thread-work-body">${name}<span class="thread-work-meta dim">${line}</span></div>${state && html`<${WorkStatePill} state=${state.state} label=${state.label} />`}</div>`;
 }
 /** A report linked in a conversation keeps its own card, beside its kind's icon. */
 function Work({ kind, children }: { kind: WorkKind; children: ComponentChildren }) {
@@ -416,7 +417,7 @@ const TRACKED_STATUS: Record<string, WorkStateIconState> = {
   removed: 'removed',
   answered: 'done',
   'waiting for you': 'needs-decision',
-  withdrawn: 'removed',
+  withdrawn: 'withdrawn',
   dropped: 'closed',
   overdue: 'limited',
   stale: 'paused',
@@ -427,18 +428,18 @@ const TRACKED_FALLBACK: Record<ThreadTrackedItem['state'], WorkStateIconState> =
 /** A linked item's state icon, and its status in words for its name and tooltip. */
 export function trackedStateIcon(item: Pick<ThreadTrackedItem, 'state' | 'status'>): { state: WorkStateIconState; label: string } {
   const state = TRACKED_STATUS[item.status] ?? (isIconVerb(item.status) ? item.status : TRACKED_FALLBACK[item.state]);
-  if (state === 'removed' && item.status !== 'withdrawn') return { state, label: 'Removed' };
+  if (state === 'removed') return { state, label: 'Removed' };
   const words = item.status.replace(/-/g, ' ');
   return { state, label: words.charAt(0).toUpperCase() + words.slice(1) };
 }
 /** A linked item whose record is gone: the store keeps only its kind. */
-const isRemoved = (item: Pick<ThreadTrackedItem, 'state' | 'status'>) =>
-  trackedStateIcon(item).state === 'removed' && item.status !== 'withdrawn';
+const isRemoved = (item: Pick<ThreadTrackedItem, 'state' | 'status'>) => trackedStateIcon(item).state === 'removed';
 
-type WorkGroup = 'needs' | 'stuck' | 'running' | 'done' | 'removed';
+type WorkGroup = 'needs' | 'stuck' | 'running' | 'done' | 'withdrawn' | 'removed';
 /** Where a linked item sorts in the work box: what needs you first, removed records last. */
 function workGroup(item: ThreadTrackedItem): WorkGroup {
   if (isRemoved(item)) return 'removed';
+  if (item.status === 'withdrawn') return 'withdrawn';
   if (item.status === 'needs-decision' || item.status === 'waiting for you') return 'needs';
   if (item.state === 'stalled') return 'stuck';
   return item.state === 'open' ? 'running' : 'done';
@@ -449,6 +450,7 @@ const WORK_GROUPS: ReadonlyArray<{ group: WorkGroup; state: WorkStateIconState; 
   { group: 'stuck', state: 'blocked', words: (n) => `${n} stuck` },
   { group: 'running', state: 'working', words: (n) => `${n} in progress` },
   { group: 'done', state: 'done', words: (n) => `${n} done` },
+  { group: 'withdrawn', state: 'withdrawn', words: (n) => `${n} withdrawn` },
   { group: 'removed', state: 'removed', words: (n) => `${n} removed` },
 ];
 /**
@@ -467,12 +469,13 @@ function WorkBox({ view }: { view: ThreadView }) {
     <ul>${sorted.map((item) => {
       const icon = trackedStateIcon(item);
       const removed = isRemoved(item);
+      const muted = removed || icon.state === 'withdrawn';
       const title = removed
         ? `Removed ${WORK_LABEL[item.kind].toLowerCase()}`
         : item.status === 'archived' || item.status === 'withdrawn'
           ? `${item.title} · ${icon.label}`
           : item.title;
-      return html`<li class=${removed ? 'removed' : undefined}><${WorkIcon} kind=${item.kind} />${item.href && !removed ? html`<a href=${safeHref(item.href)}>${title}</a>` : html`<span>${title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
+      return html`<li class=${muted ? 'removed' : undefined}><${WorkIcon} kind=${item.kind} />${item.href && !removed ? html`<a href=${safeHref(item.href)}>${title}</a>` : html`<span>${title}</span>`}<${WorkStateIcon} state=${icon.state} label=${icon.label} /></li>`;
     })}</ul>
   </details>`;
 }
