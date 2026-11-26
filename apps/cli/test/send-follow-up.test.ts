@@ -129,8 +129,8 @@ describe('send wakes a finished dispatch', () => {
     }));
     const sticky = lobstah('send', A, 'again');
     expect(sticky.stdout).toContain('delivery: wt:seat');
-    expect(sticky.stdout).toContain(`busy on dispatch ${B}`);
-    expect(lobstah('status', startedId(sticky.stdout)).stdout).toContain(`busy on dispatch ${B}`);
+    expect(sticky.stdout).toContain('queued behind 1 running dispatch on r · wt:seat (0 ahead)');
+    expect(lobstah('status', startedId(sticky.stdout)).stdout).toContain('queued behind 1 running dispatch on r · wt:seat (0 ahead)');
     expect(queuedDescriptor(startedId(sticky.stdout), 'work')?.for).toBe('wt:seat');
     expect(queuedDescriptor(startedId(sticky.stdout), 'work')?.sessionMode).toBe('continue');
     fs.rmSync(path.join(home, 'soaking', 'seat.json'));

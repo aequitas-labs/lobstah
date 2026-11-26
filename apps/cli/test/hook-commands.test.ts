@@ -375,6 +375,22 @@ it('Stop lists overdue queues and stalls beside send expectations even after the
   expect(hook(['hook', 'stop'], { session_id: HELM }).stdout).not.toContain('queued-too-long');
 });
 
+it('Stop does not raise queued attention behind a running chore', () => {
+  takeHelm({ sessionId: HELM, grounds: { name: 'fleet', repos: ['web'] }, ttlMs: 60_000, identity: { harness: 'claude' } });
+  enqueue({ id: 'holder', repo: 'web', brief: 'review' }, 'chore');
+  claimNext('chore');
+  appendStatus('holder', 'chore', 'working', 'reviewing the diff');
+  enqueue({ id: 'waiting', repo: 'web', brief: 'review', queuedAt: new Date(Date.now() - 3600_000).toISOString() }, 'chore');
+  noticeDispatchProgress();
+  expect(unseenNotices(true)).toEqual([]);
+  const stopped = hook(['hook', 'stop'], { session_id: HELM, hook_event_name: 'Stop' });
+  expect(stopped.status, stopped.stderr).toBe(0);
+  expect(stopped.stdout).not.toContain('queued-too-long');
+  const status = hook(['status'], {});
+  expect(status.status, status.stderr).toBe(0);
+  expect(status.stdout).toContain('queued behind 1 running chore (0 ahead)');
+});
+
 it('man wait wakes without polling status when the daemon posts an overdue queue notice', () => {
   const id = '77777777-7777-4777-8777-777777777777';
   enqueue({ id, repo: 'web', brief: 'b', for: 'wt:absent', queuedAt: new Date(Date.now() - 200_000).toISOString() });

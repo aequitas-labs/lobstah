@@ -1,10 +1,10 @@
-import { loadConfig } from './config.js';
+import { loadConfig, DEFAULT_LIMITS } from './config.js';
 import type { Config } from './config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { laneDirs } from './paths.js';
 import { activeIds, pendingIds, queuedAt, storedDescriptor, cancelRequested } from './queue.js';
-import { readSessionClaim, trapByAddress, trapRepoLabel, hasOpenCatch } from './soak.js';
+import { readSessionClaim, trapByAddress, trapRepoLabel, hasOpenCatch, listTraps, type TrapRegistration } from './soak.js';
 import { codexIdleWakeAt } from './codex-idle-recovery.js';
 import { idleWorkingTrap } from './trap-turn.js';
 import { readStatusLog } from './status.js';
@@ -21,6 +21,8 @@ import { dispatchUsageLimit, trapUsageLimit } from './usage-limits.js';
 
 /** Observational only: never reroute sticky work or acquire a worker slot. */
 export function dispatchQueueReason(d: Descriptor, lane: Lane, cfg = loadConfig(), now = Date.now()): string {
+  const turn: string | undefined = dispatchQueueTurn(d, lane);
+  if (turn) return turn;
   if (d.for) {
     const limited = dispatchUsageLimit(d.id, lane);
     if (limited) return `waiting on ${limited.account} usage limit${limited.resetAt ? ` until ${limited.resetAt}` : ''}`;
@@ -32,7 +34,7 @@ export function dispatchQueueReason(d: Descriptor, lane: Lane, cfg = loadConfig(
     if (now - Date.parse(trap.heartbeatAt) > cfg.soak.ttlSecs * 1000) return `addressed to ${trapRepoLabel(trap)}, which is no longer answering`;
     return `addressed to ${trapRepoLabel(trap)}, waiting for its session to take the brief`;
   }
-  if (d.target) return `addressed to trap:${d.target.profile} in grounds ${d.target.grounds}, waiting for its session to park`;
+  if (d.target) return `addressed to trap:${d.target.profile} in grounds ${d.target.grounds}, ${queueTrap(d) ? 'waiting for its session to park' : 'which is not signed on'}`;
   if (!d.repo || !cfg.repos[d.repo]) return `repo ${d.repo} is not configured`;
   if (d.trapAny) return trapCapacityReason(cfg, d.repo, d.harness, now);
   if (poolWaits(d, cfg)) return `pool ${d.pool} has no free worktree`;
@@ -47,7 +49,7 @@ export interface DispatchProgress {
   id: string;
   lane: Lane;
   repo?: string;
-  state: 'queued-too-long' | 'stalled' | 'idle-while-working';
+  state: 'queued-too-long' | 'stalled' | 'idle-while-working' | 'hung';
   since: string;
   ageSecs: number;
   stateHash: string;
@@ -79,29 +81,95 @@ export function progressNotice(n: { kind: string }): boolean {
   return n.kind === 'dispatch-progress' || n.kind === 'trap-idle-working';
 }
 
-/** One headless chore holding capacity, with the evidence needed to explain its wait. */
-interface ChoreSlotHolder {
-  id: string;
-  ageSecs: number;
-  dead: boolean;
+/** Resolve the signed-on trap named by either form of sticky delivery. */
+function queueTrap(d: Descriptor): TrapRegistration | undefined {
+  const target: Descriptor['target'] = d.target;
+  if (!target) return d.for ? trapByAddress(d.for) : undefined;
+  return listTraps().find((trap) => trap.configured?.profile === target.profile &&
+    trap.configured.grounds === target.grounds && trap.configured.surface === target.surface);
 }
 
-/** Read slot holders without treating an unknown or inaccessible process as dead. */
-function choreSlotHolders(now: number): ChoreSlotHolder[] {
-  return activeIds('chore').filter((id) =>
-    !isFinished(id, 'chore') && !isParked(id, 'chore') && !isTrapCatch(id, 'chore')).map((id): ChoreSlotHolder => {
-    let runner: Partial<RunnerInfo> | undefined;
-    try { runner = JSON.parse(fs.readFileSync(path.join(laneDirs('chore').active, id, 'runner.json'), 'utf8')) as Partial<RunnerInfo>; }
-    catch { /* A claim can precede the runner file. */ }
-    let dead: boolean = false;
-    const pid: number | undefined = runner?.pid;
-    if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
-      try { process.kill(pid, 0); }
-      catch (error) { dead = (error as NodeJS.ErrnoException).code === 'ESRCH'; }
-    }
-    const started: number = Date.parse(runner?.startedAt ?? readSessionClaim(id, 'chore')?.at ?? readStatusLog(id, 'chore')[0]?.at ?? '');
-    return { id, ageSecs: Number.isFinite(started) ? Math.max(0, (now - started) / 1000) : 0, dead };
+/** Queued items share a turn only when they can use the same worker capacity. */
+function queueCapacity(d: Descriptor): string {
+  if (d.for || d.target) return `trap:${queueTrap(d)?.trapId ?? d.for ?? JSON.stringify(d.target)}`;
+  if (d.trapAny) return `traps:${d.repo}:${d.harness ?? 'any'}`;
+  return 'headless';
+}
+
+/** A missing runner file can precede launch; only ESRCH proves its process is gone. */
+function runnerIsDead(id: string, lane: Lane): boolean {
+  let runner: Partial<RunnerInfo>;
+  try { runner = JSON.parse(fs.readFileSync(path.join(laneDirs(lane).active, id, 'runner.json'), 'utf8')) as Partial<RunnerInfo>; }
+  catch { return false; }
+  const pid: number | undefined = runner.pid;
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+  return false;
+}
+
+/** The runner record of a headless slot holder whose process answers a signal check. */
+function liveRunner(id: string, lane: Lane): RunnerInfo | undefined {
+  let runner: Partial<RunnerInfo>;
+  try { runner = JSON.parse(fs.readFileSync(path.join(laneDirs(lane).active, id, 'runner.json'), 'utf8')) as Partial<RunnerInfo>; }
+  catch { return undefined; }
+  const pid: number | undefined = runner.pid;
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0 || typeof runner.startedAt !== 'string') return undefined;
+  try { process.kill(pid, 0); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EPERM') return undefined; }
+  return runner as RunnerInfo;
+}
+
+/** Headless slot holders alive past the max age with no note, activity or event in that time. */
+function hungSlotHolders(lane: Lane, now: number, cfg: Config): DispatchProgress[] {
+  const maxAgeSecs: number = cfg.limits.slotMaxAgeSecs ?? DEFAULT_LIMITS.slotMaxAgeSecs ?? 0;
+  if (maxAgeSecs <= 0) return [];
+  return activeIds(lane).flatMap((id): DispatchProgress[] => {
+    if (isFinished(id, lane) || isParked(id, lane) || isTrapCatch(id, lane) || cancelRequested(id, lane)) return [];
+    const last = readStatusLog(id, lane).at(-1);
+    if (last && ['done', 'failed', 'paused', 'needs-decision', 'blocked'].includes(last.verb)) return [];
+    const runner: RunnerInfo | undefined = liveRunner(id, lane);
+    const started: number = Date.parse(runner?.startedAt ?? '');
+    if (!runner || !Number.isFinite(started)) return [];
+    const progress: number = Math.max(started, Date.parse(last?.at ?? '') || 0,
+      Date.parse(readActivity(id, lane)?.at ?? '') || 0, lastEventAt(id, lane) ?? 0);
+    const ageSecs: number = (now - started) / 1000;
+    const silentSecs: number = (now - progress) / 1000;
+    if (ageSecs < maxAgeSecs || silentSecs < maxAgeSecs) return [];
+    return [{ id, lane, repo: storedDescriptor(id, lane)?.repo, state: 'hung', since: runner.startedAt, ageSecs,
+      thresholdSecs: maxAgeSecs, stateHash: `hung:${runner.startedAt}`,
+      text: `hung ${id}: ${lane === 'chore' ? 'chore' : 'work dispatch'} has held a ${lane} slot for ${ageLabel(ageSecs * 1000)} with no note or activity for ${ageLabel(silentSecs * 1000)}. Check it with lobstah status ${id}, or cancel it with lobstah cancel ${id}.` }];
   });
+}
+
+/** Count running capacity that can release a turn for this queued dispatch. */
+function queueRunningCount(d: Descriptor, lane: Lane): number {
+  if (d.for || d.target) {
+    const trap: TrapRegistration | undefined = queueTrap(d);
+    return trap && (hasOpenCatch(trap) || trap.hostedCatch) ? 1 : 0;
+  }
+  if (d.trapAny) return listTraps().filter((trap) => trap.repo === d.repo &&
+    (!d.harness || trap.harness === d.harness) && hasOpenCatch(trap)).length;
+  return activeIds(lane).filter((id) => !isFinished(id, lane) && !isParked(id, lane) &&
+    !isTrapCatch(id, lane) && !runnerIsDead(id, lane)).length;
+}
+
+/** A healthy queue waits its turn indefinitely; queue age alone is not a stall. */
+function dispatchQueueTurn(d: Descriptor, lane: Lane): string | undefined {
+  const running: number = queueRunningCount(d, lane);
+  if (running === 0) return undefined;
+  const capacity: string = queueCapacity(d);
+  let ahead: number = 0;
+  for (const id of pendingIds(lane)) {
+    if (id === d.id) break;
+    const queued: Descriptor | undefined = storedDescriptor(id, lane);
+    if (queued && queueCapacity(queued) === capacity) ahead++;
+  }
+  const trap: TrapRegistration | undefined = queueTrap(d);
+  const dispatches: string = running === 1 ? 'dispatch' : 'dispatches';
+  const holder: string = trap ? `${dispatches} on ${trapRepoLabel(trap)}` : d.trapAny ? `trap ${dispatches}` :
+    lane === 'chore' ? `chore${running === 1 ? '' : 's'}` : `work ${dispatches}`;
+  return `queued behind ${running} running ${holder} (${ahead} ahead)`;
 }
 
 /** Current attention, after Codex recovery; the daemon can also request conditions eligible for recovery. */
@@ -113,7 +181,7 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), o
       const since = queuedAt(id, lane);
       if (!d || !since) continue;
       const ageSecs = (now - Date.parse(since)) / 1000;
-      if (cfg.helm.queuedNoticeSecs <= 0 || ageSecs < cfg.helm.queuedNoticeSecs) continue;
+      if (cfg.helm.queuedNoticeSecs <= 0 || ageSecs < cfg.helm.queuedNoticeSecs || queueRunningCount(d, lane) > 0) continue;
       const reason: string = dispatchQueueReason(d, lane, cfg, now);
       const remedy: string = lane === 'chore' ? 'Check or cancel the chore.' : 'Cancel and re-dispatch unaddressed, or cancel and re-address to another trap.';
       out.push({ id, lane, repo: d.repo, state: 'queued-too-long', since, ageSecs,
@@ -158,30 +226,19 @@ export function dispatchProgress(now = Date.now(), cfg: Config = loadConfig(), o
         thresholdSecs: cfg.helm.stalledNoticeSecs, stateHash: `stalled:${since}`,
         text: `stalled ${id}: no activity or note for ${ageLabel(ageSecs * 1000)} (last activity/note ${since}); last note: ${last?.note ?? '(none)'}. ${lane === 'chore' ? `Check the chore with lobstah status ${id}, or cancel it.` : `Check the worker with lobstah status ${id}; resolve or cancel and re-dispatch.`}` });
     }
+    out.push(...hungSlotHolders(lane, now, cfg));
   }
-  const holders: ChoreSlotHolder[] = choreSlotHolders(now);
-  return out.flatMap((item): DispatchProgress[] => {
-    if (item.lane !== 'chore' || item.state !== 'queued-too-long') return [item];
-    const descriptor: Descriptor | undefined = storedDescriptor(item.id, 'chore');
-    if (!descriptor || descriptor.for || descriptor.target || descriptor.trapAny || !descriptor.repo ||
-        !cfg.repos[descriptor.repo] || poolWaits(descriptor, cfg) ||
-        cfg.limits.choreConcurrent <= 0 || holders.length < cfg.limits.choreConcurrent) return [item];
-    const unhealthy: ChoreSlotHolder[] = holders.filter((holder) => holder.dead || cancelRequested(holder.id, 'chore') ||
-      out.some((progress) => progress.id === holder.id && progress.lane === 'chore' && progress.state === 'stalled'));
-    const thresholdSecs: number = unhealthy.length > 0 ? cfg.helm.queuedNoticeSecs : cfg.helm.choreQueuedNoticeSecs;
-    if (thresholdSecs <= 0 || item.ageSecs < thresholdSecs) return [];
-    const details: string = (unhealthy.length > 0 ? unhealthy : holders).map((holder) => {
-      const condition: string = holder.dead ? ', dead' : cancelRequested(holder.id, 'chore') ? ', cancelling' : unhealthy.includes(holder) ? ', stalled' : '';
-      return `${holder.id} (${ageLabel(holder.ageSecs * 1000)} old${condition})`;
-    }).join(', ');
-    return [{ ...item, thresholdSecs,
-      text: `queued-too-long ${item.id} (${ageLabel(item.ageSecs * 1000)}): waiting on chore slot holder ${details}. Check or cancel the slot holder.` }];
-  });
+  return out;
 }
 
-/** First wake at the threshold; reminders at +15m, +45m, +105m, … . */
+/** First wake at the threshold; reminders at +15m, +45m, +105m, … . A hung slot holder wakes once. */
 export function noticeDispatchProgress(now = Date.now(), cfg = loadConfig()): void {
   for (const p of dispatchProgress(now, cfg)) {
+    if (p.state === 'hung') {
+      postNotice({ kind: 'dispatch-progress', refId: p.id, repo: p.repo, text: p.text,
+        stateHash: p.stateHash, dedupeKey: `dispatch-hung-${p.lane}-${p.id}` });
+      continue;
+    }
     const reminder = Math.floor(Math.log2(1 + Math.max(0, p.ageSecs - p.thresholdSecs) / 900));
     postNotice({ kind: p.state === 'idle-while-working' ? 'trap-idle-working' : 'dispatch-progress', refId: p.id, repo: p.repo, text: p.text,
       stateHash: p.stateHash, dedupeKey: `dispatch-progress-${p.lane}-${p.id}-${p.stateHash}-${reminder}` });

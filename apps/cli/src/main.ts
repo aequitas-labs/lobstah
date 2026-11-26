@@ -919,6 +919,7 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
     const state = limited ? 'limited' : displayState({ log, lastEventAt: lastEventAt(id, lane), queued, claimedAt });
     const activity = bucket === 'active' ? activityView(readActivity(id, lane), staleSecs) : undefined;
     const waiting = bucket === 'active' ? waitingView(log.at(-1)) : undefined;
+    const descriptor: Descriptor | undefined = storedDescriptor(id, lane);
     const updated =
       (queued && state === 'queued' ? queuedAt(id, lane) : undefined) ??
       (log.length === 0 ? claimedAt : undefined) ??
@@ -928,7 +929,8 @@ function rowsFor(lane: Lane, bucket: 'queue' | 'active' | 'done'): Array<Record<
       lane,
       bucket,
       state,
-      sessionMode: storedDescriptor(id, lane)?.sessionMode ?? 'continue',
+      sessionMode: descriptor?.sessionMode ?? 'continue',
+      ...(queued && descriptor ? { queueReason: dispatchQueueReason(descriptor, lane) } : {}),
       updated,
       waiting: limited ? `${limited.account} usage limit${limited.resetAt ? ` · resets ${limited.resetAt}` : ''}` : waiting ? waitingText(waiting) : '',
       activity: activity ? activityLine(activity) : '',
@@ -1390,6 +1392,8 @@ async function mainCli(): Promise<void> {
       if (!id) {
         const rows = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'active'));
         console.log(toonTable('active', rows, ['id', 'lane', 'state', 'sessionMode', 'updated', 'waiting', 'activity']));
+        const queued = (['work', 'chore'] as Lane[]).flatMap((lane) => rowsFor(lane, 'queue'));
+        if (queued.length > 0) console.log(toonTable('queued', queued, ['id', 'lane', 'queueReason']));
         for (const p of dispatchProgress()) console.log(p.text);
         console.log(trapSummary(loadConfig()));
         const pools = poolViews(loadConfig());
