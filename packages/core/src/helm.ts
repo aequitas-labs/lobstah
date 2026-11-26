@@ -366,18 +366,15 @@ export function relieveHelm(sessionId: string): string[] {
   return relieved;
 }
 
-/**
- * Another helm took the wharf's one seat (`by`, its session): this session
- * steps down from every helm it holds here, and its next park tells it to
- * stand down.
- */
-export function standDownHelm(sessionId: string, by: string, now = Date.now()): string[] {
-  const relieved = relieveHelm(sessionId);
-  if (relieved.length > 0) {
-    const notice: RelievedNotice = { sessionId, grounds: relieved[0]!, by, at: new Date(now).toISOString() };
+/** Stand down only the displaced grounds lease, under its lock. */
+export function standDownHelm(sessionId: string, by: string, grounds: string, now = Date.now()): string[] {
+  return withHelmLock(grounds, () => {
+    if (readHelm(grounds)?.sessionId !== sessionId) return [];
+    fs.rmSync(helmPath(grounds), { force: true });
+    const notice: RelievedNotice = { sessionId, grounds, by, at: new Date(now).toISOString() };
     atomicWrite(path.join(relievedDir(), `${sessionId}.json`), JSON.stringify(notice, null, 2));
-  }
-  return relieved;
+    return [grounds];
+  });
 }
 
 export function heartbeatHelm(sessionId: string, opts: { parked?: boolean } = {}): HelmRegistration | undefined {

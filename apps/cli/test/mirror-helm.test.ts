@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
-import { ensureLayout, helmOf, loadConfig, readHelm, relieveHelm, standDownHelm } from '@lobstah/core';
+import { consumeRelievedNotice, ensureLayout, helmOf, loadConfig, readHelm, relieveHelm, standDownHelm } from '@lobstah/core';
 import type { ClientSocketMessage, CommandMessage, MirrorStatus } from '@lobstah/core';
 import { MIRROR_HELM_RENEW_MS, MIRROR_IDLE_READ_MS, WharfMirror, localHelms, takeMirrorSeat } from '../src/wharf-mirror.js';
 import type { LocalGlass, MirrorChannel, MirrorWharf } from '../src/wharf-mirror.js';
@@ -72,7 +72,7 @@ const quietGlass: LocalGlass = {
 };
 function daemonMirror(socket: FakeSocket, now: () => number): WharfMirror {
   return new WharfMirror({ wharf: 'lobstah', backend: socket, channel: socket, glass: quietGlass, now, writeStatus: (_s: MirrorStatus) => {},
-    helm: { live: () => localHelms(loadConfig()), displaced: (session, by) => void standDownHelm(session, by) } });
+    helm: { live: () => localHelms(loadConfig()), displaced: (session, by, grounds) => void standDownHelm(session, by, grounds) } });
 }
 const seatTakes = (socket: FakeSocket) => socket.commands.filter((c) => c.path === 'helm/take').map((c) => c.body);
 
@@ -175,4 +175,40 @@ it('hr-take: man helm --take takes the seat; a seat another helm took stands the
   const park = await run(['man', 'haul'], { session_id: MAC });
   expect(park.status, park.stderr).toBe(0);
   expect(JSON.parse(park.stdout)).toMatchObject({ decision: 'block', reason: expect.stringContaining('You were relieved of the helm for grounds "home" by session 8b7c6d5e') });
+});
+
+it('keeps home when another boat takes grounds sharing its wharf account and repo', async () => {
+  configure(true);
+  // Both grounds oversee the same repo remote; leases use grounds, never repo identity.
+  fs.appendFileSync(path.join(home, 'config.toml'), '\n[grounds.helm-test]\nrepos = ["web"]\nwharf = "lobstah"\n');
+  const signed = await run(['man', 'helm', '--session', MAC, '--grounds', 'home']);
+  expect(signed.status, signed.stderr).toBe(0);
+  const homeLease = readHelm('home');
+  seatAnswer = () => ({ status: 200, value: { session: OTHER, grounds: 'helm-test' } });
+  const cloud = await run(['man', 'helm', '--session', OTHER, '--grounds', 'helm-test', '--take']);
+  expect(cloud.status, cloud.stdout).toBe(0);
+  const socket = new FakeSocket();
+  const leases = new Map<string, string>([['home', MAC], ['helm-test', OTHER]]);
+  socket.answer = (body) => leases.get(String(body.grounds)) === body.session
+    ? { status: 200, value: body }
+    : { status: 409, value: { holder: { session: leases.get(String(body.grounds)) } } };
+  await daemonMirror(socket, () => Date.now()).read();
+  expect(readHelm('home')).toEqual(homeLease);
+  expect(consumeRelievedNotice(MAC)).toBeUndefined();
+});
+
+it('stands down only the displaced grounds when a session holds two local leases', async () => {
+  configure(true);
+  for (const grounds of ['home', 'work']) {
+    expect((await run(['man', 'helm', '--session', MAC, '--grounds', grounds])).status).toBe(0);
+  }
+  const socket = new FakeSocket();
+  socket.answer = (body) => body.grounds === 'work'
+    ? { status: 409, value: { holder: { session: OTHER } } }
+    : { status: 200, value: body };
+  await daemonMirror(socket, () => Date.now()).read();
+  expect(seatTakes(socket)).toHaveLength(2);
+  expect(readHelm('home')?.sessionId).toBe(MAC);
+  expect(readHelm('work')).toBeUndefined();
+  expect(consumeRelievedNotice(MAC)).toMatchObject({ grounds: 'work', by: OTHER });
 });

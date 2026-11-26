@@ -15,6 +15,7 @@ import {
   postNotice,
   readMirrorStatus,
   standDownHelm,
+  storageGrounds,
   wharfCredential,
   writeMirrorStatus,
 } from '@lobstah/core';
@@ -86,12 +87,12 @@ export interface MirrorChannel {
   command?(command: Omit<CommandMessage, 't'>): Promise<{ status: number; value: unknown } | undefined>;
 }
 
-/** This Mac's helm, which holds the wharf's one helm seat while it is live. */
+/** This Mac's helm, which holds the wharf's grounds helm seat while it is live. */
 export interface MirrorHelm {
   /** The live helms on this boat's own grounds: each session, and its grounds as the wharf names them. */
   live(): Array<{ session: string; grounds: string }>;
   /** Another helm took the seat (`by`, its session): this session stands down. */
-  displaced(session: string, by: string): void;
+  displaced(session: string, by: string, grounds: string): void;
 }
 
 export interface WharfMirrorOptions {
@@ -292,7 +293,7 @@ export class WharfMirror {
     }
   }
   /**
-   * Hold the wharf's one helm seat for this Mac's live helm, on the socket:
+   * Hold the wharf's grounds helm seat for this Mac's live helm, on the socket:
    * taking it again renews it, at once when a helm signs on here and each
    * MIRROR_HELM_RENEW_MS after. A seat another helm took refuses, and the
    * local helm stands down. With no live helm it sends nothing.
@@ -309,7 +310,7 @@ export class WharfMirror {
       if (!result) return;
       if (result.status === 409) {
         const holder = (result.value as { holder?: { session?: unknown } } | null)?.holder?.session;
-        helm.displaced(seat.session, typeof holder === 'string' ? holder : 'another helm');
+        helm.displaced(seat.session, typeof holder === 'string' ? holder : 'another helm', seat.grounds);
       } else if (result.status >= 400) throw new Error(`helm seat: ${(result.value as { error?: unknown } | null)?.error ?? result.status}`);
     }
     this.helmAt = this.now();
@@ -410,20 +411,20 @@ export function mirrorScope(config: Config, wharf: string): Extract<BackendScope
 
 /**
  * This Mac's live helms on its own grounds, newest sign-on first, one per
- * session: what the wharf's helm seat may name.
+ * grounds: what the wharf's helm seat may name.
  */
 export function localHelms(config: Config, now = Date.now()): Array<{ session: string; grounds: string }> {
   const local = new Set(localGrounds(config));
   const seats = new Map<string, string>();
   for (const h of liveHelms(config.helm.ttlSecs * 1000, now).sort((a, b) => Date.parse(b.signedOnAt) - Date.parse(a.signedOnAt))) {
     const grounds = displayGrounds(h.grounds, config);
-    if (local.has(grounds) && !seats.has(h.sessionId)) seats.set(h.sessionId, grounds);
+    if (local.has(grounds) && !seats.has(grounds)) seats.set(grounds, h.sessionId);
   }
-  return [...seats].map(([session, grounds]) => ({ session, grounds }));
+  return [...seats].map(([grounds, session]) => ({ session, grounds }));
 }
 
 /**
- * `man helm` on a mirrored Mac: take the wharf's one helm seat for this
+ * `man helm` on a mirrored Mac: take the wharf's grounds helm seat for this
  * session, so the person's Slack DMs come to it. Without a mirror it makes
  * no wharf call. A seat another helm holds refuses, naming it. With the
  * wharf away the sign-on stands, and the daemon takes the seat once it can.
@@ -479,7 +480,7 @@ export function startWharfMirror(config: Config, log: (message: string) => void 
     pending: () => slackThreadsToSync(loadConfig(), wharf),
     synced: slackThreadSynced,
   };
-  const helm: MirrorHelm = { live: () => localHelms(loadConfig()), displaced: (session, by) => void standDownHelm(session, by) };
+  const helm: MirrorHelm = { live: () => localHelms(loadConfig()), displaced: (session, by, grounds) => void standDownHelm(session, by, storageGrounds(grounds, loadConfig())) };
   mirror = new WharfMirror({ wharf, backend: new WharfBackend(scope.location, credential), channel: socket, glass: loopbackGlass(port), glassPort: port, log, slackThreads, helm });
   socket.start();
   let stopped = false;

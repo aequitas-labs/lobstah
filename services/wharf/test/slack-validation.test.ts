@@ -268,6 +268,6 @@ it('a DM goes to the helm on its seat’s grounds, however many grounds the whar
   await deliver();
   expect(posted.some((p) => p.body.text.includes('Which grounds'))).toBe(false);
   const dispatch = { id: 'selected-job', repo: 'repo', repoRemote: 'github.com/test/repo', brief: 'Investigate the build', request: requests[0]!.id };
-  expect((await call('dispatches', { ...dispatch, grounds: 'home' }, b.token, 'seat')).status).toBe(400);
+  expect((await call('dispatches', { ...dispatch, grounds: 'home' }, b.token, 'seat')).status).toBe(409);
   expect((await call('dispatches', { ...dispatch, grounds: 'away' }, b.token, 'seat')).status).toBe(200);
 });

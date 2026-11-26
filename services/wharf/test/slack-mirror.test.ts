@@ -79,9 +79,9 @@ async function takeSeat(b: BoatSocket, session: string, grounds: string, take = 
 const seat = () => runInDurableObject(env.ACCOUNTS.getByName('a'), (_i: Account, state) =>
   JSON.parse(state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='helm'").toArray()[0]?.value ?? 'null'));
 /** A helm in the cloud: a boat with helm, signing on as `lobstah man helm` on a wharf grounds does. */
-async function cloudHelm(take = false, session = OTHER_SESSION) {
+async function cloudHelm(take = false, session = OTHER_SESSION, grounds = 'away') {
   const b = await enrol('cloud-helm', ['work', 'helm']);
-  return { boat: b, taken: await call('helm/take', { session, grounds: 'away', ...(take ? { take } : {}) }, b.token, session) };
+  return { boat: b, taken: await call('helm/take', { session, grounds, ...(take ? { take } : {}) }, b.token, session) };
 }
 const calls = (b: BoatSocket) => b.received.filter((m) => m.t === 'call');
 /** What the app posted in the DM's own thread. */
@@ -182,29 +182,29 @@ it('hr-second: a second helm without take is refused, naming the one that holds 
   const mac = await enrol('chriss-macbook-pro'); await boatSocket(mac, 'home');
   const held = 'The helm is held by session 3f2a1b9c on chriss-macbook-pro. Sign on with --take to take it over, or leave it.';
   // From the cloud.
-  const cloud = await cloudHelm();
+  const cloud = await cloudHelm(false, OTHER_SESSION, 'home');
   expect(cloud.taken.status).toBe(409);
   expect(await cloud.taken.json()).toMatchObject({ error: held, holder: { session: MAC_SESSION, boat: 'chriss-macbook-pro' } });
   // From another Mac, or another session on the same Mac.
   const other = await boatSocket(await enrol('studio-mac'));
   expect(await takeSeat(other, OTHER_SESSION, 'home')).toMatchObject({ status: 409, value: { error: held } });
-  expect(await takeSeat(await boatSocket(mac), OTHER_SESSION, 'work')).toMatchObject({ status: 409, value: { error: held } });
+  expect(await takeSeat(await boatSocket(mac), OTHER_SESSION, 'home')).toMatchObject({ status: 409, value: { error: held } });
   expect(await seat()).toMatchObject({ session: MAC_SESSION, boat: 'chriss-macbook-pro' });
   // A cloud helm holding the seat is named too.
-  await runInDurableObject(env.ACCOUNTS.getByName('a'), (_i: Account, state) => state.storage.sql.exec("DELETE FROM meta WHERE key='helm'"));
-  expect((await call('helm/take', { session: OTHER_SESSION, grounds: 'away' }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), (_i: Account, state) => state.storage.sql.exec("DELETE FROM meta WHERE key='helm' OR key LIKE 'helm:%'"));
+  expect((await call('helm/take', { session: OTHER_SESSION, grounds: 'home' }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
   expect(await takeSeat(other, MAC_SESSION, 'home')).toMatchObject({ status: 409, value: { error: 'The helm is held by session 8b7c6d5e on cloud-helm. Sign on with --take to take it over, or leave it.' } });
 });
 
 it('hr-take: a second helm with take displaces the first, the first learns it, and the next DM reaches the second', async () => {
   const mac = await enrol('chriss-macbook-pro'), first = await boatSocket(mac, 'home');
-  const cloud = await cloudHelm(true);
+  const cloud = await cloudHelm(true, OTHER_SESSION, 'home');
   expect(cloud.taken.status).toBe(200);
   expect(await seat()).toMatchObject({ session: OTHER_SESSION, boat: 'cloud-helm' });
   // The Mac's next renewal is refused, naming the new holder: its helm stands down.
   expect(await takeSeat(first, MAC_SESSION, 'home')).toMatchObject({ status: 409, value: { holder: { session: OTHER_SESSION } } });
   expect((await slack(message())).status).toBe(200);
-  expect(await (await call('requests')).json()).toMatchObject([{ id: requestId, grounds: 'away', waitingForHelm: false }]);
+  expect(await (await call('requests')).json()).toMatchObject([{ id: requestId, grounds: 'home', waitingForHelm: false }]);
   expect(calls(first)).toEqual([]);
 
   // A Mac's helm takes it back with take: the next DM reaches that Mac.
@@ -403,4 +403,49 @@ it('a person’s relayed call from the hosted glass may not make a helm request'
   await boatSocket(north, 'away');
   const r = await call('mirror/calls', { id: 'call-person', boat: north.id, write: { kind: 'helm-request', payload: { request: 'x', grounds: 'away', text: 'x', by: 'a', at: '' } } });
   expect(r.status).toBe(403);
+});
+
+it('keeps leases independent for two boats on one account with a shared repo', async () => {
+  const mac = await enrol('home-mac'), socket = await boatSocket(mac, 'home');
+  const cloud = await cloudHelm(true, OTHER_SESSION, 'helm-test');
+  expect(cloud.taken.status).toBe(200);
+  expect((await takeSeat(socket, MAC_SESSION, 'home')).status).toBe(200);
+  // The cloud grounds can enqueue the very same repo that home oversees.
+  const sharedRepo = { repo: 'lobstah-pond', repoRemote: 'github.com/chrishsu/lobstah-pond', brief: 'Shared repo' };
+  expect((await call('dispatches', { id: 'shared-b', grounds: 'helm-test', ...sharedRepo }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
+  expect((await call('helm/renew', { grounds: 'helm-test' }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
+  expect((await call('helm/release', { grounds: 'home' }, cloud.boat.token, OTHER_SESSION)).status).toBe(409);
+  expect((await call('helm/release', { grounds: 'helm-test' }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
+  expect((await takeSeat(socket, MAC_SESSION, 'home')).status).toBe(200);
+  const leases = await runInDurableObject(env.ACCOUNTS.getByName('a'), (_i: Account, state) =>
+    state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key LIKE 'helm:%'").toArray().map((row) => JSON.parse(row.value)));
+  expect(leases).toEqual(expect.arrayContaining([
+    expect.objectContaining({ grounds: 'home', session: MAC_SESSION, mirror: true }),
+    expect.objectContaining({ grounds: 'helm-test', session: OTHER_SESSION, until: 0 }),
+  ]));
+});
+
+it('allows both grounds to dispatch a shared repo after a takeover on the other grounds', async () => {
+  const home = await enrol('home-boat', ['work', 'helm']);
+  const sharedRepo = { repo: 'lobstah-pond', repoRemote: 'github.com/chrishsu/lobstah-pond', brief: 'Shared repo' };
+  expect((await call('helm/take', { session: MAC_SESSION, grounds: 'home' }, home.token, MAC_SESSION)).status).toBe(200);
+  expect((await call('dispatches', { id: 'home-before', grounds: 'home', ...sharedRepo }, home.token, MAC_SESSION)).status).toBe(200);
+  const cloud = await cloudHelm(true, OTHER_SESSION, 'helm-test');
+  expect(cloud.taken.status).toBe(200);
+  expect((await call('dispatches', { id: 'cloud-after', grounds: 'helm-test', ...sharedRepo }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
+  expect((await call('helm/renew', { grounds: 'home' }, home.token, MAC_SESSION)).status).toBe(200);
+  expect((await call('dispatches', { id: 'home-after', grounds: 'home', ...sharedRepo }, home.token, MAC_SESSION)).status).toBe(200);
+});
+
+it('migrates an old account lease only into its recorded grounds', async () => {
+  const home = await enrol('home-boat', ['work', 'helm']);
+  await runInDurableObject(env.ACCOUNTS.getByName('a'), (_i: Account, state) => {
+    state.storage.sql.exec("INSERT OR REPLACE INTO meta(key,value) VALUES ('helm',?)", JSON.stringify({ session: MAC_SESSION, actor: `boat:${home.id}`, grounds: 'home', until: Date.now() + 120_000, remindSecs: 900 }));
+  });
+  const cloud = await cloudHelm(false, OTHER_SESSION, 'helm-test');
+  expect(cloud.taken.status).toBe(200);
+  expect((await call('helm/renew', { grounds: 'home' }, home.token, MAC_SESSION)).status).toBe(200);
+  expect((await call('helm/release', { grounds: 'helm-test' }, cloud.boat.token, OTHER_SESSION)).status).toBe(200);
+  expect((await call('helm/renew', { grounds: 'home' }, home.token, MAC_SESSION)).status).toBe(200);
+  expect(await (await call('glass')).json()).toMatchObject({ helmLive: true });
 });
